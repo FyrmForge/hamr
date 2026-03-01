@@ -7,7 +7,7 @@
 ## Context
 
 HAMR is an opinionated Go full-stack framework and project bootstrapping CLI. It extracts
-proven patterns from a production Go web application (SNL) into reusable, domain-agnostic
+proven patterns from a production Go web application into reusable, domain-agnostic
 packages. The goal: `hamr new myproject` gives you a production-ready Go + Templ + HTMX +
 Alpine.js full-stack app with sensible defaults, extensible architecture, and AI-ready
 documentation.
