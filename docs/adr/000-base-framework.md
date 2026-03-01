@@ -30,7 +30,6 @@ HAMR is **two things**:
 - **Always start monolith** — `hamr new` never asks about architecture
 - **Add services later** — `hamr add service <name>` scaffolds a new service
 - **HAMR provides tools, not opinions on project layout** — where shared types live, whether to restructure the monolith, shared DB vs separate DB — all project decisions
-- **Inter-service communication**: HTTP only, via `pkg/client/`
 - **Auth propagation**: Gateway forwards subject ID via trusted header
 - **E2E testing**: Go-rod + Testcontainers, fully containerized, `//go:build e2e` isolated. HAMR provides reusable helpers in `pkg/e2e`, generated projects get a ready-to-run `e2e-go/` scaffolding
 
@@ -64,9 +63,6 @@ github.com/FyrmForge/hamr/
 │   │   └── pagination.go              # Page struct, PagedResponse[T], ParsePagination
 │   ├── ctx/
 │   │   └── ctx.go                      # Typed context keys (generics-based)
-│   ├── client/
-│   │   ├── client.go                   # Service HTTP client with header propagation
-│   │   └── echo.go                     # Echo context bridge for header propagation
 │   ├── middleware/
 │   │   ├── auth.go                     # Auth, RequireAuth, OptionalAuth, RequireNotAuth
 │   │   ├── rbac.go                     # RequireRoles, RequireActive (callback-based)
@@ -89,10 +85,6 @@ github.com/FyrmForge/hamr/
 │   │   └── s3.go                       # S3/R2/MinIO implementation
 │   ├── janitor/
 │   │   └── janitor.go                  # Task interface + scheduler
-│   ├── notify/
-│   │   ├── sender.go                   # Sender interface (Recipient, Message)
-│   │   ├── dispatcher.go              # Async wrapper
-│   │   └── noop.go                     # No-op for testing/dev
 │   ├── e2e/
 │   │   ├── browser.go                  # Go-rod browser setup + timeout-safe helpers
 │   │   ├── assert.go                   # Element/URL/text assertions
@@ -338,14 +330,7 @@ Response headers:
 - `NewLocalStorage(basePath string) *LocalStorage`
 - `NewS3Storage(cfg S3Config) *S3Storage`
 
-### 26. `pkg/notify/` (sender.go, dispatcher.go, noop.go)
-- `Sender` interface: `Send(ctx, Recipient, Message) (*SendResult, error)`
-- `Recipient`: Address, Name, Meta
-- `Message`: Subject, Body, HTMLBody
-- `NewAsyncDispatcher(sender, timeout) *AsyncDispatcher`
-- `NewNoopSender(name) *NoopSender`
-
-### 27. `pkg/websocket/` (hub.go, client.go, event.go, emitter.go)
+### 26. `pkg/websocket/` (hub.go, client.go, event.go, emitter.go)
 - `Hub` with session-based + room-based routing (works without auth)
 - Primary index by session ID, optional secondary index by subject ID (when auth present)
 - `NewHub(...HubOption) *Hub`
@@ -358,26 +343,7 @@ Response headers:
 - `Event` types: `NewEvent`, `NewHTMLEvent`, `NewTriggerEvent`
 - `Emitter`: `ToSession`, `ToSubject` (auth-only), `ToRoom`, `ToRoomExcept`, `Broadcast`
 
-### 28. `pkg/client/` (client.go, echo.go)
-
-HTTP client wrapper for inter-service calls:
-- Auto-propagates `X-Request-ID` from incoming request context
-- Auto-propagates `X-Subject-ID` (authenticated subject)
-- JSON encode/decode helpers
-- Configurable base URL, timeouts, retries via functional options
-
-```go
-billing := client.New(
-    client.WithBaseURL(cfg.BillingServiceURL),
-    client.WithTimeout(5 * time.Second),
-)
-
-// Context carries request ID + subject ID automatically
-ctx := client.EchoContext(c)
-invoice, err := client.Get[dto.Invoice](ctx, billing, "/invoices/"+id)
-```
-
-### 29. `pkg/e2e/` (browser.go, assert.go, htmx.go)
+### 27. `pkg/e2e/` (browser.go, assert.go, htmx.go)
 
 Reusable go-rod helpers for E2E testing. Projects import `hamr/pkg/e2e` in their
 `e2e-go/` test files. All operations are timeout-safe — **no `Must*` methods**.
@@ -584,7 +550,7 @@ shared types go or whether the DB is shared.
 ```
 Browser -> Main service (has session cookie)
   1. Main service middleware validates session via SessionManager
-  2. Main service handler calls billing service via pkg/client:
+  2. Main service handler calls billing service:
      GET http://billing:8082/invoices/456
      Headers:
        X-Request-ID: abc-123       (propagated)
@@ -780,9 +746,7 @@ docs/
 │   ├── server.md                  # pkg/server — options, defaults, lifecycle hooks
 │   ├── storage.md                 # pkg/storage — local, S3, signed URLs
 │   ├── websockets.md              # pkg/websocket — hub, rooms, events, emitter
-│   ├── notifications.md           # pkg/notify — sender interface, async dispatch
 │   ├── background-jobs.md         # pkg/janitor — task interface, scheduling
-│   ├── services.md                # pkg/client + hamr add service
 │   ├── e2e-testing.md             # pkg/e2e — go-rod helpers, testcontainers, CI setup
 │   └── vendoring.md               # hamr vendor — frontend deps, checksums
 ├── cli/
@@ -809,7 +773,6 @@ docs/
 | `FileStorage`     | `pkg/storage`    | Pluggable file backend (local, S3, R2, GCS)                     |
 | `SignableStorage` | `pkg/storage`    | Storage with URL signing                                        |
 | `Task`            | `pkg/janitor`    | Custom background cleanup tasks                                 |
-| `Sender`          | `pkg/notify`     | Pluggable notification channel (email, SMS, Slack)              |
 | `AuditLogger`     | `pkg/middleware` | Pluggable audit persistence                                     |
 | `SubjectLoader`   | `pkg/middleware` | App-specific subject (user/account/member) loading from session |
 | `RoleChecker`     | `pkg/middleware` | App-specific role checking                                      |
@@ -860,9 +823,7 @@ docs/
 11. `pkg/server`
 12. `pkg/janitor`
 13. `pkg/storage`
-14. `pkg/notify`
-15. `pkg/websocket`
-16. `pkg/client`
+14. `pkg/websocket`
 17. `pkg/e2e`
 
 **Sprint 6** - CLI:
@@ -898,7 +859,6 @@ After Sprint 6 (CLI complete):
 - Run `hamr add service billing` in generated project
 - Verify new service compiles: `go build ./cmd/billing`
 - Verify new service starts and health check responds
-- Verify `pkg/client` propagates X-Request-ID and X-Subject-ID headers
 - Verify `TrustedSubject` middleware correctly sets subject in context
 - Verify docker-compose includes the new service
 - Verify Makefile has `run-billing` and `build-billing` targets
