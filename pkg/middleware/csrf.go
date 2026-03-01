@@ -7,37 +7,28 @@ import (
 
 // CSRFConfig allows overriding CSRF defaults.
 type CSRFConfig struct {
-	CookieName  string
-	TokenLookup string
-	Secure      bool
+	CookieName  string // default: "csrf"
+	TokenLookup string // default: "form:csrf_token,header:X-CSRF-Token"
+	Secure      bool   // default: true
 }
 
 // CSRF returns CSRF protection middleware with framework defaults.
 func CSRF() echo.MiddlewareFunc {
-	return CSRFWithConfig(CSRFConfig{})
+	return CSRFWithConfig(CSRFConfig{Secure: true})
 }
 
 // CSRFWithConfig returns CSRF protection middleware with the given config.
 func CSRFWithConfig(cfg CSRFConfig) echo.MiddlewareFunc {
-	cookieName := cfg.CookieName
-	if cookieName == "" {
-		cookieName = "csrf"
+	if cfg.CookieName == "" {
+		cfg.CookieName = "csrf"
 	}
-
-	tokenLookup := cfg.TokenLookup
-	if tokenLookup == "" {
-		tokenLookup = "form:csrf_token,header:X-CSRF-Token"
-	}
-
-	secure := cfg.Secure
-	if !secure && cfg.CookieName == "" {
-		// Only default to true when using zero-value config.
-		secure = true
+	if cfg.TokenLookup == "" {
+		cfg.TokenLookup = "form:csrf_token,header:X-CSRF-Token"
 	}
 
 	return echoMw.CSRFWithConfig(echoMw.CSRFConfig{
-		CookieName:  cookieName,
-		TokenLookup: tokenLookup,
-		CookieSecure: secure,
+		CookieName:   cfg.CookieName,
+		TokenLookup:  cfg.TokenLookup,
+		CookieSecure: cfg.Secure,
 	})
 }

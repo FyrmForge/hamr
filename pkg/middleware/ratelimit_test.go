@@ -122,7 +122,7 @@ func TestRateLimit_returns429(t *testing.T) {
 	// Use a very low rate to trigger 429.
 	mw := middleware.RateLimitWithConfig(middleware.RateLimitConfig{
 		Store:         store,
-		RatePerMinute: 1,
+		Rate: 1,
 		Burst:         0,
 		KeyFunc: func(c echo.Context) (string, error) {
 			return "test-key", nil
@@ -160,7 +160,7 @@ func TestRateLimit_customKeyFunc(t *testing.T) {
 
 	mw := middleware.RateLimitWithConfig(middleware.RateLimitConfig{
 		Store:         store,
-		RatePerMinute: 1,
+		Rate: 1,
 		Burst:         0,
 		KeyFunc: func(c echo.Context) (string, error) {
 			return c.Request().Header.Get("X-API-Key"), nil
@@ -204,7 +204,7 @@ func TestRateLimit_defaultsToIP(t *testing.T) {
 
 	mw := middleware.RateLimitWithConfig(middleware.RateLimitConfig{
 		Store:         store,
-		RatePerMinute: 2,
+		Rate: 2,
 		Burst:         0,
 	})
 

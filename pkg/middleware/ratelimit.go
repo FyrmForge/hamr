@@ -27,26 +27,30 @@ type RateLimitStore interface {
 
 // RateLimitConfig configures rate limiting middleware.
 type RateLimitConfig struct {
-	Store         RateLimitStore
-	RatePerMinute int                                  // default: 60
-	Burst         int                                  // default: 10 (max over rate)
-	KeyFunc       func(c echo.Context) (string, error) // default: c.RealIP()
+	Store   RateLimitStore
+	Rate    int                                  // max requests per window (default: 60)
+	Burst   int                                  // additional burst allowance over Rate (default: 10)
+	Window  time.Duration                        // sliding window duration (default: 1 minute)
+	KeyFunc func(c echo.Context) (string, error) // default: c.RealIP()
 }
 
 // RateLimit returns rate limiting middleware using the given store with
 // default settings (60 req/min + 10 burst).
 func RateLimit(store RateLimitStore) echo.MiddlewareFunc {
 	return RateLimitWithConfig(RateLimitConfig{
-		Store:         store,
-		RatePerMinute: 60,
-		Burst:         10,
+		Store: store,
+		Rate:  60,
+		Burst: 10,
 	})
 }
 
 // RateLimitWithConfig returns rate limiting middleware with the given config.
 func RateLimitWithConfig(cfg RateLimitConfig) echo.MiddlewareFunc {
-	if cfg.RatePerMinute <= 0 {
-		cfg.RatePerMinute = 60
+	if cfg.Rate <= 0 {
+		cfg.Rate = 60
+	}
+	if cfg.Window <= 0 {
+		cfg.Window = time.Minute
 	}
 	if cfg.KeyFunc == nil {
 		cfg.KeyFunc = func(c echo.Context) (string, error) {
@@ -54,8 +58,8 @@ func RateLimitWithConfig(cfg RateLimitConfig) echo.MiddlewareFunc {
 		}
 	}
 
-	rate := cfg.RatePerMinute + cfg.Burst
-	window := time.Minute
+	rate := cfg.Rate + cfg.Burst
+	window := cfg.Window
 
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
