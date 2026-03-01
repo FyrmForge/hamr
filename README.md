@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="hamr_logo.png" alt="HAMR" width="200">
+</p>
+
 # HAMR
 
 An opinionated Go full-stack framework and project scaffolding CLI. HAMR extracts proven patterns from production Go web applications into reusable packages and gives you a working project with one command.

@@ -4,6 +4,9 @@ import (
 	"embed"
 	"os"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 //go:embed testdata/migrations/*.sql
@@ -11,14 +14,31 @@ var testMigrations embed.FS
 
 func TestMigrateInvalidFS(t *testing.T) {
 	var empty embed.FS
-	// sqlx.DB is nil but we should fail before needing it.
 	err := Migrate(nil, MigrateConfig{
 		FS:        empty,
 		Directory: "nonexistent",
 	})
-	if err == nil {
-		t.Fatal("expected error for invalid FS/directory")
-	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "db: creating migration source")
+}
+
+func TestMigrateDownInvalidFS(t *testing.T) {
+	var empty embed.FS
+	err := MigrateDown(nil, MigrateConfig{
+		FS:        empty,
+		Directory: "nonexistent",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "db: creating migration source")
+}
+
+func TestMigrateEmptyDirectory(t *testing.T) {
+	var empty embed.FS
+	err := Migrate(nil, MigrateConfig{
+		FS:        empty,
+		Directory: "",
+	})
+	require.Error(t, err)
 }
 
 func TestMigrateIntegration(t *testing.T) {
@@ -28,9 +48,7 @@ func TestMigrateIntegration(t *testing.T) {
 	}
 
 	db, err := Connect(dsn)
-	if err != nil {
-		t.Fatalf("Connect: %v", err)
-	}
+	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
 	cfg := MigrateConfig{
@@ -39,17 +57,31 @@ func TestMigrateIntegration(t *testing.T) {
 	}
 
 	// Run up.
-	if err := Migrate(db, cfg); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	require.NoError(t, Migrate(db, cfg))
 
 	// Idempotent — running again should not error.
-	if err := Migrate(db, cfg); err != nil {
-		t.Fatalf("Migrate (idempotent): %v", err)
-	}
+	require.NoError(t, Migrate(db, cfg), "second Migrate should be idempotent")
 
 	// Run down.
-	if err := MigrateDown(db, cfg); err != nil {
-		t.Fatalf("MigrateDown: %v", err)
+	require.NoError(t, MigrateDown(db, cfg))
+}
+
+func TestMigrateIntegrationCustomDriver(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set")
 	}
+
+	db, err := Connect(dsn)
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	cfg := MigrateConfig{
+		FS:        testMigrations,
+		Directory: "testdata/migrations",
+		Driver:    "postgres",
+	}
+
+	require.NoError(t, Migrate(db, cfg))
+	require.NoError(t, MigrateDown(db, cfg))
 }
