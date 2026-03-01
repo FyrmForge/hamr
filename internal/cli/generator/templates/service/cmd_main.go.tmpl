@@ -1,0 +1,46 @@
+package main
+
+import (
+	"context"
+	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/labstack/echo/v4"
+	"github.com/FyrmForge/hamr/pkg/middleware"
+	"{{.Module}}/internal/{{.Name}}/config"
+	"{{.Module}}/internal/{{.Name}}/handler"
+)
+
+func main() {
+	cfg := config.Load()
+
+	e := echo.New()
+	e.HideBanner = true
+
+	// Trusted auth — reads X-Subject-ID forwarded by the gateway.
+	e.Use(middleware.TrustedSubject())
+
+	handler.RegisterHealth(e)
+
+	go func() {
+		slog.Info("starting server", "port", cfg.Port, "service", "{{.Name}}")
+		if err := e.Start(":" + cfg.Port); err != nil {
+			slog.Error("server stopped", "error", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	slog.Info("shutting down server")
+	if err := e.Shutdown(ctx); err != nil {
+		slog.Error("forced shutdown", "error", err)
+	}
+}
