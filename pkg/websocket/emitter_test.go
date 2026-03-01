@@ -21,9 +21,8 @@ func TestEmitter_ToSession(t *testing.T) {
 	defer cleanup()
 
 	sid := peek()
-	conn, err := dialWS(t, url, nil)
-	require.NoError(t, err)
-	defer conn.CloseNow()
+	conn := dialWS(t, url, nil)
+	defer func() { _ = conn.CloseNow() }()
 
 	em := NewEmitter(hub)
 	ev := NewEvent("test:msg", map[string]string{"k": "v"})
@@ -38,12 +37,10 @@ func TestEmitter_ToSubject(t *testing.T) {
 	defer cleanup()
 
 	hdr := http.Header{"X-Subject-Id": {"user-a"}}
-	conn1, err := dialWS(t, url, hdr)
-	require.NoError(t, err)
-	defer conn1.CloseNow()
-	conn2, err := dialWS(t, url, hdr)
-	require.NoError(t, err)
-	defer conn2.CloseNow()
+	conn1 := dialWS(t, url, hdr)
+	defer func() { _ = conn1.CloseNow() }()
+	conn2 := dialWS(t, url, hdr)
+	defer func() { _ = conn2.CloseNow() }()
 
 	em := NewEmitter(hub)
 	ev := NewHTMLEvent("html:update", "#box", "<b>hi</b>")
@@ -60,14 +57,12 @@ func TestEmitter_ToRoom(t *testing.T) {
 	defer cleanup()
 
 	sid1 := peek()
-	conn1, err := dialWS(t, url, nil)
-	require.NoError(t, err)
-	defer conn1.CloseNow()
+	conn1 := dialWS(t, url, nil)
+	defer func() { _ = conn1.CloseNow() }()
 
 	_ = peek() // skip sid2
-	conn2, err := dialWS(t, url, nil)
-	require.NoError(t, err)
-	defer conn2.CloseNow()
+	conn2 := dialWS(t, url, nil)
+	defer func() { _ = conn2.CloseNow() }()
 
 	c1 := getClient(t, hub, sid1)
 	hub.JoinRoom(c1, "lobby")
@@ -86,14 +81,12 @@ func TestEmitter_ToRoomExcept(t *testing.T) {
 	defer cleanup()
 
 	sid1 := peek()
-	conn1, err := dialWS(t, url, nil)
-	require.NoError(t, err)
-	defer conn1.CloseNow()
+	conn1 := dialWS(t, url, nil)
+	defer func() { _ = conn1.CloseNow() }()
 
 	sid2 := peek()
-	conn2, err := dialWS(t, url, nil)
-	require.NoError(t, err)
-	defer conn2.CloseNow()
+	conn2 := dialWS(t, url, nil)
+	defer func() { _ = conn2.CloseNow() }()
 
 	c1 := getClient(t, hub, sid1)
 	c2 := getClient(t, hub, sid2)
@@ -113,12 +106,10 @@ func TestEmitter_Broadcast(t *testing.T) {
 	hub, url, _, cleanup := setupTestHubSeq(t)
 	defer cleanup()
 
-	conn1, err := dialWS(t, url, nil)
-	require.NoError(t, err)
-	defer conn1.CloseNow()
-	conn2, err := dialWS(t, url, nil)
-	require.NoError(t, err)
-	defer conn2.CloseNow()
+	conn1 := dialWS(t, url, nil)
+	defer func() { _ = conn1.CloseNow() }()
+	conn2 := dialWS(t, url, nil)
+	defer func() { _ = conn2.CloseNow() }()
 
 	em := NewEmitter(hub)
 	ev := NewOuterHTMLEvent("sys:alert", "#banner", "<div>!</div>")
@@ -173,16 +164,14 @@ func setupTestHubSeq(t *testing.T, extraOpts ...HubOption) (*Hub, string, func()
 }
 
 // dialWS dials a WebSocket and waits for registration.
-func dialWS(t *testing.T, url string, header http.Header) (*ws.Conn, error) {
+func dialWS(t *testing.T, url string, header http.Header) *ws.Conn {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	conn, _, err := ws.Dial(ctx, url, &ws.DialOptions{HTTPHeader: header})
-	if err != nil {
-		return nil, err
-	}
+	require.NoError(t, err)
 	time.Sleep(30 * time.Millisecond)
-	return conn, nil
+	return conn
 }
 
 func getClient(t *testing.T, hub *Hub, sessionID string) *Client {

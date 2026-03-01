@@ -43,13 +43,13 @@ func (c *Client) readPump(ctx context.Context, onMessage func(*Client, []byte)) 
 // writePump writes messages from the send channel to the WebSocket connection.
 // It exits when the send channel is closed or the context is cancelled.
 func (c *Client) writePump(ctx context.Context) {
-	defer c.conn.CloseNow()
+	defer func() { _ = c.conn.CloseNow() }()
 
 	for {
 		select {
 		case msg, ok := <-c.send:
 			if !ok {
-				c.conn.Close(ws.StatusNormalClosure, "")
+				_ = c.conn.Close(ws.StatusNormalClosure, "")
 				return
 			}
 			writeCtx, cancel := context.WithTimeout(ctx, writeTimeout)

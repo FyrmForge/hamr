@@ -13,9 +13,8 @@ func TestHub_Handler_upgradesConnection(t *testing.T) {
 	hub, url, _, cleanup := setupTestHubSeq(t)
 	defer cleanup()
 
-	conn, err := dialWS(t, url, nil)
-	require.NoError(t, err)
-	defer conn.CloseNow()
+	conn := dialWS(t, url, nil)
+	defer func() { _ = conn.CloseNow() }()
 
 	assert.Equal(t, 1, hub.Stats().Clients)
 
@@ -29,14 +28,12 @@ func TestHub_SendToSession(t *testing.T) {
 	defer cleanup()
 
 	sid1 := peek()
-	conn1, err := dialWS(t, url, nil)
-	require.NoError(t, err)
-	defer conn1.CloseNow()
+	conn1 := dialWS(t, url, nil)
+	defer func() { _ = conn1.CloseNow() }()
 
 	_ = peek()
-	conn2, err := dialWS(t, url, nil)
-	require.NoError(t, err)
-	defer conn2.CloseNow()
+	conn2 := dialWS(t, url, nil)
+	defer func() { _ = conn2.CloseNow() }()
 
 	hub.SendToSession(sid1, []byte(`{"type":"targeted"}`))
 
@@ -50,17 +47,14 @@ func TestHub_SendToSubject(t *testing.T) {
 	defer cleanup()
 
 	hdr := http.Header{"X-Subject-Id": {"user-x"}}
-	conn1, err := dialWS(t, url, hdr)
-	require.NoError(t, err)
-	defer conn1.CloseNow()
-	conn2, err := dialWS(t, url, hdr)
-	require.NoError(t, err)
-	defer conn2.CloseNow()
+	conn1 := dialWS(t, url, hdr)
+	defer func() { _ = conn1.CloseNow() }()
+	conn2 := dialWS(t, url, hdr)
+	defer func() { _ = conn2.CloseNow() }()
 
 	// Third client with different subject.
-	conn3, err := dialWS(t, url, nil)
-	require.NoError(t, err)
-	defer conn3.CloseNow()
+	conn3 := dialWS(t, url, nil)
+	defer func() { _ = conn3.CloseNow() }()
 
 	hub.SendToSubject("user-x", []byte(`{"type":"for-user-x"}`))
 
@@ -85,19 +79,16 @@ func TestHub_SendToRoom(t *testing.T) {
 	defer cleanup()
 
 	sid1 := peek()
-	conn1, err := dialWS(t, url, nil)
-	require.NoError(t, err)
-	defer conn1.CloseNow()
+	conn1 := dialWS(t, url, nil)
+	defer func() { _ = conn1.CloseNow() }()
 
 	sid2 := peek()
-	conn2, err := dialWS(t, url, nil)
-	require.NoError(t, err)
-	defer conn2.CloseNow()
+	conn2 := dialWS(t, url, nil)
+	defer func() { _ = conn2.CloseNow() }()
 
 	_ = peek()
-	conn3, err := dialWS(t, url, nil)
-	require.NoError(t, err)
-	defer conn3.CloseNow()
+	conn3 := dialWS(t, url, nil)
+	defer func() { _ = conn3.CloseNow() }()
 
 	hub.JoinRoom(getClient(t, hub, sid1), "game-42")
 	hub.JoinRoom(getClient(t, hub, sid2), "game-42")
@@ -116,14 +107,12 @@ func TestHub_SendToRoomExcept(t *testing.T) {
 	defer cleanup()
 
 	sid1 := peek()
-	conn1, err := dialWS(t, url, nil)
-	require.NoError(t, err)
-	defer conn1.CloseNow()
+	conn1 := dialWS(t, url, nil)
+	defer func() { _ = conn1.CloseNow() }()
 
 	sid2 := peek()
-	conn2, err := dialWS(t, url, nil)
-	require.NoError(t, err)
-	defer conn2.CloseNow()
+	conn2 := dialWS(t, url, nil)
+	defer func() { _ = conn2.CloseNow() }()
 
 	hub.JoinRoom(getClient(t, hub, sid1), "chat")
 	hub.JoinRoom(getClient(t, hub, sid2), "chat")
@@ -139,15 +128,12 @@ func TestHub_Broadcast(t *testing.T) {
 	hub, url, _, cleanup := setupTestHubSeq(t)
 	defer cleanup()
 
-	conn1, err := dialWS(t, url, nil)
-	require.NoError(t, err)
-	defer conn1.CloseNow()
-	conn2, err := dialWS(t, url, nil)
-	require.NoError(t, err)
-	defer conn2.CloseNow()
-	conn3, err := dialWS(t, url, nil)
-	require.NoError(t, err)
-	defer conn3.CloseNow()
+	conn1 := dialWS(t, url, nil)
+	defer func() { _ = conn1.CloseNow() }()
+	conn2 := dialWS(t, url, nil)
+	defer func() { _ = conn2.CloseNow() }()
+	conn3 := dialWS(t, url, nil)
+	defer func() { _ = conn3.CloseNow() }()
 
 	hub.Broadcast([]byte(`{"type":"all"}`))
 
@@ -161,9 +147,8 @@ func TestHub_JoinRoom_LeaveRoom(t *testing.T) {
 	defer cleanup()
 
 	sid := peek()
-	conn, err := dialWS(t, url, nil)
-	require.NoError(t, err)
-	defer conn.CloseNow()
+	conn := dialWS(t, url, nil)
+	defer func() { _ = conn.CloseNow() }()
 
 	c := getClient(t, hub, sid)
 	hub.JoinRoom(c, "room-a")
@@ -182,9 +167,8 @@ func TestHub_AssociateSubject(t *testing.T) {
 	defer cleanup()
 
 	sid := peek()
-	conn, err := dialWS(t, url, nil)
-	require.NoError(t, err)
-	defer conn.CloseNow()
+	conn := dialWS(t, url, nil)
+	defer func() { _ = conn.CloseNow() }()
 
 	// No subject yet — verify stats show 0 subjects.
 	assert.Equal(t, 0, hub.Stats().Subjects)
@@ -203,8 +187,7 @@ func TestHub_clientDisconnect_unregisters(t *testing.T) {
 	defer cleanup()
 
 	sid := peek()
-	conn, err := dialWS(t, url, nil)
-	require.NoError(t, err)
+	conn := dialWS(t, url, nil)
 
 	c := getClient(t, hub, sid)
 	hub.JoinRoom(c, "temp-room")
@@ -212,7 +195,7 @@ func TestHub_clientDisconnect_unregisters(t *testing.T) {
 	assert.Equal(t, 1, hub.Stats().Clients)
 	assert.Equal(t, 1, hub.Stats().Rooms)
 
-	conn.CloseNow()
+	_ = conn.CloseNow()
 	// Wait for unregister.
 	waitFor(t, func() bool { return hub.Stats().Clients == 0 })
 
@@ -223,12 +206,10 @@ func TestHub_clientDisconnect_unregisters(t *testing.T) {
 func TestHub_Close_graceful(t *testing.T) {
 	hub, url, _, cleanup := setupTestHubSeq(t)
 
-	conn1, err := dialWS(t, url, nil)
-	require.NoError(t, err)
-	defer conn1.CloseNow()
-	conn2, err := dialWS(t, url, nil)
-	require.NoError(t, err)
-	defer conn2.CloseNow()
+	conn1 := dialWS(t, url, nil)
+	defer func() { _ = conn1.CloseNow() }()
+	conn2 := dialWS(t, url, nil)
+	defer func() { _ = conn2.CloseNow() }()
 
 	assert.Equal(t, 2, hub.Stats().Clients)
 
@@ -249,14 +230,12 @@ func TestHub_Stats(t *testing.T) {
 
 	hdr := http.Header{"X-Subject-Id": {"u1"}}
 	sid1 := peek()
-	conn1, err := dialWS(t, url, hdr)
-	require.NoError(t, err)
-	defer conn1.CloseNow()
+	conn1 := dialWS(t, url, hdr)
+	defer func() { _ = conn1.CloseNow() }()
 
 	_ = peek()
-	conn2, err := dialWS(t, url, nil)
-	require.NoError(t, err)
-	defer conn2.CloseNow()
+	conn2 := dialWS(t, url, nil)
+	defer func() { _ = conn2.CloseNow() }()
 
 	hub.JoinRoom(getClient(t, hub, sid1), "r1")
 
@@ -275,9 +254,8 @@ func TestHub_WithOnMessage(t *testing.T) {
 	_, url, _, cleanup := setupTestHubSeq(t, WithOnMessage(onMsg))
 	defer cleanup()
 
-	conn, err := dialWS(t, url, nil)
-	require.NoError(t, err)
-	defer conn.CloseNow()
+	conn := dialWS(t, url, nil)
+	defer func() { _ = conn.CloseNow() }()
 
 	require.NoError(t, conn.Write(t.Context(), 1, []byte(`{"action":"ping"}`)))
 
