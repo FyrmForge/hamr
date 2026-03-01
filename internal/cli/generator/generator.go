@@ -22,6 +22,7 @@ type ServiceConfig struct {
 	Name      string // "billing"
 	Module    string // inherited from project's go.mod
 	GoVersion string // inherited from project's go.mod
+	Storage   string // "" (none), "local", or "s3"
 }
 
 // NewServiceConfigFromProject reads go.mod in the current directory and
@@ -66,6 +67,12 @@ func GenerateService(cfg *ServiceConfig) error {
 
 	if err := appendMakefile(cfg); err != nil {
 		return fmt.Errorf("update Makefile: %w", err)
+	}
+
+	if cfg.Storage == "s3" {
+		if err := appendMinIO(cfg); err != nil {
+			return fmt.Errorf("add MinIO service: %w", err)
+		}
 	}
 
 	return nil
@@ -208,6 +215,64 @@ func ensureProjectFiles(cfg *ServiceConfig) error {
 			return fmt.Errorf("render %s: %w", f.dest, err)
 		}
 	}
+	return nil
+}
+
+func appendMinIO(_ *ServiceConfig) error {
+	const path = "docker/docker-compose.yaml"
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil // no docker-compose to update
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	content := string(data)
+
+	// Idempotent: skip if MinIO is already present.
+	if strings.Contains(content, "minio:") {
+		return nil
+	}
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+
+	snippet := `
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+`
+	if _, err := f.WriteString(snippet); err != nil {
+		return err
+	}
+
+	// Append named volume if not already present.
+	if !strings.Contains(content, "minio_data:") {
+		if strings.Contains(content, "\nvolumes:") {
+			// A volumes section already exists; append just the entry.
+			if _, err := f.WriteString("  minio_data:\n"); err != nil {
+				return err
+			}
+		} else {
+			if _, err := f.WriteString("\nvolumes:\n  minio_data:\n"); err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 

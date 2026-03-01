@@ -7,6 +7,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var storageFlag string
+
 var addServiceCmd = &cobra.Command{
 	Use:   "service <name>",
 	Short: "Scaffold a new service into the project",
@@ -25,10 +27,17 @@ Updates:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
+		switch storageFlag {
+		case "", "local", "s3":
+		default:
+			return fmt.Errorf("invalid --storage value %q: must be \"local\" or \"s3\"", storageFlag)
+		}
+
 		cfg, err := generator.NewServiceConfigFromProject(name)
 		if err != nil {
 			return fmt.Errorf("read project config: %w", err)
 		}
+		cfg.Storage = storageFlag
 
 		if err := generator.GenerateService(cfg); err != nil {
 			return fmt.Errorf("generate service: %w", err)
@@ -45,4 +54,8 @@ Updates:
 
 		return nil
 	},
+}
+
+func init() {
+	addServiceCmd.Flags().StringVar(&storageFlag, "storage", "", "file storage backend: \"local\" or \"s3\" (adds MinIO to docker-compose)")
 }
