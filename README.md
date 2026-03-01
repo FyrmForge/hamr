@@ -39,7 +39,6 @@ HAMR is two things:
 | `pkg/notify`       | Notification sender interface with async dispatch                                  |
 | `pkg/websocket`    | Session and room-based WebSocket hub with HTMX integration                         |
 | `pkg/client`       | Inter-service HTTP client with header propagation                                  |
-| `pkg/bus`          | Publish/subscribe event bus interface                                              |
 
 ### CLI commands
 

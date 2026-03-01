@@ -32,7 +32,6 @@ HAMR is **two things**:
 - **HAMR provides tools, not opinions on project layout** — where shared types live, whether to restructure the monolith, shared DB vs separate DB — all project decisions
 - **Inter-service communication**: HTTP only, via `pkg/client/`
 - **Auth propagation**: Gateway forwards subject ID via trusted header
-- **Event bus**: Interface only for now (noop impl), NATS + PG LISTEN/NOTIFY post-MVP
 - **E2E testing**: Go-rod + Testcontainers, fully containerized, `//go:build e2e` isolated. HAMR provides reusable helpers in `pkg/e2e`, generated projects get a ready-to-run `e2e-go/` scaffolding
 
 ## Repository Structure
@@ -68,9 +67,6 @@ github.com/FyrmForge/hamr/
 │   ├── client/
 │   │   ├── client.go                   # Service HTTP client with header propagation
 │   │   └── echo.go                     # Echo context bridge for header propagation
-│   ├── bus/
-│   │   ├── bus.go                      # Publisher/Subscriber interfaces
-│   │   └── noop.go                     # No-op implementation
 │   ├── middleware/
 │   │   ├── auth.go                     # Auth, RequireAuth, OptionalAuth, RequireNotAuth
 │   │   ├── rbac.go                     # RequireRoles, RequireActive (callback-based)
@@ -381,15 +377,7 @@ ctx := client.EchoContext(c)
 invoice, err := client.Get[dto.Invoice](ctx, billing, "/invoices/"+id)
 ```
 
-### 29. `pkg/bus/` (bus.go, noop.go)
-
-Contracts only, implementations post-MVP:
-- `Publisher` interface: `Publish(ctx, subject string, data any) error`
-- `Subscriber` interface: `Subscribe(subject string, handler func(ctx, []byte)) error`
-- `NewNoopPublisher()` — for testing and when bus isn't needed
-- Future: NATS implementation, PG LISTEN/NOTIFY implementation
-
-### 30. `pkg/e2e/` (browser.go, assert.go, htmx.go)
+### 29. `pkg/e2e/` (browser.go, assert.go, htmx.go)
 
 Reusable go-rod helpers for E2E testing. Projects import `hamr/pkg/e2e` in their
 `e2e-go/` test files. All operations are timeout-safe — **no `Must*` methods**.
@@ -449,7 +437,7 @@ page.MustElement("#selector")
 
 ## Phase 6: CLI Scaffolding Tool
 
-### 31. CLI Structure
+### 30. CLI Structure
 ```
 cmd/hamr/main.go                    # cobra root
 internal/cli/cmd/root.go            # root command
@@ -463,7 +451,7 @@ internal/cli/generator/files.go     # template exec + file write
 internal/cli/templates/             # embedded text/template files
 ```
 
-### 32. `hamr new` Interactive Options
+### 31. `hamr new` Interactive Options
 1. **Project name** (from arg)
 2. **Go module path** (flag `--module` or prompt)
 3. **CSS approach**: Plain CSS with design system | Tailwind CSS
@@ -474,7 +462,7 @@ internal/cli/templates/             # embedded text/template files
 8. **Notification system**: Yes | No
 9. **E2E testing**: Yes (go-rod + testcontainers) | No
 
-### 33. Template Data Model
+### 32. Template Data Model
 ```go
 type ProjectConfig struct {
     Name              string   // "myproject"
@@ -499,7 +487,7 @@ type ServiceConfig struct {
 }
 ```
 
-### 34. Generated Project Structure
+### 33. Generated Project Structure
 ```
 <project>/
 ├── cmd/server/
@@ -578,7 +566,7 @@ type ServiceConfig struct {
 └── go.mod
 ```
 
-### 35. `hamr add service <name>`
+### 34. `hamr add service <name>`
 
 Scaffolds a new service into an existing HAMR project:
 - Creates `cmd/<name>/main.go` — config, server start, graceful shutdown
@@ -612,9 +600,9 @@ These are project-level decisions, not framework decisions:
 - Whether to restructure the monolith's `internal/` when adding services
 - Shared DB vs separate DB per service
 - Communication direction (which service calls which)
-- Whether to use the event bus or direct HTTP calls
+- Whether to use an event bus or direct HTTP calls
 
-### 36. `hamr vendor`
+### 35. `hamr vendor`
 
 Downloads and vendors frontend dependencies into `static/js/`. Avoids any Node/npm
 toolchain requirement for projects that don't use Tailwind.
@@ -656,7 +644,7 @@ hamr vendor alpine@3.14.9      # vendor alpine at a specific version
 }
 ```
 
-### 37. Key Generated Files Content
+### 36. Key Generated Files Content
 
 **layout.templ** - includes the critical HTMX configuration:
 ```javascript
@@ -694,7 +682,7 @@ document.addEventListener('htmx:configRequest', function(evt) {
 - handler-patterns.md: How to add handlers for both HTML and JSON
 - css.md / tailwind.md: How CSS is organized and how to add styles
 
-### 38. Generated E2E Scaffolding (if `IncludeE2E`)
+### 37. Generated E2E Scaffolding (if `IncludeE2E`)
 
 All files use `//go:build e2e` build tag — excluded from normal `go test ./...`.
 
@@ -794,7 +782,7 @@ docs/
 │   ├── websockets.md              # pkg/websocket — hub, rooms, events, emitter
 │   ├── notifications.md           # pkg/notify — sender interface, async dispatch
 │   ├── background-jobs.md         # pkg/janitor — task interface, scheduling
-│   ├── services.md                # pkg/client + pkg/bus + hamr add service
+│   ├── services.md                # pkg/client + hamr add service
 │   ├── e2e-testing.md             # pkg/e2e — go-rod helpers, testcontainers, CI setup
 │   └── vendoring.md               # hamr vendor — frontend deps, checksums
 ├── cli/
@@ -826,8 +814,6 @@ docs/
 | `SubjectLoader`   | `pkg/middleware` | App-specific subject (user/account/member) loading from session |
 | `RoleChecker`     | `pkg/middleware` | App-specific role checking                                      |
 | `ActiveChecker`   | `pkg/middleware` | App-specific account status checking                            |
-| `Publisher`       | `pkg/bus`        | Pluggable event publishing (noop, NATS, PG LISTEN/NOTIFY)       |
-| `Subscriber`      | `pkg/bus`        | Pluggable event subscription                                    |
 
 ## External Dependencies
 
@@ -877,22 +863,21 @@ docs/
 14. `pkg/notify`
 15. `pkg/websocket`
 16. `pkg/client`
-17. `pkg/bus`
-18. `pkg/e2e`
+17. `pkg/e2e`
 
 **Sprint 6** - CLI:
-19. CLI structure (cobra + bubbletea)
-20. Template files for generated project
-21. Generator logic
-22. `hamr add service` command
-23. `hamr vendor` command
-24. E2E scaffolding templates
-25. End-to-end test: `hamr new testproject`
+18. CLI structure (cobra + bubbletea)
+19. Template files for generated project
+20. Generator logic
+21. `hamr add service` command
+22. `hamr vendor` command
+23. E2E scaffolding templates
+24. End-to-end test: `hamr new testproject`
 
 **Sprint 7** - Polish:
-26. Integration tests + coverage gaps (unit tests ship per sprint)
-27. README, getting-started guides, and reference docs
-28. CI/CD setup
+25. Integration tests + coverage gaps (unit tests ship per sprint)
+26. README, getting-started guides, and reference docs
+27. CI/CD setup
 
 ## Verification
 
