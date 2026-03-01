@@ -26,6 +26,13 @@ HAMR is **two things**:
 - **Extensibility**: Interfaces + functional options + lifecycle hooks
 - **WebSocket identity**: Session-based by default (works without auth), optional user-based targeting when auth is present
 - **Identity is configurable**: All packages that reference "user ID" accept it as a `string` and let the project configure how it's extracted. Projects using `int64`, `uuid.UUID`, or a field called `account_id` instead of `user_id` just provide their own extraction/conversion functions
+- **Always start monolith** — `hamr new` never asks about architecture
+- **Add services later** — `hamr add service <name>` scaffolds a new service
+- **HAMR provides tools, not opinions on project layout** — where shared types live, whether to restructure the monolith, shared DB vs separate DB — all project decisions
+- **Inter-service communication**: HTTP only, via `pkg/client/`
+- **Auth propagation**: Gateway forwards subject ID via trusted header
+- **Event bus**: Interface only for now (noop impl), NATS + PG LISTEN/NOTIFY post-MVP
+- **E2E testing**: Go-rod + Testcontainers, fully containerized, `//go:build e2e` isolated. HAMR provides reusable helpers in `pkg/e2e`, generated projects get a ready-to-run `e2e-go/` scaffolding
 
 ## Repository Structure
 
@@ -57,6 +64,12 @@ github.com/FyrmForge/hamr/
 │   │   └── pagination.go              # Page struct, PagedResponse[T], ParsePagination
 │   ├── ctx/
 │   │   └── ctx.go                      # Typed context keys (generics-based)
+│   ├── client/
+│   │   ├── client.go                   # Service HTTP client with header propagation
+│   │   └── echo.go                     # Echo context bridge for header propagation
+│   ├── bus/
+│   │   ├── bus.go                      # Publisher/Subscriber interfaces
+│   │   └── noop.go                     # No-op implementation
 │   ├── middleware/
 │   │   ├── auth.go                     # Auth, RequireAuth, OptionalAuth, RequireNotAuth
 │   │   ├── rbac.go                     # RequireRoles, RequireActive (callback-based)
@@ -66,7 +79,9 @@ github.com/FyrmForge/hamr/
 │   │   ├── cache.go                    # Per-asset-type cache headers
 │   │   ├── audit.go                    # Mutation audit logging (AuditLogger interface)
 │   │   ├── csrf.go                     # CSRF config helper for Echo
-│   │   └── cors.go                     # CORS config helper
+│   │   ├── cors.go                     # CORS config helper
+│   │   ├── subject.go                  # GetSubjectID/GetSubject shared helpers
+│   │   └── trusted.go                  # Trusted internal subject extraction from header
 │   ├── server/
 │   │   ├── server.go                   # Echo wrapper with functional options
 │   │   ├── options.go                  # All WithXxx option functions
@@ -81,6 +96,10 @@ github.com/FyrmForge/hamr/
 │   │   ├── sender.go                   # Sender interface (Recipient, Message)
 │   │   ├── dispatcher.go              # Async wrapper
 │   │   └── noop.go                     # No-op for testing/dev
+│   ├── e2e/
+│   │   ├── browser.go                  # Go-rod browser setup + timeout-safe helpers
+│   │   ├── assert.go                   # Element/URL/text assertions
+│   │   └── htmx.go                     # HTMX-aware waiters (idle, swap, settle)
 │   └── websocket/
 │       ├── hub.go                      # Session+room-based connection registry
 │       ├── client.go                   # Read/write pumps, heartbeat
@@ -254,9 +273,17 @@ Response headers:
 - `CSRFConfig`: CookieName, TokenLookup (`form:csrf_token,header:X-CSRF-Token`), SkipPaths
 - CSRF skips paths containing `/api/` by default (API uses Bearer tokens)
 
+### 21. `pkg/middleware/subject.go`
+- `GetSubjectID(c echo.Context) string`, `GetSubject(c echo.Context) any` — shared helpers used by both session-based and trusted auth
+
+### 22. `pkg/middleware/trusted.go`
+- `TrustedSubject()` middleware — reads `X-Subject-ID` header, sets in context
+- Same `GetSubjectID(c)` API as session-based auth — handlers don't care how auth was resolved
+- Only for internal network, never exposed publicly
+
 ## Phase 5: Server + Infrastructure Packages
 
-### 21. `pkg/server/server.go` + `options.go` + `hooks.go`
+### 23. `pkg/server/server.go` + `options.go` + `hooks.go`
 - `Server` wrapping Echo with functional options
 - `New(opts ...Option) *Server`
 - Options: `WithHost`, `WithPort`, `WithDevMode`, `WithMiddleware`, `WithStaticDir`,
@@ -266,26 +293,26 @@ Response headers:
 - `Start() error`, `Shutdown(ctx) error`
 - Hooks: `WithOnServerStart(fn)`, `WithOnShutdown(fn)`, `WithOnBeforeMigrate(fn)`, `WithOnAfterMigrate(fn)`
 
-### 22. `pkg/janitor/janitor.go`
+### 24. `pkg/janitor/janitor.go`
 - `Task` interface: `Name() string`, `Run(ctx) (int64, error)`
 - `New(interval, ...Option) *Janitor`
 - `AddTask(task)`, `Start()`, `Stop()`
 - Options: `WithTimeout(d)`, `WithRunImmediately(bool)`, `WithLogger(*slog.Logger)`
 
-### 23. `pkg/storage/` (storage.go, local.go, s3.go)
+### 25. `pkg/storage/` (storage.go, local.go, s3.go)
 - `FileStorage` interface: `Save`, `Read`, `Delete`, `Exists`
 - `SignableStorage` extends with `SignURL`
 - `NewLocalStorage(basePath string) *LocalStorage`
 - `NewS3Storage(cfg S3Config) *S3Storage`
 
-### 24. `pkg/notify/` (sender.go, dispatcher.go, noop.go)
+### 26. `pkg/notify/` (sender.go, dispatcher.go, noop.go)
 - `Sender` interface: `Send(ctx, Recipient, Message) (*SendResult, error)`
 - `Recipient`: Address, Name, Meta
 - `Message`: Subject, Body, HTMLBody
 - `NewAsyncDispatcher(sender, timeout) *AsyncDispatcher`
 - `NewNoopSender(name) *NoopSender`
 
-### 25. `pkg/websocket/` (hub.go, client.go, event.go, emitter.go)
+### 27. `pkg/websocket/` (hub.go, client.go, event.go, emitter.go)
 - `Hub` with session-based + room-based routing (works without auth)
 - Primary index by session ID, optional secondary index by subject ID (when auth present)
 - `NewHub(...HubOption) *Hub`
@@ -298,13 +325,83 @@ Response headers:
 - `Event` types: `NewEvent`, `NewHTMLEvent`, `NewTriggerEvent`
 - `Emitter`: `ToSession`, `ToSubject` (auth-only), `ToRoom`, `ToRoomExcept`, `Broadcast`
 
+### 28. `pkg/client/` (client.go, echo.go)
+
+HTTP client wrapper for inter-service calls:
+- Auto-propagates `X-Request-ID` from incoming request context
+- Auto-propagates `X-Subject-ID` (authenticated subject)
+- JSON encode/decode helpers
+- Configurable base URL, timeouts, retries via functional options
+
+```go
+billing := client.New(
+    client.WithBaseURL(cfg.BillingServiceURL),
+    client.WithTimeout(5 * time.Second),
+)
+
+// Context carries request ID + subject ID automatically
+ctx := client.EchoContext(c)
+invoice, err := client.Get[dto.Invoice](ctx, billing, "/invoices/"+id)
+```
+
+### 29. `pkg/bus/` (bus.go, noop.go)
+
+Contracts only, implementations post-MVP:
+- `Publisher` interface: `Publish(ctx, subject string, data any) error`
+- `Subscriber` interface: `Subscribe(subject string, handler func(ctx, []byte)) error`
+- `NewNoopPublisher()` — for testing and when bus isn't needed
+- Future: NATS implementation, PG LISTEN/NOTIFY implementation
+
+### 30. `pkg/e2e/` (browser.go, assert.go, htmx.go)
+
+Reusable go-rod helpers for E2E testing. Projects import `hamr/pkg/e2e` in their
+`e2e-go/` test files. All operations are timeout-safe — **no `Must*` methods**.
+
+**Constants:**
+- `DefaultTimeout = 10 * time.Second` — applied to all browser operations
+
+**`browser.go` — Browser lifecycle + element interaction:**
+- `SetupBrowser(t) *rod.Browser` — launches headless Chromium (no-sandbox, disable-gpu, disable-dev-shm-usage)
+- `NewPage(t, browser, url) *rod.Page` — navigates and waits for load
+- `Login(t, page, email, password string)` — fills email/password inputs, clicks submit, waits for navigation
+- `WaitForElement(t, page, selector, timeout) *rod.Element` — timeout-safe element wait
+- `WaitForURLChange(t, page, currentURL, timeout)` — polls `page.MustGetInfo().URL` until it changes
+- `Input(t, page, selector, value)` — finds element and types value
+- `Click(t, page, selector)` — finds element and clicks
+- `SelectOption(t, page, selector, value)` — selects dropdown option by value
+- `ElementExists(t, page, selector) bool` — non-fatal existence check
+
+**`assert.go` — Test assertions:**
+- `AssertElementExists(t, page, selector)` — fails test if element not found
+- `AssertElementNotVisible(t, page, selector)` — visibility check
+- `AssertElementContainsText(t, page, selector, text)` — text content match
+- `AssertURL(t, page, expected)` — exact URL match
+- `AssertURLContains(t, page, substring)` — partial URL match
+
+**`htmx.go` — HTMX-aware waiters:**
+- `WaitForHTMXIdle(t, page, timeout)` — waits until no in-flight htmx requests (`htmx.xhr && htmx.xhr.length === 0` or no `htmx-request` class on body)
+- `WaitForHTMXSwap(t, page, selector, timeout)` — waits for element content to change after an htmx swap
+- `ClickAndWaitHTMX(t, page, selector, timeout)` — clicks an element and waits for htmx to settle
+
+**Critical patterns (enforced by all helpers):**
+```go
+// ✅ Always timeout-safe
+element, err := page.Timeout(DefaultTimeout).Element("#selector")
+require.NoError(t, err)
+
+// ❌ Never use — can hang forever
+page.MustElement("#selector")
+```
+
 ## Phase 6: CLI Scaffolding Tool
 
-### 26. CLI Structure
+### 31. CLI Structure
 ```
 cmd/hamr/main.go                    # cobra root
 internal/cli/cmd/root.go            # root command
 internal/cli/cmd/new.go             # `hamr new <name>`
+internal/cli/cmd/add.go             # `hamr add service <name>`
+internal/cli/cmd/vendor.go           # `hamr vendor`
 internal/cli/cmd/version.go         # `hamr version`
 internal/cli/prompt/prompt.go       # bubbletea prompts
 internal/cli/generator/generator.go # orchestrator
@@ -312,7 +409,7 @@ internal/cli/generator/files.go     # template exec + file write
 internal/cli/templates/             # embedded text/template files
 ```
 
-### 27. `hamr new` Interactive Options
+### 32. `hamr new` Interactive Options
 1. **Project name** (from arg)
 2. **Go module path** (flag `--module` or prompt)
 3. **CSS approach**: Plain CSS with design system | Tailwind CSS
@@ -320,8 +417,9 @@ internal/cli/templates/             # embedded text/template files
 5. **File storage**: Yes (local + S3) | No
 6. **WebSocket support**: Yes | No
 7. **Notification system**: Yes | No
+8. **E2E testing**: Yes (go-rod + testcontainers) | No
 
-### 28. Template Data Model
+### 33. Template Data Model
 ```go
 type ProjectConfig struct {
     Name           string   // "myproject"
@@ -332,12 +430,20 @@ type ProjectConfig struct {
     IncludeStorage bool
     IncludeWS      bool
     IncludeNotify  bool
+    IncludeE2E     bool
     Database       string   // "postgres"
     GoVersion      string   // "1.25"
 }
+
+// Used by `hamr add service`, not `hamr new`
+type ServiceConfig struct {
+    Name       string   // "billing"
+    Module     string   // inherited from project's go.mod
+    GoVersion  string   // inherited from project's go.mod
+}
 ```
 
-### 29. Generated Project Structure
+### 34. Generated Project Structure
 ```
 <project>/
 ├── cmd/server/
@@ -371,6 +477,16 @@ type ProjectConfig struct {
 │           └── form/
 │               ├── fields.templ    # FieldError, FieldErrorOOB, CSRFField
 │               └── helpers.go      # GetError, IsSelected
+├── e2e-go/                        # (if e2e) Go-rod E2E tests
+│   ├── main_test.go               #   TestMain: setup/teardown shared environment
+│   ├── testcontainers_setup.go    #   Docker network, postgres, server containers
+│   ├── helpers.go                 #   Project-specific helpers (Login, seed data, etc.)
+│   ├── accounts.go                #   TestAccount definitions from seed data
+│   ├── auth_test.go               #   Starter login/redirect tests
+│   ├── home_test.go               #   Starter home page tests
+│   ├── testdata/
+│   │   └── seed_e2e.sql           #   E2E seed data (test accounts, fixtures)
+│   └── README.md                  #   E2E testing guide
 ├── static/
 │   ├── css/                    # (if plain CSS)
 │   │   ├── base/               #   variables.css, reset.css, utilities.css
@@ -401,11 +517,87 @@ type ProjectConfig struct {
 ├── CLAUDE.md                   # Claude-specific development guidelines
 ├── tailwind.config.js          # (if tailwind)
 ├── package.json                # (if tailwind)
+├── hamr.vendor.json            # Vendored frontend dependency versions
 ├── README.md
 └── go.mod
 ```
 
-### 30. Key Generated Files Content
+### 35. `hamr add service <name>`
+
+Scaffolds a new service into an existing HAMR project:
+- Creates `cmd/<name>/main.go` — config, server start, graceful shutdown
+- Creates `cmd/<name>/Dockerfile`
+- Creates `internal/<name>/config/config.go`
+- Creates `internal/<name>/handler/health.go` — health check endpoint
+- Adds service to `docker/docker-compose.yaml`
+- Adds Makefile targets: `run-<name>`, `build-<name>`
+
+That's it. Doesn't touch existing code. Doesn't restructure anything. Doesn't decide where
+shared types go or whether the DB is shared.
+
+#### Auth flow when services call each other
+
+```
+Browser -> Main service (has session cookie)
+  1. Main service middleware validates session via SessionManager
+  2. Main service handler calls billing service via pkg/client:
+     GET http://billing:8082/invoices/456
+     Headers:
+       X-Request-ID: abc-123       (propagated)
+       X-Subject-ID: user-789      (from session)
+  3. Billing service TrustedSubject middleware reads X-Subject-ID
+  4. Billing handler calls GetSubjectID(c) -- same API as main service
+```
+
+#### What HAMR does NOT decide
+
+These are project-level decisions, not framework decisions:
+- Where shared types/DTOs live (`internal/shared/`? top-level `types/`? duplicated?)
+- Whether to restructure the monolith's `internal/` when adding services
+- Shared DB vs separate DB per service
+- Communication direction (which service calls which)
+- Whether to use the event bus or direct HTTP calls
+
+### 36. `hamr vendor`
+
+Downloads and vendors frontend dependencies into `static/js/`. Avoids any Node/npm
+toolchain requirement for projects that don't use Tailwind.
+
+**Usage:**
+```bash
+hamr vendor                    # vendors all known deps at default versions
+hamr vendor --update           # re-vendors all deps at latest versions
+hamr vendor htmx               # vendor only htmx
+hamr vendor alpine@3.14.9      # vendor alpine at a specific version
+```
+
+**Known dependencies** (built-in registry with CDN URLs):
+
+| Name | Default Source | Output File |
+|------|---------------|-------------|
+| `htmx` | `unpkg.com/htmx.org@<ver>/dist/htmx.min.js` | `static/js/htmx.min.js` |
+| `alpine` | `unpkg.com/alpinejs@<ver>/dist/cdn.min.js` | `static/js/alpine.min.js` |
+| `idiomorph` | `unpkg.com/idiomorph@<ver>/dist/idiomorph.min.js` | `static/js/idiomorph.min.js` |
+
+**Behaviour:**
+- Reads/writes `hamr.vendor.json` in the project root to track vendored versions
+- `hamr new` calls `hamr vendor` automatically during project scaffolding
+- Downloads via HTTP GET, verifies non-empty response and JS content-type
+- Prints vendored file path and version for each dependency
+- `--update` resolves `latest` tag from the CDN for each dependency
+- Custom deps: `hamr vendor --url https://cdn.example.com/lib.min.js --out static/js/lib.min.js`
+
+**`hamr.vendor.json` format:**
+```json
+{
+  "deps": {
+    "htmx": { "version": "2.0.4", "url": "https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js", "out": "static/js/htmx.min.js" },
+    "alpine": { "version": "3.14.9", "url": "https://unpkg.com/alpinejs@3.14.9/dist/cdn.min.js", "out": "static/js/alpine.min.js" }
+  }
+}
+```
+
+### 37. Key Generated Files Content
 
 **layout.templ** - includes the critical HTMX configuration:
 ```javascript
@@ -443,6 +635,65 @@ document.addEventListener('htmx:configRequest', function(evt) {
 - handler-patterns.md: How to add handlers for both HTML and JSON
 - css.md / tailwind.md: How CSS is organized and how to add styles
 
+### 38. Generated E2E Scaffolding (if `IncludeE2E`)
+
+All files use `//go:build e2e` build tag — excluded from normal `go test ./...`.
+
+**`e2e-go/main_test.go`** — TestMain entry point:
+- Parses `-local` flag (containerized vs local server)
+- Calls `SetupSharedEnvironment()` — single DB + server for all tests
+- Defers cleanup (Testcontainers Ryuk handles container teardown)
+
+**`e2e-go/testcontainers_setup.go`** — Fully containerized infrastructure:
+- Creates isolated Docker network per test run (timestamped name)
+- PostgreSQL container (`postgres:18-alpine`) with network alias `postgres`
+- App server container (built from project's `cmd/server/Dockerfile`)
+- Waits for health check: `wait.ForHTTP("/health").WithStartupTimeout(60s)`
+- Waits for migrations: polls `information_schema.tables` until expected tables exist
+- Seeds test data: `//go:embed testdata/seed_e2e.sql`
+- Local mode alternative: reads `E2E_DATABASE_URL` / `E2E_SERVER_URL` env vars
+
+**`e2e-go/helpers.go`** — Project-specific test helpers:
+- Imports `hamr/pkg/e2e` for generic browser/assert/htmx helpers
+- `Login(t, page, email, password)` — project-specific login flow
+- `CreateTestUser(t, page, ...)` — project-specific signup flow
+- Any project-specific navigation helpers
+
+**`e2e-go/accounts.go`** — Test account definitions:
+- `TestAccount` struct: Email, Password, Role, Name
+- Global `Accounts` map keyed by role (populated from seed SQL)
+- All use password `Test1234!` (Argon2id hash in seed)
+
+**`e2e-go/testdata/seed_e2e.sql`** — Deterministic test data:
+- Uses fixed UUIDs with prefixed ranges for test isolation
+- `ON CONFLICT (id) DO NOTHING` for idempotent re-runs
+- Test accounts matching `accounts.go` definitions
+- If auth+tables: users with hashed passwords, active sessions
+
+**`e2e-go/auth_test.go`** — Starter tests:
+- Login with valid credentials → correct redirect
+- Login with invalid credentials → error message
+- Login page elements exist
+
+**`e2e-go/home_test.go`** — Starter tests:
+- Home page loads
+- Key elements present
+
+**Generated Makefile targets:**
+```makefile
+e2e:                  ## Run E2E tests (containerized)
+    go test -v -tags=e2e ./e2e-go -timeout 10m
+
+e2e-local:            ## Run E2E tests against local server
+    go test -v -tags=e2e ./e2e-go -local -timeout 10m
+
+e2e-run:              ## Run specific E2E test: make e2e-run T=TestName
+    go test -v -tags=e2e ./e2e-go -run "$(T)" -timeout 5m
+
+e2e-run-local:        ## Run specific E2E test locally: make e2e-run-local T=TestName
+    go test -v -tags=e2e ./e2e-go -local -run "$(T)" -timeout 2m
+```
+
 ## Phase 7: Post-MVP
 
 - Bearer token auth middleware (dual auth for JSON API)
@@ -467,6 +718,8 @@ document.addEventListener('htmx:configRequest', function(evt) {
 | `SubjectLoader`   | `pkg/middleware` | App-specific subject (user/account/member) loading from session |
 | `RoleChecker`     | `pkg/middleware` | App-specific role checking                                      |
 | `ActiveChecker`   | `pkg/middleware` | App-specific account status checking                            |
+| `Publisher`       | `pkg/bus`        | Pluggable event publishing (noop, NATS, PG LISTEN/NOTIFY)       |
+| `Subscriber`      | `pkg/bus`        | Pluggable event subscription                                    |
 
 ## External Dependencies
 
@@ -487,6 +740,8 @@ document.addEventListener('htmx:configRequest', function(evt) {
 | `spf13/cobra` | cmd/hamr | CLI framework |
 | `charmbracelet/bubbletea` | internal/cli | Interactive prompts |
 | `charmbracelet/lipgloss` | internal/cli | CLI styling |
+| `go-rod/rod` | e2e | Headless browser automation |
+| `testcontainers/testcontainers-go` | generated e2e-go | Container orchestration for E2E tests |
 
 ## Implementation Order
 
@@ -514,17 +769,23 @@ document.addEventListener('htmx:configRequest', function(evt) {
 13. `pkg/storage`
 14. `pkg/notify`
 15. `pkg/websocket`
+16. `pkg/client`
+17. `pkg/bus`
+18. `pkg/e2e`
 
 **Sprint 6** - CLI:
-16. CLI structure (cobra + bubbletea)
-17. Template files for generated project
-18. Generator logic
-19. End-to-end test: `hamr new testproject`
+19. CLI structure (cobra + bubbletea)
+20. Template files for generated project
+21. Generator logic
+22. `hamr add service` command
+23. `hamr vendor` command
+24. E2E scaffolding templates
+25. End-to-end test: `hamr new testproject`
 
 **Sprint 7** - Polish:
-20. Tests for all packages
-21. README and documentation
-22. CI/CD setup
+26. Tests for all packages
+27. README and documentation
+28. CI/CD setup
 
 ## Verification
 
@@ -541,3 +802,19 @@ After Sprint 6 (CLI complete):
 - Verify all docs exist (adr/, features/, ai-guides/, AGENTS.md, CLAUDE.md)
 - Verify Makefile targets work
 - Verify docker-compose starts database
+- Run `hamr add service billing` in generated project
+- Verify new service compiles: `go build ./cmd/billing`
+- Verify new service starts and health check responds
+- Verify `pkg/client` propagates X-Request-ID and X-Subject-ID headers
+- Verify `TrustedSubject` middleware correctly sets subject in context
+- Verify docker-compose includes the new service
+- Verify Makefile has `run-billing` and `build-billing` targets
+- Run `hamr vendor` — vendors htmx + alpine into `static/js/`
+- Verify `hamr.vendor.json` is created with correct versions and paths
+- Verify `hamr vendor htmx@2.0.4` pins a specific version
+- Verify `hamr vendor --update` re-downloads at latest versions
+- If e2e enabled: verify `e2e-go/` directory exists with all scaffolding files
+- Verify `make e2e` runs containerized tests (requires Docker)
+- Verify `//go:build e2e` isolation: `go test ./...` does NOT run e2e tests
+- Verify testcontainers setup creates network, postgres, server containers
+- Verify seed data loads and starter tests pass
