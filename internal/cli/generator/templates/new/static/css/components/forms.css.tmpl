@@ -7,7 +7,7 @@
     margin-bottom: var(--space-xs);
     font-size: var(--font-size-sm);
     font-weight: 500;
-    color: var(--text-primary);
+    color: var(--text-secondary);
 }
 
 .form-group input,
@@ -18,8 +18,14 @@
     border: 1px solid var(--border-color);
     border-radius: var(--border-radius);
     font-size: var(--font-size-base);
-    background-color: var(--bg-primary);
-    transition: border-color 0.15s;
+    background-color: var(--bg-tertiary);
+    color: var(--text-primary);
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.form-group input::placeholder,
+.form-group textarea::placeholder {
+    color: var(--text-muted);
 }
 
 .form-group input:focus,
@@ -27,7 +33,7 @@
 .form-group select:focus {
     outline: none;
     border-color: var(--color-primary);
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
 }
 
 .form-group input.error,
@@ -41,4 +47,17 @@
     font-size: var(--font-size-sm);
     margin-top: var(--space-xs);
     min-height: 1.25rem;
+}
+
+.auth-card {
+    max-width: 28rem;
+    margin: var(--space-2xl) auto;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-lg);
+    padding: var(--space-xl);
+}
+
+.auth-card h2 {
+    margin-bottom: var(--space-lg);
 }

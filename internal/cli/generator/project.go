@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // ProjectConfig holds the data used to render project templates.
@@ -24,7 +23,6 @@ type ProjectConfig struct {
 	IncludeWS       bool
 	IncludeNotify   bool
 	IncludeE2E      bool
-	HamrLocalPath   string // local path for replace directive (dev only)
 }
 
 // Validate checks that the ProjectConfig has all required fields and valid values.
@@ -126,9 +124,14 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 		{"templates/new/internal/repo/repo.go.tmpl", "internal/repo/repo.go"},
 		{"templates/new/internal/repo/postgres/store.go.tmpl", "internal/repo/postgres/store.go"},
 
+		// internal/api
+		{"templates/new/internal/api/server.go.tmpl", "internal/api/server.go"},
+		{"templates/new/internal/api/handler/health/handler.go.tmpl", "internal/api/handler/health/handler.go"},
+
 		// internal/web
 		{"templates/new/internal/web/server.go.tmpl", "internal/web/server.go"},
 		{"templates/new/internal/web/handler/home/handler.go.tmpl", "internal/web/handler/home/handler.go"},
+		{"templates/new/internal/web/handler/home/home.templ.tmpl", "internal/web/handler/home/home.templ"},
 		{"templates/new/internal/web/handler/health/handler.go.tmpl", "internal/web/handler/health/handler.go"},
 		{"templates/new/internal/web/handler/errors/handler.go.tmpl", "internal/web/handler/errors/handler.go"},
 
@@ -185,6 +188,7 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 		files = append(files,
 			templateFile{"templates/new/root/tailwind.config.js.tmpl", "tailwind.config.js"},
 			templateFile{"templates/new/root/package.json.tmpl", "package.json"},
+			templateFile{"templates/new/static/css/input.css.tmpl", "static/css/input.css"},
 			templateFile{"templates/new/docs/ai-guides/tailwind.md.tmpl", "docs/ai-guides/tailwind.md"},
 		)
 	}
@@ -216,50 +220,3 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 	return files
 }
 
-// FindHamrLocalPath locates the hamr module root on disk so generated projects
-// can use a replace directive. Checks in order:
-//  1. HAMR_LOCAL_PATH env var (explicit override)
-//  2. Walk up from the running executable (works for `go build ./cmd/hamr`)
-//
-// Returns "" if not found (e.g. installed via go install from a published version).
-func FindHamrLocalPath() string {
-	// Explicit env var — reliable escape hatch for go install.
-	if p := os.Getenv("HAMR_LOCAL_PATH"); p != "" {
-		if isHamrModuleRoot(p) {
-			return p
-		}
-	}
-
-	// Walk up from the executable.
-	exe, err := os.Executable()
-	if err != nil {
-		return ""
-	}
-	// Resolve symlinks (e.g. ~/bin/hamr -> /home/user/FyrmForge/hamr/hamr).
-	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = resolved
-	}
-	return walkUpForHamrMod(filepath.Dir(exe))
-}
-
-func isHamrModuleRoot(dir string) bool {
-	data, err := os.ReadFile(filepath.Join(dir, "go.mod"))
-	if err != nil {
-		return false
-	}
-	return strings.Contains(string(data), "module github.com/FyrmForge/hamr")
-}
-
-func walkUpForHamrMod(dir string) string {
-	for {
-		if isHamrModuleRoot(dir) {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	return ""
-}

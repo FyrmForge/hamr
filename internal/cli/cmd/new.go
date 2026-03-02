@@ -66,18 +66,9 @@ Pass --no-prompt to skip the wizard and use defaults.`,
 			needsLocation = true
 		}
 
-		hamrLocal := generator.FindHamrLocalPath()
-		if hamrLocal == "" {
-			return fmt.Errorf("could not locate hamr source directory\n\n" +
-				"Set HAMR_LOCAL_PATH to the hamr source directory, or symlink\n" +
-				"the hamr binary from the source tree so it can be resolved.\n\n" +
-				"  export HAMR_LOCAL_PATH=/path/to/hamr")
-		}
-
 		cfg := &generator.ProjectConfig{
-			Name:          name,
-			GoVersion:     "1.25.0",
-			HamrLocalPath: hamrLocal,
+			Name:      name,
+			GoVersion: "1.25.0",
 		}
 
 		if interactive {
@@ -141,7 +132,16 @@ Pass --no-prompt to skip the wizard and use defaults.`,
 			fmt.Printf("Warning: could not vendor JS dependencies: %v\n", err)
 		}
 
-		// Run go mod tidy (non-fatal).
+		// Resolve dependencies (non-fatal).
+		fmt.Println("Running go get ./...")
+		goget := exec.Command("go", "get", "./...")
+		goget.Dir = dir
+		goget.Stdout = os.Stdout
+		goget.Stderr = os.Stderr
+		if err := goget.Run(); err != nil {
+			fmt.Printf("Warning: go get ./... failed: %v\n", err)
+		}
+
 		fmt.Println("Running go mod tidy...")
 		tidy := exec.Command("go", "mod", "tidy")
 		tidy.Dir = dir
@@ -156,8 +156,7 @@ Pass --no-prompt to skip the wizard and use defaults.`,
 		if !inPlace {
 			fmt.Printf("  cd %s\n", dir)
 		}
-		fmt.Println("  docker compose -f docker/docker-compose.yaml up -d")
-		fmt.Println("  templ generate")
+		fmt.Println("  make docker-up")
 		fmt.Println("  make dev")
 
 		return nil

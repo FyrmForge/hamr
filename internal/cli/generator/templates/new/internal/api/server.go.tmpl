@@ -1,0 +1,26 @@
+package api
+
+import (
+	"log/slog"
+
+	"github.com/FyrmForge/hamr/pkg/middleware"
+	"github.com/FyrmForge/hamr/pkg/server"
+
+	"{{.Module}}/internal/repo"
+	"{{.Module}}/internal/api/handler/health"
+)
+
+// Deps holds the dependencies for API route registration.
+type Deps struct {
+	Log   *slog.Logger
+	Store repo.Store
+}
+
+// RegisterRoutes registers all API route handlers on the server.
+func RegisterRoutes(srv *server.Server, deps *Deps) {
+	api := srv.Echo().Group("/api")
+	api.Use(middleware.RequestID())
+
+	healthHandler := health.NewHandler(deps.Store)
+	api.GET("/health", healthHandler.Health)
+}

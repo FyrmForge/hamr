@@ -8,7 +8,7 @@
     border: 1px solid transparent;
     border-radius: var(--border-radius);
     cursor: pointer;
-    transition: background-color 0.15s, border-color 0.15s;
+    transition: background-color 0.15s, border-color 0.15s, box-shadow 0.15s;
     text-decoration: none;
 }
 
@@ -23,16 +23,18 @@
 
 .btn-primary:hover {
     background-color: var(--color-primary-hover);
+    box-shadow: var(--shadow-glow);
 }
 
 .btn-secondary {
-    background-color: var(--bg-secondary);
+    background-color: transparent;
     color: var(--text-primary);
     border-color: var(--border-color);
 }
 
 .btn-secondary:hover {
     background-color: var(--bg-tertiary);
+    border-color: var(--text-muted);
 }
 
 .btn-danger {
@@ -41,7 +43,7 @@
 }
 
 .btn-danger:hover {
-    background-color: #b91c1c;
+    background-color: #dc2626;
 }
 
 .btn-sm {

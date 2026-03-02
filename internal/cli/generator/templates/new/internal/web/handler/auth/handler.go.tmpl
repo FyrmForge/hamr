@@ -13,15 +13,15 @@ import (
 )
 
 // Handler handles authentication requests.
-type Handler struct {
+type handler struct {
 	authService    *service.AuthService
 	sessionManager *auth.SessionManager
 	log            *slog.Logger
 }
 
 // NewHandler creates a new auth handler.
-func NewHandler(authService *service.AuthService, sm *auth.SessionManager, log *slog.Logger) *Handler {
-	return &Handler{
+func NewHandler(authService *service.AuthService, sm *auth.SessionManager, log *slog.Logger) *handler {
+	return &handler{
 		authService:    authService,
 		sessionManager: sm,
 		log:            log,
@@ -29,22 +29,42 @@ func NewHandler(authService *service.AuthService, sm *auth.SessionManager, log *
 }
 
 // GET /login
-func (h *Handler) LoginPage(c echo.Context) error {
-	return c.HTML(http.StatusOK, `<form method="POST" action="/login">
-		<div class="form-group">
-			<label for="email">Email</label>
-			<input type="email" id="email" name="email" required/>
-		</div>
-		<div class="form-group">
-			<label for="password">Password</label>
-			<input type="password" id="password" name="password" required/>
-		</div>
-		<button type="submit" class="btn btn-primary">Log In</button>
-	</form>`)
+func (h *handler) LoginPage(c echo.Context) error {
+{{- if eq .CSS "tailwind"}}
+	return c.HTML(http.StatusOK, `<div class="max-w-md mx-auto mt-16 bg-slate-800 border border-slate-700 rounded-lg p-8">
+		<h2 class="text-2xl font-bold text-slate-100 mb-6 text-center">Log In</h2>
+		<form method="POST" action="/login">
+			<div class="mb-6">
+				<label for="email" class="block text-sm font-medium text-slate-400 mb-1">Email</label>
+				<input type="email" id="email" name="email" required class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"/>
+			</div>
+			<div class="mb-6">
+				<label for="password" class="block text-sm font-medium text-slate-400 mb-1">Password</label>
+				<input type="password" id="password" name="password" required class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"/>
+			</div>
+			<button type="submit" class="w-full py-2 px-4 bg-blue-500 hover:bg-blue-400 text-white font-medium rounded-md transition-colors">Log In</button>
+		</form>
+	</div>`)
+{{- else}}
+	return c.HTML(http.StatusOK, `<div class="container"><div class="auth-card">
+		<h2 class="text-center">Log In</h2>
+		<form method="POST" action="/login">
+			<div class="form-group">
+				<label for="email">Email</label>
+				<input type="email" id="email" name="email" required/>
+			</div>
+			<div class="form-group">
+				<label for="password">Password</label>
+				<input type="password" id="password" name="password" required/>
+			</div>
+			<button type="submit" class="btn btn-primary" style="width:100%">Log In</button>
+		</form>
+	</div></div>`)
+{{- end}}
 }
 
 // POST /login
-func (h *Handler) Login(c echo.Context) error {
+func (h *handler) Login(c echo.Context) error {
 	email := c.FormValue("email")
 	password := c.FormValue("password")
 
@@ -79,26 +99,50 @@ func (h *Handler) Login(c echo.Context) error {
 }
 
 // GET /register
-func (h *Handler) RegisterPage(c echo.Context) error {
-	return c.HTML(http.StatusOK, `<form method="POST" action="/register">
-		<div class="form-group">
-			<label for="name">Name</label>
-			<input type="text" id="name" name="name" required/>
-		</div>
-		<div class="form-group">
-			<label for="email">Email</label>
-			<input type="email" id="email" name="email" required/>
-		</div>
-		<div class="form-group">
-			<label for="password">Password</label>
-			<input type="password" id="password" name="password" required/>
-		</div>
-		<button type="submit" class="btn btn-primary">Register</button>
-	</form>`)
+func (h *handler) RegisterPage(c echo.Context) error {
+{{- if eq .CSS "tailwind"}}
+	return c.HTML(http.StatusOK, `<div class="max-w-md mx-auto mt-16 bg-slate-800 border border-slate-700 rounded-lg p-8">
+		<h2 class="text-2xl font-bold text-slate-100 mb-6 text-center">Register</h2>
+		<form method="POST" action="/register">
+			<div class="mb-6">
+				<label for="name" class="block text-sm font-medium text-slate-400 mb-1">Name</label>
+				<input type="text" id="name" name="name" required class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"/>
+			</div>
+			<div class="mb-6">
+				<label for="email" class="block text-sm font-medium text-slate-400 mb-1">Email</label>
+				<input type="email" id="email" name="email" required class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"/>
+			</div>
+			<div class="mb-6">
+				<label for="password" class="block text-sm font-medium text-slate-400 mb-1">Password</label>
+				<input type="password" id="password" name="password" required class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"/>
+			</div>
+			<button type="submit" class="w-full py-2 px-4 bg-blue-500 hover:bg-blue-400 text-white font-medium rounded-md transition-colors">Register</button>
+		</form>
+	</div>`)
+{{- else}}
+	return c.HTML(http.StatusOK, `<div class="container"><div class="auth-card">
+		<h2 class="text-center">Register</h2>
+		<form method="POST" action="/register">
+			<div class="form-group">
+				<label for="name">Name</label>
+				<input type="text" id="name" name="name" required/>
+			</div>
+			<div class="form-group">
+				<label for="email">Email</label>
+				<input type="email" id="email" name="email" required/>
+			</div>
+			<div class="form-group">
+				<label for="password">Password</label>
+				<input type="password" id="password" name="password" required/>
+			</div>
+			<button type="submit" class="btn btn-primary" style="width:100%">Register</button>
+		</form>
+	</div></div>`)
+{{- end}}
 }
 
 // POST /register
-func (h *Handler) Register(c echo.Context) error {
+func (h *handler) Register(c echo.Context) error {
 	name := c.FormValue("name")
 	email := c.FormValue("email")
 	password := c.FormValue("password")
@@ -145,7 +189,7 @@ func (h *Handler) Register(c echo.Context) error {
 }
 
 // POST /logout
-func (h *Handler) Logout(c echo.Context) error {
+func (h *handler) Logout(c echo.Context) error {
 	cookie, err := c.Cookie(h.sessionManager.CookieName())
 	if err == nil {
 		session, _ := h.sessionManager.ValidateSession(c.Request().Context(), cookie.Value)

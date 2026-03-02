@@ -2,23 +2,30 @@ package components
 
 templ Layout(title string) {
 	<!DOCTYPE html>
-	<html lang="en">
+	<html lang="en" class="dark">
 	<head>
 		<meta charset="UTF-8"/>
 		<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 		<title>{ title } - {{.Name}}</title>
-{{- if eq .CSS "plain"}}
-		<link rel="stylesheet" href={ StaticURL("css/base/reset.css") }/>
+{{- if eq .CSS "tailwind"}}
+		<link rel="stylesheet" href={ StaticURL("css/output.css") }/>
+{{- else}}
 		<link rel="stylesheet" href={ StaticURL("css/base/variables.css") }/>
+		<link rel="stylesheet" href={ StaticURL("css/base/reset.css") }/>
 		<link rel="stylesheet" href={ StaticURL("css/base/utilities.css") }/>
 		<link rel="stylesheet" href={ StaticURL("css/components/buttons.css") }/>
 		<link rel="stylesheet" href={ StaticURL("css/components/forms.css") }/>
 		<link rel="stylesheet" href={ StaticURL("css/components/alerts.css") }/>
 		<link rel="stylesheet" href={ StaticURL("css/layout/header.css") }/>
 		<link rel="stylesheet" href={ StaticURL("css/layout/footer.css") }/>
+		<link rel="stylesheet" href={ StaticURL("css/pages/home.css") }/>
 {{- end}}
 	</head>
+{{- if eq .CSS "tailwind"}}
+	<body class="bg-slate-900 text-slate-100 min-h-screen">
+{{- else}}
 	<body>
+{{- end}}
 		{ children... }
 
 		<script src={ StaticURL("js/htmx.min.js") }></script>
@@ -40,13 +47,4 @@ templ Layout(title string) {
 		</script>
 	</body>
 	</html>
-}
-
-templ HomePage() {
-	@Layout("Home") {
-		<main class="container">
-			<h1>Welcome to {{.Name}}</h1>
-			<p>Your HAMR project is up and running.</p>
-		</main>
-	}
 }

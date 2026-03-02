@@ -3,14 +3,11 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"io/fs"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/FyrmForge/hamr/pkg/config"
 	"github.com/FyrmForge/hamr/pkg/storage"
-	"github.com/fsnotify/fsnotify"
+	ssync "github.com/FyrmForge/hamr/pkg/sync"
 	"github.com/spf13/cobra"
 )
 
@@ -66,7 +63,7 @@ Examples:
 		ctx := context.Background()
 
 		fmt.Printf("syncing %s/ → s3://%s ...\n", dir, bucket)
-		if err := syncAll(ctx, s3, dir); err != nil {
+		if err := ssync.SyncAll(ctx, s3, dir); err != nil {
 			return fmt.Errorf("sync failed: %w", err)
 		}
 		fmt.Println("sync complete")
@@ -75,114 +72,8 @@ Examples:
 			return nil
 		}
 
-		return watchAndSync(ctx, s3, dir)
+		return ssync.WatchAndSync(ctx, s3, dir)
 	},
-}
-
-func syncAll(ctx context.Context, s3 storage.FileStorage, dir string) error {
-	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		key := s3Key(dir, path)
-		if key == "" {
-			return nil
-		}
-		if err := uploadFile(ctx, s3, path, key); err != nil {
-			return fmt.Errorf("upload %s: %w", key, err)
-		}
-		fmt.Printf("  %s\n", key)
-		return nil
-	})
-}
-
-func watchAndSync(ctx context.Context, s3 storage.FileStorage, dir string) error {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return fmt.Errorf("create watcher: %w", err)
-	}
-	defer watcher.Close()
-
-	if err := addWatchDirs(watcher, dir); err != nil {
-		return fmt.Errorf("watch directories: %w", err)
-	}
-
-	fmt.Printf("watching %s/ for changes... (ctrl+c to stop)\n", dir)
-
-	for {
-		select {
-		case event, ok := <-watcher.Events:
-			if !ok {
-				return nil
-			}
-			key := s3Key(dir, event.Name)
-			if key == "" {
-				continue
-			}
-
-			switch {
-			case event.Has(fsnotify.Create), event.Has(fsnotify.Write):
-				info, err := os.Stat(event.Name)
-				if err != nil {
-					continue
-				}
-				if info.IsDir() {
-					_ = addWatchDirs(watcher, event.Name)
-					continue
-				}
-				if err := uploadFile(ctx, s3, event.Name, key); err != nil {
-					fmt.Printf("upload %s: %v\n", key, err)
-				} else {
-					fmt.Printf("uploaded %s\n", key)
-				}
-
-			case event.Has(fsnotify.Remove), event.Has(fsnotify.Rename):
-				if err := s3.Delete(ctx, key); err != nil {
-					fmt.Printf("delete %s: %v\n", key, err)
-				} else {
-					fmt.Printf("deleted %s\n", key)
-				}
-			}
-
-		case err, ok := <-watcher.Errors:
-			if !ok {
-				return nil
-			}
-			fmt.Printf("watcher error: %v\n", err)
-		}
-	}
-}
-
-func uploadFile(ctx context.Context, s3 storage.FileStorage, path, key string) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return s3.Save(ctx, key, f)
-}
-
-func s3Key(dir, path string) string {
-	rel, err := filepath.Rel(dir, path)
-	if err != nil {
-		return ""
-	}
-	return strings.ReplaceAll(rel, string(filepath.Separator), "/")
-}
-
-func addWatchDirs(w *fsnotify.Watcher, root string) error {
-	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return w.Add(path)
-		}
-		return nil
-	})
 }
 
 func init() {

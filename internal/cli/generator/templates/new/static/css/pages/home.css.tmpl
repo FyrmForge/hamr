@@ -1,10 +1,12 @@
 .hero {
     text-align: center;
     padding: var(--space-2xl) 0;
+    padding-top: 4rem;
 }
 
 .hero h1 {
     margin-bottom: var(--space-md);
+    font-size: var(--font-size-3xl);
 }
 
 .hero p {
@@ -12,4 +14,19 @@
     font-size: var(--font-size-lg);
     max-width: 600px;
     margin-inline: auto;
+}
+
+.hero .get-started {
+    margin-top: var(--space-xl);
+}
+
+.hero .get-started code {
+    display: inline-block;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: var(--space-sm) var(--space-lg);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
 }

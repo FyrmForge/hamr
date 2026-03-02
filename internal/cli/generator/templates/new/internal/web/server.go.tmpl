@@ -43,18 +43,15 @@ type Deps struct {
 {{- end}}
 }
 
-// RegisterRoutes registers all route handlers on the server.
+// RegisterRoutes registers all web route handlers on the server.
 func RegisterRoutes(srv *server.Server, deps *Deps) {
 	e := srv.Echo()
-
-	// Global middleware.
-	e.Use(middleware.RequestID())
 
 	// Error handler.
 	errorHandler := errors.NewHandler(deps.Log)
 	e.HTTPErrorHandler = errorHandler.Handle
 
-	// Health check — no auth or session middleware.
+	// Health check — no session middleware.
 	healthHandler := health.NewHandler(deps.Store)
 	e.GET("/health", healthHandler.Health)
 {{- if .IncludeWS}}
@@ -65,6 +62,7 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 
 	// Site routes.
 	site := e.Group("")
+	site.Use(middleware.RequestID())
 	site.Use(middleware.Secure())
 {{- if .IncludeSessions}}
 	site.Use(middleware.Flash())

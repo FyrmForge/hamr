@@ -1,11 +1,50 @@
-.PHONY: dev build test lint templ docker-up docker-down clean
+.PHONY: dev build test lint docker-up docker-down docker-delete docker-reload clean install check-reflex check-templ{{- if eq .CSS "tailwind"}} check-node-modules css css-build{{- end}}
 
-## dev: Run the server in development mode
-dev: templ
-	go run ./cmd/server
+## install: Install development dependencies
+install:
+	go install github.com/cespare/reflex@latest
+	go install github.com/a-h/templ/cmd/templ@latest
+{{- if eq .CSS "tailwind"}}
+	npm install
+{{- end}}
+
+## check-reflex: Verify reflex is installed
+check-reflex:
+	@command -v reflex >/dev/null 2>&1 || { echo "reflex not found. Run: make install" >&2; exit 1; }
+
+## check-templ: Verify templ is installed
+check-templ:
+	@command -v templ >/dev/null 2>&1 || { echo "templ not found. Run: make install" >&2; exit 1; }
+{{- if eq .CSS "tailwind"}}
+
+## check-node-modules: Auto-install npm deps if missing
+check-node-modules:
+	@[ -d node_modules ] || npm install
+
+## css: Watch and rebuild Tailwind CSS on changes
+css: check-node-modules
+	npm run css
+
+## css-build: Build Tailwind CSS for production (minified)
+css-build: check-node-modules
+	npm run css:build
+{{- end}}
+
+## dev: Run the server with live reload on .go and .templ changes
+dev: check-templ check-reflex{{- if eq .CSS "tailwind"}} check-node-modules{{- end}}
+	@templ generate
+{{- if eq .CSS "tailwind"}}
+	@npm run css:build
+	@npm run css &
+{{- end}}
+	reflex -r '\.(go|templ)$$' -R '_templ\.go$$' -s -- sh -c 'templ generate && go run ./cmd/server'
 
 ## build: Build the server binary
-build: templ
+build: check-templ{{- if eq .CSS "tailwind"}} check-node-modules{{- end}}
+	templ generate
+{{- if eq .CSS "tailwind"}}
+	npm run css:build
+{{- end}}
 	go build -o bin/server ./cmd/server
 
 ## test: Run all tests
@@ -16,10 +55,6 @@ test:
 lint:
 	golangci-lint run
 
-## templ: Generate templ files
-templ:
-	templ generate
-
 ## docker-up: Start Docker services
 docker-up:
 	docker compose -f docker/docker-compose.yaml up -d
@@ -27,6 +62,13 @@ docker-up:
 ## docker-down: Stop Docker services
 docker-down:
 	docker compose -f docker/docker-compose.yaml down
+
+## docker-delete: Delete Docker containers and volumes
+docker-delete:
+	docker compose -f docker/docker-compose.yaml down -v
+
+## docker-reload: Delete and recreate Docker services
+docker-reload: docker-delete docker-up
 {{- if .S3StaticWatcher}}
 
 ## sync-static: Watch static/ and sync changes to S3

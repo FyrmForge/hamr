@@ -9,17 +9,17 @@ import (
 )
 
 // Handler handles health check requests.
-type Handler struct {
+type handler struct {
 	store repo.Store
 }
 
 // NewHandler creates a new health handler.
-func NewHandler(store repo.Store) *Handler {
-	return &Handler{store: store}
+func NewHandler(store repo.Store) *handler {
+	return &handler{store: store}
 }
 
 // GET /health
-func (h *Handler) Health(c echo.Context) error {
+func (h *handler) Health(c echo.Context) error {
 	if err := h.store.Health(c.Request().Context()); err != nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{
 			"status": "unhealthy",

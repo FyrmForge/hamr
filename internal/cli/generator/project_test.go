@@ -568,9 +568,9 @@ func TestGenerateProject_s3Storage(t *testing.T) {
 	assert.Contains(t, makefile, "sync-static:")
 	assert.Contains(t, makefile, "hamr sync --watch")
 
-	// go.mod should have replace directive for hamr.
+	// go.mod should exist with correct module.
 	gomod := readFile(t, dir, "go.mod")
-	assert.Contains(t, gomod, "replace github.com/FyrmForge/hamr")
+	assert.Contains(t, gomod, "module github.com/test/s3proj")
 }
 
 func TestGenerateProject_localStorage(t *testing.T) {

@@ -6,21 +6,19 @@ import (
 
 	"github.com/FyrmForge/hamr/pkg/respond"
 	"github.com/labstack/echo/v4"
-
-	"{{.Module}}/internal/web/components"
 )
 
 // Handler handles home page requests.
-type Handler struct {
+type handler struct {
 	log *slog.Logger
 }
 
 // NewHandler creates a new home handler.
-func NewHandler(log *slog.Logger) *Handler {
-	return &Handler{log: log}
+func NewHandler(log *slog.Logger) *handler {
+	return &handler{log: log}
 }
 
 // GET /
-func (h *Handler) Index(c echo.Context) error {
-	return respond.HTML(c, http.StatusOK, components.HomePage())
+func (h *handler) Index(c echo.Context) error {
+	return respond.HTML(c, http.StatusOK, homePage())
 }
