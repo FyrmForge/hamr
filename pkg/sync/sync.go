@@ -16,8 +16,21 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
+// BucketEnsurer is optionally implemented by storage backends that need
+// their bucket created before first use (e.g. S3/MinIO in dev mode).
+type BucketEnsurer interface {
+	EnsureBucket(ctx context.Context) error
+}
+
 // SyncAll performs a one-shot upload of every file under dir to the storage backend.
+// If the store implements BucketEnsurer, the bucket is created first.
 func SyncAll(ctx context.Context, store storage.FileStorage, dir string) error {
+	if be, ok := store.(BucketEnsurer); ok {
+		if err := be.EnsureBucket(ctx); err != nil {
+			return fmt.Errorf("ensure bucket: %w", err)
+		}
+	}
+
 	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err

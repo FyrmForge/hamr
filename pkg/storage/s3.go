@@ -23,6 +23,8 @@ type s3API interface {
 	GetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.Options)) (*s3.GetObjectOutput, error)
 	DeleteObject(ctx context.Context, params *s3.DeleteObjectInput, optFns ...func(*s3.Options)) (*s3.DeleteObjectOutput, error)
 	HeadObject(ctx context.Context, params *s3.HeadObjectInput, optFns ...func(*s3.Options)) (*s3.HeadObjectOutput, error)
+	CreateBucket(ctx context.Context, params *s3.CreateBucketInput, optFns ...func(*s3.Options)) (*s3.CreateBucketOutput, error)
+	HeadBucket(ctx context.Context, params *s3.HeadBucketInput, optFns ...func(*s3.Options)) (*s3.HeadBucketOutput, error)
 }
 
 // presigner is the subset of the S3 presign client used by S3Storage.
@@ -80,6 +82,20 @@ func newS3StorageWithClient(client s3API, ps presigner, bucket string, opts ...S
 		o(s)
 	}
 	return s
+}
+
+// EnsureBucket creates the bucket if it does not already exist.
+func (s *S3Storage) EnsureBucket(ctx context.Context) error {
+	_, err := s.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: &s.bucket})
+	if err == nil {
+		return nil
+	}
+	_, err = s.client.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: &s.bucket})
+	if err != nil {
+		return fmt.Errorf("storage: create bucket %q: %w", s.bucket, err)
+	}
+	s.logger.Info("bucket created", "bucket", s.bucket)
+	return nil
 }
 
 func (s *S3Storage) Save(ctx context.Context, path string, r io.Reader) error {

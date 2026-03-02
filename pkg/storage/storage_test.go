@@ -203,10 +203,12 @@ func TestLocalStorage_overwrite(t *testing.T) {
 
 // mockS3Client implements s3API for testing.
 type mockS3Client struct {
-	putFn    func(ctx context.Context, in *s3.PutObjectInput) (*s3.PutObjectOutput, error)
-	getFn    func(ctx context.Context, in *s3.GetObjectInput) (*s3.GetObjectOutput, error)
-	deleteFn func(ctx context.Context, in *s3.DeleteObjectInput) (*s3.DeleteObjectOutput, error)
-	headFn   func(ctx context.Context, in *s3.HeadObjectInput) (*s3.HeadObjectOutput, error)
+	putFn          func(ctx context.Context, in *s3.PutObjectInput) (*s3.PutObjectOutput, error)
+	getFn          func(ctx context.Context, in *s3.GetObjectInput) (*s3.GetObjectOutput, error)
+	deleteFn       func(ctx context.Context, in *s3.DeleteObjectInput) (*s3.DeleteObjectOutput, error)
+	headFn         func(ctx context.Context, in *s3.HeadObjectInput) (*s3.HeadObjectOutput, error)
+	createBucketFn func(ctx context.Context, in *s3.CreateBucketInput) (*s3.CreateBucketOutput, error)
+	headBucketFn   func(ctx context.Context, in *s3.HeadBucketInput) (*s3.HeadBucketOutput, error)
 }
 
 func (m *mockS3Client) PutObject(ctx context.Context, in *s3.PutObjectInput, _ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
@@ -223,6 +225,20 @@ func (m *mockS3Client) DeleteObject(ctx context.Context, in *s3.DeleteObjectInpu
 
 func (m *mockS3Client) HeadObject(ctx context.Context, in *s3.HeadObjectInput, _ ...func(*s3.Options)) (*s3.HeadObjectOutput, error) {
 	return m.headFn(ctx, in)
+}
+
+func (m *mockS3Client) CreateBucket(ctx context.Context, in *s3.CreateBucketInput, _ ...func(*s3.Options)) (*s3.CreateBucketOutput, error) {
+	if m.createBucketFn != nil {
+		return m.createBucketFn(ctx, in)
+	}
+	return &s3.CreateBucketOutput{}, nil
+}
+
+func (m *mockS3Client) HeadBucket(ctx context.Context, in *s3.HeadBucketInput, _ ...func(*s3.Options)) (*s3.HeadBucketOutput, error) {
+	if m.headBucketFn != nil {
+		return m.headBucketFn(ctx, in)
+	}
+	return &s3.HeadBucketOutput{}, nil
 }
 
 // mockPresigner implements presigner for testing.
