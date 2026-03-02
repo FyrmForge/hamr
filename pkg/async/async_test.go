@@ -217,7 +217,7 @@ func TestMap_firstError(t *testing.T) {
 func TestFire_runs(t *testing.T) {
 	var done atomic.Bool
 	async.Fire(func() { done.Store(true) })
-	assert.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+	assert.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 }
 
 func TestFire_panicDoesNotCrash(t *testing.T) {

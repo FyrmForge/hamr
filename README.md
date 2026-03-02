@@ -21,24 +21,25 @@ HAMR is two things:
 
 ### Framework packages
 
-| Package            | What it does                                                                       |
-| ------------------ | ---------------------------------------------------------------------------------- |
-| `pkg/config`       | Env-based configuration with typed accessors and `.env` file loading               |
-| `pkg/logging`      | Context-aware structured logging via `slog` (JSON in prod, coloured in dev)        |
-| `pkg/ptr`          | Generic and concrete pointer helpers                                               |
-| `pkg/validate`     | Pure-function validators with custom messages and a plugin registry                |
-| `pkg/auth`         | Argon2id password hashing, token generation, session management                    |
-| `pkg/db`           | Database connection with retry, keep-alive, and migration runner                   |
-| `pkg/htmx`         | HTMX request detection and response header helpers                                 |
-| `pkg/respond`      | Content-negotiated responses (HTML via Templ or JSON from the same handler)        |
-| `pkg/ctx`          | Type-safe Echo context keys using generics                                         |
-| `pkg/middleware`   | Auth, RBAC, flash messages, rate limiting, request ID, caching, audit, CSRF, CORS  |
-| `pkg/server`       | Echo wrapper with functional options and lifecycle hooks                           |
-| `pkg/janitor`      | Background task scheduler                                                          |
-| `pkg/storage`      | File storage interface with local filesystem and S3/R2/MinIO backends              |
-| `pkg/notify`       | Notification sender interface with async dispatch                                  |
-| `pkg/websocket`    | Session and room-based WebSocket hub with HTMX integration                         |
-| `pkg/client`       | Inter-service HTTP client with header propagation                                  |
+| Package            | What it does                                                                       | Guide |
+| ------------------ | ---------------------------------------------------------------------------------- | ----- |
+| `pkg/config`       | Env-based configuration with typed accessors and `.env` file loading               | [docs/guide/config.md](docs/guide/config.md) |
+| `pkg/logging`      | Context-aware structured logging via `slog` (JSON in prod, coloured in dev)        | [docs/guide/logging.md](docs/guide/logging.md) |
+| `pkg/ptr`          | Generic and concrete pointer helpers                                               | [docs/guide/ptr.md](docs/guide/ptr.md) |
+| `pkg/validate`     | Pure-function validators with custom messages and a plugin registry                | [docs/guide/validate.md](docs/guide/validate.md) |
+| `pkg/auth`         | Argon2id password hashing, token generation, session management                    | [docs/guide/auth.md](docs/guide/auth.md) |
+| `pkg/db`           | Database connection with retry, keep-alive, and migration runner                   | [docs/guide/db.md](docs/guide/db.md) |
+| `pkg/htmx`         | HTMX request detection and response header helpers                                 | [docs/guide/htmx.md](docs/guide/htmx.md) |
+| `pkg/respond`      | Content-negotiated responses (HTML via Templ or JSON from the same handler)        | [docs/guide/respond.md](docs/guide/respond.md) |
+| `pkg/ctx`          | Type-safe Echo context keys using generics                                         | [docs/guide/ctx.md](docs/guide/ctx.md) |
+| `pkg/middleware`   | Auth, RBAC, flash messages, rate limiting, request ID, caching, audit, CSRF, CORS  | [docs/guide/middleware.md](docs/guide/middleware.md) |
+| `pkg/server`       | Echo wrapper with functional options and lifecycle hooks                           | [docs/guide/server.md](docs/guide/server.md) |
+| `pkg/janitor`      | Background task scheduler                                                          | [docs/guide/janitor.md](docs/guide/janitor.md) |
+| `pkg/storage`      | File storage interface with local filesystem and S3/R2/MinIO backends              | [docs/guide/storage.md](docs/guide/storage.md) |
+| `pkg/async`        | Concurrent execution primitives with panic recovery                                | [docs/guide/async.md](docs/guide/async.md) |
+| `pkg/websocket`    | Session and room-based WebSocket hub with HTMX integration                         | [docs/guide/websocket.md](docs/guide/websocket.md) |
+| `pkg/client`       | Inter-service HTTP client with header propagation                                  | [docs/guide/client.md](docs/guide/client.md) |
+| `pkg/e2e`          | Reusable go-rod browser helpers for E2E testing                                    | [docs/guide/e2e.md](docs/guide/e2e.md) |
 
 ### CLI commands
 
