@@ -1,0 +1,94 @@
+# Forms Guide
+
+## Creating a Form
+
+### 1. Templ component
+
+```
+// internal/web/handler/things/templates.templ
+package things
+
+import "{{.Module}}/internal/web/components/form"
+
+templ CreateForm(errors map[string]string, csrfToken string) {
+    <form method="POST" action="/things">
+        @form.CSRFField(csrfToken)
+
+        <div class="form-group">
+            <label for="name">Name</label>
+            <input type="text" id="name" name="name"
+                hx-post="/things/validate/name"
+                hx-trigger="blur"
+                hx-target="#name-error"
+                hx-swap="outerHTML"/>
+            @form.FieldError("name", errors)
+        </div>
+
+        <div class="form-group">
+            <label for="email">Email</label>
+            <input type="email" id="email" name="email"
+                hx-post="/things/validate/email"
+                hx-trigger="blur"
+                hx-target="#email-error"
+                hx-swap="outerHTML"/>
+            @form.FieldError("email", errors)
+        </div>
+
+        <button type="submit" class="btn btn-primary">Create</button>
+    </form>
+}
+```
+
+### 2. Handler
+
+```go
+// GET /things/new
+func (h *Handler) NewPage(c echo.Context) error {
+    token := c.Get("csrf").(string)
+    return respond.HTML(c, http.StatusOK, CreateForm(nil, token))
+}
+
+// POST /things
+func (h *Handler) Create(c echo.Context) error {
+    name := c.FormValue("name")
+    email := c.FormValue("email")
+
+    errs := h.validate(name, email)
+    if len(errs) > 0 {
+        token := c.Get("csrf").(string)
+        return respond.HTML(c, http.StatusUnprocessableEntity, CreateForm(errs, token))
+    }
+
+    // Save to database...
+
+    middleware.SetFlash(c, "Created successfully!", middleware.FlashSuccess)
+    return c.Redirect(http.StatusSeeOther, "/things")
+}
+```
+
+### 3. Inline validation endpoint
+
+```go
+// POST /things/validate/name
+func (h *Handler) ValidateName(c echo.Context) error {
+    msg := validate.Required(c.FormValue("name"))
+    return respond.HTML(c, http.StatusOK, form.FieldErrorOOB("name", msg))
+}
+```
+
+## CSRF Token
+
+The CSRF middleware stores the token in `c.Get("csrf")`. Use
+`form.CSRFField(token)` in your templ components and the `htmx:configRequest`
+listener in `layout.templ` automatically attaches it to HTMX requests via the
+`X-CSRF-Token` header.
+
+## Flash Messages
+
+```go
+middleware.SetFlash(c, "Saved!", middleware.FlashSuccess)
+return c.Redirect(http.StatusSeeOther, "/things")
+```
+
+Read in templates: `components.GetFlash(c)` returns `*middleware.FlashMessage`
+with `.Message` and `.Type` fields.

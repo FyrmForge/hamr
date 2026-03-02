@@ -1,0 +1,29 @@
+//go:build e2e
+
+package e2e
+{{- if .IncludeAuth}}
+
+// TestAccount represents a test user account.
+type TestAccount struct {
+	Email    string
+	Password string
+	Role     string
+	Name     string
+}
+
+// Accounts maps roles to test accounts (populated from seed data).
+var Accounts = map[string]TestAccount{
+	"admin": {
+		Email:    "admin@test.com",
+		Password: "Test1234!",
+		Role:     "admin",
+		Name:     "Test Admin",
+	},
+	"user": {
+		Email:    "user@test.com",
+		Password: "Test1234!",
+		Role:     "user",
+		Name:     "Test User",
+	},
+}
+{{- end}}

@@ -1,0 +1,37 @@
+{{- if .IncludeSessions}}
+CREATE TABLE sessions (
+    id          TEXT PRIMARY KEY,
+    subject_id  TEXT,
+    token       TEXT        NOT NULL UNIQUE,
+    expires_at  TIMESTAMPTZ NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    metadata    JSONB
+);
+
+CREATE INDEX idx_sessions_token ON sessions (token);
+CREATE INDEX idx_sessions_subject_id ON sessions (subject_id) WHERE subject_id IS NOT NULL;
+{{- end}}
+{{- if and .IncludeAuth .AuthWithTables}}
+
+CREATE TABLE users (
+    id              TEXT PRIMARY KEY,
+    email           TEXT        NOT NULL UNIQUE,
+    password_hash   TEXT        NOT NULL,
+    name            TEXT        NOT NULL DEFAULT '',
+    role            TEXT        NOT NULL DEFAULT 'user',
+    active          BOOLEAN     NOT NULL DEFAULT true,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_users_email ON users (email);
+{{- end}}
+{{- if not (or .IncludeSessions (and .IncludeAuth .AuthWithTables))}}
+-- Add your initial migration here.
+-- Example:
+-- CREATE TABLE examples (
+--     id         TEXT PRIMARY KEY,
+--     name       TEXT NOT NULL,
+--     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+-- );
+{{- end}}

@@ -1,0 +1,12 @@
+-- E2E test seed data.
+-- All test accounts use password: Test1234!
+-- Argon2id hash for "Test1234!":
+-- $argon2id$v=19$m=65536,t=3,p=2$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+{{- if and .IncludeAuth .AuthWithTables}}
+
+INSERT INTO users (id, email, password_hash, name, role, active, created_at, updated_at)
+VALUES
+    ('e2e-admin-001', 'admin@test.com', '$argon2id$v=19$m=65536,t=3,p=2$c2FsdHNhbHRzYWx0$placeholder', 'Test Admin', 'admin', true, NOW(), NOW()),
+    ('e2e-user-001', 'user@test.com', '$argon2id$v=19$m=65536,t=3,p=2$c2FsdHNhbHRzYWx0$placeholder', 'Test User', 'user', true, NOW(), NOW())
+ON CONFLICT (id) DO NOTHING;
+{{- end}}

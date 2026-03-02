@@ -1,0 +1,46 @@
+# Tailwind CSS Guide
+
+## Setup
+
+```bash
+npm install
+npm run css        # Watch mode
+npm run css:build  # Production build
+```
+
+## Usage
+
+Apply Tailwind utility classes directly in templ components:
+
+```
+templ Button(label string) {
+    <button class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+        { label }
+    </button>
+}
+```
+
+## Configuration
+
+Edit `tailwind.config.js` to customize the design system. The `content` paths
+are pre-configured to scan `.templ` and `.go` files in `internal/web/`.
+
+## File Structure
+
+```
+static/css/
+├── input.css      Tailwind directives (@tailwind base, components, utilities)
+└── output.css     Generated CSS (do not edit)
+```
+
+## Custom Components
+
+Use `@apply` in `input.css` for reusable component classes:
+
+```css
+@layer components {
+    .btn-primary {
+        @apply px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700;
+    }
+}
+```

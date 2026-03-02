@@ -96,11 +96,21 @@ migrations/
 ## Typical Usage
 
 ```go
-func main() {
-    _ = config.LoadEnvFile()
-    dbURL := config.GetEnvOrPanic("DATABASE_URL")
+package main
 
-    database, err := db.Connect(dbURL)
+import (
+    "github.com/FyrmForge/hamr/pkg/config"
+    "github.com/FyrmForge/hamr/pkg/db"
+
+    _ "github.com/joho/godotenv/autoload"
+)
+
+var (
+    envDBURL = config.GetEnvOrPanic("DATABASE_URL")
+)
+
+func main() {
+    database, err := db.Connect(envDBURL)
     if err != nil {
         log.Fatal(err)
     }

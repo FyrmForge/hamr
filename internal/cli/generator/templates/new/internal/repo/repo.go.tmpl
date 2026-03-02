@@ -1,0 +1,28 @@
+package repo
+
+import (
+	"context"
+{{- if .IncludeSessions}}
+
+	"github.com/FyrmForge/hamr/pkg/auth"
+{{- end}}
+)
+
+// Store defines the data access interface for the application.
+type Store interface {
+	// Health checks the database connection.
+	Health(ctx context.Context) error
+{{- if .IncludeSessions}}
+
+	// Session persistence — satisfies auth.SessionStore.
+	auth.SessionStore
+{{- end}}
+{{- if .IncludeAuth}}
+
+	// GetUserByEmail returns a user by email, or nil if not found.
+	GetUserByEmail(ctx context.Context, email string) (*User, error)
+
+	// CreateUser inserts a new user.
+	CreateUser(ctx context.Context, user *User) error
+{{- end}}
+}

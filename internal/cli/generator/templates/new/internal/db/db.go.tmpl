@@ -1,0 +1,18 @@
+package db
+
+import (
+	"embed"
+
+	"github.com/FyrmForge/hamr/pkg/db"
+)
+
+//go:embed migrations/*.sql
+var migrations embed.FS
+
+// MigrateConfig returns the migration configuration for this project.
+func MigrateConfig() db.MigrateConfig {
+	return db.MigrateConfig{
+		FS:        migrations,
+		Directory: "migrations",
+	}
+}

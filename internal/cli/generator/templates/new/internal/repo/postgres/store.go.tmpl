@@ -1,0 +1,86 @@
+package postgres
+
+import (
+	"context"
+{{- if .IncludeSessions}}
+	"database/sql"
+	"errors"
+	"time"
+
+	"github.com/FyrmForge/hamr/pkg/auth"
+{{- end}}
+	"github.com/jmoiron/sqlx"
+)
+
+// Store implements repo.Store using PostgreSQL.
+type Store struct {
+	db *sqlx.DB
+}
+
+// NewStore creates a new PostgreSQL-backed store.
+func NewStore(db *sqlx.DB) *Store {
+	return &Store{db: db}
+}
+
+// Health checks the database connection.
+func (s *Store) Health(ctx context.Context) error {
+	return s.db.PingContext(ctx)
+}
+
+// DB returns the underlying database connection for use in queries.
+func (s *Store) DB() *sqlx.DB {
+	return s.db
+}
+{{- if .IncludeSessions}}
+
+// ---------------------------------------------------------------------------
+// auth.SessionStore implementation
+// ---------------------------------------------------------------------------
+
+func (s *Store) Create(ctx context.Context, session *auth.Session) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO sessions (id, subject_id, token, expires_at, created_at, metadata)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		session.ID, session.SubjectID, session.Token,
+		session.ExpiresAt, session.CreatedAt, nil,
+	)
+	return err
+}
+
+func (s *Store) GetByToken(ctx context.Context, token string) (*auth.Session, error) {
+	var (
+		id        string
+		subjectID sql.NullString
+		tok       string
+		expiresAt time.Time
+		createdAt time.Time
+	)
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, subject_id, token, expires_at, created_at
+		 FROM sessions WHERE token = $1`, token,
+	).Scan(&id, &subjectID, &tok, &expiresAt, &createdAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &auth.Session{
+		ID:        id,
+		SubjectID: subjectID.String,
+		Token:     tok,
+		ExpiresAt: expiresAt,
+		CreatedAt: createdAt,
+	}, nil
+}
+
+func (s *Store) Delete(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE id = $1`, id)
+	return err
+}
+
+func (s *Store) DeleteBySubjectID(ctx context.Context, subjectID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE subject_id = $1`, subjectID)
+	return err
+}
+{{- end}}

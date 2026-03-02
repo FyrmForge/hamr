@@ -1,0 +1,30 @@
+//go:build e2e
+
+package e2e
+
+import (
+	"testing"
+
+	"github.com/FyrmForge/hamr/pkg/e2e"
+)
+
+func TestLoginPage_Loads(t *testing.T) {
+	browser := e2e.SetupBrowser(t)
+	page := openPage(t, browser, "/login")
+
+	e2e.AssertElementExists(t, page, "form")
+	e2e.AssertElementExists(t, page, "#email")
+	e2e.AssertElementExists(t, page, "#password")
+}
+{{- if .IncludeAuth}}
+
+func TestLogin_InvalidCredentials(t *testing.T) {
+	browser := e2e.SetupBrowser(t)
+	page := openPage(t, browser, "/login")
+
+	login(t, page, "wrong@test.com", "wrongpassword")
+
+	// Should redirect back to login with error flash.
+	e2e.AssertURLContains(t, page, "/login")
+}
+{{- end}}

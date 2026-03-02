@@ -1,0 +1,44 @@
+# {{.Name}} — Claude Guidelines
+
+## Build & Test
+
+```bash
+make templ          # Generate templ files (required before build)
+make dev            # Run dev server
+make build          # Build binary
+make test           # Run tests
+make lint           # Run linters
+make docker-up      # Start PostgreSQL
+make docker-down    # Stop PostgreSQL
+```
+
+## Framework
+
+This project uses the HAMR framework (`github.com/FyrmForge/hamr`). Key packages:
+
+- `hamr/pkg/server` — Echo wrapper with functional options
+- `hamr/pkg/respond` — Content-negotiated responses (HTML/JSON)
+- `hamr/pkg/validate` — Validation helpers (return "" or error string)
+- `hamr/pkg/middleware` — Auth, CSRF, flash, rate limiting, etc.
+- `hamr/pkg/db` — Database connection with retry + migrations
+- `hamr/pkg/config` — Environment variable helpers
+- `hamr/pkg/logging` — Structured logging (slog)
+- `hamr/pkg/htmx` — HTMX request/response helpers
+
+## Key Patterns
+
+- Handlers: constructor injection, one package per domain
+- Config: `config.Load()` sets `config.C` package-level var
+- Routes: registered in `internal/web/server.go`
+- Responses: `respond.Negotiate(c, status, jsonData, templComponent)`
+- Validation: `validate.Required(v)` returns "" or error message
+- Flash: `middleware.SetFlash(c, msg, type)` before redirect
+- Errors: custom handler in `internal/web/handler/errors/`
+
+## Code Style
+
+- Follow existing patterns in the codebase
+- Use `hamr/pkg` helpers instead of reimplementing
+- Prefer `respond.HTML`/`respond.Negotiate` over raw `c.HTML()`
+- Add `// GET /path` comments above handler methods
+- Keep handlers thin — business logic in service layer

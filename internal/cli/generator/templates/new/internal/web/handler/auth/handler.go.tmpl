@@ -1,0 +1,169 @@
+package auth
+
+import (
+	"log/slog"
+	"net/http"
+
+	"github.com/FyrmForge/hamr/pkg/auth"
+	"github.com/FyrmForge/hamr/pkg/middleware"
+	"github.com/FyrmForge/hamr/pkg/validate"
+	"github.com/labstack/echo/v4"
+
+	"{{.Module}}/internal/service"
+)
+
+// Handler handles authentication requests.
+type Handler struct {
+	authService    *service.AuthService
+	sessionManager *auth.SessionManager
+	log            *slog.Logger
+}
+
+// NewHandler creates a new auth handler.
+func NewHandler(authService *service.AuthService, sm *auth.SessionManager, log *slog.Logger) *Handler {
+	return &Handler{
+		authService:    authService,
+		sessionManager: sm,
+		log:            log,
+	}
+}
+
+// GET /login
+func (h *Handler) LoginPage(c echo.Context) error {
+	return c.HTML(http.StatusOK, `<form method="POST" action="/login">
+		<div class="form-group">
+			<label for="email">Email</label>
+			<input type="email" id="email" name="email" required/>
+		</div>
+		<div class="form-group">
+			<label for="password">Password</label>
+			<input type="password" id="password" name="password" required/>
+		</div>
+		<button type="submit" class="btn btn-primary">Log In</button>
+	</form>`)
+}
+
+// POST /login
+func (h *Handler) Login(c echo.Context) error {
+	email := c.FormValue("email")
+	password := c.FormValue("password")
+
+	if msg := validate.Required(email); msg != "" {
+		middleware.SetFlash(c, "Email is required", middleware.FlashError)
+		return c.Redirect(http.StatusSeeOther, "/login")
+	}
+
+	user, err := h.authService.Authenticate(c.Request().Context(), email, password)
+	if err != nil {
+		h.log.Warn("login failed", "email", email, "error", err)
+		middleware.SetFlash(c, "Invalid email or password", middleware.FlashError)
+		return c.Redirect(http.StatusSeeOther, "/login")
+	}
+
+	session, err := h.sessionManager.CreateSession(c.Request().Context(), user.ID, nil)
+	if err != nil {
+		h.log.Error("create session failed", "error", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "session error")
+	}
+
+	c.SetCookie(&http.Cookie{
+		Name:     h.sessionManager.CookieName(),
+		Value:    session.Token,
+		Path:     h.sessionManager.CookiePath(),
+		HttpOnly: true,
+		Secure:   h.sessionManager.CookieSecure(),
+		SameSite: h.sessionManager.SameSite(),
+	})
+
+	return c.Redirect(http.StatusSeeOther, "/")
+}
+
+// GET /register
+func (h *Handler) RegisterPage(c echo.Context) error {
+	return c.HTML(http.StatusOK, `<form method="POST" action="/register">
+		<div class="form-group">
+			<label for="name">Name</label>
+			<input type="text" id="name" name="name" required/>
+		</div>
+		<div class="form-group">
+			<label for="email">Email</label>
+			<input type="email" id="email" name="email" required/>
+		</div>
+		<div class="form-group">
+			<label for="password">Password</label>
+			<input type="password" id="password" name="password" required/>
+		</div>
+		<button type="submit" class="btn btn-primary">Register</button>
+	</form>`)
+}
+
+// POST /register
+func (h *Handler) Register(c echo.Context) error {
+	name := c.FormValue("name")
+	email := c.FormValue("email")
+	password := c.FormValue("password")
+
+	errs := make(map[string]string)
+	if msg := validate.Required(name); msg != "" {
+		errs["name"] = msg
+	}
+	if msg := validate.Email(email); msg != "" {
+		errs["email"] = msg
+	}
+	if msg := validate.PasswordStrength(password); msg != "" {
+		errs["password"] = msg
+	}
+	if len(errs) > 0 {
+		middleware.SetFlash(c, "Please fix the errors below", middleware.FlashError)
+		return c.Redirect(http.StatusSeeOther, "/register")
+	}
+
+	user, err := h.authService.Register(c.Request().Context(), email, password, name)
+	if err != nil {
+		h.log.Warn("registration failed", "email", email, "error", err)
+		middleware.SetFlash(c, "Registration failed: "+err.Error(), middleware.FlashError)
+		return c.Redirect(http.StatusSeeOther, "/register")
+	}
+
+	session, err := h.sessionManager.CreateSession(c.Request().Context(), user.ID, nil)
+	if err != nil {
+		h.log.Error("create session failed", "error", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "session error")
+	}
+
+	c.SetCookie(&http.Cookie{
+		Name:     h.sessionManager.CookieName(),
+		Value:    session.Token,
+		Path:     h.sessionManager.CookiePath(),
+		HttpOnly: true,
+		Secure:   h.sessionManager.CookieSecure(),
+		SameSite: h.sessionManager.SameSite(),
+	})
+
+	middleware.SetFlash(c, "Welcome! Your account has been created.", middleware.FlashSuccess)
+	return c.Redirect(http.StatusSeeOther, "/")
+}
+
+// POST /logout
+func (h *Handler) Logout(c echo.Context) error {
+	cookie, err := c.Cookie(h.sessionManager.CookieName())
+	if err == nil {
+		session, _ := h.sessionManager.ValidateSession(c.Request().Context(), cookie.Value)
+		if session != nil {
+			_ = h.sessionManager.DeleteSession(c.Request().Context(), session.ID)
+		}
+	}
+
+	c.SetCookie(&http.Cookie{
+		Name:     h.sessionManager.CookieName(),
+		Value:    "",
+		Path:     h.sessionManager.CookiePath(),
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   h.sessionManager.CookieSecure(),
+		SameSite: h.sessionManager.SameSite(),
+	})
+
+	middleware.SetFlash(c, "You have been logged out", middleware.FlashInfo)
+	return c.Redirect(http.StatusSeeOther, "/login")
+}

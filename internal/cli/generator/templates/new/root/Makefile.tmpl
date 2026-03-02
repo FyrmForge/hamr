@@ -1,0 +1,57 @@
+.PHONY: dev build test lint templ docker-up docker-down clean
+
+## dev: Run the server in development mode
+dev: templ
+	go run ./cmd/server
+
+## build: Build the server binary
+build: templ
+	go build -o bin/server ./cmd/server
+
+## test: Run all tests
+test:
+	go test ./...
+
+## lint: Run linters
+lint:
+	golangci-lint run
+
+## templ: Generate templ files
+templ:
+	templ generate
+
+## docker-up: Start Docker services
+docker-up:
+	docker compose -f docker/docker-compose.yaml up -d
+
+## docker-down: Stop Docker services
+docker-down:
+	docker compose -f docker/docker-compose.yaml down
+{{- if .S3StaticWatcher}}
+
+## sync-static: Watch static/ and sync changes to S3
+sync-static:
+	hamr sync --watch
+{{- end}}
+{{- if .IncludeE2E}}
+
+## e2e: Run E2E tests (containerized)
+e2e:
+	go test -v -tags=e2e ./e2e-go -timeout 10m
+
+## e2e-local: Run E2E tests against local server
+e2e-local:
+	go test -v -tags=e2e ./e2e-go -local -timeout 10m
+
+## e2e-run: Run specific E2E test: make e2e-run T=TestName
+e2e-run:
+	go test -v -tags=e2e ./e2e-go -run "$(T)" -timeout 5m
+
+## e2e-run-local: Run specific E2E test locally: make e2e-run-local T=TestName
+e2e-run-local:
+	go test -v -tags=e2e ./e2e-go -local -run "$(T)" -timeout 2m
+{{- end}}
+
+## clean: Remove build artifacts
+clean:
+	rm -rf bin/ coverage.out coverage.html

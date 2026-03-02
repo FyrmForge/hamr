@@ -113,6 +113,46 @@ func (s *UserService) UploadAvatar(ctx context.Context, userID string, file io.R
 
 In production, inject S3. In tests, inject local storage pointing at `t.TempDir()`.
 
+## Scaffolding with `hamr new`
+
+The `hamr new` wizard asks whether you want file storage and which backend:
+
+```
+File storage?    [y/N]
+Storage backend: Local folder / S3 (MinIO)
+```
+
+Or via flags:
+
+```bash
+hamr new myapp --no-prompt --storage local --module github.com/user/myapp
+hamr new myapp --no-prompt --storage s3 --s3-watcher --module github.com/user/myapp
+```
+
+### What gets generated
+
+**Local storage** (`--storage local`):
+- `STORAGE_PATH` env var in `.env` / `.env.example`
+- `storage.NewLocalStorage(envStoragePath)` in `cmd/server/main.go`
+- `FileStorage` wired into `web.Deps`
+
+**S3 storage** (`--storage s3`):
+- S3 env vars (`S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`) in `.env`
+- MinIO service in `docker/docker-compose.yaml` (ports 9000 + 9001 console)
+- `storage.NewS3Storage(...)` in `cmd/server/main.go`
+- `FileStorage` wired into `web.Deps`
+
+**S3 static asset sync** (`--s3-watcher`, only with `--storage s3`):
+- `make sync-static` target in Makefile (runs `hamr sync --watch`)
+- `STATIC_BASE_URL` defaults to MinIO bucket URL so templates reference S3
+- Use `hamr sync` for one-shot uploads (CI) or `hamr sync --watch` for development
+
+### StaticBaseURL
+
+All generated projects get a `STATIC_BASE_URL` env var (default: `/static`). The layout
+template uses `StaticURL("css/base/reset.css")` instead of hardcoded `/static/` paths.
+Override `STATIC_BASE_URL` in production to point at your S3 bucket or CDN URL.
+
 ## API Reference
 
 ```go

@@ -1,0 +1,62 @@
+# {{.Name}} — AI Coding Rules
+
+## Project Structure
+
+```
+cmd/server/              Application entry point (env config loaded here)
+internal/db/             Database connection + embedded migrations
+internal/repo/           Data access layer (Store interface + PostgreSQL impl)
+internal/web/            HTTP layer
+internal/web/server.go   Route registration + middleware groups
+internal/web/handler/    One package per domain (home, health, errors{{- if .IncludeAuth}}, auth{{- end}})
+internal/web/components/ Shared templ components (layout, form helpers)
+static/                  CSS, JS, images
+```
+
+## Handler Pattern
+
+- One handler package per domain: `internal/web/handler/<name>/`
+- Constructor injection: `NewHandler(store repo.Store, log *slog.Logger) *Handler`
+- Route comments above methods: `// GET /path`
+- Register routes in `internal/web/server.go`
+- Use `respond.HTML`, `respond.JSON`, or `respond.Negotiate` for responses
+
+## Validation
+
+- Use `hamr/pkg/validate` — validators return `""` for valid, error string for invalid
+- Two-level validation:
+  1. **Blur**: HTMX `hx-post` to validate single field, return OOB swap
+  2. **Submit**: Validate all fields, return 422 with form re-render
+- Never validate in the repo/store layer
+
+## Responses
+
+- `200` for successful GET
+- `303` (See Other) for redirects after POST (PRG pattern)
+- `422` for validation errors
+- Use `middleware.SetFlash()` before redirects for success/error messages
+
+## CSS
+{{- if eq .CSS "plain"}}
+- Plain CSS with design system in `static/css/`
+- Variables in `base/variables.css`, reset in `base/reset.css`
+- Component styles in `components/`, layout in `layout/`, pages in `pages/`
+{{- else}}
+- Tailwind CSS — classes directly in templ components
+- Config in `tailwind.config.js`
+{{- end}}
+
+## Testing
+
+- Unit tests alongside source files: `*_test.go`
+- Use `testify/assert` and `testify/require`
+{{- if .IncludeE2E}}
+- E2E tests in `e2e-go/` with `//go:build e2e` tag
+- Run: `make e2e` (containerized) or `make e2e-local`
+{{- end}}
+
+## Database
+
+- Migrations in `internal/db/migrations/` (sequential numbering)
+- Use `sqlx` for queries in repo implementations
+- Store interface in `internal/repo/repo.go`

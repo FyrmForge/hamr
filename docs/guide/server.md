@@ -129,12 +129,24 @@ e.IPExtractor = echo.ExtractIPFromXFFHeader()
 ## Typical Usage
 
 ```go
-func main() {
-    _ = config.LoadEnvFile()
+package main
 
+import (
+    "github.com/FyrmForge/hamr/pkg/config"
+    "github.com/FyrmForge/hamr/pkg/server"
+
+    _ "github.com/joho/godotenv/autoload"
+)
+
+var (
+    envPort    = config.GetEnvOrDefaultInt("PORT", 8080)
+    envDevMode = config.GetEnvOrDefaultBool("DEV_MODE", false)
+)
+
+func main() {
     srv, err := server.New(
-        server.WithPort(config.GetEnvOrDefaultInt("PORT", 8080)),
-        server.WithDevMode(config.GetEnvOrDefaultBool("DEV_MODE", false)),
+        server.WithPort(envPort),
+        server.WithDevMode(envDevMode),
         server.WithTimeout(30*time.Second),
         server.WithOnShutdown(func(ctx context.Context) error {
             database.Close()

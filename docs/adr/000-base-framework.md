@@ -120,12 +120,12 @@ github.com/FyrmForge/hamr/
 ## Phase 1: Foundation Packages (no internal deps)
 
 ### 1. `pkg/config/config.go`
-- `LoadEnvFile(paths ...string) error` - wraps godotenv
 - `GetEnvOrDefault(key, def string) string`
 - `GetEnvOrPanic(key string) string`
 - `GetEnvOrDefaultInt(key string, def int) int`
 - `GetEnvOrDefaultBool(key string, def bool) bool`
 - `GetEnvOrDefaultDuration(key string, def time.Duration) time.Duration`
+- `.env` loading via `_ "github.com/joho/godotenv/autoload"` in the consuming `main` package
 
 ### 2. `pkg/logging/logging.go`
 - `New(production bool) *slog.Logger` - JSON handler in prod, tint in dev
@@ -421,12 +421,19 @@ internal/cli/templates/             # embedded text/template files
 1. **Project name** (from arg)
 2. **Go module path** (flag `--module` or prompt)
 3. **CSS approach**: Plain CSS with design system | Tailwind CSS
-4. **Sessions**: Yes (sessions table — works without user accounts) | No
-5. **Auth scaffolding** (if sessions): Full (users table + auth handlers) | Empty migration | No
-6. **File storage**: Yes (local + S3) | No
-7. **WebSocket support**: Yes | No
-8. **Notification system**: Yes | No
-9. **E2E testing**: Yes (go-rod + testcontainers) | No
+4. **Sessions?** Yes/No (cookie-based session management)
+5. **File storage?** Yes/No — if yes, follow-up: Local folder | S3 (MinIO)
+6. **S3 static watcher?** (if S3) Yes/No — watches `static/` and syncs to S3 during dev
+7. **WebSocket?** Yes/No
+8. **Notifications?** Yes/No
+9. **E2E testing?** Yes/No
+10. **Auth scaffolding** (if sessions): Full | Empty | None
+
+Each feature is an individual yes/no confirm prompt (not a multiselect).
+
+CLI flags:
+- `--storage none|local|s3` (default: `"none"`)
+- `--s3-watcher` (default: `false`, only meaningful with `--storage s3`)
 
 ### 32. Template Data Model
 ```go
@@ -437,7 +444,9 @@ type ProjectConfig struct {
     IncludeSessions   bool     // sessions table (independent of auth)
     IncludeAuth       bool     // users table + auth handlers (implies IncludeSessions)
     AuthWithTables    bool     // generate users migration with columns
-    IncludeStorage    bool
+    IncludeStorage    bool     // true when StorageBackend != ""
+    StorageBackend    string   // "" | "local" | "s3"
+    S3StaticWatcher   bool     // include cmd/syncstatic watcher
     IncludeWS         bool
     IncludeNotify     bool
     IncludeE2E        bool
@@ -457,10 +466,11 @@ type ServiceConfig struct {
 ```
 <project>/
 ├── cmd/server/
-│   ├── main.go                 # Bootstrap: config, db, migrate, services, server
+│   ├── main.go                 # Bootstrap: env config, db, migrate, services, server
 │   └── Dockerfile
+├── cmd/syncstatic/             # (if s3-watcher) Watches static/ and syncs to S3
+│   └── main.go
 ├── internal/
-│   ├── config/config.go        # App-specific env vars
 │   ├── db/
 │   │   ├── db.go               # Uses hamr/pkg/db
 │   │   └── migrations/
@@ -712,7 +722,6 @@ e2e-run-local:        ## Run specific E2E test locally: make e2e-run-local T=Tes
 - Bearer token auth middleware (dual auth for JSON API)
 - JSON-specific error handler middleware
 - WebSocket PG LISTEN/NOTIFY integration (optional package)
-- `hamr generate handler <name>` - generate individual handlers
 - `hamr generate migration <name>` - generate migration pair
 - `hamr dev` - dev server with hot reload (wraps air/reflex)
 - SQLite support as DB option
@@ -721,6 +730,84 @@ e2e-run-local:        ## Run specific E2E test locally: make e2e-run-local T=Tes
 - Observability baseline (OpenTelemetry metrics, tracing, pprof) — add once apps reach production scale
 - Transaction helpers / unit-of-work — projects use `sqlx.Tx` directly; abstraction adds complexity without clear benefit yet
 - Migration locking for concurrent deploys — `golang-migrate` handles advisory locks; revisit if multi-instance deploys cause issues
+
+### Migration Strategy Options
+
+MVP runs migrations on application startup (`db.Migrate()` in `main.go`). This is
+simple and works for single-instance deploys, but not all environments want this.
+
+Planned alternatives:
+
+- **On startup** (current default) — `db.Migrate()` called in `main.go` before server starts. Simple, works for single-instance. `golang-migrate` uses advisory locks so concurrent starts don't corrupt, but multiple instances can still race on "is migration X applied?"
+- **CLI command** — `hamr migrate up`, `hamr migrate down`, `hamr migrate status`. Runs migrations explicitly as a deploy step. Better for CI/CD pipelines and multi-instance deploys. Generated project's `cmd/server/main.go` would skip auto-migration when `MIGRATE_ON_STARTUP=false`
+- **Init container / job** — Kubernetes pattern: run migration as a one-shot container before the app container starts. The generated Dockerfile and Helm chart (future) would support a `migrate` entrypoint alongside the `server` entrypoint
+- **Makefile targets** — `make migrate-up`, `make migrate-down`, `make migrate-create NAME=add_posts`. Wraps the CLI or calls `golang-migrate` directly
+
+Implementation plan: add a `--migrate` flag to `hamr new` (default `startup`) with options `startup | cli | none`. When `cli`, generate `cmd/migrate/main.go` as a separate binary. When `none`, leave migration wiring to the user.
+
+### Static Asset CDN Upload
+
+For production deployments, serving static assets from the application server
+adds load and prevents CDN caching. Projects should be able to upload all static
+assets to S3/R2/CloudFront and rewrite asset URLs.
+
+Planned approach:
+
+- **`hamr assets upload`** — CLI command that:
+  1. Walks `static/` directory
+  2. Computes content hash for each file (for cache-busting filenames)
+  3. Uploads to configured S3 bucket with correct `Content-Type` and `Cache-Control: public, max-age=31536000, immutable`
+  4. Generates a manifest file (`static-manifest.json`) mapping original paths to CDN URLs
+  5. Prints summary of uploaded/skipped files
+
+- **Asset URL helper** — `components.AssetURL(path string) string` function that:
+  - In dev mode: returns `/static/<path>` (served locally)
+  - In production with manifest: returns the CDN URL from `static-manifest.json`
+  - Layout template uses this helper for all `<link>` and `<script>` tags
+
+- **Configuration**:
+  ```
+  ASSET_CDN_URL=https://cdn.example.com    # CDN base URL
+  ASSET_BUCKET=myproject-assets             # S3 bucket name
+  ASSET_UPLOAD=false                        # Enable CDN mode
+  ```
+
+- **Integration with `hamr new`**: `--asset-cdn` flag adds the manifest helper and config fields to the generated project. Without the flag, assets are served locally as today.
+
+### `hamr add page <name>`
+
+Scaffolds a new page (handler + templ component + route registration) into an
+existing HAMR project. This is the most common scaffolding operation after
+initial project creation.
+
+**Usage:**
+```bash
+hamr add page dashboard                 # basic page
+hamr add page admin/users               # nested under a prefix group
+hamr add page settings --auth           # page requires authentication
+```
+
+**What it generates:**
+
+| File | Content |
+|------|---------|
+| `internal/web/handler/<name>/handler.go` | Handler struct, `NewHandler`, `Index` method |
+| `internal/web/handler/<name>/templates.templ` | Page templ component using `components.Layout` |
+
+**What it updates:**
+
+| File | Change |
+|------|--------|
+| `internal/web/server.go` | Adds import + route registration in the appropriate group |
+
+**Behaviour:**
+- Reads `go.mod` to determine module path (same as `hamr add service`)
+- Infers route path from name: `dashboard` → `GET /dashboard`, `admin/users` → `GET /admin/users`
+- `--auth` flag registers the route in the `authenticated` group instead of `site`
+- `--method` flag for non-GET pages: `hamr add page settings --method GET,POST` generates both handler methods
+- Handler follows the project's constructor injection pattern with `repo.Store` and `*slog.Logger`
+- Template imports `components.Layout` and wraps content in it
+- Idempotent: errors if handler package already exists
 
 ## User-Facing Documentation
 

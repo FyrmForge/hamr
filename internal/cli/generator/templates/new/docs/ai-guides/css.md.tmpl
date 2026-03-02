@@ -1,0 +1,68 @@
+# CSS Architecture
+
+## Directory Structure
+
+```
+static/css/
+├── base/
+│   ├── variables.css    CSS custom properties (colors, spacing, typography)
+│   ├── reset.css        Minimal reset + base element styles
+│   └── utilities.css    Utility classes (container, spacing, flex, text)
+├── components/
+│   ├── buttons.css      Button variants (.btn, .btn-primary, .btn-secondary)
+│   ├── forms.css        Form groups, inputs, field errors
+│   └── alerts.css       Alert/flash message styles
+├── layout/
+│   ├── header.css       Header bar + navigation
+│   └── footer.css       Footer
+└── pages/
+    └── home.css         Home page specific styles
+```
+
+## Adding Styles
+
+### New component
+1. Create `static/css/components/<name>.css`
+2. Add `<link>` in `internal/web/components/layout.templ`
+
+### New page
+1. Create `static/css/pages/<name>.css`
+2. Add `<link>` in the page's templ component or layout
+
+## Design System
+
+All values come from CSS custom properties in `variables.css`:
+
+- **Colors**: `--color-primary`, `--color-error`, etc.
+- **Spacing**: `--space-xs` through `--space-2xl`
+- **Typography**: `--font-sans`, `--font-size-sm` through `--font-size-3xl`
+- **Borders**: `--border-color`, `--border-radius`
+
+Prefer using variables over hard-coded values. Add new variables when a value
+is used more than twice.
+
+## Button Variants
+
+```html
+<button class="btn btn-primary">Save</button>
+<a href="/cancel" class="btn btn-secondary">Cancel</a>
+<button class="btn btn-danger btn-sm">Delete</button>
+```
+
+## Form Pattern
+
+```html
+<div class="form-group">
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email"/>
+    <div class="field-error" id="email-error"></div>
+</div>
+```
+
+## Utility Classes
+
+- `.container` — Max-width centered content
+- `.text-center`, `.text-muted`, `.text-error`
+- `.mt-sm`, `.mt-md`, `.mt-lg`, `.mt-xl` — Top margin
+- `.flex`, `.flex-col`, `.items-center`, `.justify-between`
+- `.hidden`, `.sr-only`

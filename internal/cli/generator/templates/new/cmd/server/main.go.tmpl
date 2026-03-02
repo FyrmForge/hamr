@@ -1,0 +1,147 @@
+package main
+
+import (
+	"log/slog"
+	"os"
+	"time"
+{{- if .IncludeSessions}}
+
+	"github.com/FyrmForge/hamr/pkg/auth"
+{{- end}}
+	"github.com/FyrmForge/hamr/pkg/config"
+	"github.com/FyrmForge/hamr/pkg/db"
+	"github.com/FyrmForge/hamr/pkg/logging"
+	"github.com/FyrmForge/hamr/pkg/server"
+{{- if .IncludeStorage}}
+	"github.com/FyrmForge/hamr/pkg/storage"
+{{- end}}
+{{- if .IncludeWS}}
+	"github.com/FyrmForge/hamr/pkg/websocket"
+{{- end}}
+
+	appdb "{{.Module}}/internal/db"
+	"{{.Module}}/internal/repo/postgres"
+{{- if .IncludeAuth}}
+	"{{.Module}}/internal/service"
+{{- end}}
+	"{{.Module}}/internal/web"
+	"{{.Module}}/internal/web/components"
+)
+
+var (
+	envPort          = config.GetEnvOrDefaultInt("PORT", 8080)
+	envProduction    = config.GetEnvOrDefaultBool("PRODUCTION", false)
+	envDatabaseURL   = config.GetEnvOrDefault("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/{{.Name}}?sslmode=disable")
+{{- if .S3StaticWatcher}}
+	envStaticBaseURL = config.GetEnvOrDefault("STATIC_BASE_URL", "http://localhost:9000/{{.Name}}-uploads")
+{{- else}}
+	envStaticBaseURL = config.GetEnvOrDefault("STATIC_BASE_URL", "/static")
+{{- end}}
+{{- if eq .StorageBackend "local"}}
+	envStoragePath   = config.GetEnvOrDefault("STORAGE_PATH", "./uploads")
+{{- end}}
+{{- if eq .StorageBackend "s3"}}
+	envS3Endpoint    = config.GetEnvOrDefault("S3_ENDPOINT", "http://localhost:9000")
+	envS3Bucket      = config.GetEnvOrDefault("S3_BUCKET", "{{.Name}}-uploads")
+	envS3Region      = config.GetEnvOrDefault("S3_REGION", "us-east-1")
+	envS3AccessKey   = config.GetEnvOrDefault("S3_ACCESS_KEY", "minioadmin")
+	envS3SecretKey   = config.GetEnvOrDefault("S3_SECRET_KEY", "minioadmin")
+{{- end}}
+)
+
+func main() {
+	log := logging.New(envProduction)
+	slog.SetDefault(log)
+
+	components.StaticBaseURL = envStaticBaseURL
+
+	// Database.
+	database, err := db.Connect(envDatabaseURL)
+	if err != nil {
+		log.Error("failed to connect to database", "error", err)
+		os.Exit(1)
+	}
+	db.StartKeepAlive(database, 30*time.Second, 2)
+
+	if err := db.Migrate(database, appdb.MigrateConfig()); err != nil {
+		log.Error("failed to run migrations", "error", err)
+		os.Exit(1)
+	}
+
+	store := postgres.NewStore(database)
+{{- if .IncludeSessions}}
+
+	// Sessions.
+	sessionManager := auth.NewSessionManager(store)
+{{- end}}
+{{- if .IncludeAuth}}
+
+	// Auth service.
+	authService := service.NewAuthService(store)
+{{- end}}
+{{- if eq .StorageBackend "local"}}
+
+	// File storage (local).
+	fileStorage, err := storage.NewLocalStorage(envStoragePath)
+	if err != nil {
+		log.Error("failed to init storage", "error", err)
+		os.Exit(1)
+	}
+{{- end}}
+{{- if eq .StorageBackend "s3"}}
+
+	// File storage (S3).
+	fileStorage, err := storage.NewS3Storage(storage.S3Config{
+		Endpoint:       envS3Endpoint,
+		Bucket:         envS3Bucket,
+		Region:         envS3Region,
+		AccessKeyID:    envS3AccessKey,
+		SecretAccessKey: envS3SecretKey,
+		UsePathStyle:   true,
+	})
+	if err != nil {
+		log.Error("failed to init storage", "error", err)
+		os.Exit(1)
+	}
+{{- end}}
+{{- if .IncludeWS}}
+
+	// WebSocket hub.
+	hub := websocket.NewHub(websocket.WithLogger(log))
+	defer hub.Close()
+{{- end}}
+
+	// Server.
+	srv, err := server.New(
+		server.WithPort(envPort),
+		server.WithDevMode(!envProduction),
+		server.WithStaticDir("static"),
+	)
+	if err != nil {
+		log.Error("failed to create server", "error", err)
+		os.Exit(1)
+	}
+
+	web.RegisterRoutes(srv, &web.Deps{
+		Log:   log,
+		Store: store,
+{{- if .IncludeSessions}}
+		SessionManager: sessionManager,
+{{- end}}
+{{- if .IncludeAuth}}
+		AuthService: authService,
+{{- end}}
+{{- if .IncludeStorage}}
+		FileStorage: fileStorage,
+{{- end}}
+{{- if .IncludeWS}}
+		Hub: hub,
+{{- end}}
+	})
+
+	log.Info("starting server", "port", envPort)
+	if err := srv.Start(); err != nil {
+		log.Error("server stopped", "error", err)
+		os.Exit(1)
+	}
+}

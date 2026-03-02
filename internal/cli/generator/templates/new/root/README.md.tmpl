@@ -1,0 +1,73 @@
+# {{.Name}}
+
+A Go web application built with the [HAMR framework](https://github.com/FyrmForge/hamr).
+
+## Prerequisites
+
+- Go {{.GoVersion}}+
+- Docker (for PostgreSQL)
+- [templ](https://templ.guide) CLI (`go install github.com/a-h/templ/cmd/templ@latest`)
+
+## Quick Start
+
+```bash
+# Start the database
+docker compose -f docker/docker-compose.yaml up -d
+
+# Set up environment
+cp .env.example .env
+
+# Install dependencies
+go mod tidy
+
+# Generate templ files
+templ generate
+
+# Run the server
+make dev
+```
+
+The server starts at [http://localhost:8080](http://localhost:8080).
+
+## Development
+
+```bash
+make dev            # Run dev server
+make build          # Build binary to bin/server
+make test           # Run tests
+make lint           # Run golangci-lint
+make templ          # Regenerate templ files
+make docker-up      # Start services
+make docker-down    # Stop services
+```
+{{- if .IncludeE2E}}
+
+## E2E Testing
+
+```bash
+make e2e            # Run containerized E2E tests
+make e2e-local      # Run against local server
+make e2e-run T=Test # Run specific test
+```
+{{- end}}
+
+## Project Structure
+
+```
+cmd/server/              Application entry point
+internal/
+  config/                Environment configuration
+  db/                    Database + migrations
+  repo/                  Data access layer
+  web/                   HTTP handlers + components
+static/                  CSS, JS, images
+docker/                  Docker Compose
+docs/                    Documentation
+```
+
+## Stack
+
+- **Go** {{.GoVersion}} + Echo v4
+- **Templ** + HTMX + Alpine.js
+- **PostgreSQL**
+- **HAMR Framework** — server, middleware, validation, responses

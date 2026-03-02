@@ -1,0 +1,98 @@
+package web
+
+import (
+	"log/slog"
+
+	"github.com/FyrmForge/hamr/pkg/middleware"
+	"github.com/FyrmForge/hamr/pkg/server"
+{{- if .IncludeSessions}}
+	"github.com/FyrmForge/hamr/pkg/auth"
+{{- end}}
+{{- if .IncludeStorage}}
+	"github.com/FyrmForge/hamr/pkg/storage"
+{{- end}}
+{{- if .IncludeWS}}
+	"github.com/FyrmForge/hamr/pkg/websocket"
+{{- end}}
+
+	"{{.Module}}/internal/repo"
+{{- if .IncludeAuth}}
+	"{{.Module}}/internal/service"
+	authhandler "{{.Module}}/internal/web/handler/auth"
+{{- end}}
+	"{{.Module}}/internal/web/handler/errors"
+	"{{.Module}}/internal/web/handler/health"
+	"{{.Module}}/internal/web/handler/home"
+)
+
+// Deps holds the dependencies for route registration.
+type Deps struct {
+	Log   *slog.Logger
+	Store repo.Store
+{{- if .IncludeSessions}}
+	SessionManager *auth.SessionManager
+{{- end}}
+{{- if .IncludeAuth}}
+	AuthService *service.AuthService
+{{- end}}
+{{- if .IncludeStorage}}
+	FileStorage storage.FileStorage
+{{- end}}
+{{- if .IncludeWS}}
+	Hub *websocket.Hub
+{{- end}}
+}
+
+// RegisterRoutes registers all route handlers on the server.
+func RegisterRoutes(srv *server.Server, deps *Deps) {
+	e := srv.Echo()
+
+	// Global middleware.
+	e.Use(middleware.RequestID())
+
+	// Error handler.
+	errorHandler := errors.NewHandler(deps.Log)
+	e.HTTPErrorHandler = errorHandler.Handle
+
+	// Health check — no auth or session middleware.
+	healthHandler := health.NewHandler(deps.Store)
+	e.GET("/health", healthHandler.Health)
+{{- if .IncludeWS}}
+
+	// WebSocket endpoint.
+	e.GET("/ws", deps.Hub.Handler())
+{{- end}}
+
+	// Site routes.
+	site := e.Group("")
+	site.Use(middleware.Secure())
+{{- if .IncludeSessions}}
+	site.Use(middleware.Flash())
+	site.Use(middleware.CSRF())
+{{- end}}
+
+	homeHandler := home.NewHandler(deps.Log)
+	site.GET("/", homeHandler.Index)
+{{- if .IncludeAuth}}
+
+	// Auth routes.
+	authHandler := authhandler.NewHandler(deps.AuthService, deps.SessionManager, deps.Log)
+
+	authCfg := middleware.AuthConfig{
+		SessionManager: deps.SessionManager,
+		LoginRedirect:  "/login",
+		HomeRedirect:   "/",
+	}
+
+	guest := site.Group("")
+	guest.Use(middleware.RequireNotAuth(authCfg))
+	guest.GET("/login", authHandler.LoginPage)
+	guest.POST("/login", authHandler.Login)
+	guest.GET("/register", authHandler.RegisterPage)
+	guest.POST("/register", authHandler.Register)
+
+	authenticated := site.Group("")
+	authenticated.Use(middleware.RequireAuth(authCfg))
+	authenticated.POST("/logout", authHandler.Logout)
+{{- end}}
+}

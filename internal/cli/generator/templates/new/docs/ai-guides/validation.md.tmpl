@@ -1,0 +1,84 @@
+# Validation Guide
+
+## Using hamr/pkg/validate
+
+All validators return `""` for valid input or an error message string for invalid input.
+
+### Available Validators
+
+```go
+validate.Required(value)          // "This field is required"
+validate.Email(value)             // "Invalid email address"
+validate.MinLength(value, 8)      // "Must be at least 8 characters"
+validate.MaxLength(value, 100)    // "Must be at most 100 characters"
+validate.PasswordStrength(value)  // Checks upper, lower, digit, special, length
+validate.URL(value)               // "Invalid URL"
+validate.Phone(value)             // "Invalid phone number"
+validate.OneOf(value, "a", "b")   // "Must be one of: a, b"
+```
+
+### Custom Error Messages
+
+Every validator has a `*Msg` variant:
+
+```go
+validate.RequiredMsg(value, "Please enter your name")
+validate.EmailMsg(value, "That doesn't look like an email")
+```
+
+## Validation Pattern
+
+### 1. Define validation in handler
+
+```go
+func validateForm(email, password string) map[string]string {
+    errs := make(map[string]string)
+    if msg := validate.Required(email); msg != "" {
+        errs["email"] = msg
+    }
+    if msg := validate.Email(email); msg != "" {
+        errs["email"] = msg
+    }
+    if msg := validate.PasswordStrength(password); msg != "" {
+        errs["password"] = msg
+    }
+    return errs
+}
+```
+
+### 2. Return validation errors
+
+```go
+errs := validateForm(email, password)
+if len(errs) > 0 {
+    return respond.ValidationError(c, errs, FormWithErrors(errs))
+}
+```
+
+### 3. Single-field validation (HTMX blur)
+
+Create a `POST /validate/<field>` endpoint that validates one field and returns
+an OOB swap for the error element:
+
+```go
+// POST /validate/email
+func (h *Handler) ValidateEmail(c echo.Context) error {
+    email := c.FormValue("email")
+    msg := validate.Email(email)
+    return respond.HTML(c, http.StatusOK, form.FieldErrorOOB("email", msg))
+}
+```
+
+## Custom Validators
+
+```go
+validate.Register("slug", func(v string) string {
+    if !regexp.MustCompile(`^[a-z0-9-]+$`).MatchString(v) {
+        return "Must contain only lowercase letters, numbers, and hyphens"
+    }
+    return ""
+})
+
+// Usage:
+msg := validate.Run("slug", value)
+```

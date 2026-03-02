@@ -1,0 +1,26 @@
+package home
+
+import (
+	"log/slog"
+	"net/http"
+
+	"github.com/FyrmForge/hamr/pkg/respond"
+	"github.com/labstack/echo/v4"
+
+	"{{.Module}}/internal/web/components"
+)
+
+// Handler handles home page requests.
+type Handler struct {
+	log *slog.Logger
+}
+
+// NewHandler creates a new home handler.
+func NewHandler(log *slog.Logger) *Handler {
+	return &Handler{log: log}
+}
+
+// GET /
+func (h *Handler) Index(c echo.Context) error {
+	return respond.HTML(c, http.StatusOK, components.HomePage())
+}

@@ -1,30 +1,17 @@
-// Package config provides environment-based configuration helpers.
+// Package config provides typed accessors for environment variables with
+// sensible defaults and panic-on-missing semantics.
 //
-// It wraps godotenv for .env file loading and offers typed accessors for
-// environment variables with sensible defaults and panic-on-missing semantics.
+// For .env file loading, use the godotenv/autoload blank import in your main
+// package:
+//
+//	import _ "github.com/joho/godotenv/autoload"
 package config
 
 import (
-	"fmt"
 	"os"
 	"strconv"
 	"time"
-
-	"github.com/joho/godotenv"
 )
-
-// LoadEnvFile loads one or more .env files into the process environment.
-// If no paths are given it defaults to ".env". Files that do not exist are
-// silently skipped; other errors are returned.
-func LoadEnvFile(paths ...string) error {
-	if len(paths) == 0 {
-		paths = []string{".env"}
-	}
-	if err := godotenv.Load(paths...); err != nil {
-		return fmt.Errorf("config: loading env file: %w", err)
-	}
-	return nil
-}
 
 // GetEnvOrDefault returns the value of the environment variable named by key,
 // or def if the variable is unset or empty.
@@ -40,7 +27,7 @@ func GetEnvOrDefault(key, def string) string {
 func GetEnvOrPanic(key string) string {
 	v := os.Getenv(key)
 	if v == "" {
-		panic(fmt.Sprintf("config: %s is required", key))
+		panic(key + " must be defined in env")
 	}
 	return v
 }

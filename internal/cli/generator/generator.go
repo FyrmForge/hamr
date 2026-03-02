@@ -17,6 +17,9 @@ var serviceTemplates embed.FS
 //go:embed templates/project
 var projectTemplates embed.FS
 
+//go:embed templates/new
+var newTemplates embed.FS
+
 // ServiceConfig holds the data used to render service templates.
 type ServiceConfig struct {
 	Name      string // "billing"
@@ -78,8 +81,10 @@ func GenerateService(cfg *ServiceConfig) error {
 	return nil
 }
 
-func renderTemplate(tmplPath, destPath string, data any) error {
-	content, err := serviceTemplates.ReadFile(tmplPath)
+// renderFromFS renders a template from the given embedded FS and writes the
+// result to destPath, creating parent directories as needed.
+func renderFromFS(fsys embed.FS, tmplPath, destPath string, data any) error {
+	content, err := fsys.ReadFile(tmplPath)
 	if err != nil {
 		return fmt.Errorf("read template %s: %w", tmplPath, err)
 	}
@@ -93,10 +98,6 @@ func renderTemplate(tmplPath, destPath string, data any) error {
 		return fmt.Errorf("create directory: %w", err)
 	}
 
-	if _, err := os.Stat(destPath); err == nil {
-		return fmt.Errorf("file already exists: %s", destPath)
-	}
-
 	f, err := os.Create(destPath)
 	if err != nil {
 		return fmt.Errorf("create file: %w", err)
@@ -104,6 +105,13 @@ func renderTemplate(tmplPath, destPath string, data any) error {
 	defer func() { _ = f.Close() }()
 
 	return tmpl.Execute(f, data)
+}
+
+func renderTemplate(tmplPath, destPath string, data any) error {
+	if _, err := os.Stat(destPath); err == nil {
+		return fmt.Errorf("file already exists: %s", destPath)
+	}
+	return renderFromFS(serviceTemplates, tmplPath, destPath, data)
 }
 
 func parseGoMod(path string) (module, goVersion string, err error) {
@@ -277,21 +285,5 @@ func appendMinIO(_ *ServiceConfig) error {
 }
 
 func renderProjectTemplate(tmplPath, destPath string, data any) error {
-	content, err := projectTemplates.ReadFile(tmplPath)
-	if err != nil {
-		return fmt.Errorf("read template %s: %w", tmplPath, err)
-	}
-
-	tmpl, err := template.New(filepath.Base(tmplPath)).Parse(string(content))
-	if err != nil {
-		return fmt.Errorf("parse template %s: %w", tmplPath, err)
-	}
-
-	f, err := os.Create(destPath)
-	if err != nil {
-		return fmt.Errorf("create file: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-
-	return tmpl.Execute(f, data)
+	return renderFromFS(projectTemplates, tmplPath, destPath, data)
 }

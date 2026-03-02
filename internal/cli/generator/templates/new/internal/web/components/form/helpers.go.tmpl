@@ -1,0 +1,17 @@
+package form
+
+// GetError returns the error message for a field, or empty string if none.
+func GetError(errors map[string]string, field string) string {
+	if errors == nil {
+		return ""
+	}
+	return errors[field]
+}
+
+// IsSelected returns "selected" if the value matches the current value.
+func IsSelected(current, value string) string {
+	if current == value {
+		return "selected"
+	}
+	return ""
+}

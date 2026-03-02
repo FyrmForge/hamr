@@ -1,0 +1,59 @@
+# E2E Tests
+
+End-to-end tests using [go-rod](https://go-rod.github.io/) browser automation
+and the HAMR `pkg/e2e` helpers.
+
+## Running
+
+```bash
+# Containerized (requires Docker)
+make e2e
+
+# Against a local server
+make e2e-local
+
+# Specific test
+make e2e-run T=TestHomePage_Loads
+make e2e-run-local T=TestHomePage_Loads
+```
+
+## Structure
+
+```
+e2e-go/
+├── main_test.go               TestMain entry point
+├── testcontainers_setup.go    Container orchestration
+├── helpers.go                 Project-specific helpers
+├── accounts.go                Test account definitions
+├── auth_test.go               Auth flow tests
+├── home_test.go               Home page tests
+└── testdata/
+    └── seed_e2e.sql           Seed data for test accounts
+```
+
+## Writing Tests
+
+All tests use the `//go:build e2e` build tag. They are excluded from
+`go test ./...` and must be run with `-tags=e2e`.
+
+```go
+func TestMyFeature(t *testing.T) {
+    browser := e2e.SetupBrowser(t)
+    page := openPage(t, browser, "/my-page")
+
+    e2e.AssertElementExists(t, page, "#my-element")
+    e2e.AssertElementContainsText(t, page, "h1", "Expected Title")
+}
+```
+
+## HTMX Testing
+
+```go
+e2e.ClickAndWaitHTMX(t, page, "#my-button", 5*time.Second)
+e2e.WaitForHTMXIdle(t, page, 5*time.Second)
+```
+
+## Failure Artifacts
+
+On test failure, screenshots and HTML dumps are saved to
+`testdata/e2e-artifacts/`. Configure via `E2E_ARTIFACT_DIR` env var.

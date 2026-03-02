@@ -1,0 +1,26 @@
+//go:build e2e
+
+package e2e
+
+import (
+	"testing"
+
+	"github.com/FyrmForge/hamr/pkg/e2e"
+	"github.com/go-rod/rod"
+)
+
+// openPage creates a new browser page at the given path.
+func openPage(t *testing.T, browser *rod.Browser, path string) *rod.Page {
+	t.Helper()
+	return e2e.NewPage(t, browser, serverURL+path)
+}
+{{- if .IncludeAuth}}
+
+// login performs a login via the form.
+func login(t *testing.T, page *rod.Page, email, password string) {
+	t.Helper()
+	e2e.Input(t, page, "#email", email)
+	e2e.Input(t, page, "#password", password)
+	e2e.Click(t, page, "button[type=submit]")
+}
+{{- end}}

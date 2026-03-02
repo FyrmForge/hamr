@@ -1,0 +1,54 @@
+package errors
+
+import (
+	"log/slog"
+	"net/http"
+
+	"github.com/labstack/echo/v4"
+
+	"github.com/FyrmForge/hamr/pkg/htmx"
+)
+
+// Handler handles HTTP errors.
+type Handler struct {
+	log *slog.Logger
+}
+
+// NewHandler creates a new error handler.
+func NewHandler(log *slog.Logger) *Handler {
+	return &Handler{log: log}
+}
+
+// Handle is an echo.HTTPErrorHandler that returns JSON or HTML errors.
+func (h *Handler) Handle(err error, c echo.Context) {
+	if c.Response().Committed {
+		return
+	}
+
+	code := http.StatusInternalServerError
+	message := "Internal Server Error"
+
+	if he, ok := err.(*echo.HTTPError); ok {
+		code = he.Code
+		if m, ok := he.Message.(string); ok {
+			message = m
+		} else {
+			message = http.StatusText(code)
+		}
+	}
+
+	if code >= 500 {
+		h.log.Error("server error", "error", err, "status", code)
+	}
+
+	if htmx.IsHTMX(c.Request()) || c.Request().Header.Get("Accept") == "text/html" {
+		_ = c.HTML(code, "<div class=\"error\"><h2>"+http.StatusText(code)+"</h2><p>"+message+"</p></div>")
+		return
+	}
+
+	_ = c.JSON(code, map[string]any{
+		"error":   http.StatusText(code),
+		"message": message,
+		"code":    code,
+	})
+}

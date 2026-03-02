@@ -1,36 +1,11 @@
 package config_test
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/FyrmForge/hamr/pkg/config"
 )
-
-func TestLoadEnvFile(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, ".env")
-	if err := os.WriteFile(path, []byte("HAMR_TEST_LOAD=hello\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := config.LoadEnvFile(path); err != nil {
-		t.Fatalf("LoadEnvFile: %v", err)
-	}
-	if got := os.Getenv("HAMR_TEST_LOAD"); got != "hello" {
-		t.Fatalf("HAMR_TEST_LOAD = %q, want %q", got, "hello")
-	}
-	// godotenv sets the env var directly; clean up via Unsetenv.
-	t.Cleanup(func() { _ = os.Unsetenv("HAMR_TEST_LOAD") })
-}
-
-func TestLoadEnvFile_missing(t *testing.T) {
-	if err := config.LoadEnvFile("/nonexistent/.env"); err == nil {
-		t.Fatal("expected error for missing file")
-	}
-}
 
 func TestGetEnvOrDefault(t *testing.T) {
 	const key = "HAMR_TEST_DEFAULT"

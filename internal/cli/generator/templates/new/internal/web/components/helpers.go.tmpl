@@ -1,0 +1,20 @@
+package components
+
+import (
+	"github.com/FyrmForge/hamr/pkg/middleware"
+	"github.com/labstack/echo/v4"
+)
+
+// StaticBaseURL is the base URL prefix for static assets.
+// Set from main before any templates render.
+var StaticBaseURL = "/static"
+
+// GetFlash returns the flash message for the current request, if any.
+func GetFlash(c echo.Context) *middleware.FlashMessage {
+	return middleware.GetFlash(c)
+}
+
+// StaticURL returns the full URL for a static asset path.
+func StaticURL(path string) string {
+	return StaticBaseURL + "/" + path
+}

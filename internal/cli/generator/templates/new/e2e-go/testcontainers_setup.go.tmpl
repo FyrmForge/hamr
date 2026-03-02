@@ -1,0 +1,29 @@
+//go:build e2e
+
+package e2e
+
+import (
+	"fmt"
+	"os"
+)
+
+var serverURL string
+
+// SetupSharedEnvironment initializes the test environment.
+// In local mode, it reads E2E_SERVER_URL from the environment.
+// In container mode, it would start testcontainers (extend as needed).
+func SetupSharedEnvironment(local bool) {
+	if local {
+		serverURL = os.Getenv("E2E_SERVER_URL")
+		if serverURL == "" {
+			serverURL = "http://localhost:8080"
+		}
+		fmt.Printf("E2E: using local server at %s\n", serverURL)
+		return
+	}
+
+	// Container mode — extend with testcontainers setup.
+	// See: https://golang.testcontainers.org/
+	fmt.Println("E2E: container mode — implement testcontainers setup in testcontainers_setup.go")
+	serverURL = "http://localhost:8080"
+}

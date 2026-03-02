@@ -15,3 +15,6 @@ test:
 
 vet:
 	go vet ./...
+
+install: 
+	go install -ldflags '$(LDFLAGS)' ./cmd/hamr 

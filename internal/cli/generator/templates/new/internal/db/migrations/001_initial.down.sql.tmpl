@@ -1,0 +1,11 @@
+{{- if and .IncludeAuth .AuthWithTables}}
+DROP TABLE IF EXISTS users;
+{{- end}}
+{{- if .IncludeSessions}}
+DROP TABLE IF EXISTS sessions;
+{{- end}}
+{{- if not (or .IncludeSessions (and .IncludeAuth .AuthWithTables))}}
+-- Reverse the initial migration here.
+-- Example:
+-- DROP TABLE IF EXISTS examples;
+{{- end}}
