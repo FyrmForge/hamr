@@ -26,6 +26,19 @@ templ Layout(title string) {
 {{- else}}
 	<body>
 {{- end}}
+		if flash := FlashFromContext(ctx); flash != nil {
+{{- if eq .CSS "tailwind"}}
+			<div class={ "max-w-4xl mx-auto mt-4 px-4 py-3 rounded-md border text-sm", FlashTailwindClass(flash.Type) }>
+				{ flash.Message }
+			</div>
+{{- else}}
+			<div class="container">
+				<div class={ "alert", FlashAlertClass(flash.Type) }>
+					{ flash.Message }
+				</div>
+			</div>
+{{- end}}
+		}
 		{ children... }
 
 		<script src={ StaticURL("js/htmx.min.js") }></script>

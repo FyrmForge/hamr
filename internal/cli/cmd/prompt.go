@@ -16,12 +16,9 @@ type wizardResult struct {
 	Owner           string
 	CSS             string
 	Database        string
-	Auth            string
-	Sessions        string // "yes" | "no"
 	StorageBackend  string // "none" | "local" | "s3"
 	S3StaticWatcher string // "yes" | "no"
 	WebSocket       string // "yes" | "no"
-	Notify          string // "yes" | "no"
 	E2E             string // "yes" | "no"
 }
 
@@ -31,17 +28,18 @@ type wizardResult struct {
 // needsName indicates no positional arg was given (user must name the project).
 // needsLocation indicates the wizard should ask subfolder vs current directory.
 func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocation bool) (*wizardResult, error) {
+	defaultLocation := "current"
+	if !needsName && name != "" {
+		defaultLocation = "subfolder"
+	}
 	res := &wizardResult{
 		Name:            name,
-		Location:        "current",
+		Location:        defaultLocation,
 		CSS:             "plain",
 		Database:        "postgres",
-		Auth:            "none",
-		Sessions:        "yes",
 		StorageBackend:  "none",
 		S3StaticWatcher: "yes",
 		WebSocket:       "yes",
-		Notify:          "yes",
 		E2E:             "yes",
 	}
 
@@ -130,40 +128,6 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 		res.Database, _ = cmd.Flags().GetString("database")
 	}
 
-	if !cmd.Flags().Changed("auth") {
-		part1 = append(part1, huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("Authentication").
-				Options(
-					huh.NewOption("None — no auth scaffolding", "none"),
-					huh.NewOption("Empty — middleware only, no user tables", "empty"),
-					huh.NewOption("Full — complete auth with user tables + handlers", "full"),
-				).
-				Value(&res.Auth),
-		))
-	} else {
-		res.Auth, _ = cmd.Flags().GetString("auth")
-	}
-
-	if !cmd.Flags().Changed("sessions") {
-		part1 = append(part1, huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("Sessions").
-				Description("Cookie-based session management").
-				Options(
-					huh.NewOption("Yes", "yes"),
-					huh.NewOption("No", "no"),
-				).
-				Value(&res.Sessions),
-		))
-	} else {
-		if v, _ := cmd.Flags().GetBool("sessions"); v {
-			res.Sessions = "yes"
-		} else {
-			res.Sessions = "no"
-		}
-	}
-
 	if !cmd.Flags().Changed("storage") {
 		part1 = append(part1, huh.NewGroup(
 			huh.NewSelect[string]().
@@ -220,25 +184,6 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 			res.WebSocket = "yes"
 		} else {
 			res.WebSocket = "no"
-		}
-	}
-
-	if !cmd.Flags().Changed("notify") {
-		part2 = append(part2, huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("Notifications").
-				Description("In-app notification system").
-				Options(
-					huh.NewOption("Yes", "yes"),
-					huh.NewOption("No", "no"),
-				).
-				Value(&res.Notify),
-		))
-	} else {
-		if v, _ := cmd.Flags().GetBool("notify"); v {
-			res.Notify = "yes"
-		} else {
-			res.Notify = "no"
 		}
 	}
 

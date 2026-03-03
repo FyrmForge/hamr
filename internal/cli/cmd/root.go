@@ -9,7 +9,6 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(newCmd)
-	rootCmd.AddCommand(addCmd)
 	rootCmd.AddCommand(renameCmd)
 	rootCmd.AddCommand(vendorCmd)
 	rootCmd.AddCommand(syncCmd)

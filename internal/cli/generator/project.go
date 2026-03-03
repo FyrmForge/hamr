@@ -21,7 +21,6 @@ type ProjectConfig struct {
 	StorageBackend  string // "" | "local" | "s3"
 	S3StaticWatcher bool   // include cmd/syncstatic watcher
 	IncludeWS       bool
-	IncludeNotify   bool
 	IncludeE2E      bool
 }
 
@@ -200,6 +199,8 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 			templateFile{"templates/new/internal/repo/postgres/users.go.tmpl", "internal/repo/postgres/users.go"},
 			templateFile{"templates/new/internal/service/auth.go.tmpl", "internal/service/auth.go"},
 			templateFile{"templates/new/internal/web/handler/auth/handler.go.tmpl", "internal/web/handler/auth/handler.go"},
+			templateFile{"templates/new/internal/web/handler/auth/login.templ.tmpl", "internal/web/handler/auth/login.templ"},
+			templateFile{"templates/new/internal/web/handler/auth/register.templ.tmpl", "internal/web/handler/auth/register.templ"},
 		)
 	}
 

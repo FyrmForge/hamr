@@ -3,9 +3,8 @@
 ## Build & Test
 
 ```bash
-make templ          # Generate templ files (required before build)
-make dev            # Run dev server
-make build          # Build binary
+make dev            # Run dev server (auto-generates templ + live reload)
+make build          # Build binary (generates templ first)
 make test           # Run tests
 make lint           # Run linters
 make docker-up      # Start PostgreSQL
@@ -28,7 +27,7 @@ This project uses the HAMR framework (`github.com/FyrmForge/hamr`). Key packages
 ## Key Patterns
 
 - Handlers: constructor injection, one package per domain
-- Config: `config.Load()` sets `config.C` package-level var
+- Config: `config.GetEnvOrDefault()` helpers read environment variables
 - Routes: registered in `internal/web/server.go`
 - Responses: `respond.Negotiate(c, status, jsonData, templComponent)`
 - Validation: `validate.Required(v)` returns "" or error message

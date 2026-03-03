@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"os"
 	"time"
+
+	_ "github.com/joho/godotenv/autoload"
 {{- if .IncludeSessions}}
 
 	"github.com/FyrmForge/hamr/pkg/auth"
@@ -81,7 +83,7 @@ func main() {
 {{- if .IncludeSessions}}
 
 	// Sessions.
-	sessionManager := auth.NewSessionManager(store)
+	sessionManager := auth.NewSessionManager(store, auth.WithCookieSecure(!envDevMode))
 {{- end}}
 {{- if .IncludeAuth}}
 
@@ -157,6 +159,7 @@ func main() {
 		Log:           log,
 		Store:         store,
 		StaticBaseURL: envStaticBaseURL,
+		DevMode:       envDevMode,
 {{- if .IncludeSessions}}
 		SessionManager: sessionManager,
 {{- end}}

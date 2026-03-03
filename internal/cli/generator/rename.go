@@ -26,21 +26,32 @@ func RenameModule(dir, newModule string) (oldModule string, filesUpdated int, er
 		return oldModule, 0, fmt.Errorf("new module path is the same as the current one")
 	}
 
-	// Rewrite imports in all .go files.
+	// Rewrite imports in all .go and .templ files.
 	err = filepath.WalkDir(dir, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		if d.IsDir() || !strings.HasSuffix(path, ".go") {
+		if d.IsDir() {
 			return nil
 		}
 
-		changed, rewriteErr := rewriteImports(path, oldModule, newModule)
-		if rewriteErr != nil {
-			return fmt.Errorf("rewrite %s: %w", path, rewriteErr)
-		}
-		if changed {
-			filesUpdated++
+		switch {
+		case strings.HasSuffix(path, ".go"):
+			changed, rewriteErr := rewriteImports(path, oldModule, newModule)
+			if rewriteErr != nil {
+				return fmt.Errorf("rewrite %s: %w", path, rewriteErr)
+			}
+			if changed {
+				filesUpdated++
+			}
+		case strings.HasSuffix(path, ".templ"):
+			changed, rewriteErr := rewriteTemplImports(path, oldModule, newModule)
+			if rewriteErr != nil {
+				return fmt.Errorf("rewrite %s: %w", path, rewriteErr)
+			}
+			if changed {
+				filesUpdated++
+			}
 		}
 		return nil
 	})
@@ -98,6 +109,29 @@ func writeAST(fset *token.FileSet, f *ast.File, path string) error {
 	}
 
 	return os.WriteFile(path, buf.Bytes(), info.Mode())
+}
+
+// rewriteTemplImports does a text-based replacement of import paths in .templ
+// files, which cannot be parsed by go/parser.
+func rewriteTemplImports(path, oldModule, newModule string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+
+	content := string(data)
+	updated := strings.ReplaceAll(content, `"`+oldModule+`"`, `"`+newModule+`"`)
+	updated = strings.ReplaceAll(updated, `"`+oldModule+"/", `"`+newModule+"/")
+
+	if updated == content {
+		return false, nil
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return false, err
+	}
+	return true, os.WriteFile(path, []byte(updated), info.Mode())
 }
 
 // rewriteGoMod replaces the module directive line in go.mod.

@@ -1,6 +1,9 @@
 package web
 
 import (
+{{- if .IncludeSessions}}
+	"context"
+{{- end}}
 	"log/slog"
 {{- if .S3StaticWatcher}}
 	"net/url"
@@ -17,8 +20,12 @@ import (
 {{- if .IncludeWS}}
 	"github.com/FyrmForge/hamr/pkg/websocket"
 {{- end}}
+	"github.com/labstack/echo/v4"
 
 	"{{.Module}}/internal/repo"
+{{- if .IncludeSessions}}
+	"{{.Module}}/internal/web/components"
+{{- end}}
 {{- if .IncludeAuth}}
 	"{{.Module}}/internal/service"
 	authhandler "{{.Module}}/internal/web/handler/auth"
@@ -33,6 +40,7 @@ type Deps struct {
 	Log            *slog.Logger
 	Store          repo.Store
 	StaticBaseURL  string
+	DevMode        bool
 {{- if .IncludeSessions}}
 	SessionManager *auth.SessionManager
 {{- end}}
@@ -74,6 +82,9 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 {{- else}}
 	csp := "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
 {{- end}}
+{{- if .IncludeWS}}
+	csp += "; connect-src 'self' ws: wss:"
+{{- end}}
 
 	// Site routes.
 	site := e.Group("")
@@ -82,8 +93,17 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 		ContentSecurityPolicy: csp,
 	}))
 {{- if .IncludeSessions}}
-	site.Use(middleware.Flash())
-	site.Use(middleware.CSRF())
+	site.Use(middleware.FlashWithConfig(middleware.FlashConfig{Secure: !deps.DevMode}))
+	site.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			if flash := middleware.GetFlash(c); flash != nil {
+				ctx := context.WithValue(c.Request().Context(), components.FlashCtxKey, flash)
+				c.SetRequest(c.Request().WithContext(ctx))
+			}
+			return next(c)
+		}
+	})
+	site.Use(middleware.CSRFWithConfig(middleware.CSRFConfig{Secure: !deps.DevMode}))
 {{- end}}
 
 	homeHandler := home.NewHandler(deps.Log)

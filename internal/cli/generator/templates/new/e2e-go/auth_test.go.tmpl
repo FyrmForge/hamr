@@ -1,6 +1,7 @@
 //go:build e2e
 
 package e2e
+{{- if .IncludeAuth}}
 
 import (
 	"testing"
@@ -16,7 +17,6 @@ func TestLoginPage_Loads(t *testing.T) {
 	e2e.AssertElementExists(t, page, "#email")
 	e2e.AssertElementExists(t, page, "#password")
 }
-{{- if .IncludeAuth}}
 
 func TestLogin_InvalidCredentials(t *testing.T) {
 	browser := e2e.SetupBrowser(t)

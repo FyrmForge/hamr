@@ -1,0 +1,52 @@
+package auth
+
+import "{{.Module}}/internal/web/components"
+import "{{.Module}}/internal/web/components/form"
+
+templ registerPage(csrfToken string) {
+	@components.Layout("Register") {
+{{- if eq .CSS "tailwind"}}
+		<div class="max-w-md mx-auto mt-16 bg-slate-800 border border-slate-700 rounded-lg p-8">
+			<h2 class="text-2xl font-bold text-slate-100 mb-6 text-center">Register</h2>
+			<form method="POST" action="/register">
+				@form.CSRFField(csrfToken)
+				<div class="mb-6">
+					<label for="name" class="block text-sm font-medium text-slate-400 mb-1">Name</label>
+					<input type="text" id="name" name="name" required class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"/>
+				</div>
+				<div class="mb-6">
+					<label for="email" class="block text-sm font-medium text-slate-400 mb-1">Email</label>
+					<input type="email" id="email" name="email" required class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"/>
+				</div>
+				<div class="mb-6">
+					<label for="password" class="block text-sm font-medium text-slate-400 mb-1">Password</label>
+					<input type="password" id="password" name="password" required class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"/>
+				</div>
+				<button type="submit" class="w-full py-2 px-4 bg-blue-500 hover:bg-blue-400 text-white font-medium rounded-md transition-colors">Register</button>
+			</form>
+		</div>
+{{- else}}
+		<div class="container">
+			<div class="auth-card">
+				<h2 class="text-center">Register</h2>
+				<form method="POST" action="/register">
+					@form.CSRFField(csrfToken)
+					<div class="form-group">
+						<label for="name">Name</label>
+						<input type="text" id="name" name="name" required/>
+					</div>
+					<div class="form-group">
+						<label for="email">Email</label>
+						<input type="email" id="email" name="email" required/>
+					</div>
+					<div class="form-group">
+						<label for="password">Password</label>
+						<input type="password" id="password" name="password" required/>
+					</div>
+					<button type="submit" class="btn btn-primary" style="width:100%">Register</button>
+				</form>
+			</div>
+		</div>
+{{- end}}
+	}
+}

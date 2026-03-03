@@ -27,13 +27,10 @@ Usage:
   hamr new .           Scaffold into the current directory
   hamr new             Interactive — asks for name and location
 
-When flags are omitted, an interactive wizard guides you through each option.
-Pass --no-prompt to skip the wizard and use defaults.`,
+Flags are optional. Any flag not provided will be asked interactively.
+When all flags are provided, no interactive prompts are shown.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		noPrompt, _ := cmd.Flags().GetBool("no-prompt")
-		interactive := !noPrompt
-
 		var dir, name string
 		var inPlace, needsName, needsLocation bool
 
@@ -52,54 +49,47 @@ Pass --no-prompt to skip the wizard and use defaults.`,
 			// hamr new myapp → create subfolder
 			dir = args[0]
 			name = filepath.Base(dir)
-			// In interactive mode, still offer the location choice.
-			if interactive {
-				needsLocation = true
-			}
+			needsLocation = true
 
 		default:
 			// hamr new → fully interactive
-			if !interactive {
-				return fmt.Errorf("project name argument is required with --no-prompt")
-			}
 			needsName = true
 			needsLocation = true
 		}
 
 		cfg := &generator.ProjectConfig{
-			Name:      name,
-			GoVersion: "1.25.0",
+			Name:            name,
+			GoVersion:       "1.25.0",
+			IncludeAuth:     true,
+			AuthWithTables:  true,
+			IncludeSessions: true,
 		}
 
-		if interactive {
-			res, err := runInteractiveForm(cmd, name, needsName, needsLocation)
+		res, err := runInteractiveForm(cmd, name, needsName, needsLocation)
+		if err != nil {
+			return err
+		}
+
+		// Apply name/location from wizard.
+		if needsName {
+			name = res.Name
+			cfg.Name = name
+		}
+		if res.Location == "current" {
+			cwd, err := os.Getwd()
 			if err != nil {
-				return err
+				return fmt.Errorf("get working directory: %w", err)
 			}
-
-			// Apply name/location from wizard.
-			if needsName {
-				name = res.Name
-				cfg.Name = name
-			}
-			if res.Location == "current" {
-				cwd, err := os.Getwd()
-				if err != nil {
-					return fmt.Errorf("get working directory: %w", err)
-				}
-				dir = cwd
-				name = filepath.Base(cwd)
-				cfg.Name = name
-				inPlace = true
-			} else if dir == "" {
-				// Subfolder with wizard-provided name.
-				dir = res.Name
-			}
-
-			applyWizardResult(cmd, name, res, cfg)
-		} else {
-			applyFlags(cmd, name, cfg)
+			dir = cwd
+			name = filepath.Base(cwd)
+			cfg.Name = name
+			inPlace = true
+		} else if dir == "" {
+			// Subfolder with wizard-provided name.
+			dir = res.Name
 		}
+
+		applyWizardResult(cmd, name, res, cfg)
 
 		cfg.InPlace = inPlace
 
@@ -163,41 +153,6 @@ Pass --no-prompt to skip the wizard and use defaults.`,
 	},
 }
 
-// applyFlags reads all flag values for the non-interactive path.
-func applyFlags(cmd *cobra.Command, name string, cfg *generator.ProjectConfig) {
-	module, _ := cmd.Flags().GetString("module")
-	if module == "" {
-		module = fmt.Sprintf("github.com/user/%s", name)
-	}
-	cfg.Module = module
-	cfg.CSS, _ = cmd.Flags().GetString("css")
-	cfg.Database, _ = cmd.Flags().GetString("database")
-	cfg.IncludeSessions, _ = cmd.Flags().GetBool("sessions")
-	cfg.IncludeWS, _ = cmd.Flags().GetBool("websocket")
-	cfg.IncludeNotify, _ = cmd.Flags().GetBool("notify")
-	cfg.IncludeE2E, _ = cmd.Flags().GetBool("e2e")
-
-	storageFlag, _ := cmd.Flags().GetString("storage")
-	switch storageFlag {
-	case "local":
-		cfg.IncludeStorage = true
-		cfg.StorageBackend = "local"
-	case "s3":
-		cfg.IncludeStorage = true
-		cfg.StorageBackend = "s3"
-		cfg.S3StaticWatcher, _ = cmd.Flags().GetBool("s3-watcher")
-	}
-
-	authFlag, _ := cmd.Flags().GetString("auth")
-	switch authFlag {
-	case "full":
-		cfg.IncludeAuth = true
-		cfg.AuthWithTables = true
-	case "empty":
-		cfg.IncludeAuth = true
-	}
-}
-
 // applyWizardResult maps the interactive form results onto the ProjectConfig.
 func applyWizardResult(cmd *cobra.Command, name string, res *wizardResult, cfg *generator.ProjectConfig) {
 	if cmd.Flags().Changed("module") {
@@ -209,17 +164,7 @@ func applyWizardResult(cmd *cobra.Command, name string, res *wizardResult, cfg *
 	cfg.CSS = res.CSS
 	cfg.Database = res.Database
 
-	switch res.Auth {
-	case "full":
-		cfg.IncludeAuth = true
-		cfg.AuthWithTables = true
-	case "empty":
-		cfg.IncludeAuth = true
-	}
-
-	cfg.IncludeSessions = res.Sessions == "yes"
 	cfg.IncludeWS = res.WebSocket == "yes"
-	cfg.IncludeNotify = res.Notify == "yes"
 	cfg.IncludeE2E = res.E2E == "yes"
 
 	if res.StorageBackend != "none" && res.StorageBackend != "" {
@@ -232,13 +177,9 @@ func applyWizardResult(cmd *cobra.Command, name string, res *wizardResult, cfg *
 func init() {
 	newCmd.Flags().String("module", "", "Go module path (e.g. github.com/user/project); prompted if omitted")
 	newCmd.Flags().String("css", "plain", "CSS approach: \"plain\" or \"tailwind\"")
-	newCmd.Flags().Bool("sessions", true, "include session support")
-	newCmd.Flags().String("auth", "none", "auth scaffolding: \"full\", \"empty\", or \"none\"")
 	newCmd.Flags().String("storage", "none", "storage backend: \"none\", \"local\", or \"s3\"")
 	newCmd.Flags().Bool("s3-watcher", false, "include S3 static asset watcher for development")
 	newCmd.Flags().Bool("websocket", false, "include WebSocket support")
-	newCmd.Flags().Bool("notify", false, "include notification support")
 	newCmd.Flags().Bool("e2e", false, "include E2E testing scaffolding")
 	newCmd.Flags().String("database", "postgres", "database type")
-	newCmd.Flags().Bool("no-prompt", false, "skip interactive wizard, use flags and defaults")
 }

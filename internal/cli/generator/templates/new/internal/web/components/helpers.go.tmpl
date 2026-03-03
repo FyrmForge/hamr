@@ -1,8 +1,9 @@
 package components
 
 import (
+	"context"
+
 	"github.com/FyrmForge/hamr/pkg/middleware"
-	"github.com/labstack/echo/v4"
 )
 
 // StaticBaseURL is the base URL prefix for static assets.
@@ -13,9 +14,48 @@ var StaticBaseURL = "/static"
 // cache busting. Set from main via ldflags (e.g. git commit hash).
 var StaticVersion = "dev"
 
-// GetFlash returns the flash message for the current request, if any.
-func GetFlash(c echo.Context) *middleware.FlashMessage {
-	return middleware.GetFlash(c)
+type flashCtxKey struct{}
+
+// FlashCtxKey is the Go context key for flash messages.
+// Used by the flash bridge middleware in server.go to pass flash messages
+// from Echo context to Go context for templ component access.
+var FlashCtxKey = flashCtxKey{}
+
+// FlashFromContext reads the flash message from the Go context.
+// This is used by templ components that don't have access to Echo's context.
+func FlashFromContext(ctx context.Context) *middleware.FlashMessage {
+	if val, ok := ctx.Value(FlashCtxKey).(*middleware.FlashMessage); ok {
+		return val
+	}
+	return nil
+}
+
+// FlashAlertClass returns the CSS alert class for a flash type (plain CSS).
+func FlashAlertClass(t middleware.FlashType) string {
+	switch t {
+	case middleware.FlashSuccess:
+		return "alert-success"
+	case middleware.FlashError:
+		return "alert-error"
+	case middleware.FlashWarning:
+		return "alert-warning"
+	default:
+		return "alert-info"
+	}
+}
+
+// FlashTailwindClass returns Tailwind CSS classes for a flash type.
+func FlashTailwindClass(t middleware.FlashType) string {
+	switch t {
+	case middleware.FlashSuccess:
+		return "bg-green-900/50 border-green-700 text-green-300"
+	case middleware.FlashError:
+		return "bg-red-900/50 border-red-700 text-red-300"
+	case middleware.FlashWarning:
+		return "bg-yellow-900/50 border-yellow-700 text-yellow-300"
+	default:
+		return "bg-blue-900/50 border-blue-700 text-blue-300"
+	}
 }
 
 // StaticURL returns the full URL for a static asset path with a cache-busting

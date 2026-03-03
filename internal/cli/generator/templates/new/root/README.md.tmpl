@@ -12,18 +12,9 @@ A Go web application built with the [HAMR framework](https://github.com/FyrmForg
 
 ```bash
 # Start the database
-docker compose -f docker/docker-compose.yaml up -d
+make docker-up
 
-# Set up environment
-cp .env.example .env
-
-# Install dependencies
-go mod tidy
-
-# Generate templ files
-templ generate
-
-# Run the server
+# Run the server (generates templ files + live reload)
 make dev
 ```
 
@@ -32,11 +23,10 @@ The server starts at [http://localhost:8080](http://localhost:8080).
 ## Development
 
 ```bash
-make dev            # Run dev server
+make dev            # Run dev server (live reload)
 make build          # Build binary to bin/server
 make test           # Run tests
 make lint           # Run golangci-lint
-make templ          # Regenerate templ files
 make docker-up      # Start services
 make docker-down    # Stop services
 ```

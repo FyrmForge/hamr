@@ -3,13 +3,21 @@ package form
 // FieldError renders a validation error message for a form field.
 templ FieldError(field string, errors map[string]string) {
 	if msg, ok := errors[field]; ok {
+{{- if eq .CSS "tailwind"}}
+		<div class="text-red-400 text-sm mt-1" id={ field + "-error" }>{ msg }</div>
+{{- else}}
 		<div class="field-error" id={ field + "-error" }>{ msg }</div>
+{{- end}}
 	}
 }
 
 // FieldErrorOOB renders an out-of-band swap for a field error (used with HTMX).
 templ FieldErrorOOB(field string, msg string) {
+{{- if eq .CSS "tailwind"}}
+	<div class="text-red-400 text-sm mt-1" id={ field + "-error" } hx-swap-oob="true">
+{{- else}}
 	<div class="field-error" id={ field + "-error" } hx-swap-oob="true">
+{{- end}}
 		if msg != "" {
 			{ msg }
 		}
