@@ -2,6 +2,9 @@ package web
 
 import (
 	"log/slog"
+{{- if .S3StaticWatcher}}
+	"net/url"
+{{- end}}
 
 	"github.com/FyrmForge/hamr/pkg/middleware"
 	"github.com/FyrmForge/hamr/pkg/server"
@@ -27,8 +30,9 @@ import (
 
 // Deps holds the dependencies for route registration.
 type Deps struct {
-	Log   *slog.Logger
-	Store repo.Store
+	Log            *slog.Logger
+	Store          repo.Store
+	StaticBaseURL  string
 {{- if .IncludeSessions}}
 	SessionManager *auth.SessionManager
 {{- end}}
@@ -60,10 +64,23 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 	e.GET("/ws", deps.Hub.Handler())
 {{- end}}
 
+	// Content Security Policy.
+{{- if .S3StaticWatcher}}
+	staticOrigin := "'self'"
+	if u, err := url.Parse(deps.StaticBaseURL); err == nil && u.Host != "" {
+		staticOrigin = "'self' " + u.Scheme + "://" + u.Host
+	}
+	csp := "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src " + staticOrigin + " 'unsafe-inline'; img-src " + staticOrigin + "; font-src " + staticOrigin
+{{- else}}
+	csp := "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+{{- end}}
+
 	// Site routes.
 	site := e.Group("")
 	site.Use(middleware.RequestID())
-	site.Use(middleware.Secure())
+	site.Use(middleware.SecureWithConfig(middleware.SecureConfig{
+		ContentSecurityPolicy: csp,
+	}))
 {{- if .IncludeSessions}}
 	site.Use(middleware.Flash())
 	site.Use(middleware.CSRF())

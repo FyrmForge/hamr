@@ -150,8 +150,9 @@ func main() {
 	})
 
 	web.RegisterRoutes(srv, &web.Deps{
-		Log:   log,
-		Store: store,
+		Log:           log,
+		Store:         store,
+		StaticBaseURL: envStaticBaseURL,
 {{- if .IncludeSessions}}
 		SessionManager: sessionManager,
 {{- end}}
