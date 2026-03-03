@@ -113,7 +113,11 @@ func WatchAndSync(ctx context.Context, store storage.FileStorage, dir string) er
 }
 
 // Key converts a filesystem path into an S3 object key relative to dir.
+// Returns "" for paths that should be skipped (e.g. .gitkeep).
 func Key(dir, path string) string {
+	if filepath.Base(path) == ".gitkeep" {
+		return ""
+	}
 	rel, err := filepath.Rel(dir, path)
 	if err != nil {
 		return ""

@@ -9,12 +9,17 @@ import (
 // Set from main before any templates render.
 var StaticBaseURL = "/static"
 
+// StaticVersion is appended as a query string to static asset URLs for
+// cache busting. Set from main via ldflags (e.g. git commit hash).
+var StaticVersion = "dev"
+
 // GetFlash returns the flash message for the current request, if any.
 func GetFlash(c echo.Context) *middleware.FlashMessage {
 	return middleware.GetFlash(c)
 }
 
-// StaticURL returns the full URL for a static asset path.
+// StaticURL returns the full URL for a static asset path with a cache-busting
+// version query string.
 func StaticURL(path string) string {
-	return StaticBaseURL + "/" + path
+	return StaticBaseURL + "/" + path + "?v=" + StaticVersion
 }

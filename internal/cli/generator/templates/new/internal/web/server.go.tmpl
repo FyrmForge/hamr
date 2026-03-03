@@ -70,7 +70,7 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 	if u, err := url.Parse(deps.StaticBaseURL); err == nil && u.Host != "" {
 		staticOrigin = "'self' " + u.Scheme + "://" + u.Host
 	}
-	csp := "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src " + staticOrigin + " 'unsafe-inline'; img-src " + staticOrigin + "; font-src " + staticOrigin
+	csp := "default-src 'self'; script-src " + staticOrigin + " 'unsafe-inline'; style-src " + staticOrigin + " 'unsafe-inline'; img-src " + staticOrigin + "; font-src " + staticOrigin
 {{- else}}
 	csp := "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
 {{- end}}

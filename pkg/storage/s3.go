@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
+	"path/filepath"
 	"time"
 
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
@@ -112,11 +114,15 @@ func (s *S3Storage) EnsureBucket(ctx context.Context) error {
 }
 
 func (s *S3Storage) Save(ctx context.Context, path string, r io.Reader) error {
-	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
+	input := &s3.PutObjectInput{
 		Bucket: &s.bucket,
 		Key:    &path,
 		Body:   r,
-	})
+	}
+	if ct := mime.TypeByExtension(filepath.Ext(path)); ct != "" {
+		input.ContentType = &ct
+	}
+	_, err := s.client.PutObject(ctx, input)
 	if err != nil {
 		return fmt.Errorf("storage: s3 put %q: %w", path, err)
 	}

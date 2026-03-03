@@ -39,13 +39,15 @@ dev: check-templ check-reflex{{- if eq .CSS "tailwind"}} check-node-modules{{- e
 {{- end}}
 	reflex -r '\.(go|templ)$$' -R '_templ\.go$$' -s -- sh -c 'templ generate && go run ./cmd/server'
 
+VERSION := $(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
+
 ## build: Build the server binary
 build: check-templ{{- if eq .CSS "tailwind"}} check-node-modules{{- end}}
 	templ generate
 {{- if eq .CSS "tailwind"}}
 	npm run css:build
 {{- end}}
-	go build -o bin/server ./cmd/server
+	go build -ldflags "-X main.version=$(VERSION)" -o bin/server ./cmd/server
 
 ## test: Run all tests
 test:
