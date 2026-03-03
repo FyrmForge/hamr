@@ -241,6 +241,10 @@ func (m *mockS3Client) HeadBucket(ctx context.Context, in *s3.HeadBucketInput, _
 	return &s3.HeadBucketOutput{}, nil
 }
 
+func (m *mockS3Client) PutBucketPolicy(_ context.Context, _ *s3.PutBucketPolicyInput, _ ...func(*s3.Options)) (*s3.PutBucketPolicyOutput, error) {
+	return &s3.PutBucketPolicyOutput{}, nil
+}
+
 // mockPresigner implements presigner for testing.
 type mockPresigner struct {
 	fn func(ctx context.Context, in *s3.GetObjectInput) (*v4.PresignedHTTPRequest, error)

@@ -25,6 +25,7 @@ type s3API interface {
 	HeadObject(ctx context.Context, params *s3.HeadObjectInput, optFns ...func(*s3.Options)) (*s3.HeadObjectOutput, error)
 	CreateBucket(ctx context.Context, params *s3.CreateBucketInput, optFns ...func(*s3.Options)) (*s3.CreateBucketOutput, error)
 	HeadBucket(ctx context.Context, params *s3.HeadBucketInput, optFns ...func(*s3.Options)) (*s3.HeadBucketOutput, error)
+	PutBucketPolicy(ctx context.Context, params *s3.PutBucketPolicyInput, optFns ...func(*s3.Options)) (*s3.PutBucketPolicyOutput, error)
 }
 
 // presigner is the subset of the S3 presign client used by S3Storage.
@@ -84,7 +85,8 @@ func newS3StorageWithClient(client s3API, ps presigner, bucket string, opts ...S
 	return s
 }
 
-// EnsureBucket creates the bucket if it does not already exist.
+// EnsureBucket creates the bucket if it does not already exist and sets a
+// public-read policy so assets can be served directly via HTTP.
 func (s *S3Storage) EnsureBucket(ctx context.Context) error {
 	_, err := s.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: &s.bucket})
 	if err == nil {
@@ -95,6 +97,17 @@ func (s *S3Storage) EnsureBucket(ctx context.Context) error {
 		return fmt.Errorf("storage: create bucket %q: %w", s.bucket, err)
 	}
 	s.logger.Info("bucket created", "bucket", s.bucket)
+
+	// Set public-read policy so objects are accessible via browser.
+	policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":["s3:GetObject"],"Resource":["arn:aws:s3:::` + s.bucket + `/*"]}]}`
+	_, err = s.client.PutBucketPolicy(ctx, &s3.PutBucketPolicyInput{
+		Bucket: &s.bucket,
+		Policy: &policy,
+	})
+	if err != nil {
+		return fmt.Errorf("storage: set bucket policy %q: %w", s.bucket, err)
+	}
+	s.logger.Info("bucket policy set to public-read", "bucket", s.bucket)
 	return nil
 }
 
