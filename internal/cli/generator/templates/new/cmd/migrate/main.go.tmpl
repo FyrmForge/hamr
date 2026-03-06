@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"time"
 
 	_ "github.com/joho/godotenv/autoload"
 
@@ -15,7 +17,10 @@ import (
 var envDatabaseURL = config.GetEnvOrDefault("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/{{.Name}}?sslmode=disable")
 
 func main() {
-	database, err := db.Connect(envDatabaseURL)
+	connectCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	database, err := db.ConnectContext(connectCtx, envDatabaseURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to connect to database: %v\n", err)
 		os.Exit(1)

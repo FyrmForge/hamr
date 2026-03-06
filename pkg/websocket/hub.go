@@ -304,6 +304,28 @@ func (h *Hub) register(c *Client) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	// If a client already exists for this session, clean it up first to
+	// avoid orphaned goroutines and stale map entries.
+	if old, ok := h.clients[c.SessionID]; ok {
+		if old.SubjectID != "" {
+			if set, exists := h.subjects[old.SubjectID]; exists {
+				delete(set, old)
+				if len(set) == 0 {
+					delete(h.subjects, old.SubjectID)
+				}
+			}
+		}
+		for room := range old.Rooms {
+			if members, exists := h.rooms[room]; exists {
+				delete(members, old)
+				if len(members) == 0 {
+					delete(h.rooms, room)
+				}
+			}
+		}
+		close(old.send)
+	}
+
 	h.clients[c.SessionID] = c
 	if c.SubjectID != "" {
 		if h.subjects[c.SubjectID] == nil {
@@ -317,7 +339,9 @@ func (h *Hub) unregister(c *Client) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if _, ok := h.clients[c.SessionID]; !ok {
+	// Only clean up if the client in the map is the same pointer.
+	// A newer client may have already replaced this one via register.
+	if existing := h.clients[c.SessionID]; existing != c {
 		return
 	}
 

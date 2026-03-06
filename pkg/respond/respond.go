@@ -47,6 +47,7 @@ func Negotiate(c echo.Context, status int, jsonData any, component templ.Compone
 type errorResponse struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
+	Code    int    `json:"code"`
 }
 
 type validationResponse struct {
@@ -66,6 +67,7 @@ func Error(c echo.Context, status int, msg string, component ...templ.Component)
 	return c.JSON(status, errorResponse{
 		Error:   http.StatusText(status),
 		Message: msg,
+		Code:    status,
 	})
 }
 

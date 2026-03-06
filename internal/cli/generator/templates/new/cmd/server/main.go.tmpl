@@ -67,12 +67,14 @@ func main() {
 	components.StaticVersion = version
 
 	// Database.
-	database, err := db.Connect(envDatabaseURL)
+	connectCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	database, err := db.ConnectContext(connectCtx, envDatabaseURL)
 	if err != nil {
 		log.Error("failed to connect to database", "error", err)
 		os.Exit(1)
 	}
-	db.StartKeepAlive(context.Background(), database, 30*time.Second, 2)
 
 	if err := db.Migrate(database, appdb.MigrateConfig()); err != nil {
 		log.Error("failed to run migrations", "error", err)

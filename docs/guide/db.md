@@ -1,7 +1,8 @@
 # DB — PostgreSQL Connection & Migrations
 
-`hamr/pkg/db` provides PostgreSQL connection management with retry, keep-alive, and
-schema migration utilities. Uses `sqlx` for query helpers and `pgx` as the driver.
+`hamr/pkg/db` provides PostgreSQL connection management with retry, context-aware
+health checks, optional PgBouncer-safe mode, optional keep-alive probes, and
+schema migration utilities.
 
 ## Quick Start
 
@@ -15,46 +16,74 @@ import "github.com/FyrmForge/hamr/pkg/db"
 database, err := db.Connect(os.Getenv("DATABASE_URL"))
 ```
 
-Connects with retry and exponential backoff. Defaults: 10 max open, 5 max idle, 3
-retries.
-
-### Connection Pool Options
+`Connect` uses `context.Background()`. For startup cancellation/deadlines, use
+`ConnectContext`:
 
 ```go
-database, err := db.Connect(databaseURL,
+ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+defer cancel()
+
+database, err := db.ConnectContext(ctx, os.Getenv("DATABASE_URL"))
+```
+
+Connectivity is validated with `PingContext` on each retry attempt.
+
+## Connection Options
+
+```go
+database, err := db.ConnectContext(ctx, databaseURL,
     db.WithMaxOpenConns(20),
-    db.WithMaxIdleConns(10),
-    db.WithConnMaxIdleTime(30*time.Second),
-    db.WithConnMaxLifetime(5*time.Minute),
+    db.WithMaxIdleConns(20),
+    db.WithConnMaxIdleTime(5*time.Minute),
+    db.WithConnMaxLifetime(30*time.Minute),
     db.WithMaxRetries(5),
+    db.WithAttemptTimeout(3*time.Second),
 )
 ```
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `WithMaxOpenConns` | 10 | Maximum open connections |
-| `WithMaxIdleConns` | 5 | Maximum idle connections |
-| `WithConnMaxIdleTime` | 5s | Max time a connection can be idle |
-| `WithConnMaxLifetime` | 1m | Max lifetime of a connection |
-| `WithMaxRetries` | 3 | Connection retry attempts |
+| `WithMaxIdleConns` | 10 | Maximum idle connections |
+| `WithConnMaxIdleTime` | 5m | Max time a connection can be idle |
+| `WithConnMaxLifetime` | 30m | Max lifetime of a connection |
+| `WithMaxRetries` | 5 | Connection retry attempts (must be >= 1) |
+| `WithAttemptTimeout` | 3s | Timeout per connectivity check attempt |
+| `WithPgBouncerSafe` | false | Use pgx simple protocol mode for PgBouncer transaction pooling |
 
-Retries use linear backoff: 1s, 2s, 3s, etc.
+Retries use exponential backoff with jitter.
 
-## Keep-Alive
+## PgBouncer Compatibility
 
-Launch background goroutines that periodically ping the database to keep connections
-warm:
+When routing through PgBouncer transaction pooling, enable PgBouncer-safe mode:
 
 ```go
-db.StartKeepAlive(context.Background(), database, 30*time.Second, 2)
+database, err := db.ConnectContext(ctx, databaseURL,
+    db.WithPgBouncerSafe(true),
+)
 ```
 
-This launches 2 goroutines, each pinging every 30 seconds. Failures are logged via
-`slog.Default()`. The goroutines exit when the context is cancelled.
+This switches pgx to simple protocol mode to avoid prepared-statement behavior
+that can conflict with transaction pooling.
+
+## Optional Keep-Alive
+
+Background ping loops are optional and should be enabled explicitly only when
+needed.
+
+```go
+db.StartKeepAliveWithConfig(ctx, database, db.KeepAliveConfig{
+    Interval: 30 * time.Second,
+    Timeout:  3 * time.Second,
+})
+```
+
+For backward compatibility, `StartKeepAlive(ctx, db, interval, poolSize)` still
+exists, but `poolSize` is ignored and only one goroutine is started.
 
 ## Migrations
 
-Run migrations from an `embed.FS`. Uses `golang-migrate/migrate` under the hood.
+Run migrations from an `embed.FS` using `golang-migrate`.
 
 ### Embedding migrations
 
@@ -72,7 +101,7 @@ err := db.Migrate(database, db.MigrateConfig{
 })
 ```
 
-`ErrNoChange` is silently ignored — safe to call on every startup.
+`ErrNoChange` is ignored, so running this on startup is safe.
 
 ### Rolling back
 
@@ -83,40 +112,29 @@ err := db.MigrateDown(database, db.MigrateConfig{
 })
 ```
 
-### Migration file naming
-
-```
-migrations/
-    001_initial.up.sql
-    001_initial.down.sql
-    002_add_users.up.sql
-    002_add_users.down.sql
-```
-
 ## Typical Usage
 
 ```go
 package main
 
 import (
+    "context"
+    "log"
+    "time"
+
     "github.com/FyrmForge/hamr/pkg/config"
     "github.com/FyrmForge/hamr/pkg/db"
-
-    _ "github.com/joho/godotenv/autoload"
-)
-
-var (
-    envDBURL = config.GetEnvOrPanic("DATABASE_URL")
 )
 
 func main() {
-    database, err := db.Connect(envDBURL)
+    ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+    defer cancel()
+
+    database, err := db.ConnectContext(ctx, config.GetEnvOrPanic("DATABASE_URL"))
     if err != nil {
         log.Fatal(err)
     }
     defer database.Close()
-
-    db.StartKeepAlive(context.Background(), database, 30*time.Second, 2)
 
     if err := db.Migrate(database, db.MigrateConfig{
         FS:        migrationsFS,
@@ -124,31 +142,46 @@ func main() {
     }); err != nil {
         log.Fatal(err)
     }
-
-    // ... use database
 }
 ```
 
 ## API Reference
 
 ```go
-// Connection
 type ConnectConfig struct { ... }
 type ConnectOption func(*ConnectConfig)
+
 func Connect(databaseURL string, opts ...ConnectOption) (*sqlx.DB, error)
+func ConnectContext(ctx context.Context, databaseURL string, opts ...ConnectOption) (*sqlx.DB, error)
+
 func WithMaxOpenConns(n int) ConnectOption
 func WithMaxIdleConns(n int) ConnectOption
 func WithConnMaxIdleTime(d time.Duration) ConnectOption
 func WithConnMaxLifetime(d time.Duration) ConnectOption
 func WithMaxRetries(n int) ConnectOption
-func StartKeepAlive(ctx context.Context, db *sqlx.DB, interval time.Duration, poolSize int)
+func WithAttemptTimeout(d time.Duration) ConnectOption
+func WithPgBouncerSafe(enabled bool) ConnectOption
 
-// Migrations
+type KeepAliveConfig struct {
+    Interval time.Duration
+    Timeout  time.Duration
+}
+func StartKeepAlive(ctx context.Context, db *sqlx.DB, interval time.Duration, poolSize int)
+func StartKeepAliveWithConfig(ctx context.Context, db *sqlx.DB, cfg KeepAliveConfig)
+
 type MigrateConfig struct {
     FS        embed.FS
     Directory string
-    Driver    string  // default: "postgres"
+    Driver    string
 }
 func Migrate(db *sqlx.DB, cfg MigrateConfig) error
 func MigrateDown(db *sqlx.DB, cfg MigrateConfig) error
+```
+
+## Integration Testing (Testcontainers)
+
+Run the DB reconnection integration test (requires Docker):
+
+```bash
+go test -mod=mod -tags=integration -count=1 ./pkg/db -run TestConnectContext_ReconnectsAfterBackendTermination
 ```

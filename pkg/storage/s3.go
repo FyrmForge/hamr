@@ -38,10 +38,11 @@ type presigner interface {
 // S3Storage implements SignableStorage backed by an S3-compatible service
 // (AWS S3, MinIO, Cloudflare R2).
 type S3Storage struct {
-	client    s3API
-	presigner presigner
-	bucket    string
-	logger    *slog.Logger
+	client     s3API
+	presigner  presigner
+	bucket     string
+	logger     *slog.Logger
+	publicRead bool
 }
 
 // S3Option configures an S3Storage instance.
@@ -50,6 +51,12 @@ type S3Option func(*S3Storage)
 // WithS3Logger sets the logger used by S3Storage.
 func WithS3Logger(l *slog.Logger) S3Option {
 	return func(s *S3Storage) { s.logger = l }
+}
+
+// WithPublicRead controls whether EnsureBucket applies a public-read bucket
+// policy after creating the bucket. Defaults to false.
+func WithPublicRead(v bool) S3Option {
+	return func(s *S3Storage) { s.publicRead = v }
 }
 
 // NewS3Storage creates an S3Storage connected to the service described by cfg.
@@ -87,29 +94,38 @@ func newS3StorageWithClient(client s3API, ps presigner, bucket string, opts ...S
 	return s
 }
 
-// EnsureBucket creates the bucket if it does not already exist and sets a
-// public-read policy so assets can be served directly via HTTP.
+// EnsureBucket creates the bucket if it does not already exist. When
+// WithPublicRead(true) is set, it also applies a public-read bucket policy.
 func (s *S3Storage) EnsureBucket(ctx context.Context) error {
 	_, err := s.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: &s.bucket})
 	if err == nil {
 		return nil
 	}
+
+	// Only proceed to CreateBucket for not-found errors; surface others.
+	var notFound *s3types.NotFound
+	if !errors.As(err, &notFound) {
+		return fmt.Errorf("storage: head bucket %q: %w", s.bucket, err)
+	}
+
 	_, err = s.client.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: &s.bucket})
 	if err != nil {
 		return fmt.Errorf("storage: create bucket %q: %w", s.bucket, err)
 	}
 	s.logger.Info("bucket created", "bucket", s.bucket)
 
-	// Set public-read policy so objects are accessible via browser.
-	policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":["s3:GetObject"],"Resource":["arn:aws:s3:::` + s.bucket + `/*"]}]}`
-	_, err = s.client.PutBucketPolicy(ctx, &s3.PutBucketPolicyInput{
-		Bucket: &s.bucket,
-		Policy: &policy,
-	})
-	if err != nil {
-		return fmt.Errorf("storage: set bucket policy %q: %w", s.bucket, err)
+	if s.publicRead {
+		// Set public-read policy so objects are accessible via browser.
+		policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":["s3:GetObject"],"Resource":["arn:aws:s3:::` + s.bucket + `/*"]}]}`
+		_, err = s.client.PutBucketPolicy(ctx, &s3.PutBucketPolicyInput{
+			Bucket: &s.bucket,
+			Policy: &policy,
+		})
+		if err != nil {
+			return fmt.Errorf("storage: set bucket policy %q: %w", s.bucket, err)
+		}
+		s.logger.Info("bucket policy set to public-read", "bucket", s.bucket)
 	}
-	s.logger.Info("bucket policy set to public-read", "bucket", s.bucket)
 	return nil
 }
 

@@ -28,7 +28,11 @@ func WithGroupLogger(l *slog.Logger) GroupOption {
 }
 
 // WithLimit caps concurrent goroutines via a semaphore.
+// Values less than 1 are clamped to 1.
 func WithLimit(n int) GroupOption {
+	if n < 1 {
+		n = 1
+	}
 	return func(g *Group) { g.sem = make(chan struct{}, n) }
 }
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // ProjectConfig holds the data used to render project templates.
@@ -77,12 +78,15 @@ func GenerateProject(dir string, cfg *ProjectConfig) error {
 
 	files := buildProjectFileList(cfg)
 
+	var skipped []string
+
 	for _, f := range files {
 		dest := filepath.Join(dir, f.dest)
 
 		// In-place mode: skip files that already exist on disk.
 		if cfg.InPlace {
 			if _, err := os.Stat(dest); err == nil {
+				skipped = append(skipped, f.dest)
 				continue
 			}
 		}
@@ -93,6 +97,10 @@ func GenerateProject(dir string, cfg *ProjectConfig) error {
 			}
 			return fmt.Errorf("render %s: %w", f.dest, err)
 		}
+	}
+
+	if len(skipped) > 0 {
+		fmt.Printf("Skipped %d existing files: %s\n", len(skipped), strings.Join(skipped, ", "))
 	}
 
 	return nil
@@ -169,6 +177,7 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 		{"templates/new/root/AGENTS.md.tmpl", "AGENTS.md"},
 		{"templates/new/root/CLAUDE.md.tmpl", "CLAUDE.md"},
 		{"templates/new/root/README.md.tmpl", "README.md"},
+		{"templates/new/root/db-sh.tmpl", "db-sh"},
 		{"templates/new/root/go.mod.tmpl", "go.mod"},
 		{"templates/new/root/golangci.yml.tmpl", ".golangci.yml"},
 	}
@@ -227,4 +236,3 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 
 	return files
 }
-

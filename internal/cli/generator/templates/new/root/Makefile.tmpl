@@ -1,4 +1,4 @@
-.PHONY: dev build test lint migrate docker-up docker-down docker-delete docker-reload clean install check-reflex check-templ{{- if eq .CSS "tailwind"}} check-node-modules css css-build{{- end}}
+.PHONY: dev build test lint migrate db-sh docker-up docker-down docker-delete docker-reload clean install check-reflex check-templ{{- if eq .CSS "tailwind"}} check-node-modules css css-build{{- end}}
 
 ## install: Install development dependencies
 install:
@@ -50,12 +50,17 @@ build: check-templ{{- if eq .CSS "tailwind"}} check-node-modules{{- end}}
 	go build -ldflags "-X main.version=$(VERSION)" -o bin/server ./cmd/server
 
 ## test: Run all tests
-test:
+test: check-templ
+	templ generate
 	go test ./...
 
 ## migrate: Run database migrations
 migrate:
 	go run ./cmd/migrate
+
+## db-sh: Open a pgcli shell to the local dev database
+db-sh:
+	bash ./db-sh
 
 ## lint: Run linters
 lint:

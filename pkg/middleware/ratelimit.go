@@ -117,6 +117,7 @@ type MemoryStore struct {
 	insertOrder     []string
 	cleanupCtx      context.Context
 	cleanupInterval time.Duration
+	window          time.Duration
 }
 
 // MemoryStoreOption configures a MemoryStore.
@@ -135,6 +136,12 @@ func WithAutoCleanup(ctx context.Context, interval time.Duration) MemoryStoreOpt
 		s.cleanupCtx = ctx
 		s.cleanupInterval = interval
 	}
+}
+
+// WithWindow sets the rate limit window duration used by autoCleanup when
+// expiring entries. If unset, autoCleanup falls back to cleanupInterval.
+func WithWindow(d time.Duration) MemoryStoreOption {
+	return func(s *MemoryStore) { s.window = d }
 }
 
 // NewMemoryStore returns a new in-memory rate limit store.
@@ -211,12 +218,18 @@ func (s *MemoryStore) CleanupExpired(window time.Duration) {
 func (s *MemoryStore) autoCleanup() {
 	ticker := time.NewTicker(s.cleanupInterval)
 	defer ticker.Stop()
+
+	expiry := s.window
+	if expiry == 0 {
+		expiry = s.cleanupInterval
+	}
+
 	for {
 		select {
 		case <-s.cleanupCtx.Done():
 			return
 		case <-ticker.C:
-			s.CleanupExpired(s.cleanupInterval)
+			s.CleanupExpired(expiry)
 		}
 	}
 }

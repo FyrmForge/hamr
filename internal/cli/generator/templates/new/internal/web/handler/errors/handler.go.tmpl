@@ -3,6 +3,7 @@ package errors
 import (
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 
@@ -41,7 +42,7 @@ func (h *handler) Handle(err error, c echo.Context) {
 		h.log.Error("server error", "error", err, "status", code)
 	}
 
-	if htmx.IsHTMX(c.Request()) || c.Request().Header.Get("Accept") == "text/html" {
+	if htmx.IsHTMX(c.Request()) || strings.Contains(c.Request().Header.Get("Accept"), "text/html") {
 {{- if eq .CSS "tailwind"}}
 		_ = c.HTML(code, `<div class="max-w-lg mx-auto mt-16 text-center p-8 bg-slate-800 border border-slate-700 rounded-lg"><h2 class="text-2xl font-bold text-slate-100 mb-2">`+http.StatusText(code)+`</h2><p class="text-slate-400">`+message+`</p></div>`)
 {{- else}}

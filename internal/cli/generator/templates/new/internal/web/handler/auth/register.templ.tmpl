@@ -30,7 +30,7 @@ templ registerPage(csrfToken, name, email string, errs map[string]string) {
 					if msg, ok := errs["password"]; ok {
 						<p class="mt-1 text-sm text-red-400">{ msg }</p>
 					}
-					<p class="mt-1 text-xs text-slate-500">At least 8 characters with uppercase, lowercase, and a number</p>
+					<p class="mt-1 text-xs text-slate-500">At least 8 characters with uppercase, lowercase, a number, and a special character</p>
 				</div>
 				<button type="submit" class="w-full py-2 px-4 bg-blue-500 hover:bg-blue-400 text-white font-medium rounded-md transition-colors">Register</button>
 			</form>
@@ -61,7 +61,7 @@ templ registerPage(csrfToken, name, email string, errs map[string]string) {
 						if msg, ok := errs["password"]; ok {
 							<p class="field-error">{ msg }</p>
 						}
-						<p class="field-hint">At least 8 characters with uppercase, lowercase, and a number</p>
+						<p class="field-hint">At least 8 characters with uppercase, lowercase, a number, and a special character</p>
 					</div>
 					<button type="submit" class="btn btn-primary" style="width:100%">Register</button>
 				</form>

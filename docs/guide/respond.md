@@ -64,7 +64,7 @@ respond.Error(c, http.StatusForbidden, "Access denied")
 respond.Error(c, http.StatusNotFound, "Not found", templates.NotFoundPage())
 ```
 
-JSON output: `{"error": "Access denied", "code": 403}`
+JSON output: `{"error": "Forbidden", "message": "Access denied", "code": 403}`
 
 HTML output: renders the provided templ component, or returns a plain text response if
 none is given.
@@ -79,7 +79,7 @@ errors := map[string]string{
 return respond.ValidationError(c, errors)
 ```
 
-JSON output: `{"error": "validation failed", "fields": {"email": "Invalid email address", "name": "This field is required"}}`
+JSON output: `{"error": "Validation failed", "fields": {"email": "Invalid email address", "name": "This field is required"}}`
 
 HTML output: renders the provided templ component for OOB swap validation display.
 

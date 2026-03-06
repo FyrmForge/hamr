@@ -65,7 +65,7 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 		))
 	}
 
-	if needsLocation {
+	if needsLocation && !cmd.Flags().Changed("location") {
 		desc := "Subfolder creates ./" + name + ", current directory scaffolds into ."
 		if needsName {
 			desc = "Subfolder creates ./<name>, current directory scaffolds into ."
@@ -80,6 +80,8 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 				).
 				Value(&res.Location),
 		))
+	} else if cmd.Flags().Changed("location") {
+		res.Location, _ = cmd.Flags().GetString("location")
 	}
 
 	if !cmd.Flags().Changed("module") {

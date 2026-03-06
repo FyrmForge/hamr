@@ -104,6 +104,7 @@ func TestBuildProjectFileList_coreFiles(t *testing.T) {
 		"internal/web/components/layout.templ",
 		".gitignore",
 		"Makefile",
+		"db-sh",
 		"go.mod",
 		"README.md",
 	}
@@ -267,6 +268,7 @@ func TestGenerateProject_createsFiles(t *testing.T) {
 	assertFileExists(t, dir, "internal/web/server.go")
 	assertFileExists(t, dir, "go.mod")
 	assertFileExists(t, dir, ".gitignore")
+	assertFileExists(t, dir, "db-sh")
 
 	// Check module substitution.
 	gomod := readFile(t, dir, "go.mod")

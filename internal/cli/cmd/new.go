@@ -51,10 +51,39 @@ When all flags are provided, no interactive prompts are shown.`,
 			name = filepath.Base(dir)
 			needsLocation = true
 
+			// If --location flag was explicitly set, skip the interactive prompt.
+			if cmd.Flags().Changed("location") {
+				needsLocation = false
+				loc, _ := cmd.Flags().GetString("location")
+				if loc == "current" {
+					cwd, err := os.Getwd()
+					if err != nil {
+						return fmt.Errorf("get working directory: %w", err)
+					}
+					dir = cwd
+					name = filepath.Base(cwd)
+					inPlace = true
+				}
+			}
+
 		default:
 			// hamr new → fully interactive
 			needsName = true
 			needsLocation = true
+
+			if cmd.Flags().Changed("location") {
+				needsLocation = false
+				loc, _ := cmd.Flags().GetString("location")
+				if loc == "current" {
+					cwd, err := os.Getwd()
+					if err != nil {
+						return fmt.Errorf("get working directory: %w", err)
+					}
+					dir = cwd
+					name = filepath.Base(cwd)
+					inPlace = true
+				}
+			}
 		}
 
 		cfg := &generator.ProjectConfig{
@@ -193,4 +222,5 @@ func init() {
 	newCmd.Flags().Bool("websocket", false, "include WebSocket support")
 	newCmd.Flags().Bool("e2e", false, "include E2E testing scaffolding")
 	newCmd.Flags().String("database", "postgres", "database type")
+	newCmd.Flags().String("location", "subfolder", "project location: \"subfolder\" or \"current\"")
 }

@@ -181,9 +181,10 @@ CREATE INDEX idx_sessions_subject_id ON sessions (subject_id) WHERE subject_id I
 ```
 
 ### 7. `pkg/db/db.go`
-- `Connect(databaseURL string, opts ...ConnectOption) (*sqlx.DB, error)` - retry with backoff
-- `ConnectConfig`: MaxOpenConns(10), MaxIdleConns(5), ConnMaxIdleTime(5s), ConnMaxLifetime(1m), MaxRetries(3)
-- `StartKeepAlive(ctx context.Context, db *sqlx.DB, interval time.Duration, poolSize int)`
+- `Connect(databaseURL string, opts ...ConnectOption) (*sqlx.DB, error)` and `ConnectContext(ctx, ...)`
+- `ConnectConfig`: MaxOpenConns(10), MaxIdleConns(10), ConnMaxIdleTime(5m), ConnMaxLifetime(30m), MaxRetries(5), AttemptTimeout(3s), PgBouncerSafe(false)
+- `StartKeepAliveWithConfig(ctx context.Context, db *sqlx.DB, cfg KeepAliveConfig)` (opt-in)
+- Backward-compatible `StartKeepAlive(ctx, db, interval, poolSize)` remains (poolSize ignored)
 
 ### 8. `pkg/db/migrate.go`
 - `Migrate(db *sqlx.DB, cfg MigrateConfig) error` - user passes `embed.FS`

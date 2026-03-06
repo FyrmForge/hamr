@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // VendorDep describes a vendored JavaScript dependency.
@@ -202,7 +203,8 @@ func readLockFile(dir string) (*VendorLock, error) {
 	return &lock, nil
 }
 
-// writeLockFile writes the lock file to dir as indented JSON.
+// writeLockFile writes the lock file to dir as indented JSON using an atomic
+// temp-file + rename pattern.
 func writeLockFile(dir string, lock *VendorLock) error {
 	data, err := json.MarshalIndent(lock, "", "  ")
 	if err != nil {
@@ -211,13 +213,38 @@ func writeLockFile(dir string, lock *VendorLock) error {
 	data = append(data, '\n')
 
 	path := filepath.Join(dir, lockFileName)
-	return os.WriteFile(path, data, 0o644)
+	tmp := path + ".tmp"
+
+	f, err := os.Create(tmp)
+	if err != nil {
+		return fmt.Errorf("create temp lock file: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return fmt.Errorf("write temp lock file: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return fmt.Errorf("sync temp lock file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("close temp lock file: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("rename temp lock file: %w", err)
+	}
+	return nil
 }
 
 // downloadAndChecksum fetches url via HTTP GET, writes the body to destPath,
 // and returns the SHA256 hex digest of the downloaded content.
 func downloadAndChecksum(url, destPath string) (string, error) {
-	resp, err := http.Get(url)
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Get(url)
 	if err != nil {
 		return "", fmt.Errorf("download %s: %w", url, err)
 	}

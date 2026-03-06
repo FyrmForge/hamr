@@ -100,7 +100,7 @@ func (h *handler) Register(c echo.Context) error {
 	user, err := h.authService.Register(c.Request().Context(), email, password, name)
 	if err != nil {
 		h.log.Warn("registration failed", "email", email, "error", err)
-		middleware.SetFlash(c, "Registration failed: "+err.Error(), middleware.FlashError)
+		middleware.SetFlash(c, "Registration failed. Please try again.", middleware.FlashError)
 		return c.Redirect(http.StatusSeeOther, "/register")
 	}
 

@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v pgcli >/dev/null 2>&1; then
+	echo "pgcli not found. Install it first: https://www.pgcli.com/" >&2
+	exit 1
+fi
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ -f "$SCRIPT_DIR/.env" ]]; then
+	set -a
+	# shellcheck disable=SC1091
+	source "$SCRIPT_DIR/.env"
+	set +a
+fi
+
+DB_URL="${DATABASE_URL:-postgres://postgres:postgres@localhost:5432/{{.Name}}?sslmode=disable}"
+
+exec pgcli "$DB_URL"

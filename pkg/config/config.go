@@ -34,6 +34,7 @@ func GetEnvOrPanic(key string) string {
 
 // GetEnvOrDefaultInt returns the environment variable as an int, falling back
 // to def if unset, empty, or not a valid integer.
+// Note: invalid values silently fall back to the default with no warning.
 func GetEnvOrDefaultInt(key string, def int) int {
 	v := os.Getenv(key)
 	if v == "" {
@@ -48,6 +49,7 @@ func GetEnvOrDefaultInt(key string, def int) int {
 
 // GetEnvOrDefaultBool returns the environment variable as a bool, falling back
 // to def if unset, empty, or not a valid boolean.
+// Note: invalid values silently fall back to the default with no warning.
 func GetEnvOrDefaultBool(key string, def bool) bool {
 	v := os.Getenv(key)
 	if v == "" {
@@ -62,6 +64,7 @@ func GetEnvOrDefaultBool(key string, def bool) bool {
 
 // GetEnvOrDefaultDuration returns the environment variable as a time.Duration,
 // falling back to def if unset, empty, or not a valid duration string.
+// Note: invalid values silently fall back to the default with no warning.
 func GetEnvOrDefaultDuration(key string, def time.Duration) time.Duration {
 	v := os.Getenv(key)
 	if v == "" {
