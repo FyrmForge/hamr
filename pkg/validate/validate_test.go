@@ -36,7 +36,7 @@ func TestRequiredMsg(t *testing.T) {
 
 func TestEmail(t *testing.T) {
 	check(t, "valid", validate.Email("user@example.com"), "")
-	check(t, "empty", validate.Email(""), "")
+	check(t, "empty", validate.Email(""), validate.MsgEmailInvalid)
 	check(t, "no-at", validate.Email("userexample.com"), validate.MsgEmailInvalid)
 	check(t, "no-domain", validate.Email("user@"), validate.MsgEmailInvalid)
 	check(t, "no-tld", validate.Email("user@example"), validate.MsgEmailInvalid)
@@ -49,7 +49,7 @@ func TestEmail(t *testing.T) {
 func TestPhone(t *testing.T) {
 	check(t, "e164", validate.Phone("+14155551234"), "")
 	check(t, "digits", validate.Phone("4155551234"), "")
-	check(t, "empty", validate.Phone(""), "")
+	check(t, "empty", validate.Phone(""), validate.MsgPhoneInvalid)
 	check(t, "too-short", validate.Phone("123"), validate.MsgPhoneInvalid)
 	check(t, "letters", validate.Phone("abc1234567"), validate.MsgPhoneInvalid)
 }
@@ -60,7 +60,7 @@ func TestPhone(t *testing.T) {
 
 func TestURL(t *testing.T) {
 	check(t, "https", validate.URL("https://example.com"), "")
-	check(t, "empty", validate.URL(""), "")
+	check(t, "empty", validate.URL(""), validate.MsgURLInvalid)
 	check(t, "no-scheme", validate.URL("example.com"), validate.MsgURLInvalid)
 	check(t, "bare", validate.URL("not a url"), validate.MsgURLInvalid)
 }
@@ -80,24 +80,13 @@ func TestMaxLength(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Match
-// ---------------------------------------------------------------------------
-
-func TestMatch(t *testing.T) {
-	check(t, "match", validate.Match("abc123", `^[a-z]+[0-9]+$`), "")
-	check(t, "no-match", validate.Match("ABC", `^[a-z]+$`), validate.MsgPatternMismatch)
-	check(t, "empty", validate.Match("", `^[a-z]+$`), "")
-	check(t, "bad-pattern", validate.Match("abc", `[`), validate.MsgPatternMismatch)
-}
-
-// ---------------------------------------------------------------------------
 // OneOf
 // ---------------------------------------------------------------------------
 
 func TestOneOf(t *testing.T) {
 	check(t, "found", validate.OneOf("b", "a", "b", "c"), "")
 	check(t, "missing", validate.OneOf("d", "a", "b", "c"), validate.MsgOneOf)
-	check(t, "empty", validate.OneOf("", "a", "b"), "")
+	check(t, "empty", validate.OneOf("", "a", "b"), validate.MsgOneOf)
 }
 
 // ---------------------------------------------------------------------------
@@ -122,7 +111,7 @@ func TestMinAge(t *testing.T) {
 
 	check(t, "old-enough", validate.MinAge(old, 18), "")
 	check(t, "too-young", validate.MinAge(young, 18), validate.MsgMinAge)
-	check(t, "empty", validate.MinAge("", 18), "")
+	check(t, "empty", validate.MinAge("", 18), validate.MsgMinAge)
 	check(t, "bad-date", validate.MinAge("not-a-date", 18), validate.MsgMinAge)
 }
 
@@ -132,7 +121,18 @@ func TestMaxAge(t *testing.T) {
 
 	check(t, "within", validate.MaxAge(recent, 120), "")
 	check(t, "exceeds", validate.MaxAge(ancient, 120), validate.MsgMaxAge)
-	check(t, "empty", validate.MaxAge("", 120), "")
+	check(t, "empty", validate.MaxAge("", 120), validate.MsgMaxAge)
+}
+
+// ---------------------------------------------------------------------------
+// EmptyOr
+// ---------------------------------------------------------------------------
+
+func TestEmptyOr(t *testing.T) {
+	check(t, "empty-string", validate.EmptyOr(validate.Email)(""), "")
+	check(t, "whitespace", validate.EmptyOr(validate.Email)("   "), "")
+	check(t, "invalid", validate.EmptyOr(validate.Email)("bad"), validate.MsgEmailInvalid)
+	check(t, "valid", validate.EmptyOr(validate.Email)("good@example.com"), "")
 }
 
 // ---------------------------------------------------------------------------
@@ -214,7 +214,6 @@ func TestCustomMessages(t *testing.T) {
 	check(t, "URLMsg", validate.URLMsg("bad", "custom"), "custom")
 	check(t, "MinLengthMsg", validate.MinLengthMsg("a", 5, "custom"), "custom")
 	check(t, "MaxLengthMsg", validate.MaxLengthMsg("abcdef", 3, "custom"), "custom")
-	check(t, "MatchMsg", validate.MatchMsg("abc", `^[0-9]+$`, "custom"), "custom")
 	check(t, "OneOfMsg", validate.OneOfMsg("x", "custom", "a", "b"), "custom")
 	check(t, "IntRangeMsg", validate.IntRangeMsg(0, 1, 10, "custom"), "custom")
 	check(t, "PasswordStrengthMsg", validate.PasswordStrengthMsg("weak", "custom"), "custom")

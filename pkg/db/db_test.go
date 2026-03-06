@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"os"
 	"testing"
 
@@ -87,6 +88,8 @@ func TestStartKeepAliveDoesNotPanic(t *testing.T) {
 
 	// Should not panic with valid inputs.
 	assert.NotPanics(t, func() {
-		StartKeepAlive(db, 1, 1)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		StartKeepAlive(ctx, db, 1, 1)
 	})
 }

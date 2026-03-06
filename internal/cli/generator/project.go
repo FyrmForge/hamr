@@ -114,6 +114,9 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 		{"templates/new/cmd/server/main.go.tmpl", "cmd/server/main.go"},
 		{"templates/new/cmd/server/Dockerfile.tmpl", "cmd/server/Dockerfile"},
 
+		// cmd/migrate
+		{"templates/new/cmd/migrate/main.go.tmpl", "cmd/migrate/main.go"},
+
 		// internal/db
 		{"templates/new/internal/db/db.go.tmpl", "internal/db/db.go"},
 		{"templates/new/internal/db/migrations/001_initial.up.sql.tmpl", "internal/db/migrations/001_initial.up.sql"},
@@ -153,6 +156,10 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 		{"templates/new/docs/ai-guides/handler-patterns.md.tmpl", "docs/ai-guides/handler-patterns.md"},
 		{"templates/new/docs/ai-guides/validation.md.tmpl", "docs/ai-guides/validation.md"},
 		{"templates/new/docs/ai-guides/forms.md.tmpl", "docs/ai-guides/forms.md"},
+
+		// GitHub Actions
+		{"templates/new/github/workflows/ci.yml.tmpl", ".github/workflows/ci.yml"},
+		{"templates/new/github/workflows/deploy.yml.tmpl", ".github/workflows/deploy.yml"},
 
 		// root files
 		{"templates/new/root/gitignore.tmpl", ".gitignore"},

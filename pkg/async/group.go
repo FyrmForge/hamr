@@ -3,6 +3,7 @@ package async
 import (
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"sync"
 )
 
@@ -11,7 +12,7 @@ func Fire(fn func()) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				slog.Default().Error("async.Fire: panic recovered", "panic", fmt.Sprint(r))
+				slog.Default().Error("async.Fire: panic recovered", "panic", fmt.Sprint(r), "stack", string(debug.Stack()))
 			}
 		}()
 		fn()
@@ -76,7 +77,7 @@ func (g *Group) Go(fn func()) {
 		}()
 		defer func() {
 			if r := recover(); r != nil {
-				g.logger.Error("async.Group: panic recovered", "panic", fmt.Sprint(r))
+				g.logger.Error("async.Group: panic recovered", "panic", fmt.Sprint(r), "stack", string(debug.Stack()))
 			}
 		}()
 		fn()

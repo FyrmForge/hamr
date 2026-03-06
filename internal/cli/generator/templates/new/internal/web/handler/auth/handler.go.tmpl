@@ -73,7 +73,7 @@ func (h *handler) Login(c echo.Context) error {
 // GET /register
 func (h *handler) RegisterPage(c echo.Context) error {
 	csrfToken, _ := c.Get("csrf").(string)
-	return respond.HTML(c, http.StatusOK, registerPage(csrfToken))
+	return respond.HTML(c, http.StatusOK, registerPage(csrfToken, "", "", nil))
 }
 
 // POST /register
@@ -93,8 +93,8 @@ func (h *handler) Register(c echo.Context) error {
 		errs["password"] = msg
 	}
 	if len(errs) > 0 {
-		middleware.SetFlash(c, "Please fix the errors below", middleware.FlashError)
-		return c.Redirect(http.StatusSeeOther, "/register")
+		csrfToken, _ := c.Get("csrf").(string)
+		return respond.HTML(c, http.StatusUnprocessableEntity, registerPage(csrfToken, name, email, errs))
 	}
 
 	user, err := h.authService.Register(c.Request().Context(), email, password, name)

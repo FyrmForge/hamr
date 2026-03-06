@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+    paths-ignore:
+      - "*.md"
+      - LICENSE
+      - .gitignore
+      - "docs/**"
+  pull_request:
+    branches: [master, main]
+    paths-ignore:
+      - "*.md"
+      - LICENSE
+      - .gitignore
+      - "docs/**"
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "{{.GoVersion}}"
+
+      - name: Download Go modules
+        run: go mod download
+
+      - name: Install templ
+        run: go install github.com/a-h/templ/cmd/templ@latest
+
+      - name: Generate templ files
+        run: templ generate
+
+      - name: Verify generated templ files
+        run: |
+          if ! git diff --quiet -- '*_templ.go'; then
+            echo "::error::Generated templ files are out of date. Run 'templ generate' and commit."
+            git diff --stat -- '*_templ.go'
+            exit 1
+          fi
+
+      - name: Run tests
+        run: go test -v -race ./...
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v9
+{{- if eq .CSS "tailwind"}}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build CSS
+        run: npm run css:build
+{{- end}}

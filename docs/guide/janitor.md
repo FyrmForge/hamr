@@ -43,6 +43,8 @@ func (t *SessionCleanup) Run(ctx context.Context) (int64, error) {
 ## Creating and Running
 
 ```go
+ctx := context.Background() // or use a cancellable context
+
 j := janitor.New(5*time.Minute,
     janitor.WithTimeout(30*time.Second),
     janitor.WithRunImmediately(true),
@@ -51,14 +53,16 @@ j := janitor.New(5*time.Minute,
     AddTask(&SessionCleanup{db: database}).
     AddTask(&RateLimitCleanup{store: pgStore})
 
-if err := j.Start(); err != nil {
+if err := j.Start(ctx); err != nil {
     log.Fatal(err)
 }
 defer j.Stop()
 ```
 
-`AddTask` returns the Janitor for chaining. `Start` validates configuration, optionally
-runs all tasks once immediately, then spawns the background ticker.
+`AddTask` returns the Janitor for chaining. `Start` validates configuration, stores the
+context for use in all tick/task execution, optionally runs all tasks once immediately,
+then spawns the background ticker. Cancelling the context also stops the background
+goroutine.
 
 ## Options
 
@@ -112,6 +116,8 @@ janitor.New(5*time.Minute,
 func main() {
     // ... setup db, server ...
 
+    ctx := context.Background()
+
     j := janitor.New(5*time.Minute,
         janitor.WithTimeout(30*time.Second),
         janitor.WithRunImmediately(true),
@@ -120,16 +126,12 @@ func main() {
         AddTask(&SessionCleanup{db: database}).
         AddTask(&RateLimitCleanup{store: pgStore})
 
-    srv, _ := server.New(
-        server.WithOnServerStart(func(ctx context.Context) error {
-            return j.Start()
-        }),
-        server.WithOnShutdown(func(ctx context.Context) error {
-            j.Stop()
-            return nil
-        }),
-    )
+    if err := j.Start(ctx); err != nil {
+        log.Fatal(err)
+    }
+    defer j.Stop()
 
+    srv, _ := server.New()
     srv.Start()
 }
 ```
@@ -152,7 +154,7 @@ type PostTickFunc func(ctx context.Context)
 // Janitor
 func New(interval time.Duration, opts ...Option) *Janitor
 func (j *Janitor) AddTask(task Task) *Janitor
-func (j *Janitor) Start() error
+func (j *Janitor) Start(ctx context.Context) error
 func (j *Janitor) Stop()
 
 // Options

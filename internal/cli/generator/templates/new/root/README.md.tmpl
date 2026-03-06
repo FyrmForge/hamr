@@ -11,6 +11,9 @@ A Go web application built with the [HAMR framework](https://github.com/FyrmForg
 ## Quick Start
 
 ```bash
+# Install dev tools (reflex, templ)
+make install
+
 # Start the database
 make docker-up
 
@@ -27,6 +30,7 @@ make dev            # Run dev server (live reload)
 make build          # Build binary to bin/server
 make test           # Run tests
 make lint           # Run golangci-lint
+make migrate        # Run database migrations
 make docker-up      # Start services
 make docker-down    # Stop services
 ```
@@ -45,6 +49,7 @@ make e2e-run T=Test # Run specific test
 
 ```
 cmd/server/              Application entry point
+cmd/migrate/             Standalone migration runner
 internal/
   config/                Environment configuration
   db/                    Database + migrations

@@ -117,9 +117,11 @@ When all flags are provided, no interactive prompts are shown.`,
 			return fmt.Errorf("generate project: %w", err)
 		}
 
+		var warnings []string
+
 		// Auto-vendor JS dependencies (non-fatal).
 		if err := generator.VendorAll(dir, false); err != nil {
-			fmt.Printf("Warning: could not vendor JS dependencies: %v\n", err)
+			warnings = append(warnings, fmt.Sprintf("could not vendor JS dependencies: %v", err))
 		}
 
 		// Resolve dependencies (non-fatal).
@@ -129,7 +131,7 @@ When all flags are provided, no interactive prompts are shown.`,
 		goget.Stdout = os.Stdout
 		goget.Stderr = os.Stderr
 		if err := goget.Run(); err != nil {
-			fmt.Printf("Warning: go get ./... failed: %v\n", err)
+			warnings = append(warnings, fmt.Sprintf("go get ./... failed: %v", err))
 		}
 
 		fmt.Println("Running go mod tidy...")
@@ -138,11 +140,20 @@ When all flags are provided, no interactive prompts are shown.`,
 		tidy.Stdout = os.Stdout
 		tidy.Stderr = os.Stderr
 		if err := tidy.Run(); err != nil {
-			fmt.Printf("Warning: go mod tidy failed: %v\n", err)
+			warnings = append(warnings, fmt.Sprintf("go mod tidy failed: %v", err))
 		}
 
-		fmt.Printf("\nProject %q created successfully!\n\n", name)
-		fmt.Println("Next steps:")
+		if len(warnings) > 0 {
+			fmt.Printf("\nProject %q created with warnings:\n\n", name)
+			for _, w := range warnings {
+				fmt.Printf("  - %s\n", w)
+			}
+			fmt.Println("\nYou may need to run 'go mod tidy' manually to resolve these.")
+		} else {
+			fmt.Printf("\nProject %q created successfully!\n", name)
+		}
+
+		fmt.Println("\nNext steps:")
 		if !inPlace {
 			fmt.Printf("  cd %s\n", dir)
 		}

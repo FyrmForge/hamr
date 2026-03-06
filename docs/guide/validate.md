@@ -36,7 +36,6 @@ validate.Phone(value)                // optional +, 7-15 digits
 validate.URL(value)                  // valid absolute URL
 validate.MinLength(value, 3)         // at least 3 runes
 validate.MaxLength(value, 100)       // at most 100 runes
-validate.Match(value, `^\d{4}$`)     // regex match
 validate.OneOf(value, "a", "b", "c") // allowed values
 ```
 
@@ -68,6 +67,28 @@ for _, r := range reqs {
 }
 ```
 
+## Empty-Input Behavior
+
+All validators (except `Required`) now **reject empty strings by default**. This means
+an empty value will fail `Email`, `Phone`, `URL`, etc. If a field is optional but must
+be valid when provided, wrap the validator with `EmptyOr`:
+
+```go
+// Optional email — blank is OK, but non-blank must be valid.
+if msg := validate.EmptyOr(validate.Email)(""); msg != "" {
+    errors["email"] = msg // not reached — empty passes
+}
+```
+
+`EmptyOr` treats whitespace-only strings as empty:
+
+```go
+validate.EmptyOr(validate.Email)("")      // "" (pass)
+validate.EmptyOr(validate.Email)("   ")   // "" (pass)
+validate.EmptyOr(validate.Email)("bad")   // "Invalid email address"
+validate.EmptyOr(validate.Email)("a@b.c") // "" (pass)
+```
+
 ## Custom Messages
 
 Every validator has a `*Msg` variant that accepts a custom error message:
@@ -90,7 +111,6 @@ All default messages are exported constants in `messages.go`:
 | `MsgURLInvalid` | "Invalid URL" |
 | `MsgMinLength` | "Too short" |
 | `MsgMaxLength` | "Too long" |
-| `MsgPatternMismatch` | "Invalid format" |
 | `MsgOneOf` | "Invalid selection" |
 | `MsgIntRange` | "Value out of range" |
 | `MsgMinAge` | "Does not meet minimum age requirement" |
@@ -144,6 +164,9 @@ func (h *Handler) CreateUser(c echo.Context) error {
 ## API Reference
 
 ```go
+// Higher-order helpers
+func EmptyOr(fn func(string) string) func(string) string
+
 // String validators
 func Required(value string) string
 func Email(value string) string
@@ -151,7 +174,6 @@ func Phone(value string) string
 func URL(value string) string
 func MinLength(value string, min int) string
 func MaxLength(value string, max int) string
-func Match(value string, pattern string) string
 func OneOf(value string, options ...string) string
 
 // Numeric
@@ -172,7 +194,6 @@ func PhoneMsg(value, msg string) string
 func URLMsg(value, msg string) string
 func MinLengthMsg(value string, min int, msg string) string
 func MaxLengthMsg(value string, max int, msg string) string
-func MatchMsg(value, pattern, msg string) string
 func OneOfMsg(value, msg string, options ...string) string
 func IntRangeMsg(value, min, max int, msg string) string
 func MinAgeMsg(birthDate string, minAge int, msg string) string

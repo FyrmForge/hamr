@@ -15,7 +15,6 @@ func TestMessageConstants(t *testing.T) {
 		validate.MsgURLInvalid,
 		validate.MsgMinLength,
 		validate.MsgMaxLength,
-		validate.MsgPatternMismatch,
 		validate.MsgOneOf,
 		validate.MsgIntRange,
 		validate.MsgMinAge,

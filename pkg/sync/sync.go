@@ -57,7 +57,7 @@ func WatchAndSync(ctx context.Context, store storage.FileStorage, dir string) er
 	if err != nil {
 		return fmt.Errorf("create watcher: %w", err)
 	}
-	defer watcher.Close()
+	defer func() { _ = watcher.Close() }()
 
 	if err := addWatchDirs(watcher, dir); err != nil {
 		return fmt.Errorf("watch directories: %w", err)
@@ -130,7 +130,7 @@ func uploadFile(ctx context.Context, store storage.FileStorage, path, key string
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return store.Save(ctx, key, f)
 }
 

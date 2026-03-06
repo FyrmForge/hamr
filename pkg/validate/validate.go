@@ -28,6 +28,18 @@ func RequiredMsg(value, msg string) string {
 	return ""
 }
 
+// EmptyOr wraps a validator function so that empty (whitespace-only) values
+// pass validation. Use this when a field is optional but must be valid if
+// provided.
+func EmptyOr(fn func(string) string) func(string) string {
+	return func(value string) string {
+		if strings.TrimSpace(value) == "" {
+			return ""
+		}
+		return fn(value)
+	}
+}
+
 // Email returns "" if value looks like a valid email, or MsgEmailInvalid.
 func Email(value string) string {
 	return EmailMsg(value, MsgEmailInvalid)
@@ -35,9 +47,6 @@ func Email(value string) string {
 
 // EmailMsg is like Email with a custom message.
 func EmailMsg(value, msg string) string {
-	if value == "" {
-		return ""
-	}
 	if !emailRe.MatchString(value) {
 		return msg
 	}
@@ -52,9 +61,6 @@ func Phone(value string) string {
 
 // PhoneMsg is like Phone with a custom message.
 func PhoneMsg(value, msg string) string {
-	if value == "" {
-		return ""
-	}
 	if !phoneRe.MatchString(value) {
 		return msg
 	}
@@ -68,9 +74,6 @@ func URL(value string) string {
 
 // URLMsg is like URL with a custom message.
 func URLMsg(value, msg string) string {
-	if value == "" {
-		return ""
-	}
 	u, err := url.ParseRequestURI(value)
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return msg
@@ -104,27 +107,6 @@ func MaxLengthMsg(value string, max int, msg string) string {
 	return ""
 }
 
-// Match returns "" if value matches the regular expression pattern, or
-// MsgPatternMismatch.
-func Match(value string, pattern string) string {
-	return MatchMsg(value, pattern, MsgPatternMismatch)
-}
-
-// MatchMsg is like Match with a custom message.
-func MatchMsg(value, pattern, msg string) string {
-	if value == "" {
-		return ""
-	}
-	re, err := regexp.Compile(pattern)
-	if err != nil {
-		return msg
-	}
-	if !re.MatchString(value) {
-		return msg
-	}
-	return ""
-}
-
 // OneOf returns "" if value is one of the allowed options, or MsgOneOf.
 func OneOf(value string, options ...string) string {
 	return OneOfMsg(value, MsgOneOf, options...)
@@ -132,9 +114,6 @@ func OneOf(value string, options ...string) string {
 
 // OneOfMsg is like OneOf with a custom message.
 func OneOfMsg(value, msg string, options ...string) string {
-	if value == "" {
-		return ""
-	}
 	if slices.Contains(options, value) {
 		return ""
 	}
@@ -169,9 +148,6 @@ func MinAge(birthDate string, minAge int) string {
 
 // MinAgeMsg is like MinAge with a custom message.
 func MinAgeMsg(birthDate string, minAge int, msg string) string {
-	if birthDate == "" {
-		return ""
-	}
 	dob, err := time.Parse(dateLayout, birthDate)
 	if err != nil {
 		return msg
@@ -191,9 +167,6 @@ func MaxAge(birthDate string, maxAge int) string {
 
 // MaxAgeMsg is like MaxAge with a custom message.
 func MaxAgeMsg(birthDate string, maxAge int, msg string) string {
-	if birthDate == "" {
-		return ""
-	}
 	dob, err := time.Parse(dateLayout, birthDate)
 	if err != nil {
 		return msg

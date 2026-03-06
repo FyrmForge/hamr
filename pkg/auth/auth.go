@@ -105,6 +105,21 @@ func decodePHC(encoded string) (HashConfig, []byte, []byte, error) {
 	return cfg, salt, hash, nil
 }
 
+// NeedsRehash reports whether the encoded hash was created with parameters
+// that differ from DefaultHashConfig. When true the caller should re-hash the
+// password and update the stored hash. Returns an error if the encoded string
+// cannot be parsed.
+func NeedsRehash(encodedHash string) (bool, error) {
+	cfg, _, _, err := decodePHC(encodedHash)
+	if err != nil {
+		return false, err
+	}
+	return cfg.Time != DefaultHashConfig.Time ||
+		cfg.Memory != DefaultHashConfig.Memory ||
+		cfg.Parallelism != DefaultHashConfig.Parallelism ||
+		cfg.KeyLength != DefaultHashConfig.KeyLength, nil
+}
+
 // GenerateToken returns a 32-byte cryptographically-secure random token
 // encoded with base64 raw-URL encoding.
 func GenerateToken() (string, error) {

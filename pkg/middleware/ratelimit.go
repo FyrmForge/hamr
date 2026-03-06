@@ -111,15 +111,44 @@ type window struct {
 
 // MemoryStore is an in-memory fixed-window rate limit store.
 type MemoryStore struct {
-	mu      sync.Mutex
-	windows map[string]*window
+	mu              sync.Mutex
+	windows         map[string]*window
+	maxSize         int
+	insertOrder     []string
+	cleanupCtx      context.Context
+	cleanupInterval time.Duration
+}
+
+// MemoryStoreOption configures a MemoryStore.
+type MemoryStoreOption func(*MemoryStore)
+
+// WithMaxSize sets the maximum number of entries in the memory store.
+// When full, the oldest entry is evicted.
+func WithMaxSize(n int) MemoryStoreOption {
+	return func(s *MemoryStore) { s.maxSize = n }
+}
+
+// WithAutoCleanup starts a background goroutine that calls CleanupExpired
+// at the given interval. The goroutine stops when ctx is cancelled.
+func WithAutoCleanup(ctx context.Context, interval time.Duration) MemoryStoreOption {
+	return func(s *MemoryStore) {
+		s.cleanupCtx = ctx
+		s.cleanupInterval = interval
+	}
 }
 
 // NewMemoryStore returns a new in-memory rate limit store.
-func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{
+func NewMemoryStore(opts ...MemoryStoreOption) *MemoryStore {
+	s := &MemoryStore{
 		windows: make(map[string]*window),
 	}
+	for _, o := range opts {
+		o(s)
+	}
+	if s.cleanupCtx != nil && s.cleanupInterval > 0 {
+		go s.autoCleanup()
+	}
+	return s
 }
 
 // Allow implements RateLimitStore.
@@ -130,8 +159,19 @@ func (s *MemoryStore) Allow(_ context.Context, key string, rate int, dur time.Du
 	now := time.Now()
 	w, ok := s.windows[key]
 	if !ok || now.Sub(w.start) >= dur {
+		isNew := !ok
 		w = &window{count: 0, start: now}
 		s.windows[key] = w
+
+		if isNew {
+			// Evict oldest entry if max size exceeded.
+			if s.maxSize > 0 && len(s.insertOrder) >= s.maxSize {
+				oldest := s.insertOrder[0]
+				s.insertOrder = s.insertOrder[1:]
+				delete(s.windows, oldest)
+			}
+			s.insertOrder = append(s.insertOrder, key)
+		}
 	}
 
 	w.count++
@@ -153,6 +193,30 @@ func (s *MemoryStore) CleanupExpired(window time.Duration) {
 	for key, w := range s.windows {
 		if now.Sub(w.start) >= window {
 			delete(s.windows, key)
+		}
+	}
+
+	// Rebuild insertOrder to remove deleted keys.
+	if s.maxSize > 0 {
+		alive := s.insertOrder[:0]
+		for _, key := range s.insertOrder {
+			if _, ok := s.windows[key]; ok {
+				alive = append(alive, key)
+			}
+		}
+		s.insertOrder = alive
+	}
+}
+
+func (s *MemoryStore) autoCleanup() {
+	ticker := time.NewTicker(s.cleanupInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.cleanupCtx.Done():
+			return
+		case <-ticker.C:
+			s.CleanupExpired(s.cleanupInterval)
 		}
 	}
 }

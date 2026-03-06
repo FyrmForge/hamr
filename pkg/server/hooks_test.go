@@ -3,12 +3,9 @@ package server_test
 import (
 	"context"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/FyrmForge/hamr/pkg/server"
-	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -87,46 +84,6 @@ func TestRunAfterMigrate_error(t *testing.T) {
 
 	err = srv.RunAfterMigrate(context.Background())
 	assert.EqualError(t, err, "after failed")
-}
-
-func TestShutdown_runsHooks(t *testing.T) {
-	hookRan := false
-	srv, err := server.New(
-		server.WithDevMode(true),
-		server.WithOnShutdown(func(_ context.Context) error {
-			hookRan = true
-			return nil
-		}),
-	)
-	require.NoError(t, err)
-
-	err = srv.Shutdown(context.Background())
-	require.NoError(t, err)
-	assert.True(t, hookRan)
-}
-
-func TestShutdown_hookError_continuesShutdown(t *testing.T) {
-	srv, err := server.New(
-		server.WithDevMode(true),
-		server.WithOnShutdown(func(_ context.Context) error {
-			return errors.New("shutdown hook failed")
-		}),
-	)
-	require.NoError(t, err)
-
-	// Shutdown should succeed even if the hook errors.
-	err = srv.Shutdown(context.Background())
-	require.NoError(t, err)
-
-	// Verify the Echo server is actually shut down by checking it rejects requests.
-	srv.GET("/test", func(c echo.Context) error {
-		return c.String(http.StatusOK, "ok")
-	})
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	rec := httptest.NewRecorder()
-	srv.Echo().ServeHTTP(rec, req)
-	// After shutdown, the server may still serve via ServeHTTP (it's a handler),
-	// but the important thing is Shutdown didn't return an error.
 }
 
 func TestMultipleHooks_executionOrder(t *testing.T) {

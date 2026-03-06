@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -27,14 +28,21 @@ type SessionStore interface {
 	DeleteBySubjectID(ctx context.Context, subjectID string) error
 }
 
+// SessionToucher is optionally implemented by a SessionStore that supports
+// extending session expiry without creating a new session.
+type SessionToucher interface {
+	Touch(ctx context.Context, id string, newExpiresAt time.Time) error
+}
+
 // SessionManager manages session lifecycle on top of a SessionStore.
 type SessionManager struct {
-	store        SessionStore
-	duration     time.Duration
-	cookieName   string
-	cookiePath   string
-	cookieSecure bool
-	sameSite     http.SameSite
+	store             SessionStore
+	duration          time.Duration
+	slidingThreshold  time.Duration
+	cookieName        string
+	cookiePath        string
+	cookieSecure      bool
+	sameSite          http.SameSite
 }
 
 // SessionOption configures a SessionManager.
@@ -63,6 +71,14 @@ func WithCookieSecure(secure bool) SessionOption {
 // WithSameSite sets the SameSite attribute on the session cookie.
 func WithSameSite(ss http.SameSite) SessionOption {
 	return func(m *SessionManager) { m.sameSite = ss }
+}
+
+// WithSlidingRefresh sets the threshold after which a validated session's
+// expiry is automatically extended. When the session age exceeds threshold,
+// the store is type-asserted to SessionToucher and, if implemented, Touch is
+// called to push the expiry forward by the configured duration.
+func WithSlidingRefresh(threshold time.Duration) SessionOption {
+	return func(m *SessionManager) { m.slidingThreshold = threshold }
 }
 
 // NewSessionManager returns a SessionManager with sensible defaults.
@@ -119,6 +135,16 @@ func (m *SessionManager) ValidateSession(ctx context.Context, token string) (*Se
 		_ = m.store.Delete(ctx, s.ID)
 		return nil, nil
 	}
+
+	// Sliding refresh: extend expiry when session age exceeds the threshold.
+	if m.slidingThreshold > 0 && time.Since(s.CreatedAt) > m.slidingThreshold {
+		if toucher, ok := m.store.(SessionToucher); ok {
+			if err := toucher.Touch(ctx, s.ID, time.Now().Add(m.duration)); err != nil {
+				slog.Default().Warn("auth: sliding refresh failed", "session", s.ID, "error", err)
+			}
+		}
+	}
+
 	return s, nil
 }
 

@@ -3,6 +3,7 @@
 package db
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"time"
@@ -96,16 +97,21 @@ func Connect(databaseURL string, opts ...ConnectOption) (*sqlx.DB, error) {
 }
 
 // StartKeepAlive launches poolSize goroutines that each ping db every interval.
-// Failures are logged via slog.Default(). The goroutines run for the lifetime
-// of the process.
-func StartKeepAlive(db *sqlx.DB, interval time.Duration, poolSize int) {
+// Failures are logged via slog.Default(). The goroutines exit when ctx is
+// cancelled.
+func StartKeepAlive(ctx context.Context, db *sqlx.DB, interval time.Duration, poolSize int) {
 	for range poolSize {
 		go func() {
 			ticker := time.NewTicker(interval)
 			defer ticker.Stop()
-			for range ticker.C {
-				if err := db.Ping(); err != nil {
-					slog.Default().Error("db: keep-alive ping failed", "error", err)
+			for {
+				select {
+				case <-ticker.C:
+					if err := db.Ping(); err != nil {
+						slog.Default().Error("db: keep-alive ping failed", "error", err)
+					}
+				case <-ctx.Done():
+					return
 				}
 			}
 		}()

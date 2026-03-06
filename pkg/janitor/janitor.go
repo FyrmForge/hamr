@@ -35,6 +35,7 @@ type PostTickFunc func(ctx context.Context)
 
 // Janitor runs a set of Tasks on a fixed interval.
 type Janitor struct {
+	ctx            context.Context
 	interval       time.Duration
 	timeout        time.Duration
 	runImmediately bool
@@ -74,8 +75,9 @@ func (j *Janitor) AddTask(task Task) *Janitor {
 
 // Start validates configuration, optionally runs tasks immediately, and spawns
 // the background ticker goroutine. It returns an error if the configuration is
-// invalid.
-func (j *Janitor) Start() error {
+// invalid. The provided context is stored and used for all tick/task execution;
+// cancelling it will also stop the background goroutine.
+func (j *Janitor) Start(ctx context.Context) error {
 	if j.interval <= 0 {
 		return fmt.Errorf("janitor: interval must be positive, got %v", j.interval)
 	}
@@ -85,6 +87,8 @@ func (j *Janitor) Start() error {
 	if j.logger == nil {
 		j.logger = slog.Default()
 	}
+
+	j.ctx = ctx
 
 	if j.runImmediately {
 		j.runTick()
@@ -98,6 +102,8 @@ func (j *Janitor) Start() error {
 			case <-ticker.C:
 				j.runTick()
 			case <-j.done:
+				return
+			case <-ctx.Done():
 				return
 			}
 		}
@@ -114,7 +120,7 @@ func (j *Janitor) Stop() {
 
 // runTick executes one full tick cycle: preTick hooks, all tasks, postTick hooks.
 func (j *Janitor) runTick() {
-	ctx := context.Background()
+	ctx := j.ctx
 
 	for _, fn := range j.preTick {
 		if err := fn(ctx); err != nil {

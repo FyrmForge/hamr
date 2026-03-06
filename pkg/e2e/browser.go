@@ -27,6 +27,7 @@ import (
 // Config controls browser lifecycle, timeouts, and artifact capture.
 type Config struct {
 	Headless            bool          // default: true,  env: E2E_HEADLESS
+	NoSandbox           bool          // default: true,  env: E2E_NO_SANDBOX
 	SlowMotion          time.Duration // default: 0,     env: E2E_SLOW_MOTION
 	Timeout             time.Duration // default: 10s,   env: E2E_TIMEOUT
 	ArtifactDir         string        // default: "testdata/e2e-artifacts", env: E2E_ARTIFACT_DIR
@@ -37,6 +38,7 @@ type Config struct {
 func defaultConfig() Config {
 	return Config{
 		Headless:            true,
+		NoSandbox:           true,
 		SlowMotion:          0,
 		Timeout:             10 * time.Second,
 		ArtifactDir:         "testdata/e2e-artifacts",
@@ -69,6 +71,10 @@ func WithScreenshotOnFailure(b bool) Option { return func(c *Config) { c.Screens
 
 // WithHTMLDumpOnFailure enables or disables automatic HTML dumps on test failure.
 func WithHTMLDumpOnFailure(b bool) Option { return func(c *Config) { c.HTMLDumpOnFailure = b } }
+
+// WithNoSandbox controls the Chrome --no-sandbox flag. Defaults to true for CI
+// environments. Set to false when running with a proper sandbox available.
+func WithNoSandbox(b bool) Option { return func(c *Config) { c.NoSandbox = b } }
 
 // ---------------------------------------------------------------------------
 // Unexported env helpers (no dependency on pkg/config)
@@ -125,6 +131,7 @@ func buildConfig(opts []Option) Config {
 	cfg.SlowMotion = getEnvDuration("E2E_SLOW_MOTION", cfg.SlowMotion)
 	cfg.Timeout = getEnvDuration("E2E_TIMEOUT", cfg.Timeout)
 	cfg.ArtifactDir = getEnvString("E2E_ARTIFACT_DIR", cfg.ArtifactDir)
+	cfg.NoSandbox = getEnvBool("E2E_NO_SANDBOX", cfg.NoSandbox)
 	cfg.ScreenshotOnFailure = getEnvBool("E2E_SCREENSHOT_ON_FAIL", cfg.ScreenshotOnFailure)
 	cfg.HTMLDumpOnFailure = getEnvBool("E2E_HTML_DUMP_ON_FAIL", cfg.HTMLDumpOnFailure)
 
@@ -154,7 +161,7 @@ func SetupBrowser(t *testing.T, opts ...Option) *rod.Browser {
 
 	l := launcher.New().
 		Headless(cfg.Headless).
-		NoSandbox(true).
+		NoSandbox(cfg.NoSandbox).
 		Set("disable-dev-shm-usage").
 		Set("disable-gpu")
 

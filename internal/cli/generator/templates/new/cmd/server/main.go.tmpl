@@ -72,7 +72,7 @@ func main() {
 		log.Error("failed to connect to database", "error", err)
 		os.Exit(1)
 	}
-	db.StartKeepAlive(database, 30*time.Second, 2)
+	db.StartKeepAlive(context.Background(), database, 30*time.Second, 2)
 
 	if err := db.Migrate(database, appdb.MigrateConfig()); err != nil {
 		log.Error("failed to run migrations", "error", err)

@@ -38,7 +38,8 @@ HAMR is two things:
 | `pkg/storage`      | File storage interface with local filesystem and S3/R2/MinIO backends              | [docs/guide/storage.md](docs/guide/storage.md) |
 | `pkg/async`        | Concurrent execution primitives with panic recovery                                | [docs/guide/async.md](docs/guide/async.md) |
 | `pkg/websocket`    | Session and room-based WebSocket hub with HTMX integration                         | [docs/guide/websocket.md](docs/guide/websocket.md) |
-| `pkg/client`       | Inter-service HTTP client with header propagation                                  | [docs/guide/client.md](docs/guide/client.md) |
+| `pkg/media`        | Image and video upload, processing, and serving on top of storage                  | [docs/guide/media.md](docs/guide/media.md) |
+| `pkg/sync`         | S3 sync for static assets with file watching                                       | [docs/guide/sync.md](docs/guide/sync.md) |
 | `pkg/e2e`          | Reusable go-rod browser helpers for E2E testing                                    | [docs/guide/e2e.md](docs/guide/e2e.md) |
 
 ### CLI commands
@@ -46,7 +47,9 @@ HAMR is two things:
 | Command                     | What it does                                    |
 | --------------------------- | ----------------------------------------------  |
 | `hamr new <name>`           | Scaffold a new project with interactive options |
-| `hamr add service <name>`   | Add a service to an existing project            |
+| `hamr sync`                 | Sync a local directory to an S3-compatible bucket |
+| `hamr vendor`               | Download and checksum frontend JS dependencies  |
+| `hamr rename module <path>` | Rename the Go module and update all import paths |
 | `hamr version`              | Print version and commit                        |
 
 ## Install
@@ -92,9 +95,10 @@ hamr new myproject
 
 # Run it
 cd myproject
-docker compose up -d        # start Postgres
-make migrate                # run migrations
-make dev                    # start dev server
+make docker-up              # start Postgres
+make dev                    # start dev server (migrations run on startup)
+# Or run migrations separately:
+make migrate                # run migrations standalone
 ```
 
 ## Generated project structure
@@ -141,8 +145,6 @@ myproject/
 **Identity is a string** -- all framework packages accept subject IDs as `string`. Projects using `int64`, `uuid.UUID`, or a field called `account_id` provide their own conversion at the boundary.
 
 **Callback-based extensibility** -- auth middleware uses a `SubjectLoader` callback, RBAC uses a `RoleChecker` callback. The framework never knows your user struct.
-
-**Start monolith, add services later** -- `hamr add service billing` scaffolds a new service with its own `cmd/`, config, and Dockerfile. Inter-service calls propagate request ID and subject ID via `pkg/client`.
 
 ## Development
 

@@ -13,9 +13,10 @@ import (
 )
 
 // RenameModule rewrites the module directive in go.mod and updates all import
-// paths in .go files under dir. It returns the old module path and the number
-// of .go files that were modified.
-func RenameModule(dir, newModule string) (oldModule string, filesUpdated int, err error) {
+// paths in .go files under dir. When dryRun is true it detects changes and
+// prints affected files but does not write anything. It returns the old module
+// path and the number of .go files that were (or would be) modified.
+func RenameModule(dir, newModule string, dryRun bool) (oldModule string, filesUpdated int, err error) {
 	goModPath := filepath.Join(dir, "go.mod")
 	oldModule, _, err = parseGoMod(goModPath)
 	if err != nil {
@@ -37,19 +38,25 @@ func RenameModule(dir, newModule string) (oldModule string, filesUpdated int, er
 
 		switch {
 		case strings.HasSuffix(path, ".go"):
-			changed, rewriteErr := rewriteImports(path, oldModule, newModule)
+			changed, rewriteErr := rewriteImports(path, oldModule, newModule, dryRun)
 			if rewriteErr != nil {
 				return fmt.Errorf("rewrite %s: %w", path, rewriteErr)
 			}
 			if changed {
+				if dryRun {
+					fmt.Printf("  would update: %s\n", path)
+				}
 				filesUpdated++
 			}
 		case strings.HasSuffix(path, ".templ"):
-			changed, rewriteErr := rewriteTemplImports(path, oldModule, newModule)
+			changed, rewriteErr := rewriteTemplImports(path, oldModule, newModule, dryRun)
 			if rewriteErr != nil {
 				return fmt.Errorf("rewrite %s: %w", path, rewriteErr)
 			}
 			if changed {
+				if dryRun {
+					fmt.Printf("  would update: %s\n", path)
+				}
 				filesUpdated++
 			}
 		}
@@ -60,8 +67,10 @@ func RenameModule(dir, newModule string) (oldModule string, filesUpdated int, er
 	}
 
 	// Update go.mod module directive.
-	if err := rewriteGoMod(goModPath, oldModule, newModule); err != nil {
-		return oldModule, filesUpdated, fmt.Errorf("rewrite go.mod: %w", err)
+	if !dryRun {
+		if err := rewriteGoMod(goModPath, oldModule, newModule); err != nil {
+			return oldModule, filesUpdated, fmt.Errorf("rewrite go.mod: %w", err)
+		}
 	}
 
 	return oldModule, filesUpdated, nil
@@ -69,7 +78,8 @@ func RenameModule(dir, newModule string) (oldModule string, filesUpdated int, er
 
 // rewriteImports parses a Go file and replaces import paths that match the old
 // module prefix with the new one. Returns true if the file was modified.
-func rewriteImports(path, oldModule, newModule string) (bool, error) {
+// When dryRun is true, it detects changes but does not write the file.
+func rewriteImports(path, oldModule, newModule string, dryRun bool) (bool, error) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
 	if err != nil {
@@ -88,6 +98,10 @@ func rewriteImports(path, oldModule, newModule string) (bool, error) {
 
 	if !changed {
 		return false, nil
+	}
+
+	if dryRun {
+		return true, nil
 	}
 
 	// Rewrite any package-qualified identifiers that use named imports aren't
@@ -112,8 +126,9 @@ func writeAST(fset *token.FileSet, f *ast.File, path string) error {
 }
 
 // rewriteTemplImports does a text-based replacement of import paths in .templ
-// files, which cannot be parsed by go/parser.
-func rewriteTemplImports(path, oldModule, newModule string) (bool, error) {
+// files, which cannot be parsed by go/parser. When dryRun is true, it detects
+// changes but does not write the file.
+func rewriteTemplImports(path, oldModule, newModule string, dryRun bool) (bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return false, err
@@ -125,6 +140,10 @@ func rewriteTemplImports(path, oldModule, newModule string) (bool, error) {
 
 	if updated == content {
 		return false, nil
+	}
+
+	if dryRun {
+		return true, nil
 	}
 
 	info, err := os.Stat(path)

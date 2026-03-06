@@ -9,9 +9,10 @@ import (
 
 // CORSConfig allows overriding CORS defaults.
 type CORSConfig struct {
-	AllowOrigins []string
-	AllowMethods []string
-	AllowHeaders []string
+	AllowOrigins     []string
+	AllowMethods     []string
+	AllowHeaders     []string
+	AllowCredentials bool
 }
 
 // CORS returns CORS middleware with framework defaults.
@@ -52,8 +53,9 @@ func CORSWithConfig(cfg CORSConfig) echo.MiddlewareFunc {
 	}
 
 	return echoMw.CORSWithConfig(echoMw.CORSConfig{
-		AllowOrigins: origins,
-		AllowMethods: methods,
-		AllowHeaders: headers,
+		AllowOrigins:     origins,
+		AllowMethods:     methods,
+		AllowHeaders:     headers,
+		AllowCredentials: cfg.AllowCredentials,
 	})
 }

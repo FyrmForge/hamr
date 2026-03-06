@@ -1,0 +1,31 @@
+package main
+
+import (
+	"fmt"
+	"os"
+
+	_ "github.com/joho/godotenv/autoload"
+
+	"github.com/FyrmForge/hamr/pkg/config"
+	"github.com/FyrmForge/hamr/pkg/db"
+
+	appdb "{{.Module}}/internal/db"
+)
+
+var envDatabaseURL = config.GetEnvOrDefault("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/{{.Name}}?sslmode=disable")
+
+func main() {
+	database, err := db.Connect(envDatabaseURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to connect to database: %v\n", err)
+		os.Exit(1)
+	}
+	defer database.Close()
+
+	if err := db.Migrate(database, appdb.MigrateConfig()); err != nil {
+		fmt.Fprintf(os.Stderr, "migration failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("migrations completed successfully")
+}

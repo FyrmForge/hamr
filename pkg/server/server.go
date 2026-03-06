@@ -37,8 +37,6 @@ type Server struct {
 	embeddedFS     fs.FS
 	embeddedPrefix string
 
-	onServerStart   []HookFunc
-	onShutdown      []HookFunc
 	onBeforeMigrate []HookFunc
 	onAfterMigrate  []HookFunc
 }
@@ -150,12 +148,11 @@ func (s *Server) Group(prefix string, m ...echo.MiddlewareFunc) *echo.Group {
 }
 
 // Start begins listening and blocks until SIGINT/SIGTERM or a listener error.
-// It runs on-start hooks after the listener is up and on-shutdown hooks during
-// graceful shutdown.
+// It performs graceful shutdown when a signal is received.
 func (s *Server) Start() error {
 	addr := s.Addr()
 
-	// Pre-bind the listener so on-start hooks can safely connect to the server.
+	// Pre-bind the listener before starting the server.
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("server: listen %s: %w", addr, err)
@@ -169,14 +166,6 @@ func (s *Server) Start() error {
 		}
 		close(errCh)
 	}()
-
-	// Run on-server-start hooks — listener is guaranteed ready.
-	if err := runHooks(context.Background(), s.onServerStart); err != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), s.shutdownTimeout)
-		defer cancel()
-		_ = s.Shutdown(ctx)
-		return fmt.Errorf("server: on-start hook: %w", err)
-	}
 
 	// Wait for signal or listener error.
 	quit := make(chan os.Signal, 1)
@@ -209,13 +198,7 @@ func (s *Server) Start() error {
 	return nil
 }
 
-// Shutdown runs on-shutdown hooks (logging errors but continuing) and then
-// shuts down the Echo server.
+// Shutdown shuts down the Echo server gracefully.
 func (s *Server) Shutdown(ctx context.Context) error {
-	for _, fn := range s.onShutdown {
-		if err := fn(ctx); err != nil {
-			slog.Default().Error("server: shutdown hook error", "error", err)
-		}
-	}
 	return s.echo.Shutdown(ctx)
 }

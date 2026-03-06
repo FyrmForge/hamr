@@ -95,8 +95,8 @@ func TestParseNameVersion(t *testing.T) {
 
 func TestDownloadAndChecksum(t *testing.T) {
 	content := "console.log('hello');"
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, content)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, content)
 	}))
 	defer ts.Close()
 
@@ -133,17 +133,17 @@ func TestDownloadAndChecksum_httpError(t *testing.T) {
 // for the three default dependencies.
 func newTestServer() *httptest.Server {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/htmx.min.js", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "/* htmx */")
+	mux.HandleFunc("/htmx.min.js", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, "/* htmx */")
 	})
-	mux.HandleFunc("/alpine.min.js", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "/* alpine */")
+	mux.HandleFunc("/alpine.min.js", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, "/* alpine */")
 	})
-	mux.HandleFunc("/idiomorph.min.js", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "/* idiomorph */")
+	mux.HandleFunc("/idiomorph.min.js", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, "/* idiomorph */")
 	})
-	mux.HandleFunc("/custom.js", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "/* custom */")
+	mux.HandleFunc("/custom.js", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, "/* custom */")
 	})
 	return httptest.NewServer(mux)
 }
@@ -296,9 +296,9 @@ func TestVendorVerify_noLockFile(t *testing.T) {
 
 func TestVendorSkipsExisting(t *testing.T) {
 	downloads := 0
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		downloads++
-		fmt.Fprint(w, "/* htmx */")
+		_, _ = fmt.Fprint(w, "/* htmx */")
 	}))
 	defer ts.Close()
 

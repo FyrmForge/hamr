@@ -11,7 +11,6 @@ const (
 	MsgURLInvalid      = "Invalid URL"
 	MsgMinLength       = "Too short"
 	MsgMaxLength       = "Too long"
-	MsgPatternMismatch = "Invalid format"
 	MsgOneOf           = "Invalid selection"
 	MsgIntRange        = "Value out of range"
 	MsgMinAge          = "Does not meet minimum age requirement"

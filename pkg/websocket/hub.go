@@ -139,60 +139,83 @@ func (h *Hub) Close() {
 // --- Sending ---
 
 // SendToSession sends a message to the client with the given session ID.
-func (h *Hub) SendToSession(sessionID string, msg []byte) {
+// Returns true if the message was sent, false if the session was not found
+// or the message was dropped.
+func (h *Hub) SendToSession(sessionID string, msg []byte) bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
 	if c, ok := h.clients[sessionID]; ok {
-		h.safeSend(c, msg)
+		return h.safeSend(c, msg)
 	}
+	return false
 }
 
 // SendToSubject sends a message to all clients associated with a subject ID.
-func (h *Hub) SendToSubject(subjectID string, msg []byte) {
+// Returns the number of dropped messages.
+func (h *Hub) SendToSubject(subjectID string, msg []byte) int {
 	if subjectID == "" {
-		return
+		return 0
 	}
 
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
+	dropped := 0
 	for c := range h.subjects[subjectID] {
-		h.safeSend(c, msg)
+		if !h.safeSend(c, msg) {
+			dropped++
+		}
 	}
+	return dropped
 }
 
 // SendToRoom sends a message to all clients in a room.
-func (h *Hub) SendToRoom(room string, msg []byte) {
+// Returns the number of dropped messages.
+func (h *Hub) SendToRoom(room string, msg []byte) int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
+	dropped := 0
 	for c := range h.rooms[room] {
-		h.safeSend(c, msg)
+		if !h.safeSend(c, msg) {
+			dropped++
+		}
 	}
+	return dropped
 }
 
 // SendToRoomExcept sends a message to all clients in a room except one session.
-func (h *Hub) SendToRoomExcept(room string, msg []byte, exceptSessionID string) {
+// Returns the number of dropped messages.
+func (h *Hub) SendToRoomExcept(room string, msg []byte, exceptSessionID string) int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
+	dropped := 0
 	for c := range h.rooms[room] {
 		if c.SessionID == exceptSessionID {
 			continue
 		}
-		h.safeSend(c, msg)
+		if !h.safeSend(c, msg) {
+			dropped++
+		}
 	}
+	return dropped
 }
 
 // Broadcast sends a message to every connected client.
-func (h *Hub) Broadcast(msg []byte) {
+// Returns the number of dropped messages.
+func (h *Hub) Broadcast(msg []byte) int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
+	dropped := 0
 	for _, c := range h.clients {
-		h.safeSend(c, msg)
+		if !h.safeSend(c, msg) {
+			dropped++
+		}
 	}
+	return dropped
 }
 
 // --- Room management ---
@@ -322,13 +345,15 @@ func (h *Hub) unregister(c *Client) {
 }
 
 // safeSend performs a non-blocking send to the client's send channel.
-// Drops the message and logs a warning if the buffer is full.
-func (h *Hub) safeSend(c *Client, msg []byte) {
+// Returns true if the message was sent, false if it was dropped.
+func (h *Hub) safeSend(c *Client, msg []byte) bool {
 	select {
 	case c.send <- msg:
+		return true
 	default:
 		h.logger.Warn("websocket: send buffer full, dropping message",
 			"session_id", c.SessionID,
 		)
+		return false
 	}
 }

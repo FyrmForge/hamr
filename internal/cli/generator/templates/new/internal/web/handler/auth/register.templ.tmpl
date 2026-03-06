@@ -3,7 +3,7 @@ package auth
 import "{{.Module}}/internal/web/components"
 import "{{.Module}}/internal/web/components/form"
 
-templ registerPage(csrfToken string) {
+templ registerPage(csrfToken, name, email string, errs map[string]string) {
 	@components.Layout("Register") {
 {{- if eq .CSS "tailwind"}}
 		<div class="max-w-md mx-auto mt-16 bg-slate-800 border border-slate-700 rounded-lg p-8">
@@ -12,15 +12,25 @@ templ registerPage(csrfToken string) {
 				@form.CSRFField(csrfToken)
 				<div class="mb-6">
 					<label for="name" class="block text-sm font-medium text-slate-400 mb-1">Name</label>
-					<input type="text" id="name" name="name" required class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"/>
+					<input type="text" id="name" name="name" value={ name } required class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"/>
+					if msg, ok := errs["name"]; ok {
+						<p class="mt-1 text-sm text-red-400">{ msg }</p>
+					}
 				</div>
 				<div class="mb-6">
 					<label for="email" class="block text-sm font-medium text-slate-400 mb-1">Email</label>
-					<input type="email" id="email" name="email" required class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"/>
+					<input type="email" id="email" name="email" value={ email } required class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"/>
+					if msg, ok := errs["email"]; ok {
+						<p class="mt-1 text-sm text-red-400">{ msg }</p>
+					}
 				</div>
 				<div class="mb-6">
 					<label for="password" class="block text-sm font-medium text-slate-400 mb-1">Password</label>
 					<input type="password" id="password" name="password" required class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"/>
+					if msg, ok := errs["password"]; ok {
+						<p class="mt-1 text-sm text-red-400">{ msg }</p>
+					}
+					<p class="mt-1 text-xs text-slate-500">At least 8 characters with uppercase, lowercase, and a number</p>
 				</div>
 				<button type="submit" class="w-full py-2 px-4 bg-blue-500 hover:bg-blue-400 text-white font-medium rounded-md transition-colors">Register</button>
 			</form>
@@ -33,15 +43,25 @@ templ registerPage(csrfToken string) {
 					@form.CSRFField(csrfToken)
 					<div class="form-group">
 						<label for="name">Name</label>
-						<input type="text" id="name" name="name" required/>
+						<input type="text" id="name" name="name" value={ name } required/>
+						if msg, ok := errs["name"]; ok {
+							<p class="field-error">{ msg }</p>
+						}
 					</div>
 					<div class="form-group">
 						<label for="email">Email</label>
-						<input type="email" id="email" name="email" required/>
+						<input type="email" id="email" name="email" value={ email } required/>
+						if msg, ok := errs["email"]; ok {
+							<p class="field-error">{ msg }</p>
+						}
 					</div>
 					<div class="form-group">
 						<label for="password">Password</label>
 						<input type="password" id="password" name="password" required/>
+						if msg, ok := errs["password"]; ok {
+							<p class="field-error">{ msg }</p>
+						}
+						<p class="field-hint">At least 8 characters with uppercase, lowercase, and a number</p>
 					</div>
 					<button type="submit" class="btn btn-primary" style="width:100%">Register</button>
 				</form>

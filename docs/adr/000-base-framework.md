@@ -183,7 +183,7 @@ CREATE INDEX idx_sessions_subject_id ON sessions (subject_id) WHERE subject_id I
 ### 7. `pkg/db/db.go`
 - `Connect(databaseURL string, opts ...ConnectOption) (*sqlx.DB, error)` - retry with backoff
 - `ConnectConfig`: MaxOpenConns(10), MaxIdleConns(5), ConnMaxIdleTime(5s), ConnMaxLifetime(1m), MaxRetries(3)
-- `StartKeepAlive(db *sqlx.DB, interval time.Duration, poolSize int)`
+- `StartKeepAlive(ctx context.Context, db *sqlx.DB, interval time.Duration, poolSize int)`
 
 ### 8. `pkg/db/migrate.go`
 - `Migrate(db *sqlx.DB, cfg MigrateConfig) error` - user passes `embed.FS`
@@ -302,7 +302,7 @@ Response headers:
 - Route methods: `GET`, `POST`, `PUT`, `DELETE`, `PATCH`, `Group`
 - `Echo() *echo.Echo` for escape hatch
 - `Start() error`, `Shutdown(ctx) error`
-- Hooks: `WithOnServerStart(fn)`, `WithOnShutdown(fn)`, `WithOnBeforeMigrate(fn)`, `WithOnAfterMigrate(fn)`
+- Hooks: `WithOnBeforeMigrate(fn)`, `WithOnAfterMigrate(fn)`
 - **Production defaults** (enabled unless overridden):
   - Panic recovery (`middleware.Recover()`)
   - Request timeout: 30s

@@ -226,9 +226,10 @@ siteGroup.Use(middleware.CSRFWithConfig(middleware.CSRFConfig{
 apiGroup.Use(middleware.CORS())
 // or with config:
 apiGroup.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-    AllowOrigins: []string{"https://myapp.com"},
-    AllowMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-    AllowHeaders: []string{"Origin", "Content-Type", "Authorization"},
+    AllowOrigins:     []string{"https://myapp.com"},
+    AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+    AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+    AllowCredentials: true,
 }))
 ```
 
@@ -295,7 +296,7 @@ func GetFlash(c echo.Context) *FlashMessage
 // Rate limiting
 func RateLimit(store RateLimitStore) echo.MiddlewareFunc
 func RateLimitWithConfig(cfg RateLimitConfig) echo.MiddlewareFunc
-func NewMemoryStore() *MemoryStore
+func NewMemoryStore(opts ...MemoryStoreOption) *MemoryStore
 func NewPGStore(db DB) *PGStore
 
 // Request ID

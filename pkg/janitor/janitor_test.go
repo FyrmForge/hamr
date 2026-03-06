@@ -83,14 +83,14 @@ func TestAddTask_chaining(t *testing.T) {
 
 func TestStart_invalidInterval(t *testing.T) {
 	j := New(0, WithLogger(discardLogger()))
-	err := j.Start()
+	err := j.Start(context.Background())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "interval must be positive")
 }
 
 func TestStart_invalidTimeout(t *testing.T) {
 	j := New(1*time.Hour, WithTimeout(0), WithLogger(discardLogger()))
-	err := j.Start()
+	err := j.Start(context.Background())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "timeout must be positive")
 }
@@ -102,7 +102,7 @@ func TestStart_runImmediately(t *testing.T) {
 		WithLogger(discardLogger()),
 	).AddTask(task)
 
-	err := j.Start()
+	err := j.Start(context.Background())
 	require.NoError(t, err)
 	defer j.Stop()
 
@@ -116,7 +116,7 @@ func TestStart_tickExecution(t *testing.T) {
 		WithLogger(discardLogger()),
 	).AddTask(task)
 
-	err := j.Start()
+	err := j.Start(context.Background())
 	require.NoError(t, err)
 	defer j.Stop()
 
@@ -127,7 +127,7 @@ func TestStart_tickExecution(t *testing.T) {
 
 func TestStop_idempotent(t *testing.T) {
 	j := New(1*time.Hour, WithLogger(discardLogger()))
-	require.NoError(t, j.Start())
+	require.NoError(t, j.Start(context.Background()))
 
 	assert.NotPanics(t, func() {
 		j.Stop()
@@ -143,7 +143,7 @@ func TestTask_timeout(t *testing.T) {
 		WithLogger(discardLogger()),
 	).AddTask(task)
 
-	err := j.Start()
+	err := j.Start(context.Background())
 	require.NoError(t, err)
 	defer j.Stop()
 
@@ -165,7 +165,7 @@ func TestTask_errorDoesNotStopOthers(t *testing.T) {
 		WithLogger(discardLogger()),
 	).AddTask(bad).AddTask(good)
 
-	require.NoError(t, j.Start())
+	require.NoError(t, j.Start(context.Background()))
 	defer j.Stop()
 
 	assert.Equal(t, 1, bad.callCount())
@@ -185,7 +185,7 @@ func TestPreRun_called(t *testing.T) {
 		}),
 	).AddTask(task)
 
-	require.NoError(t, j.Start())
+	require.NoError(t, j.Start(context.Background()))
 	defer j.Stop()
 
 	assert.Equal(t, "pr", got.Load())
@@ -206,7 +206,7 @@ func TestPreRun_errorSkipsTask(t *testing.T) {
 		}),
 	).AddTask(skipped).AddTask(notSkipped)
 
-	require.NoError(t, j.Start())
+	require.NoError(t, j.Start(context.Background()))
 	defer j.Stop()
 
 	assert.Equal(t, 0, skipped.callCount(), "pre-run error should skip the task")
@@ -233,7 +233,7 @@ func TestPostRun_called(t *testing.T) {
 		}),
 	).AddTask(task)
 
-	require.NoError(t, j.Start())
+	require.NoError(t, j.Start(context.Background()))
 	defer j.Stop()
 
 	assert.Equal(t, "post", gotName.Load())
@@ -254,7 +254,7 @@ func TestPreTick_called(t *testing.T) {
 		}),
 	).AddTask(task)
 
-	require.NoError(t, j.Start())
+	require.NoError(t, j.Start(context.Background()))
 	defer j.Stop()
 
 	assert.True(t, called.Load())
@@ -272,7 +272,7 @@ func TestPreTick_errorSkipsTick(t *testing.T) {
 		}),
 	).AddTask(task)
 
-	require.NoError(t, j.Start())
+	require.NoError(t, j.Start(context.Background()))
 	defer j.Stop()
 
 	assert.Equal(t, 0, task.callCount(), "pre-tick error should skip the entire tick")
@@ -290,7 +290,7 @@ func TestPostTick_called(t *testing.T) {
 		}),
 	).AddTask(task)
 
-	require.NoError(t, j.Start())
+	require.NoError(t, j.Start(context.Background()))
 	defer j.Stop()
 
 	assert.True(t, called.Load())

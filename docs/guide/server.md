@@ -72,22 +72,6 @@ api.POST("/users", createUserHandler)
 
 ## Lifecycle Hooks
 
-Register callbacks for server events:
-
-```go
-srv, err := server.New(
-    server.WithPort(8080),
-    server.WithOnServerStart(func(ctx context.Context) error {
-        log.Println("Server started")
-        return nil
-    }),
-    server.WithOnShutdown(func(ctx context.Context) error {
-        log.Println("Shutting down...")
-        return nil
-    }),
-)
-```
-
 ### Migration hooks
 
 Run hooks before/after database migrations:
@@ -112,8 +96,6 @@ srv.RunAfterMigrate(ctx)
 
 ### Hook execution
 
-- **OnServerStart**: runs after the listener is up
-- **OnShutdown**: runs during graceful shutdown, errors are logged but don't stop shutdown
 - **OnBeforeMigrate / OnAfterMigrate**: called explicitly by the project, stop on first error
 
 ## Escape Hatch
@@ -148,10 +130,6 @@ func main() {
         server.WithPort(envPort),
         server.WithDevMode(envDevMode),
         server.WithTimeout(30*time.Second),
-        server.WithOnShutdown(func(ctx context.Context) error {
-            database.Close()
-            return nil
-        }),
     )
     if err != nil {
         log.Fatal(err)
@@ -206,8 +184,6 @@ func WithShutdownTimeout(d time.Duration) Option
 
 // Hooks
 type HookFunc func(ctx context.Context) error
-func WithOnServerStart(fn HookFunc) Option
-func WithOnShutdown(fn HookFunc) Option
 func WithOnBeforeMigrate(fn HookFunc) Option
 func WithOnAfterMigrate(fn HookFunc) Option
 func (s *Server) RunBeforeMigrate(ctx context.Context) error

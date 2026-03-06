@@ -609,6 +609,60 @@ func TestGenerateProject_localStorage(t *testing.T) {
 	assert.NotContains(t, localMakefile, "sync-static:")
 }
 
+func TestGenerateProject_ciWorkflow(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "ciproj")
+
+	cfg := &ProjectConfig{
+		Name:      "ciproj",
+		Module:    "github.com/test/ciproj",
+		CSS:       "plain",
+		Database:  "postgres",
+		GoVersion: "1.25.0",
+	}
+
+	require.NoError(t, GenerateProject(dir, cfg))
+
+	assertFileExists(t, dir, ".github/workflows/ci.yml")
+	assertFileExists(t, dir, ".github/workflows/deploy.yml")
+
+	ci := readFile(t, dir, ".github/workflows/ci.yml")
+	assert.Contains(t, ci, `go-version: "1.25.0"`)
+	assert.Contains(t, ci, "templ generate")
+	assert.Contains(t, ci, "templ files are out of date")
+	assert.Contains(t, ci, "golangci-lint-action")
+	assert.NotContains(t, ci, "setup-node")
+
+	deploy := readFile(t, dir, ".github/workflows/deploy.yml")
+	// Every non-empty line should be a comment.
+	for _, line := range strings.Split(deploy, "\n") {
+		if strings.TrimSpace(line) != "" {
+			assert.True(t, strings.HasPrefix(line, "#"), "deploy.yml has uncommented line: %q", line)
+		}
+	}
+	assert.Contains(t, deploy, "secrets.RAILWAY_TOKEN")
+	assert.Contains(t, deploy, "secrets.RAILWAY_SERVICE")
+}
+
+func TestGenerateProject_ciWorkflowTailwind(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "twciproj")
+
+	cfg := &ProjectConfig{
+		Name:      "twciproj",
+		Module:    "github.com/test/twciproj",
+		CSS:       "tailwind",
+		Database:  "postgres",
+		GoVersion: "1.24.0",
+	}
+
+	require.NoError(t, GenerateProject(dir, cfg))
+
+	ci := readFile(t, dir, ".github/workflows/ci.yml")
+	assert.Contains(t, ci, `go-version: "1.24.0"`)
+	assert.Contains(t, ci, "setup-node")
+	assert.Contains(t, ci, "npm ci")
+	assert.Contains(t, ci, "npm run css:build")
+}
+
 // --- Helpers ---
 
 func assertFileExists(t *testing.T, dir, rel string) {

@@ -5,16 +5,6 @@ import "context"
 // HookFunc is a lifecycle callback invoked at a specific server event.
 type HookFunc func(ctx context.Context) error
 
-// WithOnServerStart registers a hook that runs after the listener starts.
-func WithOnServerStart(fn HookFunc) Option {
-	return func(s *Server) { s.onServerStart = append(s.onServerStart, fn) }
-}
-
-// WithOnShutdown registers a hook that runs during graceful shutdown.
-func WithOnShutdown(fn HookFunc) Option {
-	return func(s *Server) { s.onShutdown = append(s.onShutdown, fn) }
-}
-
 // WithOnBeforeMigrate registers a hook that runs before database migration.
 func WithOnBeforeMigrate(fn HookFunc) Option {
 	return func(s *Server) { s.onBeforeMigrate = append(s.onBeforeMigrate, fn) }

@@ -1,4 +1,4 @@
-.PHONY: dev build test lint docker-up docker-down docker-delete docker-reload clean install check-reflex check-templ{{- if eq .CSS "tailwind"}} check-node-modules css css-build{{- end}}
+.PHONY: dev build test lint migrate docker-up docker-down docker-delete docker-reload clean install check-reflex check-templ{{- if eq .CSS "tailwind"}} check-node-modules css css-build{{- end}}
 
 ## install: Install development dependencies
 install:
@@ -52,6 +52,10 @@ build: check-templ{{- if eq .CSS "tailwind"}} check-node-modules{{- end}}
 ## test: Run all tests
 test:
 	go test ./...
+
+## migrate: Run database migrations
+migrate:
+	go run ./cmd/migrate
 
 ## lint: Run linters
 lint:

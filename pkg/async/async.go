@@ -3,6 +3,7 @@ package async
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"sync"
 )
 
@@ -30,7 +31,7 @@ func All(ctx context.Context, fns ...func(context.Context) error) error {
 			defer wg.Done()
 			defer func() {
 				if r := recover(); r != nil {
-					err := fmt.Errorf("async: panic in job %d: %v", i, r)
+					err := fmt.Errorf("async: panic in job %d: %v\n%s", i, r, debug.Stack())
 					once.Do(func() { firstErr = err; cancel() })
 				}
 			}()
@@ -63,7 +64,7 @@ func Settle(ctx context.Context, fns ...func(context.Context) error) []error {
 			defer wg.Done()
 			defer func() {
 				if r := recover(); r != nil {
-					errs[i] = fmt.Errorf("async: panic in job %d: %v", i, r)
+					errs[i] = fmt.Errorf("async: panic in job %d: %v\n%s", i, r, debug.Stack())
 				}
 			}()
 
@@ -99,7 +100,7 @@ func Map[T, R any](ctx context.Context, items []T, fn func(context.Context, T) (
 			defer wg.Done()
 			defer func() {
 				if r := recover(); r != nil {
-					err := fmt.Errorf("async: panic in job %d: %v", i, r)
+					err := fmt.Errorf("async: panic in job %d: %v\n%s", i, r, debug.Stack())
 					once.Do(func() { firstErr = err; cancel() })
 				}
 			}()

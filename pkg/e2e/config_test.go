@@ -15,6 +15,7 @@ func TestDefaultConfig(t *testing.T) {
 	cfg := defaultConfig()
 
 	assert.True(t, cfg.Headless, "Headless default")
+	assert.True(t, cfg.NoSandbox, "NoSandbox default")
 	assert.Equal(t, time.Duration(0), cfg.SlowMotion, "SlowMotion default")
 	assert.Equal(t, 10*time.Second, cfg.Timeout, "Timeout default")
 	assert.Equal(t, "testdata/e2e-artifacts", cfg.ArtifactDir, "ArtifactDir default")
@@ -54,6 +55,11 @@ func TestWithScreenshotOnFailure(t *testing.T) {
 func TestWithHTMLDumpOnFailure(t *testing.T) {
 	cfg := buildConfig([]Option{WithHTMLDumpOnFailure(false)})
 	assert.False(t, cfg.HTMLDumpOnFailure)
+}
+
+func TestWithNoSandbox(t *testing.T) {
+	cfg := buildConfig([]Option{WithNoSandbox(false)})
+	assert.False(t, cfg.NoSandbox)
 }
 
 // ---------------------------------------------------------------------------
@@ -96,6 +102,12 @@ func TestEnvOverride_HTMLDumpOnFailure(t *testing.T) {
 	assert.False(t, cfg.HTMLDumpOnFailure)
 }
 
+func TestEnvOverride_NoSandbox(t *testing.T) {
+	t.Setenv("E2E_NO_SANDBOX", "false")
+	cfg := buildConfig(nil)
+	assert.False(t, cfg.NoSandbox)
+}
+
 // ---------------------------------------------------------------------------
 // Env vars take precedence over code options
 // ---------------------------------------------------------------------------
@@ -116,6 +128,12 @@ func TestEnvPrecedence_ArtifactDir(t *testing.T) {
 	t.Setenv("E2E_ARTIFACT_DIR", "/env/path")
 	cfg := buildConfig([]Option{WithArtifactDir("/code/path")})
 	assert.Equal(t, "/env/path", cfg.ArtifactDir, "env should override code option")
+}
+
+func TestEnvPrecedence_NoSandbox(t *testing.T) {
+	t.Setenv("E2E_NO_SANDBOX", "true")
+	cfg := buildConfig([]Option{WithNoSandbox(false)})
+	assert.True(t, cfg.NoSandbox, "env should override code option")
 }
 
 // ---------------------------------------------------------------------------

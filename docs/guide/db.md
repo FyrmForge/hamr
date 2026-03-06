@@ -46,11 +46,11 @@ Launch background goroutines that periodically ping the database to keep connect
 warm:
 
 ```go
-db.StartKeepAlive(database, 30*time.Second, 2)
+db.StartKeepAlive(context.Background(), database, 30*time.Second, 2)
 ```
 
 This launches 2 goroutines, each pinging every 30 seconds. Failures are logged via
-`slog.Default()`.
+`slog.Default()`. The goroutines exit when the context is cancelled.
 
 ## Migrations
 
@@ -116,7 +116,7 @@ func main() {
     }
     defer database.Close()
 
-    db.StartKeepAlive(database, 30*time.Second, 2)
+    db.StartKeepAlive(context.Background(), database, 30*time.Second, 2)
 
     if err := db.Migrate(database, db.MigrateConfig{
         FS:        migrationsFS,
@@ -141,7 +141,7 @@ func WithMaxIdleConns(n int) ConnectOption
 func WithConnMaxIdleTime(d time.Duration) ConnectOption
 func WithConnMaxLifetime(d time.Duration) ConnectOption
 func WithMaxRetries(n int) ConnectOption
-func StartKeepAlive(db *sqlx.DB, interval time.Duration, poolSize int)
+func StartKeepAlive(ctx context.Context, db *sqlx.DB, interval time.Duration, poolSize int)
 
 // Migrations
 type MigrateConfig struct {
