@@ -2,24 +2,54 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    branches: [master]
+
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
-  release:
+  release-please:
     runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          release-type: go
+
+  build-release:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-
-      - name: Build with version info
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
         run: |
           go build -ldflags "\
-            -X github.com/FyrmForge/hamr/internal/cli/cmd.version=${{ github.ref_name }} \
+            -X github.com/FyrmForge/hamr/internal/cli/cmd.version=${{ needs.release-please.outputs.tag_name }} \
             -X github.com/FyrmForge/hamr/internal/cli/cmd.commit=${{ github.sha }}" \
-            -o bin/hamr ./cmd/hamr
-
-      - name: Verify binary
-        run: ./bin/hamr version
+            -o hamr-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/hamr
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload ${{ needs.release-please.outputs.tag_name }} \
+            hamr-${{ matrix.goos }}-${{ matrix.goarch }}
