@@ -1,4 +1,4 @@
-.PHONY: dev build test lint templint migrate db-sh docker-up docker-down docker-delete docker-reload clean install check-templ{{- if eq .CSS "tailwind"}} check-node-modules css css-build{{- end}}
+.PHONY: dev build test lint templint migrate db-sh docker-up docker-down docker-delete docker-reload clean install check-templ{{- if eq .CSS "tailwind"}} check-node-modules css css-build{{- end}}{{- if .StaticS3}} sync-static{{- end}}
 
 ## install: Install development dependencies
 install:
@@ -96,3 +96,9 @@ e2e-run-local:
 ## clean: Remove build artifacts
 clean:
 	rm -rf bin/ coverage.out coverage.html
+{{- if .StaticS3}}
+
+## sync-static: One-shot sync of static/ to S3 (for CI)
+sync-static:
+	hamr sync --bucket $(S3_STATIC_BUCKET)
+{{- end}}

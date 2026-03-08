@@ -90,7 +90,7 @@ func injectReloadScript(resp *http.Response) error {
 	}
 
 	body, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if err != nil {
 		return err
 	}
@@ -128,7 +128,7 @@ func ListenAndServeProxy(addr string, handler http.Handler) (*http.Server, net.L
 	}
 
 	srv := &http.Server{Handler: handler}
-	go srv.Serve(ln)
+	go func() { _ = srv.Serve(ln) }()
 
 	return srv, ln, nil
 }

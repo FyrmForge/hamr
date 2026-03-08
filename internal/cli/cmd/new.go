@@ -172,6 +172,47 @@ When all flags are provided, no interactive prompts are shown.`,
 			warnings = append(warnings, fmt.Sprintf("go mod tidy failed: %v", err))
 		}
 
+		// Install npm dependencies for Tailwind (non-fatal).
+		if cfg.CSS == "tailwind" {
+			fmt.Println("Running npm install...")
+			npmInstall := exec.Command("npm", "install")
+			npmInstall.Dir = dir
+			npmInstall.Stdout = os.Stdout
+			npmInstall.Stderr = os.Stderr
+			if err := npmInstall.Run(); err != nil {
+				warnings = append(warnings, fmt.Sprintf("npm install failed: %v", err))
+			}
+		}
+
+		// Initialize git repo and create initial commit (non-fatal).
+		isGitRepo := false
+		if inPlace {
+			chk := exec.Command("git", "rev-parse", "--git-dir")
+			chk.Dir = dir
+			isGitRepo = chk.Run() == nil
+		}
+		if !isGitRepo {
+			gitInit := exec.Command("git", "init")
+			gitInit.Dir = dir
+			gitInit.Stdout = os.Stdout
+			gitInit.Stderr = os.Stderr
+			if err := gitInit.Run(); err != nil {
+				warnings = append(warnings, fmt.Sprintf("git init failed: %v", err))
+			} else {
+				gitAdd := exec.Command("git", "add", "-A")
+				gitAdd.Dir = dir
+				if err := gitAdd.Run(); err != nil {
+					warnings = append(warnings, fmt.Sprintf("git add failed: %v", err))
+				} else {
+					gitCommit := exec.Command("git", "commit", "-m", "Initial commit from hamr new")
+					gitCommit.Dir = dir
+					if err := gitCommit.Run(); err != nil {
+						warnings = append(warnings, fmt.Sprintf("git commit failed: %v", err))
+					}
+				}
+			}
+		}
+
 		if len(warnings) > 0 {
 			fmt.Printf("\nProject %q created with warnings:\n\n", name)
 			for _, w := range warnings {
@@ -210,6 +251,9 @@ func applyWizardResult(cmd *cobra.Command, name string, res *wizardResult, cfg *
 	if res.StorageBackend != "none" && res.StorageBackend != "" {
 		cfg.IncludeStorage = true
 		cfg.StorageBackend = res.StorageBackend
+		if res.StorageBackend == "s3" {
+			cfg.StaticS3 = res.StaticS3 == "yes"
+		}
 	}
 }
 
@@ -221,4 +265,5 @@ func init() {
 	newCmd.Flags().Bool("e2e", false, "include E2E testing scaffolding")
 	newCmd.Flags().String("database", "postgres", "database type")
 	newCmd.Flags().String("location", "subfolder", "project location: \"subfolder\" or \"current\"")
+	newCmd.Flags().Bool("static-s3", false, "sync static assets to a dedicated S3 bucket")
 }

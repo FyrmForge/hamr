@@ -15,9 +15,9 @@ import (
 )
 
 func TestInjectReloadScript_HTML(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte("<html><body><h1>Hello</h1></body></html>"))
+		_, _ = w.Write([]byte("<html><body><h1>Hello</h1></body></html>"))
 	}))
 	defer backend.Close()
 
@@ -28,7 +28,7 @@ func TestInjectReloadScript_HTML(t *testing.T) {
 
 	resp, err := http.Get(proxy.URL)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
@@ -45,9 +45,9 @@ func TestInjectReloadScript_HTML(t *testing.T) {
 }
 
 func TestInjectReloadScript_ContentLength(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte("<html><body>Hello</body></html>"))
+		_, _ = w.Write([]byte("<html><body>Hello</body></html>"))
 	}))
 	defer backend.Close()
 
@@ -58,7 +58,7 @@ func TestInjectReloadScript_ContentLength(t *testing.T) {
 
 	resp, err := http.Get(proxy.URL)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
@@ -73,9 +73,9 @@ func TestInjectReloadScript_ContentLength(t *testing.T) {
 }
 
 func TestInjectReloadScript_NonHTML(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status":"ok"}`))
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	}))
 	defer backend.Close()
 
@@ -86,7 +86,7 @@ func TestInjectReloadScript_NonHTML(t *testing.T) {
 
 	resp, err := http.Get(proxy.URL)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
@@ -95,9 +95,9 @@ func TestInjectReloadScript_NonHTML(t *testing.T) {
 }
 
 func TestInjectReloadScript_NoBodyTag(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte("<html><h1>No body tag</h1></html>"))
+		_, _ = w.Write([]byte("<html><h1>No body tag</h1></html>"))
 	}))
 	defer backend.Close()
 
@@ -108,7 +108,7 @@ func TestInjectReloadScript_NoBodyTag(t *testing.T) {
 
 	resp, err := http.Get(proxy.URL)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
@@ -120,7 +120,7 @@ func TestInjectReloadScript_NoBodyTag(t *testing.T) {
 }
 
 func TestInjectReloadScript_EmptyBody(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusOK)
 		// Empty body.
@@ -134,7 +134,7 @@ func TestInjectReloadScript_EmptyBody(t *testing.T) {
 
 	resp, err := http.Get(proxy.URL)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
@@ -144,10 +144,10 @@ func TestInjectReloadScript_EmptyBody(t *testing.T) {
 }
 
 func TestInjectReloadScript_MultipleBodyTags(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		// Malformed HTML with two </body> tags.
-		w.Write([]byte("<html><body>one</body><body>two</body></html>"))
+		_, _ = w.Write([]byte("<html><body>one</body><body>two</body></html>"))
 	}))
 	defer backend.Close()
 
@@ -158,7 +158,7 @@ func TestInjectReloadScript_MultipleBodyTags(t *testing.T) {
 
 	resp, err := http.Get(proxy.URL)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
@@ -173,9 +173,9 @@ func TestInjectReloadScript_MultipleBodyTags(t *testing.T) {
 }
 
 func TestInjectReloadScript_Disabled(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte("<html><body>Hello</body></html>"))
+		_, _ = w.Write([]byte("<html><body>Hello</body></html>"))
 	}))
 	defer backend.Close()
 
@@ -186,7 +186,7 @@ func TestInjectReloadScript_Disabled(t *testing.T) {
 
 	resp, err := http.Get(proxy.URL)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
@@ -195,9 +195,9 @@ func TestInjectReloadScript_Disabled(t *testing.T) {
 }
 
 func TestInjectReloadScript_CSSResponse(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/css")
-		w.Write([]byte("body { color: red; }"))
+		_, _ = w.Write([]byte("body { color: red; }"))
 	}))
 	defer backend.Close()
 
@@ -208,7 +208,7 @@ func TestInjectReloadScript_CSSResponse(t *testing.T) {
 
 	resp, err := http.Get(proxy.URL)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
@@ -248,7 +248,7 @@ func TestNewProxyHandler_StripsAcceptEncodingForInjection(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reqHeader <- r.Header.Clone()
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte("<html><body>Hello</body></html>"))
+		_, _ = w.Write([]byte("<html><body>Hello</body></html>"))
 	}))
 	defer backend.Close()
 
@@ -262,7 +262,7 @@ func TestNewProxyHandler_StripsAcceptEncodingForInjection(t *testing.T) {
 	req.Header.Set("Accept-Encoding", "gzip")
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	select {
 	case hdr := <-reqHeader:
@@ -280,7 +280,7 @@ func TestSSEEndpoint(t *testing.T) {
 
 	resp, err := http.Get(proxy.URL + "/__hamr/reload")
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	assert.Equal(t, "text/event-stream", resp.Header.Get("Content-Type"))
 }
@@ -300,13 +300,13 @@ func TestListenAndServeProxy(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, srv)
 	require.NotNil(t, ln)
-	defer srv.Close()
+	defer func() { _ = srv.Close() }()
 
 	// Should be listening.
 	addr := ln.Addr().String()
 	resp, err := http.Get("http://" + addr + "/__hamr/reload")
 	require.NoError(t, err)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	assert.Equal(t, "text/event-stream", resp.Header.Get("Content-Type"))
 }
 

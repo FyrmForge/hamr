@@ -16,9 +16,17 @@ type Config struct {
 	Proxy ProxyConfig `toml:"proxy"`
 }
 
-// DevConfig holds the [dev] table with watch rules.
+// DevConfig holds the [dev] table with watch rules and daemons.
 type DevConfig struct {
-	Watch []WatchRule `toml:"watch"`
+	Watch   []WatchRule `toml:"watch"`
+	Daemons []Daemon    `toml:"daemon"`
+}
+
+// Daemon defines a long-running background process started once at launch.
+type Daemon struct {
+	Name string   `toml:"name"`
+	Cmd  string   `toml:"cmd"`
+	Env  []string `toml:"env"`
 }
 
 // ProxyConfig holds the [proxy] table.
@@ -165,17 +173,33 @@ func applyDefaults(cfg *Config) {
 }
 
 func validate(cfg *Config) error {
-	if len(cfg.Dev.Watch) == 0 {
-		return fmt.Errorf("no watch rules defined in [dev.watch]")
+	if len(cfg.Dev.Watch) == 0 && len(cfg.Dev.Daemons) == 0 {
+		return fmt.Errorf("no watch rules or daemons defined in [dev]")
 	}
 
-	names := make(map[string]bool, len(cfg.Dev.Watch))
+	names := make(map[string]bool, len(cfg.Dev.Watch)+len(cfg.Dev.Daemons))
+
+	// Validate daemons.
+	for i, d := range cfg.Dev.Daemons {
+		if d.Name == "" {
+			return fmt.Errorf("daemon %d: name is required", i)
+		}
+		if d.Cmd == "" {
+			return fmt.Errorf("daemon %q: cmd is required", d.Name)
+		}
+		if names[d.Name] {
+			return fmt.Errorf("duplicate daemon name %q", d.Name)
+		}
+		names[d.Name] = true
+	}
+
+	// Validate watch rules.
 	for i, rule := range cfg.Dev.Watch {
 		if rule.Name == "" {
 			return fmt.Errorf("watch rule %d: name is required", i)
 		}
 		if names[rule.Name] {
-			return fmt.Errorf("duplicate watch rule name %q", rule.Name)
+			return fmt.Errorf("duplicate name %q (watch rule collides with daemon or other watch rule)", rule.Name)
 		}
 		names[rule.Name] = true
 
@@ -187,10 +211,14 @@ func validate(cfg *Config) error {
 		}
 	}
 
-	// Check unknown deps.
+	// Check unknown deps (only watch rule names are valid deps).
+	watchNames := make(map[string]bool, len(cfg.Dev.Watch))
+	for _, rule := range cfg.Dev.Watch {
+		watchNames[rule.Name] = true
+	}
 	for _, rule := range cfg.Dev.Watch {
 		for _, dep := range rule.Depends {
-			if !names[dep] {
+			if !watchNames[dep] {
 				return fmt.Errorf("watch rule %q: unknown dependency %q", rule.Name, dep)
 			}
 		}

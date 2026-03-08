@@ -79,6 +79,64 @@ func TestApplyWizardResult_noStorage(t *testing.T) {
 	assert.Equal(t, "", cfg.StorageBackend)
 }
 
+func TestApplyWizardResult_staticS3(t *testing.T) {
+	res := &wizardResult{
+		Owner:          "user",
+		CSS:            "plain",
+		Database:       "postgres",
+		StorageBackend: "s3",
+		StaticS3:       "yes",
+	}
+
+	cfg := &generator.ProjectConfig{
+		Name:      "app",
+		GoVersion: "1.25.0",
+	}
+	applyWizardResult(newCmd, "app", res, cfg)
+
+	assert.True(t, cfg.IncludeStorage)
+	assert.Equal(t, "s3", cfg.StorageBackend)
+	assert.True(t, cfg.StaticS3)
+}
+
+func TestApplyWizardResult_staticS3_no(t *testing.T) {
+	res := &wizardResult{
+		Owner:          "user",
+		CSS:            "plain",
+		Database:       "postgres",
+		StorageBackend: "s3",
+		StaticS3:       "no",
+	}
+
+	cfg := &generator.ProjectConfig{
+		Name:      "app",
+		GoVersion: "1.25.0",
+	}
+	applyWizardResult(newCmd, "app", res, cfg)
+
+	assert.True(t, cfg.IncludeStorage)
+	assert.Equal(t, "s3", cfg.StorageBackend)
+	assert.False(t, cfg.StaticS3)
+}
+
+func TestApplyWizardResult_staticS3_nonS3Storage(t *testing.T) {
+	res := &wizardResult{
+		Owner:          "user",
+		CSS:            "plain",
+		Database:       "postgres",
+		StorageBackend: "local",
+		StaticS3:       "yes",
+	}
+
+	cfg := &generator.ProjectConfig{
+		Name:      "app",
+		GoVersion: "1.25.0",
+	}
+	applyWizardResult(newCmd, "app", res, cfg)
+
+	assert.False(t, cfg.StaticS3, "StaticS3 should only be set for s3 storage backend")
+}
+
 func TestWizardResult_locationDefault(t *testing.T) {
 	res := &wizardResult{
 		Location: "subfolder",

@@ -43,7 +43,7 @@ func NewWatcher(root string, rules []WatchRule, logger *slog.Logger) (*Watcher, 
 
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
-		fsw.Close()
+		_ = fsw.Close()
 		return nil, err
 	}
 
@@ -87,7 +87,7 @@ func (w *Watcher) Stop() {
 		w.cancel()
 	}
 	w.wg.Wait()
-	w.fsw.Close()
+	_ = w.fsw.Close()
 }
 
 func (w *Watcher) addWatchDirs(root string) error {

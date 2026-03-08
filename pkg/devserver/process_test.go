@@ -183,8 +183,7 @@ func TestBuildEnv(t *testing.T) {
 	})
 
 	t.Run("includes system env", func(t *testing.T) {
-		os.Setenv("HAMR_TEST_MARKER", "present")
-		defer os.Unsetenv("HAMR_TEST_MARKER")
+		t.Setenv("HAMR_TEST_MARKER", "present")
 
 		env := buildEnv([]string{"EXTRA=val"})
 
@@ -199,62 +198,64 @@ func TestBuildEnv(t *testing.T) {
 	})
 }
 
-func TestLogWriter(t *testing.T) {
-	t.Run("writes complete lines", func(t *testing.T) {
-		var buf bytes.Buffer
-		logger := slog.New(slog.NewTextHandler(&buf, nil))
+func TestPrefixWriter(t *testing.T) {
+	t.Run("writes complete lines with prefix", func(t *testing.T) {
+		r, w, _ := os.Pipe()
+		pw := &prefixWriter{dest: w, tag: []byte("[test] ")}
 
-		w := &logWriter{logger: logger, level: slog.LevelInfo, prefix: "test"}
-		_, err := w.Write([]byte("hello world\n"))
+		_, err := pw.Write([]byte("hello world\n"))
 		require.NoError(t, err)
+		_ = w.Close()
 
-		assert.Contains(t, buf.String(), "hello world")
-		assert.Contains(t, buf.String(), "rule=test")
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, r)
+		assert.Contains(t, buf.String(), "[test] hello world\n")
 	})
 
 	t.Run("buffers partial lines", func(t *testing.T) {
-		var buf bytes.Buffer
-		logger := slog.New(slog.NewTextHandler(&buf, nil))
-
-		w := &logWriter{logger: logger, level: slog.LevelInfo, prefix: "test"}
+		r, w, _ := os.Pipe()
+		pw := &prefixWriter{dest: w, tag: []byte("[test] ")}
 
 		// Write without newline — should buffer.
-		_, err := w.Write([]byte("partial"))
+		_, err := pw.Write([]byte("partial"))
 		require.NoError(t, err)
-		assert.Empty(t, buf.String(), "no output until newline")
 
 		// Complete the line.
-		_, err = w.Write([]byte(" complete\n"))
+		_, err = pw.Write([]byte(" complete\n"))
 		require.NoError(t, err)
-		assert.Contains(t, buf.String(), "partial complete")
+		_ = w.Close()
+
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, r)
+		assert.Contains(t, buf.String(), "[test] partial complete\n")
 	})
 
 	t.Run("multiple lines in one write", func(t *testing.T) {
-		var buf bytes.Buffer
-		logger := slog.New(slog.NewTextHandler(&buf, nil))
+		r, w, _ := os.Pipe()
+		pw := &prefixWriter{dest: w, tag: []byte("[test] ")}
 
-		w := &logWriter{logger: logger, level: slog.LevelInfo, prefix: "test"}
-		_, err := w.Write([]byte("line1\nline2\n"))
+		_, err := pw.Write([]byte("line1\nline2\n"))
 		require.NoError(t, err)
+		_ = w.Close()
 
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, r)
 		output := buf.String()
-		assert.Contains(t, output, "line1")
-		assert.Contains(t, output, "line2")
+		assert.Contains(t, output, "[test] line1\n")
+		assert.Contains(t, output, "[test] line2\n")
 	})
 
-	t.Run("skips empty lines", func(t *testing.T) {
-		var buf bytes.Buffer
-		logger := slog.New(slog.NewTextHandler(&buf, nil))
+	t.Run("preserves ANSI colors", func(t *testing.T) {
+		r, w, _ := os.Pipe()
+		pw := &prefixWriter{dest: w, tag: []byte("[test] ")}
 
-		w := &logWriter{logger: logger, level: slog.LevelInfo, prefix: "test"}
-		_, err := w.Write([]byte("\n\nhello\n\n"))
+		ansi := "\033[31mred text\033[0m\n"
+		_, err := pw.Write([]byte(ansi))
 		require.NoError(t, err)
+		_ = w.Close()
 
-		// Only "hello" should be logged, not empty lines.
-		output := buf.String()
-		assert.Contains(t, output, "hello")
-		// Count occurrences of "msg=" — should be exactly 1.
-		count := bytes.Count([]byte(output), []byte("msg="))
-		assert.Equal(t, 1, count, "should log exactly one message")
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, r)
+		assert.Contains(t, buf.String(), "\033[31mred text\033[0m")
 	})
 }

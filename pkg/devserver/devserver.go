@@ -111,6 +111,23 @@ func (r *Runner) Run(ctx context.Context) error {
 		graph.MarkDone(name)
 	}
 
+	// Start daemons.
+	for i := range r.cfg.Dev.Daemons {
+		d := &r.cfg.Dev.Daemons[i]
+		r.logger.Info("starting daemon", "name", d.Name)
+		rule := &WatchRule{Name: d.Name, Run: d.Cmd, Env: d.Env}
+		if err := pm.StartProcess(runCtx, rule); err != nil {
+			r.logger.Error("failed to start daemon", "daemon", d.Name, "err", err)
+		}
+	}
+
+	// If no watch rules, just block until shutdown.
+	if len(r.cfg.Dev.Watch) == 0 {
+		r.logger.Info("no watch rules, running daemons only")
+		<-runCtx.Done()
+		return runCtx.Err()
+	}
+
 	// Start file watcher.
 	var err error
 	watcher, err = NewWatcher(".", r.cfg.Dev.Watch, r.logger)

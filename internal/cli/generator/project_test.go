@@ -677,6 +677,66 @@ func TestGenerateProject_ciWorkflowTailwind(t *testing.T) {
 	assert.Contains(t, ci, "npm run css:build")
 }
 
+func TestGenerateProject_staticS3(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "s3staticproj")
+
+	cfg := &ProjectConfig{
+		Name:           "s3staticproj",
+		Module:         "github.com/test/s3staticproj",
+		CSS:            "plain",
+		Database:       "postgres",
+		GoVersion:      "1.25.0",
+		IncludeStorage: true,
+		StorageBackend: "s3",
+		StaticS3:       true,
+	}
+
+	require.NoError(t, GenerateProject(dir, cfg))
+
+	// hamr.toml should have sync-static daemon.
+	hamrToml := readFile(t, dir, "hamr.toml")
+	assert.Contains(t, hamrToml, `name = "sync-static"`)
+	assert.Contains(t, hamrToml, "hamr sync --watch --bucket s3staticproj-static")
+
+	// Makefile should have sync-static target.
+	makefile := readFile(t, dir, "Makefile")
+	assert.Contains(t, makefile, "sync-static:")
+	assert.Contains(t, makefile, "hamr sync --bucket $(S3_STATIC_BUCKET)")
+
+	// .env.example should have S3_STATIC_BUCKET.
+	envFile := readFile(t, dir, ".env.example")
+	assert.Contains(t, envFile, "S3_STATIC_BUCKET=s3staticproj-static")
+}
+
+func TestGenerateProject_s3WithoutStaticS3(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "s3nostaticproj")
+
+	cfg := &ProjectConfig{
+		Name:           "s3nostaticproj",
+		Module:         "github.com/test/s3nostaticproj",
+		CSS:            "plain",
+		Database:       "postgres",
+		GoVersion:      "1.25.0",
+		IncludeStorage: true,
+		StorageBackend: "s3",
+		StaticS3:       false,
+	}
+
+	require.NoError(t, GenerateProject(dir, cfg))
+
+	// hamr.toml should NOT have sync-static daemon.
+	hamrToml := readFile(t, dir, "hamr.toml")
+	assert.NotContains(t, hamrToml, "sync-static")
+
+	// Makefile should NOT have sync-static target.
+	makefile := readFile(t, dir, "Makefile")
+	assert.NotContains(t, makefile, "sync-static:")
+
+	// .env.example should NOT have S3_STATIC_BUCKET.
+	envFile := readFile(t, dir, ".env.example")
+	assert.NotContains(t, envFile, "S3_STATIC_BUCKET")
+}
+
 // --- Helpers ---
 
 func assertFileExists(t *testing.T, dir, rel string) {

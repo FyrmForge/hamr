@@ -20,7 +20,7 @@ func TestSSEBroker_Handler(t *testing.T) {
 
 	resp, err := http.Get(srv.URL)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	assert.Equal(t, "text/event-stream", resp.Header.Get("Content-Type"))
 	assert.Equal(t, "no-cache", resp.Header.Get("Cache-Control"))
@@ -47,7 +47,7 @@ func TestSSEBroker_Broadcast(t *testing.T) {
 
 	resp, err := http.Get(srv.URL)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Wait for client to connect.
 	time.Sleep(50 * time.Millisecond)
@@ -73,7 +73,7 @@ func TestSSEBroker_Broadcast_MultipleEvents(t *testing.T) {
 
 	resp, err := http.Get(srv.URL)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	time.Sleep(50 * time.Millisecond)
 
@@ -99,11 +99,11 @@ func TestSSEBroker_MultipleClients(t *testing.T) {
 	// Connect two clients.
 	resp1, err := http.Get(srv.URL)
 	require.NoError(t, err)
-	defer resp1.Body.Close()
+	defer func() { _ = resp1.Body.Close() }()
 
 	resp2, err := http.Get(srv.URL)
 	require.NoError(t, err)
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 
 	time.Sleep(50 * time.Millisecond)
 	assert.Equal(t, 2, broker.ClientCount())
@@ -141,7 +141,7 @@ func TestSSEBroker_ClientDisconnect(t *testing.T) {
 	assert.Equal(t, 1, broker.ClientCount())
 
 	// Close the response body to simulate disconnect.
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	time.Sleep(100 * time.Millisecond)
 
 	assert.Equal(t, 0, broker.ClientCount())
@@ -162,7 +162,7 @@ func TestSSEBroker_Broadcast_FullChannel(t *testing.T) {
 
 	resp, err := http.Get(srv.URL)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	time.Sleep(50 * time.Millisecond)
 

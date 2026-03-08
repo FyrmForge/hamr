@@ -226,6 +226,39 @@ cmd = "echo test"
 	})
 }
 
+func TestLoadConfig_DaemonOnly(t *testing.T) {
+	path := writeConfig(t, `
+[[dev.daemon]]
+name = "tailwind"
+cmd = "npx tailwindcss --watch"
+env = ["NODE_ENV=development"]
+`)
+	cfg, err := LoadConfig(path)
+	require.NoError(t, err)
+	require.Len(t, cfg.Dev.Daemons, 1)
+	assert.Equal(t, "tailwind", cfg.Dev.Daemons[0].Name)
+	assert.Equal(t, "npx tailwindcss --watch", cfg.Dev.Daemons[0].Cmd)
+	assert.Equal(t, []string{"NODE_ENV=development"}, cfg.Dev.Daemons[0].Env)
+	assert.Empty(t, cfg.Dev.Watch)
+}
+
+func TestLoadConfig_DaemonsWithWatchRules(t *testing.T) {
+	path := writeConfig(t, `
+[[dev.daemon]]
+name = "tailwind"
+cmd = "npx tailwindcss --watch"
+
+[[dev.watch]]
+name = "go"
+watch = "**/*.go"
+cmd = "go build ./cmd/server"
+`)
+	cfg, err := LoadConfig(path)
+	require.NoError(t, err)
+	assert.Len(t, cfg.Dev.Daemons, 1)
+	assert.Len(t, cfg.Dev.Watch, 1)
+}
+
 func TestLoadConfig_ValidationErrors(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -233,9 +266,9 @@ func TestLoadConfig_ValidationErrors(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name:    "no watch rules",
+			name:    "no watch rules or daemons",
 			toml:    `[dev]`,
-			wantErr: "no watch rules",
+			wantErr: "no watch rules or daemons",
 		},
 		{
 			name: "missing name",
@@ -259,7 +292,7 @@ name = "go"
 watch = "*.go"
 cmd = "echo"
 `,
-			wantErr: "duplicate watch rule name",
+			wantErr: "duplicate name",
 		},
 		{
 			name: "missing watch pattern",
@@ -329,6 +362,49 @@ cmd = "echo"
 depends = ["b"]
 `,
 			wantErr: "dependency cycle",
+		},
+		{
+			name: "daemon missing name",
+			toml: `
+[[dev.daemon]]
+cmd = "npx tailwindcss --watch"
+`,
+			wantErr: "name is required",
+		},
+		{
+			name: "daemon missing cmd",
+			toml: `
+[[dev.daemon]]
+name = "tailwind"
+`,
+			wantErr: "cmd is required",
+		},
+		{
+			name: "duplicate daemon name",
+			toml: `
+[[dev.daemon]]
+name = "tw"
+cmd = "echo a"
+
+[[dev.daemon]]
+name = "tw"
+cmd = "echo b"
+`,
+			wantErr: "duplicate daemon name",
+		},
+		{
+			name: "daemon name collides with watch rule",
+			toml: `
+[[dev.daemon]]
+name = "go"
+cmd = "echo daemon"
+
+[[dev.watch]]
+name = "go"
+watch = "*.go"
+cmd = "echo watch"
+`,
+			wantErr: "duplicate name",
 		},
 		{
 			name: "invalid proxy listen port",

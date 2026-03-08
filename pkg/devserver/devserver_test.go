@@ -265,7 +265,7 @@ func TestRunner_Run_Integration(t *testing.T) {
 
 	origDir, _ := os.Getwd()
 	require.NoError(t, os.Chdir(dir))
-	defer os.Chdir(origDir)
+	defer func() { _ = os.Chdir(origDir) }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -295,6 +295,118 @@ func TestRunner_Run_Integration(t *testing.T) {
 			assert.ErrorIs(t, err, context.Canceled)
 		}
 	case <-time.After(5 * time.Second):
+		t.Fatal("runner.Run did not shut down")
+	}
+}
+
+func TestRunner_Run_DaemonsOnly(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	dir := t.TempDir()
+	markerPath := filepath.Join(dir, "daemon.started")
+
+	cfg := &Config{
+		Dev: DevConfig{
+			Daemons: []Daemon{
+				{
+					Name: "marker",
+					Cmd:  "touch " + markerPath + " && sleep 60",
+				},
+			},
+		},
+	}
+
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(dir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	r := NewRunner(cfg, WithLogger(discardLogger()), WithNoProxy(true))
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.Run(ctx)
+	}()
+
+	// Wait for the daemon to create the marker file.
+	assert.Eventually(t, func() bool {
+		_, err := os.Stat(markerPath)
+		return err == nil
+	}, 3*time.Second, 50*time.Millisecond, "daemon should have started and created marker file")
+
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			assert.ErrorIs(t, err, context.Canceled)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("runner.Run did not shut down")
+	}
+}
+
+func TestRunner_Run_DaemonsWithWatchRules(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	dir := t.TempDir()
+	markerPath := filepath.Join(dir, "daemon.started")
+	triggerPath := filepath.Join(dir, "trigger.go")
+	require.NoError(t, os.WriteFile(triggerPath, []byte("package main"), 0o644))
+
+	cfg := &Config{
+		Dev: DevConfig{
+			Daemons: []Daemon{
+				{
+					Name: "bg",
+					Cmd:  "touch " + markerPath + " && sleep 60",
+				},
+			},
+			Watch: []WatchRule{
+				{
+					Name:     "go",
+					Watch:    StringOrSlice{"**/*.go"},
+					Cmd:      "echo built",
+					Debounce: Duration{50 * time.Millisecond},
+				},
+			},
+		},
+	}
+
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(dir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	r := NewRunner(cfg, WithLogger(discardLogger()), WithNoProxy(true))
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.Run(ctx)
+	}()
+
+	// Daemon should start.
+	assert.Eventually(t, func() bool {
+		_, err := os.Stat(markerPath)
+		return err == nil
+	}, 3*time.Second, 50*time.Millisecond, "daemon should have started")
+
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			assert.ErrorIs(t, err, context.Canceled)
+		}
+	case <-time.After(10 * time.Second):
 		t.Fatal("runner.Run did not shut down")
 	}
 }
@@ -331,7 +443,7 @@ func TestRunner_Run_DependencyOrderForCoalescedEvents(t *testing.T) {
 
 	origDir, _ := os.Getwd()
 	require.NoError(t, os.Chdir(dir))
-	defer os.Chdir(origDir)
+	defer func() { _ = os.Chdir(origDir) }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

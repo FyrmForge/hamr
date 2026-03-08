@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/FyrmForge/hamr/pkg/config"
 	"github.com/FyrmForge/hamr/pkg/storage"
 	ssync "github.com/FyrmForge/hamr/pkg/sync"
 	"github.com/spf13/cobra"
@@ -29,12 +28,14 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dir, _ := cmd.Flags().GetString("dir")
 		watch, _ := cmd.Flags().GetBool("watch")
-		endpoint, _ := cmd.Flags().GetString("endpoint")
-		bucket, _ := cmd.Flags().GetString("bucket")
-		region, _ := cmd.Flags().GetString("region")
-		accessKey, _ := cmd.Flags().GetString("access-key")
-		secretKey, _ := cmd.Flags().GetString("secret-key")
 		pathStyle, _ := cmd.Flags().GetBool("path-style")
+
+		// Flags take priority; fall back to env vars (which may come from .env).
+		endpoint := flagOrEnv(cmd, "endpoint", "S3_ENDPOINT", "http://localhost:9000")
+		bucket := flagOrEnv(cmd, "bucket", "S3_BUCKET", "")
+		region := flagOrEnv(cmd, "region", "S3_REGION", "us-east-1")
+		accessKey := flagOrEnv(cmd, "access-key", "S3_ACCESS_KEY", "")
+		secretKey := flagOrEnv(cmd, "secret-key", "S3_SECRET_KEY", "")
 
 		if bucket == "" {
 			return fmt.Errorf("bucket is required (use --bucket or set S3_BUCKET)")
@@ -79,10 +80,23 @@ Examples:
 func init() {
 	syncCmd.Flags().String("dir", "static", "local directory to sync")
 	syncCmd.Flags().Bool("watch", false, "watch for changes after initial sync")
-	syncCmd.Flags().String("endpoint", config.GetEnvOrDefault("S3_ENDPOINT", "http://localhost:9000"), "S3 endpoint URL")
-	syncCmd.Flags().String("bucket", config.GetEnvOrDefault("S3_BUCKET", ""), "S3 bucket name")
-	syncCmd.Flags().String("region", config.GetEnvOrDefault("S3_REGION", "us-east-1"), "S3 region")
-	syncCmd.Flags().String("access-key", config.GetEnvOrDefault("S3_ACCESS_KEY", ""), "S3 access key")
-	syncCmd.Flags().String("secret-key", config.GetEnvOrDefault("S3_SECRET_KEY", ""), "S3 secret key")
+	syncCmd.Flags().String("endpoint", "", "S3 endpoint URL (default http://localhost:9000)")
+	syncCmd.Flags().String("bucket", "", "S3 bucket name")
+	syncCmd.Flags().String("region", "", "S3 region (default us-east-1)")
+	syncCmd.Flags().String("access-key", "", "S3 access key")
+	syncCmd.Flags().String("secret-key", "", "S3 secret key")
 	syncCmd.Flags().Bool("path-style", true, "use path-style addressing (required for MinIO)")
+}
+
+// flagOrEnv returns the flag value if explicitly set, otherwise the env var,
+// otherwise the fallback default.
+func flagOrEnv(cmd *cobra.Command, flag, envKey, def string) string {
+	if cmd.Flags().Changed(flag) {
+		v, _ := cmd.Flags().GetString(flag)
+		return v
+	}
+	if v := os.Getenv(envKey); v != "" {
+		return v
+	}
+	return def
 }

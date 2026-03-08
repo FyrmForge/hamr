@@ -20,6 +20,7 @@ type ProjectConfig struct {
 	AuthWithTables  bool
 	IncludeStorage  bool   // true when StorageBackend != ""
 	StorageBackend  string // "" | "local" | "s3"
+	StaticS3        bool   // sync static/ to a dedicated S3 bucket
 	IncludeWS       bool
 	IncludeE2E      bool
 }

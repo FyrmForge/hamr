@@ -11,13 +11,15 @@ cmd = "templ generate"
 debounce = 100
 {{- if eq .CSS "tailwind"}}
 
-[[dev.watch]]
-name = "css"
-watch = ["static/css/**/*.css", "**/*.templ"]
-ignore = "static/css/output.css"
-cmd = "npm run css:build"
-debounce = 200
-reload = "css"
+[[dev.daemon]]
+name = "tailwind"
+cmd = "npx tailwindcss -i static/css/input.css -o static/css/output.css --watch"
+{{- end}}
+{{- if .StaticS3}}
+
+[[dev.daemon]]
+name = "sync-static"
+cmd = "hamr sync --watch --bucket {{.Name}}-static"
 {{- end}}
 
 [[dev.watch]]

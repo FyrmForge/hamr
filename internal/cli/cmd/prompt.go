@@ -18,6 +18,7 @@ type wizardResult struct {
 	CSS             string
 	Database        string
 	StorageBackend  string // "none" | "local" | "s3"
+	StaticS3        string // "yes" | "no"
 	WebSocket       string // "yes" | "no"
 	E2E             string // "yes" | "no"
 }
@@ -44,6 +45,7 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 		CSS:             "plain",
 		Database:        "postgres",
 		StorageBackend:  "none",
+		StaticS3:        "no",
 		WebSocket:       "yes",
 		E2E:             "yes",
 	}
@@ -216,11 +218,40 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 	}
 
 	// Run each step individually so we can print after each answer.
+	// We run the steps collected so far before the static-s3 question,
+	// since we need to know the storage backend value.
 	for _, s := range steps {
 		if err := huh.NewForm(s.group).Run(); err != nil {
 			return nil, err
 		}
 		s.print()
+	}
+
+	// ── Static asset syncing (S3 only) ─────────────────────
+	if res.StorageBackend == "s3" && !cmd.Flags().Changed("static-s3") {
+		if err := huh.NewForm(huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Static asset syncing").
+				Description("Adds a background daemon to hamr dev that syncs your static/ directory to a separate S3 bucket, and a Makefile target for CI deployments.").
+				Options(
+					huh.NewOption("Yes", "yes"),
+					huh.NewOption("No", "no"),
+				).
+				Value(&res.StaticS3),
+		)).Run(); err != nil {
+			return nil, err
+		}
+		if res.StaticS3 == "yes" {
+			fmt.Println("  Static S3 sync: Yes")
+		} else {
+			fmt.Println("  Static S3 sync: No")
+		}
+	} else if cmd.Flags().Changed("static-s3") {
+		if v, _ := cmd.Flags().GetBool("static-s3"); v {
+			res.StaticS3 = "yes"
+		} else {
+			res.StaticS3 = "no"
+		}
 	}
 
 	// ── WebSocket ───────────────────────────────────────────

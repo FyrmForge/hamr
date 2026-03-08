@@ -290,7 +290,7 @@ func TestNewWatcher(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, w)
 	assert.Equal(t, dir, w.root)
-	w.fsw.Close()
+	_ = w.fsw.Close()
 }
 
 func TestWatcher_StopWithoutStart(t *testing.T) {

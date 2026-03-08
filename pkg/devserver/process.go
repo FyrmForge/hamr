@@ -1,6 +1,7 @@
 package devserver
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -37,8 +38,8 @@ func (pm *ProcessManager) RunCommand(ctx context.Context, rule *WatchRule) error
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", rule.Cmd)
 	cmd.Env = buildEnv(rule.Env)
-	cmd.Stdout = &logWriter{logger: pm.logger, level: slog.LevelInfo, prefix: rule.Name}
-	cmd.Stderr = &logWriter{logger: pm.logger, level: slog.LevelError, prefix: rule.Name}
+	cmd.Stdout = newPrefixWriter(os.Stdout, rule.Name)
+	cmd.Stderr = newPrefixWriter(os.Stderr, rule.Name)
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("rule %q cmd failed: %w", rule.Name, err)
@@ -56,8 +57,9 @@ func (pm *ProcessManager) StartProcess(ctx context.Context, rule *WatchRule) err
 	cmd := exec.CommandContext(ctx, "sh", "-c", rule.Run)
 	cmd.Env = buildEnv(rule.Env)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Stdout = &logWriter{logger: pm.logger, level: slog.LevelInfo, prefix: rule.Name}
-	cmd.Stderr = &logWriter{logger: pm.logger, level: slog.LevelError, prefix: rule.Name}
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = newPrefixWriter(os.Stdout, rule.Name)
+	cmd.Stderr = newPrefixWriter(os.Stderr, rule.Name)
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("rule %q start failed: %w", rule.Name, err)
@@ -69,12 +71,15 @@ func (pm *ProcessManager) StartProcess(ctx context.Context, rule *WatchRule) err
 
 	// Wait in background so we can clean up the map entry.
 	go func() {
-		_ = cmd.Wait()
+		err := cmd.Wait()
 		pm.mu.Lock()
 		if pm.procs[rule.Name] == cmd.Process {
 			delete(pm.procs, rule.Name)
 		}
 		pm.mu.Unlock()
+		if err != nil {
+			pm.logger.Warn("process exited", "rule", rule.Name, "err", err)
+		}
 	}()
 
 	return nil
@@ -117,7 +122,7 @@ func (pm *ProcessManager) stopProcess(name string) {
 	// Wait for graceful shutdown.
 	done := make(chan struct{})
 	go func() {
-		proc.Wait()
+		_, _ = proc.Wait()
 		close(done)
 	}()
 
@@ -162,28 +167,59 @@ func buildEnv(ruleEnv []string) []string {
 	return result
 }
 
-// logWriter implements io.Writer and writes each line to slog.
-type logWriter struct {
-	logger *slog.Logger
-	level  slog.Level
-	prefix string
+// prefixWriter implements io.Writer, prepending a colored tag to each line
+// while passing through the raw bytes (preserving ANSI colors from child
+// processes).
+type prefixWriter struct {
+	dest   *os.File
+	tag    []byte // e.g. "\033[36m[templ]\033[0m "
 	buf    []byte
+	mu     sync.Mutex
 }
 
-func (w *logWriter) Write(p []byte) (int, error) {
+var ruleColors = [...]string{
+	"\033[36m", // cyan
+	"\033[33m", // yellow
+	"\033[35m", // magenta
+	"\033[32m", // green
+	"\033[34m", // blue
+}
+
+const colorReset = "\033[0m"
+
+var colorIndex int
+var colorMu sync.Mutex
+
+func nextColor() string {
+	colorMu.Lock()
+	c := ruleColors[colorIndex%len(ruleColors)]
+	colorIndex++
+	colorMu.Unlock()
+	return c
+}
+
+func newPrefixWriter(dest *os.File, name string) *prefixWriter {
+	color := nextColor()
+	tag := []byte(color + "[" + name + "]" + colorReset + " ")
+	return &prefixWriter{dest: dest, tag: tag}
+}
+
+func (w *prefixWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
 	w.buf = append(w.buf, p...)
 	for {
-		idx := strings.IndexByte(string(w.buf), '\n')
+		idx := bytes.IndexByte(w.buf, '\n')
 		if idx < 0 {
 			break
 		}
-		line := string(w.buf[:idx])
+		line := w.buf[:idx+1] // include the newline
 		w.buf = w.buf[idx+1:]
-		if line != "" {
-			w.logger.Log(context.Background(), w.level, line, "rule", w.prefix)
-		}
+		_, _ = w.dest.Write(w.tag)
+		_, _ = w.dest.Write(line)
 	}
 	return len(p), nil
 }
 
-var _ io.Writer = (*logWriter)(nil)
+var _ io.Writer = (*prefixWriter)(nil)

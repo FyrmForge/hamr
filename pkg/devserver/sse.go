@@ -55,7 +55,7 @@ func (b *SSEBroker) Handler() http.HandlerFunc {
 		}()
 
 		// Send initial connected event.
-		fmt.Fprintf(w, "event: connected\ndata: ok\n\n")
+		_, _ = fmt.Fprintf(w, "event: connected\ndata: ok\n\n")
 		flusher.Flush()
 
 		for {
@@ -66,7 +66,7 @@ func (b *SSEBroker) Handler() http.HandlerFunc {
 				if !ok {
 					return
 				}
-				fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, evt.Data)
+				_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, evt.Data)
 				flusher.Flush()
 			}
 		}
