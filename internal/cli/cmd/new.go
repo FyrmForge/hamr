@@ -210,7 +210,6 @@ func applyWizardResult(cmd *cobra.Command, name string, res *wizardResult, cfg *
 	if res.StorageBackend != "none" && res.StorageBackend != "" {
 		cfg.IncludeStorage = true
 		cfg.StorageBackend = res.StorageBackend
-		cfg.S3StaticWatcher = res.S3StaticWatcher == "yes"
 	}
 }
 
@@ -218,7 +217,6 @@ func init() {
 	newCmd.Flags().String("module", "", "Go module path (e.g. github.com/user/project); prompted if omitted")
 	newCmd.Flags().String("css", "plain", "CSS approach: \"plain\" or \"tailwind\"")
 	newCmd.Flags().String("storage", "none", "storage backend: \"none\", \"local\", or \"s3\"")
-	newCmd.Flags().Bool("s3-watcher", false, "include S3 static asset watcher for development")
 	newCmd.Flags().Bool("websocket", false, "include WebSocket support")
 	newCmd.Flags().Bool("e2e", false, "include E2E testing scaffolding")
 	newCmd.Flags().String("database", "postgres", "database type")

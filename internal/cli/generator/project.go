@@ -20,7 +20,6 @@ type ProjectConfig struct {
 	AuthWithTables  bool
 	IncludeStorage  bool   // true when StorageBackend != ""
 	StorageBackend  string // "" | "local" | "s3"
-	S3StaticWatcher bool   // include cmd/syncstatic watcher
 	IncludeWS       bool
 	IncludeE2E      bool
 }
@@ -180,6 +179,7 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 		{"templates/new/root/db-sh.tmpl", "db-sh"},
 		{"templates/new/root/go.mod.tmpl", "go.mod"},
 		{"templates/new/root/golangci.yml.tmpl", ".golangci.yml"},
+		{"templates/new/root/hamr.toml.tmpl", "hamr.toml"},
 	}
 
 	// Plain CSS files.
@@ -217,6 +217,13 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 			templateFile{"templates/new/internal/web/handler/auth/handler.go.tmpl", "internal/web/handler/auth/handler.go"},
 			templateFile{"templates/new/internal/web/handler/auth/login.templ.tmpl", "internal/web/handler/auth/login.templ"},
 			templateFile{"templates/new/internal/web/handler/auth/register.templ.tmpl", "internal/web/handler/auth/register.templ"},
+		)
+	}
+
+	// WebSocket files.
+	if cfg.IncludeWS {
+		files = append(files,
+			templateFile{"templates/new/static/js/ws.js.tmpl", "static/js/ws.js"},
 		)
 	}
 

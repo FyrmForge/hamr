@@ -34,7 +34,6 @@ func NewHandler(store repo.Store, log *slog.Logger) *Handler {
 // GET /things
 func (h *Handler) List(c echo.Context) error {
     // Fetch data from store
-    // Return via respond.Negotiate for dual HTML/JSON
     return respond.HTML(c, http.StatusOK, ThingsPage())
 }
 
@@ -51,7 +50,6 @@ func (h *Handler) Create(c echo.Context) error {
 
 - `respond.HTML(c, status, component)` — Render a templ component
 - `respond.JSON(c, status, data)` — Return JSON
-- `respond.Negotiate(c, status, jsonData, component)` — Auto-detect HTML vs JSON
 - `respond.Error(c, status, msg)` — Error response (HTML or JSON)
 - `respond.ValidationError(c, fields)` — 422 with field errors
 

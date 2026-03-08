@@ -1,7 +1,8 @@
-# Janitor — Background Task Scheduler
+# Janitor — Cron-Based Task Scheduler
 
-`hamr/pkg/janitor` provides a periodic background task runner with per-task timeouts,
-chainable API, and pre/post hooks at both per-task and per-tick levels.
+`hamr/pkg/janitor` provides a cron-based background task runner with per-task
+schedules and timeouts, chainable API, and pre/post hooks. Built on top of
+[robfig/cron](https://github.com/robfig/cron).
 
 ## Quick Start
 
@@ -45,13 +46,12 @@ func (t *SessionCleanup) Run(ctx context.Context) (int64, error) {
 ```go
 ctx := context.Background() // or use a cancellable context
 
-j := janitor.New(5*time.Minute,
+j := janitor.New(
     janitor.WithTimeout(30*time.Second),
-    janitor.WithRunImmediately(true),
     janitor.WithLogger(logger),
 ).
-    AddTask(&SessionCleanup{db: database}).
-    AddTask(&RateLimitCleanup{store: pgStore})
+    AddTask("@every 5m", &SessionCleanup{db: database}).
+    AddTask("0 0 * * *", &RateLimitCleanup{store: pgStore})
 
 if err := j.Start(ctx); err != nil {
     log.Fatal(err)
@@ -59,29 +59,42 @@ if err := j.Start(ctx); err != nil {
 defer j.Stop()
 ```
 
-`AddTask` returns the Janitor for chaining. `Start` validates configuration, stores the
-context for use in all tick/task execution, optionally runs all tasks once immediately,
-then spawns the background ticker. Cancelling the context also stops the background
-goroutine.
+Each task gets its own cron schedule. `AddTask` returns the Janitor for chaining.
+`Start` validates configuration, registers tasks with the cron scheduler, and starts it.
+Cancelling the context stops the scheduler.
+
+## Schedule Expressions
+
+Standard cron format and robfig/cron descriptors are supported:
+
+| Expression | Meaning |
+|-----------|---------|
+| `@every 5m` | Every 5 minutes |
+| `@every 1h` | Every hour |
+| `@hourly` | Top of every hour |
+| `@daily` | Midnight every day |
+| `@weekly` | Midnight on Sunday |
+| `0 0 * * *` | Midnight every day |
+| `0 3 * * 1-5` | 3 AM on weekdays |
+| `*/5 * * * *` | Every 5 minutes |
 
 ## Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `WithTimeout(d)` | 30s | Per-task context timeout |
-| `WithRunImmediately(bool)` | `false` | Run all tasks once on `Start` before ticking |
 | `WithLogger(l)` | `slog.Default()` | Structured logger for task execution |
 | `WithPreRun(fn)` | — | Hook called before each task |
 | `WithPostRun(fn)` | — | Hook called after each task |
-| `WithPreTick(fn)` | — | Hook called before any tasks in a tick |
-| `WithPostTick(fn)` | — | Hook called after all tasks in a tick |
+| `WithPreTick(fn)` | — | Hook called before each scheduled execution |
+| `WithPostTick(fn)` | — | Hook called after each scheduled execution |
 
 ## Hooks
 
 ### Per-task hooks
 
 ```go
-janitor.New(5*time.Minute,
+janitor.New(
     janitor.WithPreRun(func(ctx context.Context, taskName string) error {
         log.Printf("starting task: %s", taskName)
         return nil // return error to skip this task
@@ -94,21 +107,21 @@ janitor.New(5*time.Minute,
 
 `PreRun` returning an error skips that task. Multiple hooks run in order.
 
-### Per-tick hooks
+### Per-execution hooks
 
 ```go
-janitor.New(5*time.Minute,
+janitor.New(
     janitor.WithPreTick(func(ctx context.Context) error {
-        // check if maintenance window, return error to skip entire tick
+        // check if maintenance window, return error to skip execution
         return nil
     }),
     janitor.WithPostTick(func(ctx context.Context) {
-        log.Println("tick complete")
+        log.Println("execution complete")
     }),
 )
 ```
 
-`PreTick` returning an error skips the entire tick.
+`PreTick` returning an error skips the execution.
 
 ## Typical Usage
 
@@ -118,13 +131,12 @@ func main() {
 
     ctx := context.Background()
 
-    j := janitor.New(5*time.Minute,
+    j := janitor.New(
         janitor.WithTimeout(30*time.Second),
-        janitor.WithRunImmediately(true),
         janitor.WithLogger(logger),
     ).
-        AddTask(&SessionCleanup{db: database}).
-        AddTask(&RateLimitCleanup{store: pgStore})
+        AddTask("@every 5m", &SessionCleanup{db: database}).
+        AddTask("0 3 * * *", &RateLimitCleanup{store: pgStore})
 
     if err := j.Start(ctx); err != nil {
         log.Fatal(err)
@@ -152,15 +164,14 @@ type PreTickFunc func(ctx context.Context) error
 type PostTickFunc func(ctx context.Context)
 
 // Janitor
-func New(interval time.Duration, opts ...Option) *Janitor
-func (j *Janitor) AddTask(task Task) *Janitor
+func New(opts ...Option) *Janitor
+func (j *Janitor) AddTask(schedule string, task Task) *Janitor
 func (j *Janitor) Start(ctx context.Context) error
 func (j *Janitor) Stop()
 
 // Options
 type Option func(*Janitor)
 func WithTimeout(d time.Duration) Option
-func WithRunImmediately(run bool) Option
 func WithLogger(l *slog.Logger) Option
 func WithPreRun(fn PreRunFunc) Option
 func WithPostRun(fn PostRunFunc) Option

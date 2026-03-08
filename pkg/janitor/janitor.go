@@ -1,6 +1,5 @@
-// Package janitor provides a periodic background task runner with a chainable
-// API, per-task timeouts, and pre/post hooks at both per-task and per-tick
-// levels.
+// Package janitor provides a cron-based background task runner with per-task
+// schedules, timeouts, and pre/post hooks.
 package janitor
 
 import (
@@ -9,6 +8,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/robfig/cron/v3"
 )
 
 // Task is a single unit of maintenance work executed by the Janitor.
@@ -26,40 +27,42 @@ type PreRunFunc func(ctx context.Context, taskName string) error
 // PostRunFunc is called after each task with its results.
 type PostRunFunc func(ctx context.Context, taskName string, affected int64, taskErr error)
 
-// PreTickFunc is called before any tasks in a tick. Returning an error skips
-// the entire tick.
+// PreTickFunc is called before a scheduled task execution. Returning an error
+// skips that execution.
 type PreTickFunc func(ctx context.Context) error
 
-// PostTickFunc is called after all tasks in a tick have run.
+// PostTickFunc is called after a scheduled task execution completes.
 type PostTickFunc func(ctx context.Context)
 
-// Janitor runs a set of Tasks on a fixed interval.
-type Janitor struct {
-	ctx            context.Context
-	interval       time.Duration
-	timeout        time.Duration
-	runImmediately bool
-	logger         *slog.Logger
+// scheduledTask pairs a cron expression with a Task.
+type scheduledTask struct {
+	schedule string
+	task     Task
+}
 
-	tasks []Task
+// Janitor runs Tasks on individual cron schedules.
+type Janitor struct {
+	mu sync.Mutex
+
+	ctx     context.Context
+	cancel  context.CancelFunc
+	timeout time.Duration
+	logger  *slog.Logger
+
+	tasks []scheduledTask
 
 	preRun   []PreRunFunc
 	postRun  []PostRunFunc
 	preTick  []PreTickFunc
 	postTick []PostTickFunc
 
-	done chan struct{}
-	stop sync.Once
+	cron *cron.Cron
 }
 
-// New creates a Janitor that ticks at the given interval. Options configure
-// timeout, logger, hooks, and other behaviour. The returned pointer supports
-// method chaining via AddTask.
-func New(interval time.Duration, opts ...Option) *Janitor {
+// New creates a Janitor. Options configure timeout, logger, and hooks.
+func New(opts ...Option) *Janitor {
 	j := &Janitor{
-		interval: interval,
-		timeout:  30 * time.Second,
-		done:     make(chan struct{}),
+		timeout: 30 * time.Second,
 	}
 	for _, o := range opts {
 		o(j)
@@ -67,20 +70,18 @@ func New(interval time.Duration, opts ...Option) *Janitor {
 	return j
 }
 
-// AddTask appends a task and returns the Janitor for chaining.
-func (j *Janitor) AddTask(task Task) *Janitor {
-	j.tasks = append(j.tasks, task)
+// AddTask registers a task with a cron schedule expression. Supported formats
+// include standard cron ("0 0 * * *") and robfig/cron descriptors
+// ("@every 5m", "@daily", "@hourly").
+func (j *Janitor) AddTask(schedule string, task Task) *Janitor {
+	j.tasks = append(j.tasks, scheduledTask{schedule: schedule, task: task})
 	return j
 }
 
-// Start validates configuration, optionally runs tasks immediately, and spawns
-// the background ticker goroutine. It returns an error if the configuration is
-// invalid. The provided context is stored and used for all tick/task execution;
-// cancelling it will also stop the background goroutine.
+// Start validates configuration, registers all tasks with the cron scheduler,
+// and starts it. The provided context controls the lifetime — cancelling it
+// stops the scheduler.
 func (j *Janitor) Start(ctx context.Context) error {
-	if j.interval <= 0 {
-		return fmt.Errorf("janitor: interval must be positive, got %v", j.interval)
-	}
 	if j.timeout <= 0 {
 		return fmt.Errorf("janitor: timeout must be positive, got %v", j.timeout)
 	}
@@ -88,59 +89,80 @@ func (j *Janitor) Start(ctx context.Context) error {
 		j.logger = slog.Default()
 	}
 
-	j.ctx = ctx
+	j.mu.Lock()
+	if j.cron != nil {
+		j.mu.Unlock()
+		return fmt.Errorf("janitor: already started")
+	}
+	j.ctx, j.cancel = context.WithCancel(ctx)
+	// Prevent overlapping runs of the same task when schedules are shorter
+	// than execution time.
+	j.cron = cron.New(cron.WithChain(
+		cron.SkipIfStillRunning(cron.DiscardLogger),
+	))
+	cronRef := j.cron
+	ctxRef := j.ctx
+	j.mu.Unlock()
 
-	if j.runImmediately {
-		j.runTick()
+	for _, st := range j.tasks {
+		st := st // capture
+		_, err := cronRef.AddFunc(st.schedule, func() {
+			j.runTask(ctxRef, st.task)
+		})
+		if err != nil {
+			j.Stop()
+			return fmt.Errorf("janitor: invalid schedule %q for task %q: %w",
+				st.schedule, st.task.Name(), err)
+		}
 	}
 
+	cronRef.Start()
+
 	go func() {
-		ticker := time.NewTicker(j.interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				j.runTick()
-			case <-j.done:
-				return
-			case <-ctx.Done():
-				return
-			}
+		<-ctxRef.Done()
+		cronRef.Stop()
+
+		j.mu.Lock()
+		if j.cron == cronRef {
+			j.ctx = nil
+			j.cancel = nil
+			j.cron = nil
 		}
+		j.mu.Unlock()
 	}()
 
 	return nil
 }
 
-// Stop signals the background goroutine to exit. It is safe to call multiple
-// times.
+// Stop stops the cron scheduler. It is safe to call multiple times.
 func (j *Janitor) Stop() {
-	j.stop.Do(func() { close(j.done) })
+	j.mu.Lock()
+	cancel := j.cancel
+	cronRef := j.cron
+	j.ctx = nil
+	j.cancel = nil
+	j.cron = nil
+	j.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	if cronRef != nil {
+		cronRef.Stop()
+	}
 }
 
-// runTick executes one full tick cycle: preTick hooks, all tasks, postTick hooks.
-func (j *Janitor) runTick() {
-	ctx := j.ctx
+// runTask executes a single task with pre/post hooks and timeout.
+func (j *Janitor) runTask(parent context.Context, t Task) {
+	name := t.Name()
 
 	for _, fn := range j.preTick {
-		if err := fn(ctx); err != nil {
-			j.logger.Error("janitor: pre-tick hook failed, skipping tick", "error", err)
+		if err := fn(parent); err != nil {
+			j.logger.Error("janitor: pre-tick hook failed, skipping task",
+				"task", name, "error", err)
 			return
 		}
 	}
-
-	for _, t := range j.tasks {
-		j.runTask(ctx, t)
-	}
-
-	for _, fn := range j.postTick {
-		fn(ctx)
-	}
-}
-
-// runTask executes a single task with its pre/post hooks and timeout.
-func (j *Janitor) runTask(parent context.Context, t Task) {
-	name := t.Name()
 
 	for _, fn := range j.preRun {
 		if err := fn(parent, name); err != nil {
@@ -167,5 +189,9 @@ func (j *Janitor) runTask(parent context.Context, t Task) {
 
 	for _, fn := range j.postRun {
 		fn(parent, name, affected, err)
+	}
+
+	for _, fn := range j.postTick {
+		fn(parent)
 	}
 }

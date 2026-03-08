@@ -83,60 +83,6 @@ func TestJSON_sendsJSON(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Negotiate
-// ---------------------------------------------------------------------------
-
-func TestNegotiate_htmxRequest(t *testing.T) {
-	c, w := newTestContext(http.MethodGet, "/", map[string]string{"HX-Request": "true"})
-	comp := &mockComponent{html: "<p>htmx</p>"}
-
-	err := Negotiate(c, http.StatusOK, nil, comp)
-	require.NoError(t, err)
-	assert.Equal(t, "<p>htmx</p>", w.Body.String())
-}
-
-func TestNegotiate_acceptHTML(t *testing.T) {
-	c, w := newTestContext(http.MethodGet, "/", map[string]string{"Accept": "text/html"})
-	comp := &mockComponent{html: "<p>html</p>"}
-
-	err := Negotiate(c, http.StatusOK, nil, comp)
-	require.NoError(t, err)
-	assert.Equal(t, "<p>html</p>", w.Body.String())
-}
-
-func TestNegotiate_acceptJSON(t *testing.T) {
-	c, w := newTestContext(http.MethodGet, "/", map[string]string{"Accept": "application/json"})
-	comp := &mockComponent{html: "<p>nope</p>"}
-	data := map[string]int{"n": 1}
-
-	err := Negotiate(c, http.StatusOK, data, comp)
-	require.NoError(t, err)
-	assert.Contains(t, w.Body.String(), `"n":1`)
-}
-
-func TestNegotiate_noAcceptHeader(t *testing.T) {
-	c, w := newTestContext(http.MethodGet, "/", nil)
-	comp := &mockComponent{html: "<p>nope</p>"}
-	data := map[string]int{"n": 1}
-
-	err := Negotiate(c, http.StatusOK, data, comp)
-	require.NoError(t, err)
-	assert.Contains(t, w.Body.String(), `"n":1`)
-}
-
-func TestWantsHTML_htmxPriority(t *testing.T) {
-	c, w := newTestContext(http.MethodGet, "/", map[string]string{
-		"HX-Request": "true",
-		"Accept":     "application/json",
-	})
-	comp := &mockComponent{html: "<p>htmx wins</p>"}
-
-	err := Negotiate(c, http.StatusOK, nil, comp)
-	require.NoError(t, err)
-	assert.Equal(t, "<p>htmx wins</p>", w.Body.String())
-}
-
-// ---------------------------------------------------------------------------
 // Error
 // ---------------------------------------------------------------------------
 

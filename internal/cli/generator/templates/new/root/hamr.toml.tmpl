@@ -1,0 +1,36 @@
+[proxy]
+listen = ":3000"
+target = ":8080"
+inject_reload = true
+
+[[dev.watch]]
+name = "templ"
+watch = "**/*.templ"
+ignore = "*_templ.go"
+cmd = "templ generate"
+debounce = 100
+{{- if eq .CSS "tailwind"}}
+
+[[dev.watch]]
+name = "css"
+watch = ["static/css/**/*.css", "**/*.templ"]
+ignore = "static/css/output.css"
+cmd = "npm run css:build"
+debounce = 200
+reload = "css"
+{{- end}}
+
+[[dev.watch]]
+name = "go"
+watch = ["**/*.go", "**/*.templ"]
+ignore = ["*_templ.go", "*_test.go"]
+cmd = "go build -o ./tmp/app ./cmd/server"
+run = "./tmp/app"
+depends = ["templ"]
+reload = "full"
+
+[[dev.watch]]
+name = "static"
+watch = ["static/**/*.js", "static/images/**"]
+reload = "full"
+cmd = "echo static files changed"

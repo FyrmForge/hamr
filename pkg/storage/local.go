@@ -143,3 +143,37 @@ func (s *LocalStorage) Exists(_ context.Context, path string) (bool, error) {
 	}
 	return false, fmt.Errorf("storage: stat file: %w", err)
 }
+
+func (s *LocalStorage) List(_ context.Context, prefix string) ([]string, error) {
+	dir := s.basePath
+	if prefix != "" {
+		resolved, err := s.resolve(prefix)
+		if err != nil {
+			return nil, err
+		}
+		dir = resolved
+	}
+
+	var paths []string
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(s.basePath, path)
+		if err != nil {
+			return err
+		}
+		paths = append(paths, rel)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("storage: list %q: %w", prefix, err)
+	}
+	return paths, nil
+}

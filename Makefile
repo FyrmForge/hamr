@@ -11,7 +11,7 @@ lint:
 	golangci-lint run ./...
 
 test:
-	go test ./...
+	go test ./... -v -race
 
 test-integration-db:
 	go test -mod=mod -tags=integration -count=1 ./pkg/db -run TestConnectContext_ReconnectsAfterBackendTermination

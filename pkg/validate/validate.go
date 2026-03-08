@@ -274,6 +274,40 @@ func Run(name, value string) string {
 }
 
 // ---------------------------------------------------------------------------
+// Field + Check helpers
+// ---------------------------------------------------------------------------
+
+// FieldResult pairs a field name with its validation result.
+type FieldResult struct {
+	Name    string
+	Message string
+}
+
+// Field creates a FieldResult by running a validator result against a field.
+// If msg is provided, it overrides a non-empty result.
+func Field(name, result string, msg ...string) FieldResult {
+	if result != "" && len(msg) > 0 && msg[0] != "" {
+		result = msg[0]
+	}
+	return FieldResult{Name: name, Message: result}
+}
+
+// Check collects non-empty validation results into a map keyed by field name.
+// Returns nil when all fields pass.
+func Check(fields ...FieldResult) map[string]string {
+	var errs map[string]string
+	for _, f := range fields {
+		if f.Message != "" {
+			if errs == nil {
+				errs = make(map[string]string, len(fields))
+			}
+			errs[f.Name] = f.Message
+		}
+	}
+	return errs
+}
+
+// ---------------------------------------------------------------------------
 // Compiled regexes
 // ---------------------------------------------------------------------------
 

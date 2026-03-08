@@ -48,6 +48,9 @@ jobs:
 
       - name: Lint
         uses: golangci/golangci-lint-action@v9
+
+      - name: Lint templ files
+        run: go run github.com/FyrmForge/hamr/cmd/hamr@latest lint templ
 {{- if eq .CSS "tailwind"}}
 
       - uses: actions/setup-node@v4

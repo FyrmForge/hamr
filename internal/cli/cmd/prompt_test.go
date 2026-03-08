@@ -39,11 +39,10 @@ func TestApplyWizardResult_defaults(t *testing.T) {
 
 func TestApplyWizardResult_s3Storage(t *testing.T) {
 	res := &wizardResult{
-		Owner:           "user",
-		CSS:             "plain",
-		Database:        "postgres",
-		StorageBackend:  "s3",
-		S3StaticWatcher: "yes",
+		Owner:          "user",
+		CSS:            "plain",
+		Database:       "postgres",
+		StorageBackend: "s3",
 	}
 
 	cfg := &generator.ProjectConfig{
@@ -57,7 +56,6 @@ func TestApplyWizardResult_s3Storage(t *testing.T) {
 
 	assert.True(t, cfg.IncludeStorage)
 	assert.Equal(t, "s3", cfg.StorageBackend)
-	assert.True(t, cfg.S3StaticWatcher)
 }
 
 func TestApplyWizardResult_noStorage(t *testing.T) {
@@ -79,7 +77,6 @@ func TestApplyWizardResult_noStorage(t *testing.T) {
 
 	assert.False(t, cfg.IncludeStorage)
 	assert.Equal(t, "", cfg.StorageBackend)
-	assert.False(t, cfg.S3StaticWatcher)
 }
 
 func TestWizardResult_locationDefault(t *testing.T) {

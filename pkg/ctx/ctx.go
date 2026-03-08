@@ -46,6 +46,32 @@ func MustGet[T any](c echo.Context, key Key[T]) T {
 	return val
 }
 
+// GetAs retrieves a value from the Echo context using an untyped key and
+// asserts it to type T. It returns (zero, false) on missing or mismatched type.
+func GetAs[T any](c echo.Context, key Key[any]) (T, bool) {
+	val := c.Get(key.name)
+	if val == nil {
+		var zero T
+		return zero, false
+	}
+	typed, ok := val.(T)
+	if !ok {
+		var zero T
+		return zero, false
+	}
+	return typed, true
+}
+
+// MustGetAs retrieves a value from the Echo context using an untyped key and
+// asserts it to type T. It panics with a clear message on missing or mismatched type.
+func MustGetAs[T any](c echo.Context, key Key[any]) T {
+	val, ok := GetAs[T](c, key)
+	if !ok {
+		panic("ctx: value for key " + key.name + " is missing or not the expected type")
+	}
+	return val
+}
+
 // Pre-defined keys used across the framework.
 var (
 	SubjectIDKey = NewKey[string]("subject_id")

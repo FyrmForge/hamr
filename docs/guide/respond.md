@@ -12,9 +12,9 @@ import "github.com/FyrmForge/hamr/pkg/respond"
 
 ## Design
 
-The same handler can serve both HTMX (HTML) and JSON API clients. The `Negotiate`
-function inspects `HX-Request` and `Accept` headers to pick the right format
-automatically.
+HAMR is HTMX-first. Use `respond.HTML` for templ components and `respond.JSON` for
+dedicated API endpoints. The `Error` and `ValidationError` helpers negotiate format
+automatically based on headers.
 
 ## HTML Responses
 
@@ -37,22 +37,6 @@ func (h *Handler) GetUser(c echo.Context) error {
     return respond.JSON(c, http.StatusOK, user)
 }
 ```
-
-## Content Negotiation
-
-Serve both HTML and JSON from a single handler:
-
-```go
-func (h *Handler) GetUser(c echo.Context) error {
-    user, err := h.repo.GetUser(ctx, id)
-    if err != nil {
-        return respond.Error(c, http.StatusNotFound, "User not found")
-    }
-    return respond.Negotiate(c, http.StatusOK, user, templates.UserPage(user))
-}
-```
-
-Priority: `HX-Request` header (HTML) > `Accept` header > default (JSON).
 
 ## Error Responses
 
@@ -118,7 +102,6 @@ return respond.JSON(c, http.StatusOK, respond.PagedResponse[User]{
 // Responses
 func HTML(c echo.Context, status int, component templ.Component) error
 func JSON(c echo.Context, status int, data any) error
-func Negotiate(c echo.Context, status int, jsonData any, component templ.Component) error
 func Error(c echo.Context, status int, msg string, component ...templ.Component) error
 func ValidationError(c echo.Context, fields map[string]string, component ...templ.Component) error
 

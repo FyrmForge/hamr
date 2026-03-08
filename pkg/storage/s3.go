@@ -25,6 +25,7 @@ type s3API interface {
 	GetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.Options)) (*s3.GetObjectOutput, error)
 	DeleteObject(ctx context.Context, params *s3.DeleteObjectInput, optFns ...func(*s3.Options)) (*s3.DeleteObjectOutput, error)
 	HeadObject(ctx context.Context, params *s3.HeadObjectInput, optFns ...func(*s3.Options)) (*s3.HeadObjectOutput, error)
+	ListObjectsV2(ctx context.Context, params *s3.ListObjectsV2Input, optFns ...func(*s3.Options)) (*s3.ListObjectsV2Output, error)
 	CreateBucket(ctx context.Context, params *s3.CreateBucketInput, optFns ...func(*s3.Options)) (*s3.CreateBucketOutput, error)
 	HeadBucket(ctx context.Context, params *s3.HeadBucketInput, optFns ...func(*s3.Options)) (*s3.HeadBucketOutput, error)
 	PutBucketPolicy(ctx context.Context, params *s3.PutBucketPolicyInput, optFns ...func(*s3.Options)) (*s3.PutBucketPolicyOutput, error)
@@ -194,6 +195,33 @@ func (s *S3Storage) SignURL(ctx context.Context, path string, expiry time.Durati
 		return "", fmt.Errorf("storage: s3 presign %q: %w", path, err)
 	}
 	return req.URL, nil
+}
+
+func (s *S3Storage) List(ctx context.Context, prefix string) ([]string, error) {
+	var keys []string
+	input := &s3.ListObjectsV2Input{
+		Bucket: &s.bucket,
+	}
+	if prefix != "" {
+		input.Prefix = &prefix
+	}
+
+	for {
+		out, err := s.client.ListObjectsV2(ctx, input)
+		if err != nil {
+			return nil, fmt.Errorf("storage: s3 list %q: %w", prefix, err)
+		}
+		for _, obj := range out.Contents {
+			if obj.Key != nil {
+				keys = append(keys, *obj.Key)
+			}
+		}
+		if out.IsTruncated == nil || !*out.IsTruncated {
+			break
+		}
+		input.ContinuationToken = out.NextContinuationToken
+	}
+	return keys, nil
 }
 
 func endpointPtr(s string) *string {

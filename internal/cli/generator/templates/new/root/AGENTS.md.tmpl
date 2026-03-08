@@ -19,7 +19,7 @@ static/                  CSS, JS, images
 - Constructor injection: `NewHandler(store repo.Store, log *slog.Logger) *Handler`
 - Route comments above methods: `// GET /path`
 - Register routes in `internal/web/server.go`
-- Use `respond.HTML`, `respond.JSON`, or `respond.Negotiate` for responses
+- Use `respond.HTML` or `respond.JSON` for responses
 
 ## Validation
 
@@ -45,6 +45,14 @@ static/                  CSS, JS, images
 - Tailwind CSS — classes directly in templ components
 - Config in `tailwind.config.js`
 {{- end}}
+
+## Templ Linting
+
+- Run `make templint` to lint `.templ` files
+- Control flow on one line (`if cond { <div>...</div> }`) is silently dropped by templ — always use multiline
+- Accessibility: `<img>` must have `alt=`, `<a>` must have `href=`
+- Style: avoid inline `style=` attributes, empty `class=""`, and `href="javascript:..."`
+- Configure rules via `.templint.yml` in the project root
 
 ## Testing
 

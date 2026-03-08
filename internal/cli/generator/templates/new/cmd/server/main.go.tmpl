@@ -18,9 +18,6 @@ import (
 {{- if .IncludeStorage}}
 	"github.com/FyrmForge/hamr/pkg/storage"
 {{- end}}
-{{- if .S3StaticWatcher}}
-	ssync "github.com/FyrmForge/hamr/pkg/sync"
-{{- end}}
 {{- if .IncludeWS}}
 	"github.com/FyrmForge/hamr/pkg/websocket"
 {{- end}}
@@ -42,11 +39,7 @@ var (
 	envPort          = config.GetEnvOrDefaultInt("PORT", 8080)
 	envDevMode       = config.GetEnvOrDefaultBool("DEV_MODE", true)
 	envDatabaseURL   = config.GetEnvOrDefault("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/{{.Name}}?sslmode=disable")
-{{- if .S3StaticWatcher}}
-	envStaticBaseURL = config.GetEnvOrDefault("STATIC_BASE_URL", "http://localhost:9000/{{.Name}}-uploads")
-{{- else}}
 	envStaticBaseURL = config.GetEnvOrDefault("STATIC_BASE_URL", "/static")
-{{- end}}
 {{- if eq .StorageBackend "local"}}
 	envStoragePath   = config.GetEnvOrDefault("STORAGE_PATH", "./uploads")
 {{- end}}
@@ -115,23 +108,6 @@ func main() {
 	if err != nil {
 		log.Error("failed to init storage", "error", err)
 		os.Exit(1)
-	}
-{{- end}}
-{{- if .S3StaticWatcher}}
-
-	// Dev mode: sync static assets to S3 in the background.
-	if envDevMode {
-		go func() {
-			ctx := context.Background()
-			log.Info("dev mode: syncing static assets to S3")
-			if err := ssync.SyncAll(ctx, fileStorage, "static"); err != nil {
-				log.Error("initial static sync failed", "error", err)
-				return
-			}
-			if err := ssync.WatchAndSync(ctx, fileStorage, "static"); err != nil {
-				log.Error("static sync watcher stopped", "error", err)
-			}
-		}()
 	}
 {{- end}}
 {{- if .IncludeWS}}

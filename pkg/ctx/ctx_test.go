@@ -135,6 +135,62 @@ func TestMultipleKeys(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// GetAs
+// ---------------------------------------------------------------------------
+
+func TestGetAs_success(t *testing.T) {
+	type user struct{ Name string }
+	c := newEchoContext()
+	c.Set("subject", &user{Name: "alice"})
+
+	got, ok := ctx.GetAs[*user](c, ctx.SubjectKey)
+	require.True(t, ok)
+	assert.Equal(t, "alice", got.Name)
+}
+
+func TestGetAs_wrongType(t *testing.T) {
+	c := newEchoContext()
+	c.Set("subject", "not-a-struct")
+
+	type user struct{ Name string }
+	got, ok := ctx.GetAs[*user](c, ctx.SubjectKey)
+	assert.False(t, ok)
+	assert.Nil(t, got)
+}
+
+func TestGetAs_missing(t *testing.T) {
+	c := newEchoContext()
+
+	got, ok := ctx.GetAs[string](c, ctx.SubjectKey)
+	assert.False(t, ok)
+	assert.Equal(t, "", got)
+}
+
+func TestMustGetAs_success(t *testing.T) {
+	type user struct{ Name string }
+	c := newEchoContext()
+	c.Set("subject", &user{Name: "bob"})
+
+	got := ctx.MustGetAs[*user](c, ctx.SubjectKey)
+	assert.Equal(t, "bob", got.Name)
+}
+
+func TestMustGetAs_panicsOnMissing(t *testing.T) {
+	c := newEchoContext()
+	assert.Panics(t, func() {
+		ctx.MustGetAs[string](c, ctx.SubjectKey)
+	})
+}
+
+func TestMustGetAs_panicsOnWrongType(t *testing.T) {
+	c := newEchoContext()
+	c.Set("subject", 42)
+	assert.Panics(t, func() {
+		ctx.MustGetAs[string](c, ctx.SubjectKey)
+	})
+}
+
+// ---------------------------------------------------------------------------
 // Pre-defined keys
 // ---------------------------------------------------------------------------
 

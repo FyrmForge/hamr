@@ -13,12 +13,6 @@ func WithTimeout(d time.Duration) Option {
 	return func(j *Janitor) { j.timeout = d }
 }
 
-// WithRunImmediately runs all tasks once synchronously on Start before the
-// first ticker tick.
-func WithRunImmediately(run bool) Option {
-	return func(j *Janitor) { j.runImmediately = run }
-}
-
 // WithLogger sets the structured logger used for task execution logging.
 // A nil logger is resolved to slog.Default() at Start time.
 func WithLogger(l *slog.Logger) Option {
@@ -36,13 +30,13 @@ func WithPostRun(fn PostRunFunc) Option {
 	return func(j *Janitor) { j.postRun = append(j.postRun, fn) }
 }
 
-// WithPreTick appends a per-tick pre-tick hook. Multiple hooks run in order;
-// the first error skips the entire tick.
+// WithPreTick appends a pre-execution hook. Multiple hooks run in order;
+// the first error skips the execution.
 func WithPreTick(fn PreTickFunc) Option {
 	return func(j *Janitor) { j.preTick = append(j.preTick, fn) }
 }
 
-// WithPostTick appends a per-tick post-tick hook. Multiple hooks run in order.
+// WithPostTick appends a post-execution hook. Multiple hooks run in order.
 func WithPostTick(fn PostTickFunc) Option {
 	return func(j *Janitor) { j.postTick = append(j.postTick, fn) }
 }

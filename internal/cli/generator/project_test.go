@@ -450,6 +450,24 @@ func TestGenerateProject_configHasCorrectDBURL(t *testing.T) {
 	assert.Contains(t, mainGo, "cfgproj?sslmode=disable")
 }
 
+func TestGenerateProject_hamrConfigRebuildsGoOnTemplChanges(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "devcfgproj")
+
+	cfg := &ProjectConfig{
+		Name:      "devcfgproj",
+		Module:    "github.com/test/devcfgproj",
+		CSS:       "plain",
+		Database:  "postgres",
+		GoVersion: "1.25.0",
+	}
+
+	require.NoError(t, GenerateProject(dir, cfg))
+
+	hamrToml := readFile(t, dir, "hamr.toml")
+	assert.Contains(t, hamrToml, `watch = ["**/*.go", "**/*.templ"]`)
+	assert.Contains(t, hamrToml, `depends = ["templ"]`)
+}
+
 func TestGenerateProject_inPlace(t *testing.T) {
 	dir := t.TempDir() // already exists
 
@@ -525,14 +543,13 @@ func TestGenerateProject_s3Storage(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "s3proj")
 
 	cfg := &ProjectConfig{
-		Name:            "s3proj",
-		Module:          "github.com/test/s3proj",
-		CSS:             "plain",
-		Database:        "postgres",
-		GoVersion:       "1.25.0",
-		IncludeStorage:  true,
-		StorageBackend:  "s3",
-		S3StaticWatcher: true,
+		Name:           "s3proj",
+		Module:         "github.com/test/s3proj",
+		CSS:            "plain",
+		Database:       "postgres",
+		GoVersion:      "1.25.0",
+		IncludeStorage: true,
+		StorageBackend: "s3",
 	}
 
 	require.NoError(t, GenerateProject(dir, cfg))
@@ -564,11 +581,6 @@ func TestGenerateProject_s3Storage(t *testing.T) {
 	layout := readFile(t, dir, "internal/web/components/layout.templ")
 	assert.Contains(t, layout, "StaticURL(")
 	assert.NotContains(t, layout, `href="/static/`)
-
-	// Makefile should have sync-static target using hamr sync.
-	makefile := readFile(t, dir, "Makefile")
-	assert.Contains(t, makefile, "sync-static:")
-	assert.Contains(t, makefile, "hamr sync --watch")
 
 	// go.mod should exist with correct module.
 	gomod := readFile(t, dir, "go.mod")

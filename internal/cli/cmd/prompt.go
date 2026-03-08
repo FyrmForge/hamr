@@ -18,9 +18,14 @@ type wizardResult struct {
 	CSS             string
 	Database        string
 	StorageBackend  string // "none" | "local" | "s3"
-	S3StaticWatcher string // "yes" | "no"
 	WebSocket       string // "yes" | "no"
 	E2E             string // "yes" | "no"
+}
+
+// wizardStep pairs a huh group with a callback that prints the selection.
+type wizardStep struct {
+	group *huh.Group
+	print func()
 }
 
 // runInteractiveForm builds and runs a huh form for any options that weren't
@@ -39,152 +44,204 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 		CSS:             "plain",
 		Database:        "postgres",
 		StorageBackend:  "none",
-		S3StaticWatcher: "yes",
 		WebSocket:       "yes",
 		E2E:             "yes",
 	}
 
-	// ── Part 1: project setup + stack + storage ──────────────
-	var part1 []*huh.Group
+	var steps []wizardStep
 
+	// ── Project name ────────────────────────────────────────
 	if needsName {
-		part1 = append(part1, huh.NewGroup(
-			huh.NewInput().
-				Title("Project name").
-				Placeholder("myapp").
-				Value(&res.Name).
-				Validate(func(s string) error {
-					if s == "" {
-						return fmt.Errorf("required")
-					}
-					if !regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`).MatchString(s) {
-						return fmt.Errorf("must start with a letter and contain only letters, digits, hyphens, or underscores")
-					}
-					return nil
-				}),
-		))
+		steps = append(steps, wizardStep{
+			group: huh.NewGroup(
+				huh.NewInput().
+					Title("Project name").
+					Placeholder("myapp").
+					Value(&res.Name).
+					Validate(func(s string) error {
+						if s == "" {
+							return fmt.Errorf("required")
+						}
+						if !regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`).MatchString(s) {
+							return fmt.Errorf("must start with a letter and contain only letters, digits, hyphens, or underscores")
+						}
+						return nil
+					}),
+			),
+			print: func() {
+				fmt.Printf("  Project name: %s\n", res.Name)
+			},
+		})
 	}
 
+	// ── Project location ────────────────────────────────────
 	if needsLocation && !cmd.Flags().Changed("location") {
 		desc := "Subfolder creates ./" + name + ", current directory scaffolds into ."
 		if needsName {
 			desc = "Subfolder creates ./<name>, current directory scaffolds into ."
 		}
-		part1 = append(part1, huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("Project location").
-				Description(desc).
-				Options(
-					huh.NewOption("Use current directory", "current"),
-					huh.NewOption("Create subfolder", "subfolder"),
-				).
-				Value(&res.Location),
-		))
-	} else if cmd.Flags().Changed("location") {
-		res.Location, _ = cmd.Flags().GetString("location")
-	}
-
-	if !cmd.Flags().Changed("module") {
-		res.Owner = ghUsername()
-		part1 = append(part1, huh.NewGroup(
-			huh.NewInput().
-				Title("GitHub username or org").
-				DescriptionFunc(func() string {
+		steps = append(steps, wizardStep{
+			group: huh.NewGroup(
+				huh.NewSelect[string]().
+					Title("Project location").
+					Description(desc).
+					Options(
+						huh.NewOption("Use current directory", "current"),
+						huh.NewOption("Create subfolder", "subfolder"),
+					).
+					Value(&res.Location),
+			),
+			print: func() {
+				if res.Location == "current" {
+					fmt.Println("  Location: current directory")
+				} else {
 					n := res.Name
 					if n == "" {
 						n = name
 					}
-					return fmt.Sprintf("Module will be github.com/<owner>/%s", n)
-				}, &res.Name).
-				Placeholder("username").
-				Value(&res.Owner).
-				Validate(func(s string) error {
-					if s == "" {
-						return fmt.Errorf("required")
-					}
-					return nil
-				}),
-		))
+					fmt.Printf("  Location: subfolder ./%s\n", n)
+				}
+			},
+		})
+	} else if cmd.Flags().Changed("location") {
+		res.Location, _ = cmd.Flags().GetString("location")
 	}
 
+	// ── GitHub username / module ─────────────────────────────
+	if !cmd.Flags().Changed("module") {
+		res.Owner = ghUsername()
+		steps = append(steps, wizardStep{
+			group: huh.NewGroup(
+				huh.NewInput().
+					Title("GitHub username or org").
+					DescriptionFunc(func() string {
+						n := res.Name
+						if n == "" {
+							n = name
+						}
+						return fmt.Sprintf("Module will be github.com/<owner>/%s", n)
+					}, &res.Name).
+					Placeholder("username").
+					Value(&res.Owner).
+					Validate(func(s string) error {
+						if s == "" {
+							return fmt.Errorf("required")
+						}
+						return nil
+					}),
+			),
+			print: func() {
+				n := res.Name
+				if n == "" {
+					n = name
+				}
+				fmt.Printf("  Module: github.com/%s/%s\n", res.Owner, n)
+			},
+		})
+	}
+
+	// ── CSS approach ────────────────────────────────────────
 	if !cmd.Flags().Changed("css") {
-		part1 = append(part1, huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("CSS approach").
-				Options(
-					huh.NewOption("Plain CSS — variables, reset, utilities", "plain"),
-					huh.NewOption("Tailwind CSS — utility-first with build step", "tailwind"),
-				).
-				Value(&res.CSS),
-		))
+		steps = append(steps, wizardStep{
+			group: huh.NewGroup(
+				huh.NewSelect[string]().
+					Title("CSS approach").
+					Description("Controls how your project's stylesheets are organized and built.").
+					Options(
+						huh.NewOption("Plain CSS — organized variables, reset, and utility classes with no build step", "plain"),
+						huh.NewOption("Tailwind CSS — utility-first framework requiring Node.js and a CSS build step", "tailwind"),
+					).
+					Value(&res.CSS),
+			),
+			print: func() {
+				switch res.CSS {
+				case "tailwind":
+					fmt.Println("  CSS: Tailwind CSS")
+				default:
+					fmt.Println("  CSS: Plain CSS")
+				}
+			},
+		})
 	} else {
 		res.CSS, _ = cmd.Flags().GetString("css")
 	}
 
+	// ── Database ────────────────────────────────────────────
 	if !cmd.Flags().Changed("database") {
-		part1 = append(part1, huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("Database").
-				Options(
-					huh.NewOption("PostgreSQL — pgx + sqlx", "postgres"),
-				).
-				Value(&res.Database),
-		))
+		steps = append(steps, wizardStep{
+			group: huh.NewGroup(
+				huh.NewSelect[string]().
+					Title("Database").
+					Description("Sets up a connection pool, migration runner, and Docker Compose service for local development.").
+					Options(
+						huh.NewOption("PostgreSQL — pgx driver with sqlx for query helpers", "postgres"),
+					).
+					Value(&res.Database),
+			),
+			print: func() {
+				fmt.Println("  Database: PostgreSQL")
+			},
+		})
 	} else {
 		res.Database, _ = cmd.Flags().GetString("database")
 	}
 
+	// ── File storage ────────────────────────────────────────
 	if !cmd.Flags().Changed("storage") {
-		part1 = append(part1, huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("File storage").
-				Options(
-					huh.NewOption("None", "none"),
-					huh.NewOption("Local folder", "local"),
-					huh.NewOption("S3 (MinIO)", "s3"),
-				).
-				Value(&res.StorageBackend),
-		))
+		steps = append(steps, wizardStep{
+			group: huh.NewGroup(
+				huh.NewSelect[string]().
+					Title("File storage").
+					Description("Adds a storage layer for handling user-uploaded files like avatars or documents.").
+					Options(
+						huh.NewOption("None — no file upload support", "none"),
+						huh.NewOption("Local folder — saves uploads to a directory on disk", "local"),
+						huh.NewOption("S3 (MinIO) — saves uploads to an S3-compatible bucket with MinIO for local dev", "s3"),
+					).
+					Value(&res.StorageBackend),
+			),
+			print: func() {
+				switch res.StorageBackend {
+				case "local":
+					fmt.Println("  Storage: Local disk")
+				case "s3":
+					fmt.Println("  Storage: S3 (MinIO)")
+				default:
+					fmt.Println("  Storage: None")
+				}
+			},
+		})
 	} else {
 		res.StorageBackend, _ = cmd.Flags().GetString("storage")
 	}
 
-	if len(part1) > 0 {
-		if err := huh.NewForm(part1...).Run(); err != nil {
+	// Run each step individually so we can print after each answer.
+	for _, s := range steps {
+		if err := huh.NewForm(s.group).Run(); err != nil {
 			return nil, err
 		}
+		s.print()
 	}
 
-	// ── S3 static sync (immediately after storage) ───────────
-	if res.StorageBackend == "s3" && !cmd.Flags().Changed("s3-watcher") {
+	// ── WebSocket ───────────────────────────────────────────
+	if !cmd.Flags().Changed("websocket") {
 		if err := huh.NewForm(huh.NewGroup(
 			huh.NewSelect[string]().
-				Title("Sync static assets to S3").
-				Description("Upload CSS/JS/images to S3 bucket, serve from S3 URL instead of /static").
-				Options(
-					huh.NewOption("Yes", "yes"),
-					huh.NewOption("No", "no"),
-				).
-				Value(&res.S3StaticWatcher),
-		)).Run(); err != nil {
-			return nil, err
-		}
-	}
-
-	// ── Part 2: remaining features ───────────────────────────
-	var part2 []*huh.Group
-
-	if !cmd.Flags().Changed("websocket") {
-		part2 = append(part2, huh.NewGroup(
-			huh.NewSelect[string]().
 				Title("WebSocket").
-				Description("Real-time connections").
+				Description("Includes a client-side JS helper and server wiring for persistent two-way connections, useful for live updates or chat features.").
 				Options(
 					huh.NewOption("Yes", "yes"),
 					huh.NewOption("No", "no"),
 				).
 				Value(&res.WebSocket),
-		))
+		)).Run(); err != nil {
+			return nil, err
+		}
+		if res.WebSocket == "yes" {
+			fmt.Println("  WebSocket: Yes")
+		} else {
+			fmt.Println("  WebSocket: No")
+		}
 	} else {
 		if v, _ := cmd.Flags().GetBool("websocket"); v {
 			res.WebSocket = "yes"
@@ -193,28 +250,30 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 		}
 	}
 
+	// ── E2E testing ─────────────────────────────────────────
 	if !cmd.Flags().Changed("e2e") {
-		part2 = append(part2, huh.NewGroup(
+		if err := huh.NewForm(huh.NewGroup(
 			huh.NewSelect[string]().
 				Title("E2E testing").
-				Description("Browser tests with testcontainers").
+				Description("Scaffolds a Go-based browser test suite using testcontainers to spin up Postgres and your app in Docker, with helpers for form submission and assertions.").
 				Options(
 					huh.NewOption("Yes", "yes"),
 					huh.NewOption("No", "no"),
 				).
 				Value(&res.E2E),
-		))
+		)).Run(); err != nil {
+			return nil, err
+		}
+		if res.E2E == "yes" {
+			fmt.Println("  E2E tests: Yes")
+		} else {
+			fmt.Println("  E2E tests: No")
+		}
 	} else {
 		if v, _ := cmd.Flags().GetBool("e2e"); v {
 			res.E2E = "yes"
 		} else {
 			res.E2E = "no"
-		}
-	}
-
-	if len(part2) > 0 {
-		if err := huh.NewForm(part2...).Run(); err != nil {
-			return nil, err
 		}
 	}
 

@@ -1,7 +1,7 @@
-// Package respond provides content-negotiated HTTP response helpers.
+// Package respond provides HTTP response helpers for HTMX-first applications.
 //
-// It detects htmx requests, negotiates between HTML and JSON responses,
-// and renders templ components or JSON payloads via Echo.
+// It renders templ components or JSON payloads via Echo. Use respond.HTML for
+// templ components and respond.JSON for API responses.
 package respond
 
 import (
@@ -34,14 +34,6 @@ func HTML(c echo.Context, status int, component templ.Component) error {
 // JSON sends a JSON response with the given status code.
 func JSON(c echo.Context, status int, data any) error {
 	return c.JSON(status, data)
-}
-
-// Negotiate sends HTML or JSON based on client preference.
-func Negotiate(c echo.Context, status int, jsonData any, component templ.Component) error {
-	if wantsHTML(c) {
-		return HTML(c, status, component)
-	}
-	return JSON(c, status, jsonData)
 }
 
 type errorResponse struct {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -198,6 +199,61 @@ func TestLocalStorage_overwrite(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Local storage List tests
+// ---------------------------------------------------------------------------
+
+func TestLocalStorage_List_empty(t *testing.T) {
+	store, err := NewLocalStorage(t.TempDir())
+	require.NoError(t, err)
+
+	got, err := store.List(context.Background(), "")
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
+func TestLocalStorage_List_allFiles(t *testing.T) {
+	store, err := NewLocalStorage(t.TempDir())
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	require.NoError(t, store.Save(ctx, "a.txt", strings.NewReader("a")))
+	require.NoError(t, store.Save(ctx, "b.txt", strings.NewReader("b")))
+	require.NoError(t, store.Save(ctx, "sub/c.txt", strings.NewReader("c")))
+
+	got, err := store.List(ctx, "")
+	require.NoError(t, err)
+	assert.Len(t, got, 3)
+	assert.Contains(t, got, "a.txt")
+	assert.Contains(t, got, "b.txt")
+	assert.Contains(t, got, filepath.Join("sub", "c.txt"))
+}
+
+func TestLocalStorage_List_withPrefix(t *testing.T) {
+	store, err := NewLocalStorage(t.TempDir())
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	require.NoError(t, store.Save(ctx, "photos/a.jpg", strings.NewReader("a")))
+	require.NoError(t, store.Save(ctx, "photos/b.jpg", strings.NewReader("b")))
+	require.NoError(t, store.Save(ctx, "docs/c.txt", strings.NewReader("c")))
+
+	got, err := store.List(ctx, "photos")
+	require.NoError(t, err)
+	assert.Len(t, got, 2)
+	assert.Contains(t, got, filepath.Join("photos", "a.jpg"))
+	assert.Contains(t, got, filepath.Join("photos", "b.jpg"))
+}
+
+func TestLocalStorage_List_missingPrefix(t *testing.T) {
+	store, err := NewLocalStorage(t.TempDir())
+	require.NoError(t, err)
+
+	got, err := store.List(context.Background(), "nonexistent")
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
+// ---------------------------------------------------------------------------
 // S3 storage tests (mocked)
 // ---------------------------------------------------------------------------
 
@@ -207,6 +263,7 @@ type mockS3Client struct {
 	getFn          func(ctx context.Context, in *s3.GetObjectInput) (*s3.GetObjectOutput, error)
 	deleteFn       func(ctx context.Context, in *s3.DeleteObjectInput) (*s3.DeleteObjectOutput, error)
 	headFn         func(ctx context.Context, in *s3.HeadObjectInput) (*s3.HeadObjectOutput, error)
+	listFn         func(ctx context.Context, in *s3.ListObjectsV2Input) (*s3.ListObjectsV2Output, error)
 	createBucketFn func(ctx context.Context, in *s3.CreateBucketInput) (*s3.CreateBucketOutput, error)
 	headBucketFn   func(ctx context.Context, in *s3.HeadBucketInput) (*s3.HeadBucketOutput, error)
 }
@@ -225,6 +282,13 @@ func (m *mockS3Client) DeleteObject(ctx context.Context, in *s3.DeleteObjectInpu
 
 func (m *mockS3Client) HeadObject(ctx context.Context, in *s3.HeadObjectInput, _ ...func(*s3.Options)) (*s3.HeadObjectOutput, error) {
 	return m.headFn(ctx, in)
+}
+
+func (m *mockS3Client) ListObjectsV2(ctx context.Context, in *s3.ListObjectsV2Input, _ ...func(*s3.Options)) (*s3.ListObjectsV2Output, error) {
+	if m.listFn != nil {
+		return m.listFn(ctx, in)
+	}
+	return &s3.ListObjectsV2Output{}, nil
 }
 
 func (m *mockS3Client) CreateBucket(ctx context.Context, in *s3.CreateBucketInput, _ ...func(*s3.Options)) (*s3.CreateBucketOutput, error) {
@@ -405,6 +469,52 @@ func TestS3Storage_SignURL_error(t *testing.T) {
 	_, err := store.SignURL(context.Background(), "key", time.Minute)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "cred error")
+}
+
+// --- List ---
+
+func TestS3Storage_List(t *testing.T) {
+	key1, key2 := "photos/a.jpg", "photos/b.jpg"
+	mc := &mockS3Client{
+		listFn: func(_ context.Context, in *s3.ListObjectsV2Input) (*s3.ListObjectsV2Output, error) {
+			assert.Equal(t, "test-bucket", *in.Bucket)
+			assert.Equal(t, "photos/", *in.Prefix)
+			return &s3.ListObjectsV2Output{
+				Contents: []s3types.Object{
+					{Key: &key1},
+					{Key: &key2},
+				},
+			}, nil
+		},
+	}
+	store := newTestS3(mc, nil)
+	got, err := store.List(context.Background(), "photos/")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"photos/a.jpg", "photos/b.jpg"}, got)
+}
+
+func TestS3Storage_List_empty(t *testing.T) {
+	mc := &mockS3Client{
+		listFn: func(context.Context, *s3.ListObjectsV2Input) (*s3.ListObjectsV2Output, error) {
+			return &s3.ListObjectsV2Output{}, nil
+		},
+	}
+	store := newTestS3(mc, nil)
+	got, err := store.List(context.Background(), "")
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
+func TestS3Storage_List_error(t *testing.T) {
+	mc := &mockS3Client{
+		listFn: func(context.Context, *s3.ListObjectsV2Input) (*s3.ListObjectsV2Output, error) {
+			return nil, errors.New("access denied")
+		},
+	}
+	store := newTestS3(mc, nil)
+	_, err := store.List(context.Background(), "prefix")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "access denied")
 }
 
 // --- NewS3Storage validation ---

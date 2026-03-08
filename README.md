@@ -41,6 +41,7 @@ HAMR is two things:
 | `pkg/media`        | Image and video upload, processing, and serving on top of storage                  | [docs/guide/media.md](docs/guide/media.md) |
 | `pkg/sync`         | S3 sync for static assets with file watching                                       | [docs/guide/sync.md](docs/guide/sync.md) |
 | `pkg/e2e`          | Reusable go-rod browser helpers for E2E testing                                    | [docs/guide/e2e.md](docs/guide/e2e.md) |
+| `pkg/templint`     | Static linter for `.templ` files (control flow, a11y, style rules)                 | [docs/guide/templint.md](docs/guide/templint.md) |
 
 ### CLI commands
 
@@ -50,6 +51,7 @@ HAMR is two things:
 | `hamr sync`                 | Sync a local directory to an S3-compatible bucket |
 | `hamr vendor`               | Download and checksum frontend JS dependencies  |
 | `hamr rename module <path>` | Rename the Go module and update all import paths |
+| `hamr lint templ`           | Lint `.templ` files for common issues           |
 | `hamr version`              | Print version and commit                        |
 
 ## Install

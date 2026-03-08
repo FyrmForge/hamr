@@ -50,5 +50,5 @@ docs/                Documentation
 - Handlers use constructor injection and register via `web.RegisterRoutes`
 - Route comments: `// GET /path` above handler methods
 - Validation: `hamr/pkg/validate` validators return "" for valid, error message for invalid
-- Response: `hamr/pkg/respond.Negotiate` for dual HTML/JSON support
+- Response: `hamr/pkg/respond.HTML` for templ components, `respond.JSON` for API responses
 - Config: env vars read in `main.go` via `hamr/pkg/config` helpers

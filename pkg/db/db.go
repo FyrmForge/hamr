@@ -15,6 +15,10 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
+// OnRetryFunc is called before each retry sleep with the attempt number,
+// the error from the failed ping, and the backoff duration.
+type OnRetryFunc func(attempt int, err error, backoff time.Duration)
+
 // ConnectConfig holds connection pool and retry parameters.
 type ConnectConfig struct {
 	MaxOpenConns    int
@@ -24,6 +28,8 @@ type ConnectConfig struct {
 	MaxRetries      int
 	AttemptTimeout  time.Duration
 	PgBouncerSafe   bool
+	Logger          *slog.Logger
+	OnRetry         OnRetryFunc
 }
 
 // ConnectOption configures a ConnectConfig.
@@ -63,6 +69,17 @@ func WithAttemptTimeout(d time.Duration) ConnectOption {
 // PgBouncer transaction pooling.
 func WithPgBouncerSafe(enabled bool) ConnectOption {
 	return func(c *ConnectConfig) { c.PgBouncerSafe = enabled }
+}
+
+// WithLogger sets the logger used to log retry attempts. A nil logger
+// disables retry logging.
+func WithLogger(l *slog.Logger) ConnectOption {
+	return func(c *ConnectConfig) { c.Logger = l }
+}
+
+// WithOnRetry sets a callback invoked before each retry sleep.
+func WithOnRetry(fn OnRetryFunc) ConnectOption {
+	return func(c *ConnectConfig) { c.OnRetry = fn }
 }
 
 // Connect opens a PostgreSQL connection using context.Background().
@@ -140,6 +157,16 @@ func ConnectContext(ctx context.Context, databaseURL string, opts ...ConnectOpti
 		}
 
 		sleep := backoffWithJitter(attempt)
+		if cfg.Logger != nil {
+			cfg.Logger.Warn("db: retrying connection",
+				"attempt", attempt+1,
+				"backoff", sleep,
+				"error", lastErr,
+			)
+		}
+		if cfg.OnRetry != nil {
+			cfg.OnRetry(attempt+1, lastErr, sleep)
+		}
 		select {
 		case <-time.After(sleep):
 		case <-ctx.Done():

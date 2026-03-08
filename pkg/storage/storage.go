@@ -24,6 +24,10 @@ type FileStorage interface {
 
 	// Exists reports whether a file exists at path.
 	Exists(ctx context.Context, path string) (bool, error)
+
+	// List returns all file paths under the given prefix. Paths are relative
+	// to the storage root. An empty prefix lists all files.
+	List(ctx context.Context, prefix string) ([]string, error)
 }
 
 // SignableStorage extends FileStorage with the ability to generate

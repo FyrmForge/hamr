@@ -51,6 +51,41 @@ func (s *stubTask) callCount() int {
 	return s.calls
 }
 
+type overlapTask struct {
+	name  string
+	delay time.Duration
+
+	running    atomic.Int32
+	maxRunning atomic.Int32
+	calls      atomic.Int32
+}
+
+func (t *overlapTask) Name() string { return t.name }
+
+func (t *overlapTask) Run(ctx context.Context) (int64, error) {
+	t.calls.Add(1)
+	running := t.running.Add(1)
+	for {
+		max := t.maxRunning.Load()
+		if running <= max {
+			break
+		}
+		if t.maxRunning.CompareAndSwap(max, running) {
+			break
+		}
+	}
+
+	select {
+	case <-time.After(t.delay):
+	case <-ctx.Done():
+		t.running.Add(-1)
+		return 0, ctx.Err()
+	}
+
+	t.running.Add(-1)
+	return 0, nil
+}
+
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(nopWriter{}, nil))
 }
@@ -62,59 +97,57 @@ func (nopWriter) Write(p []byte) (int, error) { return len(p), nil }
 // ---------- tests ----------
 
 func TestNew_defaults(t *testing.T) {
-	j := New(1 * time.Hour)
+	j := New()
 	assert.Equal(t, 30*time.Second, j.timeout)
 	assert.Empty(t, j.tasks)
-	assert.NotNil(t, j.done)
 }
 
 func TestAddTask_chaining(t *testing.T) {
 	a := &stubTask{name: "a"}
 	b := &stubTask{name: "b"}
 
-	j := New(1 * time.Hour)
-	ret := j.AddTask(a).AddTask(b)
+	j := New()
+	ret := j.AddTask("@every 1h", a).AddTask("@every 1h", b)
 
 	assert.Same(t, j, ret, "AddTask must return the same Janitor for chaining")
 	require.Len(t, j.tasks, 2)
-	assert.Equal(t, "a", j.tasks[0].Name())
-	assert.Equal(t, "b", j.tasks[1].Name())
-}
-
-func TestStart_invalidInterval(t *testing.T) {
-	j := New(0, WithLogger(discardLogger()))
-	err := j.Start(context.Background())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "interval must be positive")
+	assert.Equal(t, "a", j.tasks[0].task.Name())
+	assert.Equal(t, "b", j.tasks[1].task.Name())
 }
 
 func TestStart_invalidTimeout(t *testing.T) {
-	j := New(1*time.Hour, WithTimeout(0), WithLogger(discardLogger()))
+	j := New(WithTimeout(0), WithLogger(discardLogger()))
 	err := j.Start(context.Background())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "timeout must be positive")
 }
 
-func TestStart_runImmediately(t *testing.T) {
-	task := &stubTask{name: "imm", affected: 5}
-	j := New(1*time.Hour,
-		WithRunImmediately(true),
-		WithLogger(discardLogger()),
-	).AddTask(task)
+func TestStart_invalidSchedule(t *testing.T) {
+	task := &stubTask{name: "bad-sched"}
+	j := New(WithLogger(discardLogger())).AddTask("not-a-cron", task)
 
 	err := j.Start(context.Background())
-	require.NoError(t, err)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid schedule")
+}
+
+func TestStart_alreadyStarted(t *testing.T) {
+	task := &stubTask{name: "once"}
+	j := New(WithLogger(discardLogger())).AddTask("@every 1s", task)
+
+	require.NoError(t, j.Start(context.Background()))
 	defer j.Stop()
 
-	// runImmediately runs synchronously before Start returns.
-	assert.Equal(t, 1, task.callCount())
+	err := j.Start(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already started")
 }
 
 func TestStart_tickExecution(t *testing.T) {
 	task := &stubTask{name: "tick", affected: 1}
-	j := New(50*time.Millisecond,
+	j := New(
 		WithLogger(discardLogger()),
-	).AddTask(task)
+	).AddTask("@every 1s", task)
 
 	err := j.Start(context.Background())
 	require.NoError(t, err)
@@ -122,11 +155,11 @@ func TestStart_tickExecution(t *testing.T) {
 
 	assert.Eventually(t, func() bool {
 		return task.callCount() >= 2
-	}, 500*time.Millisecond, 10*time.Millisecond)
+	}, 5*time.Second, 100*time.Millisecond)
 }
 
 func TestStop_idempotent(t *testing.T) {
-	j := New(1*time.Hour, WithLogger(discardLogger()))
+	j := New(WithLogger(discardLogger()))
 	require.NoError(t, j.Start(context.Background()))
 
 	assert.NotPanics(t, func() {
@@ -137,66 +170,83 @@ func TestStop_idempotent(t *testing.T) {
 
 func TestTask_timeout(t *testing.T) {
 	task := &stubTask{name: "slow", delay: 5 * time.Second}
-	j := New(1*time.Hour,
+	j := New(
 		WithTimeout(50*time.Millisecond),
-		WithRunImmediately(true),
 		WithLogger(discardLogger()),
-	).AddTask(task)
+	).AddTask("@every 1s", task)
 
 	err := j.Start(context.Background())
 	require.NoError(t, err)
 	defer j.Stop()
 
-	assert.Equal(t, 1, task.callCount())
+	assert.Eventually(t, func() bool {
+		return task.callCount() >= 1
+	}, 3*time.Second, 100*time.Millisecond)
+
 	task.mu.Lock()
 	ctx := task.lastCtx
 	task.mu.Unlock()
 
-	// The context should have been cancelled by now.
+	// Wait for the timeout to fire.
+	time.Sleep(100 * time.Millisecond)
 	assert.Error(t, ctx.Err())
+}
+
+func TestTask_noOverlapForSameSchedule(t *testing.T) {
+	task := &overlapTask{name: "no-overlap", delay: 1500 * time.Millisecond}
+	j := New(
+		WithLogger(discardLogger()),
+	).AddTask("@every 1s", task)
+
+	require.NoError(t, j.Start(context.Background()))
+	defer j.Stop()
+
+	assert.Eventually(t, func() bool {
+		return task.calls.Load() >= 2
+	}, 6*time.Second, 100*time.Millisecond)
+	assert.Equal(t, int32(1), task.maxRunning.Load())
 }
 
 func TestTask_errorDoesNotStopOthers(t *testing.T) {
 	bad := &stubTask{name: "bad", err: errors.New("boom")}
 	good := &stubTask{name: "good", affected: 42}
 
-	j := New(1*time.Hour,
-		WithRunImmediately(true),
+	j := New(
 		WithLogger(discardLogger()),
-	).AddTask(bad).AddTask(good)
+	).AddTask("@every 1s", bad).AddTask("@every 1s", good)
 
 	require.NoError(t, j.Start(context.Background()))
 	defer j.Stop()
 
-	assert.Equal(t, 1, bad.callCount())
-	assert.Equal(t, 1, good.callCount())
+	assert.Eventually(t, func() bool {
+		return bad.callCount() >= 1 && good.callCount() >= 1
+	}, 5*time.Second, 100*time.Millisecond)
 }
 
 func TestPreRun_called(t *testing.T) {
 	task := &stubTask{name: "pr", affected: 3}
 	var got atomic.Value
 
-	j := New(1*time.Hour,
-		WithRunImmediately(true),
+	j := New(
 		WithLogger(discardLogger()),
 		WithPreRun(func(_ context.Context, name string) error {
 			got.Store(name)
 			return nil
 		}),
-	).AddTask(task)
+	).AddTask("@every 1s", task)
 
 	require.NoError(t, j.Start(context.Background()))
 	defer j.Stop()
 
-	assert.Equal(t, "pr", got.Load())
+	assert.Eventually(t, func() bool {
+		return got.Load() == "pr"
+	}, 3*time.Second, 100*time.Millisecond)
 }
 
 func TestPreRun_errorSkipsTask(t *testing.T) {
 	skipped := &stubTask{name: "skipped", affected: 1}
-	notSkipped := &stubTask{name: "kept", affected: 1}
 
-	j := New(1*time.Hour,
-		WithRunImmediately(true),
+	j := New(
 		WithLogger(discardLogger()),
 		WithPreRun(func(_ context.Context, name string) error {
 			if name == "skipped" {
@@ -204,13 +254,15 @@ func TestPreRun_errorSkipsTask(t *testing.T) {
 			}
 			return nil
 		}),
-	).AddTask(skipped).AddTask(notSkipped)
+	).AddTask("@every 1s", skipped)
 
 	require.NoError(t, j.Start(context.Background()))
 	defer j.Stop()
 
+	// Give enough time for the cron to fire.
+	time.Sleep(2 * time.Second)
+
 	assert.Equal(t, 0, skipped.callCount(), "pre-run error should skip the task")
-	assert.Equal(t, 1, notSkipped.callCount(), "other tasks should still run")
 }
 
 func TestPostRun_called(t *testing.T) {
@@ -223,20 +275,22 @@ func TestPostRun_called(t *testing.T) {
 		gotErr      atomic.Value
 	)
 
-	j := New(1*time.Hour,
-		WithRunImmediately(true),
+	j := New(
 		WithLogger(discardLogger()),
 		WithPostRun(func(_ context.Context, name string, affected int64, err error) {
 			gotName.Store(name)
 			gotAffected.Store(affected)
 			gotErr.Store(err)
 		}),
-	).AddTask(task)
+	).AddTask("@every 1s", task)
 
 	require.NoError(t, j.Start(context.Background()))
 	defer j.Stop()
 
-	assert.Equal(t, "post", gotName.Load())
+	assert.Eventually(t, func() bool {
+		return gotName.Load() == "post"
+	}, 3*time.Second, 100*time.Millisecond)
+
 	assert.Equal(t, int64(7), gotAffected.Load())
 	assert.Equal(t, taskErr, gotErr.Load())
 }
@@ -245,53 +299,75 @@ func TestPreTick_called(t *testing.T) {
 	task := &stubTask{name: "pt", affected: 1}
 	var called atomic.Bool
 
-	j := New(1*time.Hour,
-		WithRunImmediately(true),
+	j := New(
 		WithLogger(discardLogger()),
 		WithPreTick(func(_ context.Context) error {
 			called.Store(true)
 			return nil
 		}),
-	).AddTask(task)
+	).AddTask("@every 1s", task)
 
 	require.NoError(t, j.Start(context.Background()))
 	defer j.Stop()
 
-	assert.True(t, called.Load())
-	assert.Equal(t, 1, task.callCount())
+	assert.Eventually(t, func() bool {
+		return called.Load() && task.callCount() >= 1
+	}, 3*time.Second, 100*time.Millisecond)
 }
 
-func TestPreTick_errorSkipsTick(t *testing.T) {
+func TestPreTick_errorSkipsExecution(t *testing.T) {
 	task := &stubTask{name: "pt-skip", affected: 1}
 
-	j := New(1*time.Hour,
-		WithRunImmediately(true),
+	j := New(
 		WithLogger(discardLogger()),
 		WithPreTick(func(_ context.Context) error {
 			return errors.New("skip tick")
 		}),
-	).AddTask(task)
+	).AddTask("@every 1s", task)
 
 	require.NoError(t, j.Start(context.Background()))
 	defer j.Stop()
 
-	assert.Equal(t, 0, task.callCount(), "pre-tick error should skip the entire tick")
+	time.Sleep(2 * time.Second)
+	assert.Equal(t, 0, task.callCount(), "pre-tick error should skip the task")
 }
 
 func TestPostTick_called(t *testing.T) {
 	task := &stubTask{name: "ptt", affected: 1}
 	var called atomic.Bool
 
-	j := New(1*time.Hour,
-		WithRunImmediately(true),
+	j := New(
 		WithLogger(discardLogger()),
 		WithPostTick(func(_ context.Context) {
 			called.Store(true)
 		}),
-	).AddTask(task)
+	).AddTask("@every 1s", task)
 
 	require.NoError(t, j.Start(context.Background()))
 	defer j.Stop()
 
-	assert.True(t, called.Load())
+	assert.Eventually(t, called.Load, 3*time.Second, 100*time.Millisecond)
+}
+
+func TestContextCancellation(t *testing.T) {
+	task := &stubTask{name: "ctx-cancel", affected: 1}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	j := New(
+		WithLogger(discardLogger()),
+	).AddTask("@every 1s", task)
+
+	require.NoError(t, j.Start(ctx))
+
+	assert.Eventually(t, func() bool {
+		return task.callCount() >= 1
+	}, 3*time.Second, 100*time.Millisecond)
+
+	cancel()
+	time.Sleep(500 * time.Millisecond)
+
+	countAfterCancel := task.callCount()
+	time.Sleep(2 * time.Second)
+	assert.Equal(t, countAfterCancel, task.callCount(),
+		"no more executions should happen after context cancellation")
 }

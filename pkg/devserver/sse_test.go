@@ -1,0 +1,222 @@
+package devserver
+
+import (
+	"bufio"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestSSEBroker_Handler(t *testing.T) {
+	broker := NewSSEBroker()
+	srv := httptest.NewServer(broker.Handler())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, "text/event-stream", resp.Header.Get("Content-Type"))
+	assert.Equal(t, "no-cache", resp.Header.Get("Cache-Control"))
+
+	// Read the initial "connected" event.
+	scanner := bufio.NewScanner(resp.Body)
+	var lines []string
+	for scanner.Scan() {
+		line := scanner.Text()
+		lines = append(lines, line)
+		if line == "" && len(lines) > 1 {
+			break
+		}
+	}
+	joined := strings.Join(lines, "\n")
+	assert.Contains(t, joined, "event: connected")
+	assert.Contains(t, joined, "data: ok")
+}
+
+func TestSSEBroker_Broadcast(t *testing.T) {
+	broker := NewSSEBroker()
+	srv := httptest.NewServer(broker.Handler())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	// Wait for client to connect.
+	time.Sleep(50 * time.Millisecond)
+	assert.Equal(t, 1, broker.ClientCount())
+
+	// Broadcast an event.
+	broker.Broadcast(SSEEvent{Type: "reload", Data: "full"})
+
+	// Read events: skip the initial "connected" event, then read "reload".
+	scanner := bufio.NewScanner(resp.Body)
+	events := readSSEEvents(scanner, 2)
+
+	require.Len(t, events, 2)
+	assert.Equal(t, "connected", events[0].typ)
+	assert.Equal(t, "reload", events[1].typ)
+	assert.Equal(t, "full", events[1].data)
+}
+
+func TestSSEBroker_Broadcast_MultipleEvents(t *testing.T) {
+	broker := NewSSEBroker()
+	srv := httptest.NewServer(broker.Handler())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	time.Sleep(50 * time.Millisecond)
+
+	broker.Broadcast(SSEEvent{Type: "reload", Data: "full"})
+	broker.Broadcast(SSEEvent{Type: "reload", Data: "css"})
+
+	scanner := bufio.NewScanner(resp.Body)
+	events := readSSEEvents(scanner, 3) // connected + 2 reload events
+
+	require.Len(t, events, 3)
+	assert.Equal(t, "connected", events[0].typ)
+	assert.Equal(t, "reload", events[1].typ)
+	assert.Equal(t, "full", events[1].data)
+	assert.Equal(t, "reload", events[2].typ)
+	assert.Equal(t, "css", events[2].data)
+}
+
+func TestSSEBroker_MultipleClients(t *testing.T) {
+	broker := NewSSEBroker()
+	srv := httptest.NewServer(broker.Handler())
+	defer srv.Close()
+
+	// Connect two clients.
+	resp1, err := http.Get(srv.URL)
+	require.NoError(t, err)
+	defer resp1.Body.Close()
+
+	resp2, err := http.Get(srv.URL)
+	require.NoError(t, err)
+	defer resp2.Body.Close()
+
+	time.Sleep(50 * time.Millisecond)
+	assert.Equal(t, 2, broker.ClientCount())
+
+	// Broadcast — both should receive.
+	broker.Broadcast(SSEEvent{Type: "reload", Data: "full"})
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	check := func(resp *http.Response) {
+		defer wg.Done()
+		scanner := bufio.NewScanner(resp.Body)
+		events := readSSEEvents(scanner, 2)
+		assert.Len(t, events, 2)
+		if len(events) == 2 {
+			assert.Equal(t, "reload", events[1].typ)
+		}
+	}
+
+	go check(resp1)
+	go check(resp2)
+	wg.Wait()
+}
+
+func TestSSEBroker_ClientDisconnect(t *testing.T) {
+	broker := NewSSEBroker()
+	srv := httptest.NewServer(broker.Handler())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	require.NoError(t, err)
+
+	time.Sleep(50 * time.Millisecond)
+	assert.Equal(t, 1, broker.ClientCount())
+
+	// Close the response body to simulate disconnect.
+	resp.Body.Close()
+	time.Sleep(100 * time.Millisecond)
+
+	assert.Equal(t, 0, broker.ClientCount())
+}
+
+func TestSSEBroker_Broadcast_NoClients(t *testing.T) {
+	broker := NewSSEBroker()
+	assert.Equal(t, 0, broker.ClientCount())
+
+	// Should not panic or block.
+	broker.Broadcast(SSEEvent{Type: "reload", Data: "full"})
+}
+
+func TestSSEBroker_Broadcast_FullChannel(t *testing.T) {
+	broker := NewSSEBroker()
+	srv := httptest.NewServer(broker.Handler())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Flood with more events than the channel buffer (16).
+	// Should not block.
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 100; i++ {
+			broker.Broadcast(SSEEvent{Type: "reload", Data: "full"})
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good — broadcast didn't block.
+	case <-time.After(2 * time.Second):
+		t.Fatal("Broadcast blocked with full channel")
+	}
+}
+
+func TestSSEBroker_ClientCount(t *testing.T) {
+	broker := NewSSEBroker()
+	assert.Equal(t, 0, broker.ClientCount())
+}
+
+type sseEvent struct {
+	typ  string
+	data string
+}
+
+func readSSEEvents(scanner *bufio.Scanner, count int) []sseEvent {
+	var events []sseEvent
+	var current sseEvent
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		if line == "" {
+			if current.typ != "" {
+				events = append(events, current)
+				current = sseEvent{}
+				if len(events) >= count {
+					break
+				}
+			}
+			continue
+		}
+
+		if strings.HasPrefix(line, "event: ") {
+			current.typ = strings.TrimPrefix(line, "event: ")
+		} else if strings.HasPrefix(line, "data: ") {
+			current.data = strings.TrimPrefix(line, "data: ")
+		}
+	}
+	return events
+}

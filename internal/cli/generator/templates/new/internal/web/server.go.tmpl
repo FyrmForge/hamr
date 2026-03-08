@@ -5,9 +5,6 @@ import (
 	"context"
 {{- end}}
 	"log/slog"
-{{- if .S3StaticWatcher}}
-	"net/url"
-{{- end}}
 
 	"github.com/FyrmForge/hamr/pkg/middleware"
 	"github.com/FyrmForge/hamr/pkg/server"
@@ -73,15 +70,7 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 {{- end}}
 
 	// Content Security Policy.
-{{- if .S3StaticWatcher}}
-	staticOrigin := "'self'"
-	if u, err := url.Parse(deps.StaticBaseURL); err == nil && u.Host != "" {
-		staticOrigin = "'self' " + u.Scheme + "://" + u.Host
-	}
-	csp := "default-src 'self'; script-src " + staticOrigin + " 'unsafe-inline'; style-src " + staticOrigin + " 'unsafe-inline'; img-src " + staticOrigin + "; font-src " + staticOrigin
-{{- else}}
 	csp := "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
-{{- end}}
 {{- if .IncludeWS}}
 	csp += "; connect-src 'self' ws: wss:"
 {{- end}}

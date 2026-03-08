@@ -1,8 +1,10 @@
 package db
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"testing"
 	"time"
@@ -96,6 +98,31 @@ func TestConnectOptionsApplied(t *testing.T) {
 	)
 	// Should still fail (no DB), but proves options are applied without error.
 	require.Error(t, err)
+}
+
+func TestConnectWithLogger(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	_, err := Connect("postgres://invalid:5432/nope",
+		WithMaxRetries(2),
+		WithAttemptTimeout(100*time.Millisecond),
+		WithLogger(logger),
+	)
+	require.Error(t, err)
+	assert.Contains(t, buf.String(), "db: retrying connection")
+}
+
+func TestConnectWithOnRetry(t *testing.T) {
+	var attempts []int
+	_, err := Connect("postgres://invalid:5432/nope",
+		WithMaxRetries(2),
+		WithAttemptTimeout(100*time.Millisecond),
+		WithOnRetry(func(attempt int, err error, backoff time.Duration) {
+			attempts = append(attempts, attempt)
+		}),
+	)
+	require.Error(t, err)
+	assert.Equal(t, []int{1}, attempts)
 }
 
 func TestConnectIntegration(t *testing.T) {

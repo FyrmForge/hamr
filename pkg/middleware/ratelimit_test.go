@@ -2,6 +2,7 @@ package middleware_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -13,6 +14,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// failingStore is a RateLimitStore that always returns an error.
+type failingStore struct{}
+
+func (f *failingStore) Allow(_ context.Context, _ string, _ int, _ time.Duration) (bool, int, time.Time, error) {
+	return false, 0, time.Time{}, errors.New("store unavailable")
+}
 
 // ---------------------------------------------------------------------------
 // MemoryStore tests
@@ -121,9 +129,9 @@ func TestRateLimit_returns429(t *testing.T) {
 
 	// Use a very low rate to trigger 429.
 	mw := middleware.RateLimitWithConfig(middleware.RateLimitConfig{
-		Store:         store,
-		Rate: 1,
-		Burst:         0,
+		Store: store,
+		Rate:  1,
+		Burst: 0,
 		KeyFunc: func(c echo.Context) (string, error) {
 			return "test-key", nil
 		},
@@ -159,9 +167,9 @@ func TestRateLimit_customKeyFunc(t *testing.T) {
 	e := echo.New()
 
 	mw := middleware.RateLimitWithConfig(middleware.RateLimitConfig{
-		Store:         store,
-		Rate: 1,
-		Burst:         0,
+		Store: store,
+		Rate:  1,
+		Burst: 0,
 		KeyFunc: func(c echo.Context) (string, error) {
 			return c.Request().Header.Get("X-API-Key"), nil
 		},
@@ -198,14 +206,56 @@ func TestRateLimit_customKeyFunc(t *testing.T) {
 	require.NoError(t, err3)
 }
 
+func TestRateLimit_failOpen(t *testing.T) {
+	store := &failingStore{}
+	e := echo.New()
+
+	mw := middleware.RateLimitWithConfig(middleware.RateLimitConfig{
+		Store: store,
+		Rate:  10,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	err := mw(func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	})(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestRateLimit_failClosed(t *testing.T) {
+	store := &failingStore{}
+	e := echo.New()
+
+	mw := middleware.RateLimitWithConfig(middleware.RateLimitConfig{
+		Store:      store,
+		Rate:       10,
+		FailClosed: true,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	err := mw(func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	})(c)
+	require.Error(t, err)
+
+	he, ok := err.(*echo.HTTPError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusServiceUnavailable, he.Code)
+}
+
 func TestRateLimit_defaultsToIP(t *testing.T) {
 	store := middleware.NewMemoryStore()
 	e := echo.New()
 
 	mw := middleware.RateLimitWithConfig(middleware.RateLimitConfig{
-		Store:         store,
-		Rate: 2,
-		Burst:         0,
+		Store: store,
+		Rate:  2,
+		Burst: 0,
 	})
 
 	for i := 0; i < 2; i++ {

@@ -1,0 +1,110 @@
+// WebSocket auto-reconnect helper for {{.Name}}.
+//
+// Usage:
+//   const ws = new HamrWS("/ws");
+//   ws.onmessage = function(event) { ... };
+//   ws.close(); // manual close, no reconnect
+//
+// With hx-ws, set ws-connect to your endpoint and this script handles reconnect
+// automatically via the htmx:wsClose event.
+
+(function() {
+    "use strict";
+
+    var MIN_DELAY = 1000;
+    var MAX_DELAY = 30000;
+
+    /**
+     * HamrWS wraps a WebSocket with auto-reconnect and exponential backoff.
+     * @param {string} url - WebSocket URL path (e.g. "/ws"). Resolved to ws:// or wss://.
+     */
+    function HamrWS(url) {
+        this._url = resolveURL(url);
+        this._delay = MIN_DELAY;
+        this._closed = false;
+        this._ws = null;
+        this.onopen = null;
+        this.onmessage = null;
+        this.onclose = null;
+        this.onerror = null;
+        this._connect();
+    }
+
+    HamrWS.prototype._connect = function() {
+        if (this._closed) return;
+        var self = this;
+        var ws = new WebSocket(this._url);
+
+        ws.onopen = function(e) {
+            self._delay = MIN_DELAY;
+            self._ws = ws;
+            if (self.onopen) self.onopen(e);
+        };
+
+        ws.onmessage = function(e) {
+            if (self.onmessage) self.onmessage(e);
+        };
+
+        ws.onclose = function(e) {
+            self._ws = null;
+            if (self.onclose) self.onclose(e);
+            if (!self._closed) self._reconnect();
+        };
+
+        ws.onerror = function(e) {
+            if (self.onerror) self.onerror(e);
+            ws.close();
+        };
+    };
+
+    HamrWS.prototype._reconnect = function() {
+        var self = this;
+        var delay = self._delay + Math.random() * 500;
+        setTimeout(function() {
+            if (!self._closed) self._connect();
+        }, delay);
+        self._delay = Math.min(self._delay * 2, MAX_DELAY);
+    };
+
+    /** Send data through the WebSocket. Silently dropped if not connected. */
+    HamrWS.prototype.send = function(data) {
+        if (this._ws && this._ws.readyState === WebSocket.OPEN) {
+            this._ws.send(data);
+        }
+    };
+
+    /** Close the connection permanently (no reconnect). */
+    HamrWS.prototype.close = function() {
+        this._closed = true;
+        if (this._ws) this._ws.close();
+    };
+
+    function resolveURL(path) {
+        var protocol = location.protocol === "https:" ? "wss:" : "ws:";
+        return protocol + "//" + location.host + path;
+    }
+
+    // Auto-reconnect for htmx hx-ws connections.
+    document.addEventListener("htmx:wsClose", function(evt) {
+        var elt = evt.detail.elt;
+        if (!elt) return;
+        var wsAttr = elt.getAttribute("ws-connect") || elt.getAttribute("hx-ws");
+        if (!wsAttr) return;
+        var url = wsAttr.replace(/^connect:/, "");
+        var delay = MIN_DELAY;
+
+        function reconnect() {
+            setTimeout(function() {
+                // Let htmx re-process the element to establish a new connection.
+                if (document.contains(elt)) {
+                    htmx.process(elt);
+                }
+            }, delay + Math.random() * 500);
+            delay = Math.min(delay * 2, MAX_DELAY);
+        }
+
+        reconnect();
+    });
+
+    window.HamrWS = HamrWS;
+})();

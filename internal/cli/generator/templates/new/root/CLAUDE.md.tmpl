@@ -3,11 +3,12 @@
 ## Build & Test
 
 ```bash
-make install        # Install dev tools (reflex, templ)
-make dev            # Run dev server (auto-generates templ + live reload)
+make install        # Install dev tools (templ)
+make dev            # Run dev server (file watching, builds, live reload)
 make build          # Build binary (generates templ first)
 make test           # Run tests
 make lint           # Run linters
+make templint       # Lint .templ files for silent failures and a11y issues
 make docker-up      # Start PostgreSQL
 make docker-down    # Stop PostgreSQL
 ```
@@ -30,7 +31,7 @@ This project uses the HAMR framework (`github.com/FyrmForge/hamr`). Key packages
 - Handlers: constructor injection, one package per domain
 - Config: `config.GetEnvOrDefault()` helpers read environment variables
 - Routes: registered in `internal/web/server.go`
-- Responses: `respond.Negotiate(c, status, jsonData, templComponent)`
+- Responses: `respond.HTML(c, status, templComponent)` or `respond.JSON(c, status, data)`
 - Validation: `validate.Required(v)` returns "" or error message
 - Flash: `middleware.SetFlash(c, msg, type)` before redirect
 - Errors: custom handler in `internal/web/handler/errors/`
@@ -39,6 +40,6 @@ This project uses the HAMR framework (`github.com/FyrmForge/hamr`). Key packages
 
 - Follow existing patterns in the codebase
 - Use `hamr/pkg` helpers instead of reimplementing
-- Prefer `respond.HTML`/`respond.Negotiate` over raw `c.HTML()`
+- Prefer `respond.HTML`/`respond.JSON` over raw `c.HTML()`
 - Add `// GET /path` comments above handler methods
 - Keep handlers thin — business logic in service layer

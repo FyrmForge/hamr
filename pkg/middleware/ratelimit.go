@@ -27,15 +27,16 @@ type RateLimitStore interface {
 
 // RateLimitConfig configures rate limiting middleware.
 type RateLimitConfig struct {
-	Store   RateLimitStore
-	Rate    int                                  // max requests per window (default: 60)
-	Burst   int                                  // additional burst allowance over Rate (default: 10)
-	Window  time.Duration                        // sliding window duration (default: 1 minute)
-	KeyFunc func(c echo.Context) (string, error) // default: c.RealIP()
+	Store      RateLimitStore
+	Rate       int                                  // max requests per window (default: 60)
+	Burst      int                                  // additional burst allowance over Rate (default: 10)
+	Window     time.Duration                        // sliding window duration (default: 1 minute)
+	KeyFunc    func(c echo.Context) (string, error) // default: c.RealIP()
+	FailClosed bool                                 // deny requests when store errors (default: false)
 }
 
 // RateLimit returns rate limiting middleware using the given store with
-// default settings (60 req/min + 10 burst).
+// default settings (60 req/min + 10 burst, fail-open).
 func RateLimit(store RateLimitStore) echo.MiddlewareFunc {
 	return RateLimitWithConfig(RateLimitConfig{
 		Store: store,
@@ -72,7 +73,9 @@ func RateLimitWithConfig(cfg RateLimitConfig) echo.MiddlewareFunc {
 			if err != nil {
 				logger := logging.FromContext(c.Request().Context())
 				logger.Error("rate limit store error", slog.String("error", err.Error()))
-				// Fail open — allow request on store error.
+				if cfg.FailClosed {
+					return echo.NewHTTPError(http.StatusServiceUnavailable, "rate limit unavailable")
+				}
 				return next(c)
 			}
 
