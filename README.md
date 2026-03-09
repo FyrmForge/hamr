@@ -23,25 +23,25 @@ HAMR is two things:
 
 | Package            | What it does                                                                       | Guide |
 | ------------------ | ---------------------------------------------------------------------------------- | ----- |
-| `pkg/config`       | Env-based configuration with typed accessors and `.env` file loading               | [docs/guide/config.md](docs/guide/config.md) |
-| `pkg/logging`      | Context-aware structured logging via `slog` (JSON in prod, coloured in dev)        | [docs/guide/logging.md](docs/guide/logging.md) |
-| `pkg/ptr`          | Generic and concrete pointer helpers                                               | [docs/guide/ptr.md](docs/guide/ptr.md) |
-| `pkg/validate`     | Pure-function validators with custom messages and a plugin registry                | [docs/guide/validate.md](docs/guide/validate.md) |
-| `pkg/auth`         | Argon2id password hashing, token generation, session management                    | [docs/guide/auth.md](docs/guide/auth.md) |
-| `pkg/db`           | Database connection with retry, keep-alive, and migration runner                   | [docs/guide/db.md](docs/guide/db.md) |
-| `pkg/htmx`         | HTMX request detection and response header helpers                                 | [docs/guide/htmx.md](docs/guide/htmx.md) |
-| `pkg/respond`      | Content-negotiated responses (HTML via Templ or JSON from the same handler)        | [docs/guide/respond.md](docs/guide/respond.md) |
-| `pkg/ctx`          | Type-safe Echo context keys using generics                                         | [docs/guide/ctx.md](docs/guide/ctx.md) |
-| `pkg/middleware`   | Auth, RBAC, flash messages, rate limiting, request ID, caching, audit, CSRF, CORS  | [docs/guide/middleware.md](docs/guide/middleware.md) |
-| `pkg/server`       | Echo wrapper with functional options and lifecycle hooks                           | [docs/guide/server.md](docs/guide/server.md) |
-| `pkg/janitor`      | Background task scheduler                                                          | [docs/guide/janitor.md](docs/guide/janitor.md) |
-| `pkg/storage`      | File storage interface with local filesystem and S3/R2/MinIO backends              | [docs/guide/storage.md](docs/guide/storage.md) |
-| `pkg/async`        | Concurrent execution primitives with panic recovery                                | [docs/guide/async.md](docs/guide/async.md) |
-| `pkg/websocket`    | Session and room-based WebSocket hub with HTMX integration                         | [docs/guide/websocket.md](docs/guide/websocket.md) |
-| `pkg/media`        | Image and video upload, processing, and serving on top of storage                  | [docs/guide/media.md](docs/guide/media.md) |
-| `pkg/sync`         | S3 sync for static assets with file watching                                       | [docs/guide/sync.md](docs/guide/sync.md) |
-| `pkg/e2e`          | Reusable go-rod browser helpers for E2E testing                                    | [docs/guide/e2e.md](docs/guide/e2e.md) |
-| `pkg/templint`     | Static linter for `.templ` files (control flow, a11y, style rules)                 | [docs/guide/templint.md](docs/guide/templint.md) |
+| `pkg/config`       | Env-based configuration with typed accessors and `.env` file loading               | [docs/guide/pkg/config.md](docs/guide/pkg/config.md) |
+| `pkg/logging`      | Context-aware structured logging via `slog` (JSON in prod, coloured in dev)        | [docs/guide/pkg/logging.md](docs/guide/pkg/logging.md) |
+| `pkg/ptr`          | Generic and concrete pointer helpers                                               | [docs/guide/pkg/ptr.md](docs/guide/pkg/ptr.md) |
+| `pkg/validate`     | Pure-function validators with custom messages and a plugin registry                | [docs/guide/pkg/validate.md](docs/guide/pkg/validate.md) |
+| `pkg/auth`         | Argon2id password hashing, token generation, session management                    | [docs/guide/pkg/auth.md](docs/guide/pkg/auth.md) |
+| `pkg/db`           | Database connection with retry, keep-alive, and migration runner                   | [docs/guide/pkg/db.md](docs/guide/pkg/db.md) |
+| `pkg/htmx`         | HTMX request detection and response header helpers                                 | [docs/guide/pkg/htmx.md](docs/guide/pkg/htmx.md) |
+| `pkg/respond`      | Content-negotiated responses (HTML via Templ or JSON from the same handler)        | [docs/guide/pkg/respond.md](docs/guide/pkg/respond.md) |
+| `pkg/ctx`          | Type-safe Echo context keys using generics                                         | [docs/guide/pkg/ctx.md](docs/guide/pkg/ctx.md) |
+| `pkg/middleware`   | Auth, RBAC, flash messages, rate limiting, request ID, caching, audit, CSRF, CORS  | [docs/guide/pkg/middleware.md](docs/guide/pkg/middleware.md) |
+| `pkg/server`       | Echo wrapper with functional options and lifecycle hooks                           | [docs/guide/pkg/server.md](docs/guide/pkg/server.md) |
+| `pkg/janitor`      | Background task scheduler                                                          | [docs/guide/pkg/janitor.md](docs/guide/pkg/janitor.md) |
+| `pkg/storage`      | File storage interface with local filesystem and S3/R2/MinIO backends              | [docs/guide/pkg/storage.md](docs/guide/pkg/storage.md) |
+| `pkg/async`        | Concurrent execution primitives with panic recovery                                | [docs/guide/pkg/async.md](docs/guide/pkg/async.md) |
+| `pkg/websocket`    | Session and room-based WebSocket hub with HTMX integration                         | [docs/guide/pkg/websocket.md](docs/guide/pkg/websocket.md) |
+| `pkg/media`        | Image and video upload, processing, and serving on top of storage                  | [docs/guide/pkg/media.md](docs/guide/pkg/media.md) |
+| `pkg/sync`         | S3 sync for static assets with file watching                                       | [docs/guide/pkg/sync.md](docs/guide/pkg/sync.md) |
+| `pkg/e2e`          | Reusable go-rod browser helpers for E2E testing                                    | [docs/guide/pkg/e2e.md](docs/guide/pkg/e2e.md) |
+| `pkg/templint`     | Static linter for `.templ` files (control flow, a11y, style rules)                 | [docs/guide/pkg/templint.md](docs/guide/pkg/templint.md) |
 
 ### CLI commands
 
