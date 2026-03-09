@@ -6,10 +6,10 @@ templ homePage() {
 	@components.Layout("Home") {
 {{- if eq .CSS "tailwind"}}
 		<main class="max-w-4xl mx-auto px-6 py-16 text-center">
-			<h1 class="text-4xl font-bold text-slate-100 mb-4">{{.Name}}</h1>
-			<p class="text-lg text-slate-400 max-w-xl mx-auto">Your HAMR project is up and running.</p>
+			<h1 class="text-4xl font-bold text-hamr-metal-steel mb-4">{{.Name}}</h1>
+			<p class="text-lg text-hamr-metal-light max-w-xl mx-auto">Your HAMR project is up and running.</p>
 			<div class="mt-8">
-				<code class="inline-block bg-slate-800 border border-slate-700 rounded-md px-6 py-2 font-mono text-sm text-slate-400">make dev</code>
+				<code class="inline-block bg-hamr-metal-mid border border-hamr-metal-light/20 rounded-md px-6 py-2 font-mono text-sm text-hamr-fire-glow">make dev</code>
 			</div>
 		</main>
 {{- else}}

@@ -1,6 +1,7 @@
 package devserver
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
@@ -13,17 +14,60 @@ type SSEEvent struct {
 	Data string // event data
 }
 
-// SSEBroker manages SSE client connections and broadcasts events.
-type SSEBroker struct {
-	mu      sync.RWMutex
-	clients map[uint64]chan SSEEvent
-	nextID  atomic.Uint64
+// sseRule is a watch rule serialized for the config SSE event.
+type sseRule struct {
+	Name    string   `json:"name"`
+	Watch   []string `json:"watch,omitempty"`
+	Cmd     string   `json:"cmd,omitempty"`
+	Run     string   `json:"run,omitempty"`
+	Reload  string   `json:"reload,omitempty"`
+	Depends []string `json:"depends,omitempty"`
 }
 
-// NewSSEBroker creates a new SSE broker.
-func NewSSEBroker() *SSEBroker {
+// sseDaemon is a daemon serialized for the config SSE event.
+type sseDaemon struct {
+	Name string `json:"name"`
+	Cmd  string `json:"cmd"`
+}
+
+// sseConfig is the payload for the "config" SSE event.
+type sseConfig struct {
+	Rules   []sseRule   `json:"rules"`
+	Daemons []sseDaemon `json:"daemons"`
+}
+
+// SSEBroker manages SSE client connections and broadcasts events.
+type SSEBroker struct {
+	mu         sync.RWMutex
+	clients    map[uint64]chan SSEEvent
+	nextID     atomic.Uint64
+	configJSON string // pre-serialized config payload
+}
+
+// NewSSEBroker creates a new SSE broker. The provided watch rules and daemons
+// are serialized once and sent to each client on connect as a "config" event.
+func NewSSEBroker(rules []WatchRule, daemons []Daemon) *SSEBroker {
+	cfg := sseConfig{
+		Rules:   make([]sseRule, len(rules)),
+		Daemons: make([]sseDaemon, len(daemons)),
+	}
+	for i, r := range rules {
+		cfg.Rules[i] = sseRule{
+			Name:    r.Name,
+			Watch:   []string(r.Watch),
+			Cmd:     r.Cmd,
+			Run:     r.Run,
+			Reload:  string(r.Reload),
+			Depends: []string(r.Depends),
+		}
+	}
+	for i, d := range daemons {
+		cfg.Daemons[i] = sseDaemon{Name: d.Name, Cmd: d.Cmd}
+	}
+	data, _ := json.Marshal(cfg)
 	return &SSEBroker{
-		clients: make(map[uint64]chan SSEEvent),
+		clients:    make(map[uint64]chan SSEEvent),
+		configJSON: string(data),
 	}
 }
 
@@ -54,8 +98,9 @@ func (b *SSEBroker) Handler() http.HandlerFunc {
 			b.mu.Unlock()
 		}()
 
-		// Send initial connected event.
+		// Send initial connected event, followed by config.
 		_, _ = fmt.Fprintf(w, "event: connected\ndata: ok\n\n")
+		_, _ = fmt.Fprintf(w, "event: config\ndata: %s\n\n", b.configJSON)
 		flusher.Flush()
 
 		for {

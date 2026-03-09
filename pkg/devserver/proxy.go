@@ -3,6 +3,7 @@ package devserver
 import (
 	"bytes"
 	_ "embed"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -14,6 +15,9 @@ import (
 
 //go:embed reload.js
 var reloadJS []byte
+
+//go:embed logo.png
+var logoPNG []byte
 
 var reloadScript = []byte("\n<script>\n" + string(reloadJS) + "\n</script>\n")
 
@@ -28,7 +32,9 @@ func init() {
 // NewProxyHandler creates an HTTP handler that reverse-proxies to the target
 // address, optionally injecting the live reload script into HTML responses.
 // The SSE broker handler is mounted at /__hamr/reload.
-func NewProxyHandler(target string, broker *SSEBroker, injectReload bool) http.Handler {
+// If errorState is non-nil, HTML requests are intercepted with an error page
+// when there are active build errors.
+func NewProxyHandler(target string, broker *SSEBroker, errorState *ErrorState, logBuf *LogBuffer, injectReload bool) http.Handler {
 	targetURL := &url.URL{
 		Scheme: "http",
 		Host:   normalizeHost(target),
@@ -53,11 +59,53 @@ func NewProxyHandler(target string, broker *SSEBroker, injectReload bool) http.H
 		proxy.ModifyResponse = injectReloadScript
 	}
 
+	var rootHandler http.Handler = proxy
+	if errorState != nil {
+		rootHandler = &errorInterceptor{errorState: errorState, next: proxy}
+	}
+
 	mux := http.NewServeMux()
 	mux.Handle("/__hamr/reload", broker.Handler())
-	mux.Handle("/", proxy)
+	mux.HandleFunc("/__hamr/logo.png", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Write(logoPNG) //nolint:errcheck
+	})
+	if logBuf != nil {
+		mux.HandleFunc("/__hamr/logs", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(logBuf.Lines()) //nolint:errcheck
+		})
+	}
+	mux.Handle("/", rootHandler)
 
 	return mux
+}
+
+// errorInterceptor serves a build error page for HTML requests when there are
+// active build errors. Non-HTML and HTMX requests pass through to the backend.
+type errorInterceptor struct {
+	errorState *ErrorState
+	next       http.Handler
+}
+
+func (e *errorInterceptor) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if e.errorState.HasErrors() && acceptsHTML(r) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusBadGateway)
+		w.Write(renderErrorPage(e.errorState.Snapshot())) //nolint:errcheck
+		return
+	}
+	e.next.ServeHTTP(w, r)
+}
+
+// acceptsHTML returns true if the request is a browser navigation requesting
+// HTML (not an HTMX partial or API call).
+func acceptsHTML(r *http.Request) bool {
+	if r.Header.Get("HX-Request") != "" {
+		return false
+	}
+	return strings.Contains(r.Header.Get("Accept"), "text/html")
 }
 
 func normalizeHost(addr string) string {

@@ -1,9 +1,13 @@
 package devserver
 
 import (
+	"bufio"
 	"context"
 	"io"
 	"log/slog"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,12 +97,12 @@ func TestRunner_HandleEvent(t *testing.T) {
 	r := NewRunner(cfg, WithLogger(discardLogger()), WithNoProxy(true))
 	graph := NewGraph(cfg.Dev.Watch)
 	pm := NewProcessManager(discardLogger())
-	broker := NewSSEBroker()
+	broker := NewSSEBroker(nil, nil)
 
 	rule := r.findRule("echo")
 	evt := FileEvent{Rule: rule, Path: "main.go", Time: time.Now()}
 
-	r.handleEvent(context.Background(), evt, graph, pm, broker)
+	r.handleEvent(context.Background(), evt, graph, pm, broker, NewErrorState())
 
 	// After handleEvent, the rule should be marked done (not blocking dependees).
 	err := graph.WaitForDeps(context.Background(), "echo")
@@ -117,12 +121,12 @@ func TestRunner_HandleEvent_WithProcess(t *testing.T) {
 	r := NewRunner(cfg, WithLogger(discardLogger()), WithNoProxy(true))
 	graph := NewGraph(cfg.Dev.Watch)
 	pm := NewProcessManager(discardLogger())
-	broker := NewSSEBroker()
+	broker := NewSSEBroker(nil, nil)
 
 	rule := r.findRule("server")
 	evt := FileEvent{Rule: rule, Path: "main.go", Time: time.Now()}
 
-	r.handleEvent(context.Background(), evt, graph, pm, broker)
+	r.handleEvent(context.Background(), evt, graph, pm, broker, NewErrorState())
 
 	// Process should be running.
 	time.Sleep(50 * time.Millisecond)
@@ -146,12 +150,12 @@ func TestRunner_HandleEvent_BuildFailure(t *testing.T) {
 	r := NewRunner(cfg, WithLogger(discardLogger()), WithNoProxy(true))
 	graph := NewGraph(cfg.Dev.Watch)
 	pm := NewProcessManager(discardLogger())
-	broker := NewSSEBroker()
+	broker := NewSSEBroker(nil, nil)
 
 	rule := r.findRule("fail")
 	evt := FileEvent{Rule: rule, Path: "main.go", Time: time.Now()}
 
-	r.handleEvent(context.Background(), evt, graph, pm, broker)
+	r.handleEvent(context.Background(), evt, graph, pm, broker, NewErrorState())
 
 	// Build failed — process should NOT have started.
 	pm.mu.Lock()
@@ -176,12 +180,12 @@ func TestRunner_HandleEvent_NoReload(t *testing.T) {
 	r := NewRunner(cfg, WithLogger(discardLogger()), WithNoProxy(true))
 	graph := NewGraph(cfg.Dev.Watch)
 	pm := NewProcessManager(discardLogger())
-	broker := NewSSEBroker()
+	broker := NewSSEBroker(nil, nil)
 
 	rule := r.findRule("quiet")
 	evt := FileEvent{Rule: rule, Path: "main.go", Time: time.Now()}
 
-	r.handleEvent(context.Background(), evt, graph, pm, broker)
+	r.handleEvent(context.Background(), evt, graph, pm, broker, NewErrorState())
 	// No assertion on broadcast — just verifying no panic and flow completes.
 }
 
@@ -197,12 +201,12 @@ func TestRunner_HandleEvent_CSSReload(t *testing.T) {
 	r := NewRunner(cfg, WithLogger(discardLogger()), WithNoProxy(true))
 	graph := NewGraph(cfg.Dev.Watch)
 	pm := NewProcessManager(discardLogger())
-	broker := NewSSEBroker()
+	broker := NewSSEBroker(nil, nil)
 
 	rule := r.findRule("css")
 	evt := FileEvent{Rule: rule, Path: "style.css", Time: time.Now()}
 
-	r.handleEvent(context.Background(), evt, graph, pm, broker)
+	r.handleEvent(context.Background(), evt, graph, pm, broker, NewErrorState())
 	// Completes without error.
 }
 
@@ -219,7 +223,7 @@ func TestRunner_HandleEvent_Cancelled(t *testing.T) {
 	r := NewRunner(cfg, WithLogger(discardLogger()), WithNoProxy(true))
 	graph := NewGraph(cfg.Dev.Watch)
 	pm := NewProcessManager(discardLogger())
-	broker := NewSSEBroker()
+	broker := NewSSEBroker(nil, nil)
 
 	// Mark templ as running so go will block.
 	graph.MarkRunning("templ")
@@ -231,7 +235,7 @@ func TestRunner_HandleEvent_Cancelled(t *testing.T) {
 	evt := FileEvent{Rule: rule, Path: "main.go", Time: time.Now()}
 
 	// Should return without hanging.
-	r.handleEvent(ctx, evt, graph, pm, broker)
+	r.handleEvent(ctx, evt, graph, pm, broker, NewErrorState())
 }
 
 func TestRunner_Run_Integration(t *testing.T) {
@@ -488,4 +492,117 @@ func TestRunner_Run_DependencyOrderForCoalescedEvents(t *testing.T) {
 		}
 	}
 	require.GreaterOrEqual(t, goCount, 1)
+}
+
+func TestRunner_HandleEvent_BuildFailure_BroadcastsError(t *testing.T) {
+	cfg := &Config{
+		Dev: DevConfig{
+			Watch: []WatchRule{
+				{Name: "fail", Watch: StringOrSlice{"**/*.go"}, Cmd: "echo build-error-output && exit 1"},
+			},
+		},
+	}
+
+	r := NewRunner(cfg, WithLogger(discardLogger()), WithNoProxy(true))
+	graph := NewGraph(cfg.Dev.Watch)
+	pm := NewProcessManager(discardLogger())
+	broker := NewSSEBroker(nil, nil)
+	srv := httptest.NewServer(broker.Handler())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	time.Sleep(50 * time.Millisecond)
+
+	rule := r.findRule("fail")
+	evt := FileEvent{Rule: rule, Path: "main.go", Time: time.Now()}
+	r.handleEvent(context.Background(), evt, graph, pm, broker, NewErrorState())
+
+	// Read events: connected + config + building + build_error.
+	scanner := bufio.NewScanner(resp.Body)
+	events := readSSEEvents(scanner, 4)
+
+	require.Len(t, events, 4)
+	assert.Equal(t, "connected", events[0].typ)
+	assert.Equal(t, "config", events[1].typ)
+	assert.Equal(t, "building", events[2].typ)
+	assert.Equal(t, "build_error", events[3].typ)
+	assert.Contains(t, events[3].data, "build-error-output")
+	assert.Contains(t, events[3].data, `"rule":"fail"`)
+}
+
+func TestRunner_HandleEvent_BuildSuccess_BroadcastsOk(t *testing.T) {
+	cfg := &Config{
+		Dev: DevConfig{
+			Watch: []WatchRule{
+				{Name: "ok", Watch: StringOrSlice{"**/*.go"}, Cmd: "echo fine", Reload: ReloadFull},
+			},
+		},
+	}
+
+	r := NewRunner(cfg, WithLogger(discardLogger()), WithNoProxy(true))
+	graph := NewGraph(cfg.Dev.Watch)
+	pm := NewProcessManager(discardLogger())
+	broker := NewSSEBroker(nil, nil)
+	srv := httptest.NewServer(broker.Handler())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	time.Sleep(50 * time.Millisecond)
+
+	rule := r.findRule("ok")
+	evt := FileEvent{Rule: rule, Path: "main.go", Time: time.Now()}
+	r.handleEvent(context.Background(), evt, graph, pm, broker, NewErrorState())
+
+	// Read events: connected + config + building + build_ok + reload.
+	scanner := bufio.NewScanner(resp.Body)
+	events := readSSEEvents(scanner, 5)
+
+	require.Len(t, events, 5)
+	assert.Equal(t, "building", events[2].typ)
+	assert.Equal(t, "build_ok", events[3].typ)
+	assert.Equal(t, "ok", events[3].data)
+	assert.Equal(t, "reload", events[4].typ)
+}
+
+func TestWaitForTarget_ListenerUp(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer func() { _ = ln.Close() }()
+
+	ok := waitForTarget(context.Background(), ln.Addr().String(), 2*time.Second)
+	assert.True(t, ok, "should return true when target is listening")
+}
+
+func TestWaitForTarget_NothingListening(t *testing.T) {
+	// Bind and immediately close to get a port that nothing listens on.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	start := time.Now()
+	ok := waitForTarget(context.Background(), addr, 300*time.Millisecond)
+	elapsed := time.Since(start)
+
+	assert.False(t, ok, "should return false when nothing is listening")
+	assert.GreaterOrEqual(t, elapsed, 250*time.Millisecond, "should wait close to timeout")
+}
+
+func TestWaitForTarget_ContextCancelled(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	ok := waitForTarget(ctx, addr, 5*time.Second)
+	assert.False(t, ok, "should return false when context is cancelled")
 }

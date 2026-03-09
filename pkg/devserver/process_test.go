@@ -6,6 +6,8 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,17 +23,19 @@ func TestProcessManager_RunCommand(t *testing.T) {
 	pm := NewProcessManager(testLogger())
 
 	rule := &WatchRule{Name: "test", Cmd: "echo hello"}
-	err := pm.RunCommand(context.Background(), rule)
+	output, err := pm.RunCommand(context.Background(), rule)
 	require.NoError(t, err)
+	assert.Empty(t, output)
 }
 
 func TestProcessManager_RunCommand_Failure(t *testing.T) {
 	pm := NewProcessManager(testLogger())
 
-	rule := &WatchRule{Name: "test", Cmd: "exit 1"}
-	err := pm.RunCommand(context.Background(), rule)
+	rule := &WatchRule{Name: "test", Cmd: "echo boom && exit 1"}
+	output, err := pm.RunCommand(context.Background(), rule)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "rule \"test\" cmd failed")
+	assert.Contains(t, output, "boom")
 }
 
 func TestProcessManager_RunCommand_Cancelled(t *testing.T) {
@@ -41,7 +45,7 @@ func TestProcessManager_RunCommand_Cancelled(t *testing.T) {
 	cancel()
 
 	rule := &WatchRule{Name: "test", Cmd: "sleep 60"}
-	err := pm.RunCommand(ctx, rule)
+	_, err := pm.RunCommand(ctx, rule)
 	assert.Error(t, err)
 }
 
@@ -49,7 +53,7 @@ func TestProcessManager_RunCommand_WithEnv(t *testing.T) {
 	pm := NewProcessManager(testLogger())
 
 	rule := &WatchRule{Name: "test", Cmd: "echo $MY_TEST_VAR", Env: []string{"MY_TEST_VAR=hello_from_env"}}
-	err := pm.RunCommand(context.Background(), rule)
+	_, err := pm.RunCommand(context.Background(), rule)
 	require.NoError(t, err)
 }
 
@@ -57,7 +61,7 @@ func TestProcessManager_RunCommand_Stderr(t *testing.T) {
 	pm := NewProcessManager(testLogger())
 
 	rule := &WatchRule{Name: "test", Cmd: "echo error >&2"}
-	err := pm.RunCommand(context.Background(), rule)
+	_, err := pm.RunCommand(context.Background(), rule)
 	require.NoError(t, err) // cmd exits 0 even with stderr
 }
 
@@ -142,6 +146,110 @@ func TestProcessManager_StartProcess_MultipleRules(t *testing.T) {
 	count = len(pm.procs)
 	pm.mu.Unlock()
 	assert.Equal(t, 0, count)
+}
+
+func TestTailBuffer(t *testing.T) {
+	t.Run("small input", func(t *testing.T) {
+		tb := newTailBuffer()
+		_, _ = tb.Write([]byte("hello"))
+		assert.Equal(t, "hello", tb.String())
+	})
+
+	t.Run("exact fit", func(t *testing.T) {
+		tb := newTailBuffer()
+		data := bytes.Repeat([]byte("x"), tailBufSize)
+		_, _ = tb.Write(data)
+		assert.Equal(t, string(data), tb.String())
+	})
+
+	t.Run("overflow single write", func(t *testing.T) {
+		tb := newTailBuffer()
+		data := bytes.Repeat([]byte("a"), tailBufSize+100)
+		_, _ = tb.Write(data)
+		assert.Equal(t, string(data[100:]), tb.String())
+	})
+
+	t.Run("multi-write wrap", func(t *testing.T) {
+		tb := newTailBuffer()
+		chunk := bytes.Repeat([]byte("b"), tailBufSize-10)
+		_, _ = tb.Write(chunk)
+		_, _ = tb.Write([]byte("0123456789extra"))
+
+		got := tb.String()
+		assert.Len(t, got, tailBufSize)
+		assert.True(t, strings.HasSuffix(got, "extra"), "should end with last written data")
+	})
+
+	t.Run("larger than buffer", func(t *testing.T) {
+		tb := newTailBuffer()
+		data := bytes.Repeat([]byte("c"), tailBufSize*3)
+		_, _ = tb.Write(data)
+		assert.Equal(t, string(data[len(data)-tailBufSize:]), tb.String())
+	})
+
+	t.Run("reset", func(t *testing.T) {
+		tb := newTailBuffer()
+		_, _ = tb.Write([]byte("data"))
+		tb.Reset()
+		assert.Equal(t, "", tb.String())
+	})
+}
+
+func TestProcessManager_OnProcessExit(t *testing.T) {
+	pm := NewProcessManager(testLogger())
+
+	var mu sync.Mutex
+	var gotRule string
+	var gotErr error
+	var gotOutput string
+
+	pm.OnProcessExit = func(rule string, err error, output string) {
+		mu.Lock()
+		gotRule = rule
+		gotErr = err
+		gotOutput = output
+		mu.Unlock()
+	}
+
+	rule := &WatchRule{Name: "crasher", Run: "echo crash-output && exit 42"}
+	err := pm.StartProcess(context.Background(), rule)
+	require.NoError(t, err)
+
+	// Wait for the process to exit and callback to fire.
+	assert.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return gotRule != ""
+	}, 3*time.Second, 50*time.Millisecond)
+
+	mu.Lock()
+	assert.Equal(t, "crasher", gotRule)
+	assert.Error(t, gotErr)
+	assert.Contains(t, gotOutput, "crash-output")
+	mu.Unlock()
+}
+
+func TestProcessManager_LogOutput(t *testing.T) {
+	logBuf := NewLogBuffer(100)
+	broker := NewSSEBroker(nil, nil)
+
+	pm := NewProcessManager(testLogger())
+	pm.SetLogOutput(logBuf, broker)
+
+	rule := &WatchRule{Name: "test", Cmd: "echo hello && echo world"}
+	_, err := pm.RunCommand(context.Background(), rule)
+	require.NoError(t, err)
+
+	lines := logBuf.Lines()
+	require.GreaterOrEqual(t, len(lines), 2)
+
+	var texts []string
+	for _, l := range lines {
+		assert.Equal(t, "test", l.Rule)
+		texts = append(texts, l.Text)
+	}
+	assert.Contains(t, texts, "hello")
+	assert.Contains(t, texts, "world")
 }
 
 func TestBuildEnv(t *testing.T) {

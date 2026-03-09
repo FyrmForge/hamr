@@ -9,8 +9,9 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "hamr",
-	Short: "HAMR - Go full-stack framework and project scaffolding CLI",
+	Use:          "hamr",
+	Short:        "HAMR - Go full-stack framework and project scaffolding CLI",
+	SilenceUsage: true,
 }
 
 // loadDotenv reads a .env file and sets any variables not already present

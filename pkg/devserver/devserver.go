@@ -2,8 +2,10 @@ package devserver
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"sync"
@@ -59,7 +61,14 @@ func (r *Runner) Run(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	graph := NewGraph(r.cfg.Dev.Watch)
 	pm := NewProcessManager(r.logger)
-	broker := NewSSEBroker()
+	broker := NewSSEBroker(r.cfg.Dev.Watch, r.cfg.Dev.Daemons)
+	errorState := NewErrorState()
+	logBuf := NewLogBuffer(1000)
+	pm.SetLogOutput(logBuf, broker)
+	pm.OnProcessExit = func(rule string, err error, output string) {
+		errorState.Set(rule, output)
+		broker.Broadcast(buildErrorEvent(rule, output))
+	}
 	var schedulerWG sync.WaitGroup
 	var watcher *Watcher
 
@@ -80,7 +89,7 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	if !r.noProxy {
 		inject := r.cfg.Proxy.InjectReload != nil && *r.cfg.Proxy.InjectReload
-		handler := NewProxyHandler(r.cfg.Proxy.Target, broker, inject)
+		handler := NewProxyHandler(r.cfg.Proxy.Target, broker, errorState, logBuf, inject)
 		srv, _, err := ListenAndServeProxy(r.cfg.Proxy.Listen, handler)
 		if err != nil {
 			return fmt.Errorf("start proxy: %w", err)
@@ -98,8 +107,10 @@ func (r *Runner) Run(ctx context.Context) error {
 			continue
 		}
 		if rule.Cmd != "" {
-			if err := pm.RunCommand(runCtx, rule); err != nil {
+			if output, err := pm.RunCommand(runCtx, rule); err != nil {
 				r.logger.Error("initial build failed", "rule", name, "err", err)
+				errorState.Set(name, output)
+				broker.Broadcast(buildErrorEvent(name, output))
 				// Continue — don't abort the whole dev server for a build error.
 			}
 		}
@@ -125,7 +136,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	if len(r.cfg.Dev.Watch) == 0 {
 		r.logger.Info("no watch rules, running daemons only")
 		<-runCtx.Done()
-		return runCtx.Err()
+		return nil
 	}
 
 	// Start file watcher.
@@ -223,7 +234,7 @@ func (r *Runner) Run(ctx context.Context) error {
 					break
 				}
 
-				r.handleEvent(runCtx, evt, graph, pm, broker)
+				r.handleEvent(runCtx, evt, graph, pm, broker, errorState)
 			}
 		}
 	}()
@@ -234,7 +245,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		case <-watcher.Done():
 			return nil
 		case <-runCtx.Done():
-			return runCtx.Err()
+			return nil
 		case evt, ok := <-watcher.Events():
 			if !ok {
 				return nil
@@ -250,9 +261,12 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 }
 
-func (r *Runner) handleEvent(ctx context.Context, evt FileEvent, graph *Graph, pm *ProcessManager, broker *SSEBroker) {
+func (r *Runner) handleEvent(ctx context.Context, evt FileEvent, graph *Graph, pm *ProcessManager, broker *SSEBroker, errorState *ErrorState) {
 	rule := evt.Rule
 	r.logger.Info("change detected", "rule", rule.Name, "path", evt.Path)
+
+	// Notify the browser that a build is starting.
+	broker.Broadcast(SSEEvent{Type: "building", Data: rule.Name})
 
 	// Mark this rule as running so dependees block.
 	graph.MarkRunning(rule.Name)
@@ -266,16 +280,28 @@ func (r *Runner) handleEvent(ctx context.Context, evt FileEvent, graph *Graph, p
 
 	// Run the build command.
 	if rule.Cmd != "" {
-		if err := pm.RunCommand(ctx, rule); err != nil {
+		if output, err := pm.RunCommand(ctx, rule); err != nil {
 			r.logger.Error("build failed", "rule", rule.Name, "err", err)
+			errorState.Set(rule.Name, output)
+			broker.Broadcast(buildErrorEvent(rule.Name, output))
 			return
 		}
+		errorState.Clear(rule.Name)
+		broker.Broadcast(SSEEvent{Type: "build_ok", Data: rule.Name})
 	}
 
 	// Restart the long-running process.
 	if rule.Run != "" {
 		if err := pm.StartProcess(ctx, rule); err != nil {
 			r.logger.Error("restart failed", "rule", rule.Name, "err", err)
+		}
+	}
+
+	// Wait for the target server to be ready before reloading the browser.
+	if rule.Run != "" && !r.noProxy && rule.Reload != "" && rule.Reload != ReloadNone {
+		target := normalizeHost(r.cfg.Proxy.Target)
+		if !waitForTarget(ctx, target, 5*time.Second) {
+			r.logger.Warn("target not ready, broadcasting reload anyway", "rule", rule.Name)
 		}
 	}
 
@@ -286,6 +312,36 @@ func (r *Runner) handleEvent(ctx context.Context, evt FileEvent, graph *Graph, p
 			Data: string(rule.Reload),
 		})
 	}
+}
+
+// waitForTarget polls the given TCP address until a connection succeeds or the
+// timeout expires. Returns true if the target became reachable.
+func waitForTarget(ctx context.Context, addr string, timeout time.Duration) bool {
+	deadline := time.After(timeout)
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-deadline:
+			return false
+		default:
+		}
+		conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return true
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// buildErrorEvent creates an SSE event for a build/process error.
+func buildErrorEvent(rule, output string) SSEEvent {
+	payload, _ := json.Marshal(struct {
+		Rule   string `json:"rule"`
+		Output string `json:"output"`
+	}{Rule: rule, Output: output})
+	return SSEEvent{Type: "build_error", Data: string(payload)}
 }
 
 func (r *Runner) findRule(name string) *WatchRule {

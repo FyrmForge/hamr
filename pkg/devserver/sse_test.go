@@ -14,7 +14,7 @@ import (
 )
 
 func TestSSEBroker_Handler(t *testing.T) {
-	broker := NewSSEBroker()
+	broker := NewSSEBroker(nil, nil)
 	srv := httptest.NewServer(broker.Handler())
 	defer srv.Close()
 
@@ -41,7 +41,7 @@ func TestSSEBroker_Handler(t *testing.T) {
 }
 
 func TestSSEBroker_Broadcast(t *testing.T) {
-	broker := NewSSEBroker()
+	broker := NewSSEBroker(nil, nil)
 	srv := httptest.NewServer(broker.Handler())
 	defer srv.Close()
 
@@ -56,18 +56,19 @@ func TestSSEBroker_Broadcast(t *testing.T) {
 	// Broadcast an event.
 	broker.Broadcast(SSEEvent{Type: "reload", Data: "full"})
 
-	// Read events: skip the initial "connected" event, then read "reload".
+	// Read events: connected + config + reload.
 	scanner := bufio.NewScanner(resp.Body)
-	events := readSSEEvents(scanner, 2)
+	events := readSSEEvents(scanner, 3)
 
-	require.Len(t, events, 2)
+	require.Len(t, events, 3)
 	assert.Equal(t, "connected", events[0].typ)
-	assert.Equal(t, "reload", events[1].typ)
-	assert.Equal(t, "full", events[1].data)
+	assert.Equal(t, "config", events[1].typ)
+	assert.Equal(t, "reload", events[2].typ)
+	assert.Equal(t, "full", events[2].data)
 }
 
 func TestSSEBroker_Broadcast_MultipleEvents(t *testing.T) {
-	broker := NewSSEBroker()
+	broker := NewSSEBroker(nil, nil)
 	srv := httptest.NewServer(broker.Handler())
 	defer srv.Close()
 
@@ -81,18 +82,19 @@ func TestSSEBroker_Broadcast_MultipleEvents(t *testing.T) {
 	broker.Broadcast(SSEEvent{Type: "reload", Data: "css"})
 
 	scanner := bufio.NewScanner(resp.Body)
-	events := readSSEEvents(scanner, 3) // connected + 2 reload events
+	events := readSSEEvents(scanner, 4) // connected + config + 2 reload events
 
-	require.Len(t, events, 3)
+	require.Len(t, events, 4)
 	assert.Equal(t, "connected", events[0].typ)
-	assert.Equal(t, "reload", events[1].typ)
-	assert.Equal(t, "full", events[1].data)
+	assert.Equal(t, "config", events[1].typ)
 	assert.Equal(t, "reload", events[2].typ)
-	assert.Equal(t, "css", events[2].data)
+	assert.Equal(t, "full", events[2].data)
+	assert.Equal(t, "reload", events[3].typ)
+	assert.Equal(t, "css", events[3].data)
 }
 
 func TestSSEBroker_MultipleClients(t *testing.T) {
-	broker := NewSSEBroker()
+	broker := NewSSEBroker(nil, nil)
 	srv := httptest.NewServer(broker.Handler())
 	defer srv.Close()
 
@@ -117,10 +119,10 @@ func TestSSEBroker_MultipleClients(t *testing.T) {
 	check := func(resp *http.Response) {
 		defer wg.Done()
 		scanner := bufio.NewScanner(resp.Body)
-		events := readSSEEvents(scanner, 2)
-		assert.Len(t, events, 2)
-		if len(events) == 2 {
-			assert.Equal(t, "reload", events[1].typ)
+		events := readSSEEvents(scanner, 3) // connected + config + reload
+		assert.Len(t, events, 3)
+		if len(events) == 3 {
+			assert.Equal(t, "reload", events[2].typ)
 		}
 	}
 
@@ -130,7 +132,7 @@ func TestSSEBroker_MultipleClients(t *testing.T) {
 }
 
 func TestSSEBroker_ClientDisconnect(t *testing.T) {
-	broker := NewSSEBroker()
+	broker := NewSSEBroker(nil, nil)
 	srv := httptest.NewServer(broker.Handler())
 	defer srv.Close()
 
@@ -148,7 +150,7 @@ func TestSSEBroker_ClientDisconnect(t *testing.T) {
 }
 
 func TestSSEBroker_Broadcast_NoClients(t *testing.T) {
-	broker := NewSSEBroker()
+	broker := NewSSEBroker(nil, nil)
 	assert.Equal(t, 0, broker.ClientCount())
 
 	// Should not panic or block.
@@ -156,7 +158,7 @@ func TestSSEBroker_Broadcast_NoClients(t *testing.T) {
 }
 
 func TestSSEBroker_Broadcast_FullChannel(t *testing.T) {
-	broker := NewSSEBroker()
+	broker := NewSSEBroker(nil, nil)
 	srv := httptest.NewServer(broker.Handler())
 	defer srv.Close()
 
@@ -184,8 +186,34 @@ func TestSSEBroker_Broadcast_FullChannel(t *testing.T) {
 	}
 }
 
+func TestSSEBroker_ConfigEvent(t *testing.T) {
+	rules := []WatchRule{
+		{Name: "templ", Watch: StringOrSlice{"**/*.templ"}, Cmd: "templ generate", Reload: ReloadFull},
+	}
+	daemons := []Daemon{
+		{Name: "server", Cmd: "go run ./cmd/server"},
+	}
+	broker := NewSSEBroker(rules, daemons)
+	srv := httptest.NewServer(broker.Handler())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	scanner := bufio.NewScanner(resp.Body)
+	events := readSSEEvents(scanner, 2) // connected + config
+
+	require.Len(t, events, 2)
+	assert.Equal(t, "config", events[1].typ)
+	assert.Contains(t, events[1].data, `"templ"`)
+	assert.Contains(t, events[1].data, `"server"`)
+	assert.Contains(t, events[1].data, `"templ generate"`)
+	assert.Contains(t, events[1].data, `"go run ./cmd/server"`)
+}
+
 func TestSSEBroker_ClientCount(t *testing.T) {
-	broker := NewSSEBroker()
+	broker := NewSSEBroker(nil, nil)
 	assert.Equal(t, 0, broker.ClientCount())
 }
 

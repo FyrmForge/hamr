@@ -1,25 +1,38 @@
 :root {
-    /* Colors */
-    --color-primary: #3b82f6;
-    --color-primary-hover: #60a5fa;
-    --color-secondary: #64748b;
-    --color-success: #22c55e;
-    --color-warning: #f59e0b;
-    --color-error: #ef4444;
-    --color-info: #06b6d4;
+    /* hamr palette — metal */
+    --hamr-metal-dark: #1F2326;
+    --hamr-metal-mid: #3A3F45;
+    --hamr-metal-light: #7A8188;
+    --hamr-metal-steel: #B8BEC6;
+
+    /* hamr palette — fire */
+    --hamr-fire-yellow: #FFD166;
+    --hamr-fire-orange: #FF8C32;
+    --hamr-fire-ember: #FF5A1F;
+    --hamr-fire-deep: #C92E0A;
+    --hamr-fire-glow: #FFB347;
+
+    /* Semantic colors */
+    --color-primary: var(--hamr-fire-orange);
+    --color-primary-hover: var(--hamr-fire-glow);
+    --color-secondary: var(--hamr-metal-light);
+    --color-success: var(--hamr-fire-glow);
+    --color-warning: var(--hamr-fire-yellow);
+    --color-error: var(--hamr-fire-deep);
+    --color-info: var(--hamr-fire-orange);
 
     /* Backgrounds */
-    --bg-primary: #0f172a;
-    --bg-secondary: #1e293b;
-    --bg-tertiary: #334155;
+    --bg-primary: var(--hamr-metal-dark);
+    --bg-secondary: var(--hamr-metal-mid);
+    --bg-tertiary: #4A5058;
 
     /* Text */
-    --text-primary: #f1f5f9;
-    --text-secondary: #94a3b8;
-    --text-muted: #64748b;
+    --text-primary: var(--hamr-metal-steel);
+    --text-secondary: var(--hamr-metal-light);
+    --text-muted: #5A6068;
 
     /* Borders */
-    --border-color: #334155;
+    --border-color: var(--hamr-metal-mid);
     --border-radius: 0.375rem;
     --border-radius-lg: 0.5rem;
 
@@ -44,7 +57,7 @@
     /* Shadows */
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4);
-    --shadow-glow: 0 0 12px rgba(59, 130, 246, 0.15);
+    --shadow-glow: 0 0 12px rgba(255, 179, 71, 0.15);
 
     /* Layout */
     --container-max: 1200px;

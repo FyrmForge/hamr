@@ -1,0 +1,14 @@
+{
+  "branches": [
+    "master"
+  ],
+  "tagFormat": "v{{version}}",
+  "plugins": {
+    "commit-analyzer": {
+      "name": "cz",
+      "options": {
+        "patch_release_rules": "fix,chore,ci"
+      }
+    }
+  }
+}

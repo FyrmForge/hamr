@@ -3,6 +3,7 @@ package devserver
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -21,8 +22,8 @@ func TestInjectReloadScript_HTML(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	broker := NewSSEBroker()
-	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, true)
+	broker := NewSSEBroker(nil, nil)
+	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, nil, nil, true)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()
 
@@ -51,8 +52,8 @@ func TestInjectReloadScript_ContentLength(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	broker := NewSSEBroker()
-	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, true)
+	broker := NewSSEBroker(nil, nil)
+	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, nil, nil, true)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()
 
@@ -79,8 +80,8 @@ func TestInjectReloadScript_NonHTML(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	broker := NewSSEBroker()
-	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, true)
+	broker := NewSSEBroker(nil, nil)
+	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, nil, nil, true)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()
 
@@ -101,8 +102,8 @@ func TestInjectReloadScript_NoBodyTag(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	broker := NewSSEBroker()
-	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, true)
+	broker := NewSSEBroker(nil, nil)
+	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, nil, nil, true)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()
 
@@ -127,8 +128,8 @@ func TestInjectReloadScript_EmptyBody(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	broker := NewSSEBroker()
-	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, true)
+	broker := NewSSEBroker(nil, nil)
+	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, nil, nil, true)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()
 
@@ -151,8 +152,8 @@ func TestInjectReloadScript_MultipleBodyTags(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	broker := NewSSEBroker()
-	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, true)
+	broker := NewSSEBroker(nil, nil)
+	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, nil, nil, true)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()
 
@@ -179,8 +180,8 @@ func TestInjectReloadScript_Disabled(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	broker := NewSSEBroker()
-	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, false)
+	broker := NewSSEBroker(nil, nil)
+	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, nil, nil, false)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()
 
@@ -201,8 +202,8 @@ func TestInjectReloadScript_CSSResponse(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	broker := NewSSEBroker()
-	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, true)
+	broker := NewSSEBroker(nil, nil)
+	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, nil, nil, true)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()
 
@@ -252,8 +253,8 @@ func TestNewProxyHandler_StripsAcceptEncodingForInjection(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	broker := NewSSEBroker()
-	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, true)
+	broker := NewSSEBroker(nil, nil)
+	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, nil, nil, true)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()
 
@@ -273,8 +274,8 @@ func TestNewProxyHandler_StripsAcceptEncodingForInjection(t *testing.T) {
 }
 
 func TestSSEEndpoint(t *testing.T) {
-	broker := NewSSEBroker()
-	handler := NewProxyHandler("localhost:9999", broker, true)
+	broker := NewSSEBroker(nil, nil)
+	handler := NewProxyHandler("localhost:9999", broker, nil, nil, true)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()
 
@@ -293,8 +294,8 @@ func TestNormalizeHost(t *testing.T) {
 }
 
 func TestListenAndServeProxy(t *testing.T) {
-	broker := NewSSEBroker()
-	handler := NewProxyHandler("localhost:9999", broker, false)
+	broker := NewSSEBroker(nil, nil)
+	handler := NewProxyHandler("localhost:9999", broker, nil, nil, false)
 
 	srv, ln, err := ListenAndServeProxy(":0", handler)
 	require.NoError(t, err)
@@ -311,11 +312,152 @@ func TestListenAndServeProxy(t *testing.T) {
 }
 
 func TestListenAndServeProxy_InvalidAddr(t *testing.T) {
-	broker := NewSSEBroker()
-	handler := NewProxyHandler("localhost:9999", broker, false)
+	broker := NewSSEBroker(nil, nil)
+	handler := NewProxyHandler("localhost:9999", broker, nil, nil, false)
 
 	_, _, err := ListenAndServeProxy("invalid-not-an-addr", handler)
 	assert.Error(t, err)
+}
+
+func TestErrorPage_ServedOnBuildError(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<html><body>OK</body></html>"))
+	}))
+	defer backend.Close()
+
+	es := NewErrorState()
+	es.Set("go", "cannot find package main")
+	broker := NewSSEBroker(nil, nil)
+	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, es, nil, true)
+	proxy := httptest.NewServer(handler)
+	defer proxy.Close()
+
+	req, err := http.NewRequest(http.MethodGet, proxy.URL, nil)
+	require.NoError(t, err)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, http.StatusBadGateway, resp.StatusCode)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	bodyStr := string(body)
+	assert.Contains(t, bodyStr, "Build Error")
+	assert.Contains(t, bodyStr, "cannot find package main")
+	assert.Contains(t, bodyStr, "__hamr_error_page")
+}
+
+func TestErrorPage_SkippedForAPI(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer backend.Close()
+
+	es := NewErrorState()
+	es.Set("go", "error")
+	broker := NewSSEBroker(nil, nil)
+	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, es, nil, false)
+	proxy := httptest.NewServer(handler)
+	defer proxy.Close()
+
+	req, err := http.NewRequest(http.MethodGet, proxy.URL, nil)
+	require.NoError(t, err)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, `{"ok":true}`, string(body))
+}
+
+func TestErrorPage_SkippedForHTMX(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<div>partial</div>"))
+	}))
+	defer backend.Close()
+
+	es := NewErrorState()
+	es.Set("go", "error")
+	broker := NewSSEBroker(nil, nil)
+	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, es, nil, false)
+	proxy := httptest.NewServer(handler)
+	defer proxy.Close()
+
+	req, err := http.NewRequest(http.MethodGet, proxy.URL, nil)
+	require.NoError(t, err)
+	req.Header.Set("Accept", "text/html")
+	req.Header.Set("HX-Request", "true")
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, "<div>partial</div>", string(body))
+}
+
+func TestErrorPage_NotServedWhenNoErrors(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<html><body>OK</body></html>"))
+	}))
+	defer backend.Close()
+
+	es := NewErrorState()
+	broker := NewSSEBroker(nil, nil)
+	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, es, nil, false)
+	proxy := httptest.NewServer(handler)
+	defer proxy.Close()
+
+	req, err := http.NewRequest(http.MethodGet, proxy.URL, nil)
+	require.NoError(t, err)
+	req.Header.Set("Accept", "text/html")
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Contains(t, string(body), "<html><body>OK</body></html>")
+}
+
+func TestLogsEndpoint(t *testing.T) {
+	logBuf := NewLogBuffer(100)
+	logBuf.Append(LogLine{Rule: "go", Text: "building..."})
+	logBuf.Append(LogLine{Rule: "templ", Text: "generating templates"})
+
+	broker := NewSSEBroker(nil, nil)
+	handler := NewProxyHandler("localhost:9999", broker, nil, logBuf, false)
+	proxy := httptest.NewServer(handler)
+	defer proxy.Close()
+
+	resp, err := http.Get(proxy.URL + "/__hamr/logs")
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+
+	var lines []LogLine
+	err = json.NewDecoder(resp.Body).Decode(&lines)
+	require.NoError(t, err)
+	require.Len(t, lines, 2)
+	assert.Equal(t, "go", lines[0].Rule)
+	assert.Equal(t, "building...", lines[0].Text)
+	assert.Equal(t, "templ", lines[1].Rule)
+	assert.Equal(t, "generating templates", lines[1].Text)
 }
 
 func indexOf(s, sub string) int {

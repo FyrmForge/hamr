@@ -13,7 +13,7 @@ debounce = 100
 
 [[dev.daemon]]
 name = "tailwind"
-cmd = "npx tailwindcss -i static/css/input.css -o static/css/output.css --watch"
+cmd = "npm run css"
 {{- end}}
 {{- if .StaticS3}}
 
@@ -26,13 +26,8 @@ cmd = "hamr sync --watch --bucket {{.Name}}-static"
 name = "go"
 watch = ["**/*.go", "**/*.templ"]
 ignore = ["*_templ.go", "*_test.go"]
-cmd = "go build -o ./tmp/app ./cmd/server"
-run = "./tmp/app"
+cmd = "go build -o ./bin/app ./cmd/server"
+run = "./bin/app"
 depends = ["templ"]
 reload = "full"
 
-[[dev.watch]]
-name = "static"
-watch = ["static/**/*.js", "static/images/**"]
-reload = "full"
-cmd = "echo static files changed"

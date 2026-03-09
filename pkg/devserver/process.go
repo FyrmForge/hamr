@@ -16,11 +16,87 @@ import (
 
 const shutdownTimeout = 5 * time.Second
 
+// tailBuffer is a fixed-size ring buffer implementing io.Writer.
+// It keeps only the last tailBufSize bytes written, discarding older data.
+type tailBuffer struct {
+	mu   sync.Mutex
+	buf  []byte
+	size int
+	pos  int // next write position in the ring
+	full bool
+}
+
+const tailBufSize = 8192
+
+func newTailBuffer() *tailBuffer {
+	return &tailBuffer{buf: make([]byte, tailBufSize), size: tailBufSize}
+}
+
+func (tb *tailBuffer) Write(p []byte) (int, error) {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	n := len(p)
+	if n >= tb.size {
+		// Data larger than buffer — keep only the last size bytes.
+		copy(tb.buf, p[n-tb.size:])
+		tb.pos = 0
+		tb.full = true
+		return n, nil
+	}
+	// How much fits before wrapping?
+	space := tb.size - tb.pos
+	if n <= space {
+		copy(tb.buf[tb.pos:], p)
+		tb.pos += n
+		if tb.pos == tb.size {
+			tb.pos = 0
+			tb.full = true
+		}
+	} else {
+		copy(tb.buf[tb.pos:], p[:space])
+		copy(tb.buf, p[space:])
+		tb.pos = n - space
+		tb.full = true
+	}
+	return n, nil
+}
+
+func (tb *tailBuffer) String() string {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	if !tb.full {
+		return string(tb.buf[:tb.pos])
+	}
+	// Ring has wrapped — [pos:] + [:pos].
+	out := make([]byte, tb.size)
+	n := copy(out, tb.buf[tb.pos:])
+	copy(out[n:], tb.buf[:tb.pos])
+	return string(out)
+}
+
+func (tb *tailBuffer) Reset() {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	tb.pos = 0
+	tb.full = false
+}
+
+var _ io.Writer = (*tailBuffer)(nil)
+
 // ProcessManager handles running one-shot commands and long-running processes.
 type ProcessManager struct {
-	mu     sync.Mutex
-	procs  map[string]*os.Process
-	logger *slog.Logger
+	mu            sync.Mutex
+	procs         map[string]*os.Process
+	logger        *slog.Logger
+	OnProcessExit func(rule string, err error, output string)
+	logBuf        *LogBuffer
+	logBroker     *SSEBroker
+}
+
+// SetLogOutput enables streaming process output to a LogBuffer and SSE broker.
+func (pm *ProcessManager) SetLogOutput(buf *LogBuffer, broker *SSEBroker) {
+	pm.logBuf = buf
+	pm.logBroker = broker
 }
 
 // NewProcessManager creates a new process manager.
@@ -33,18 +109,35 @@ func NewProcessManager(logger *slog.Logger) *ProcessManager {
 
 // RunCommand runs a one-shot command to completion.
 // Stdout and stderr are streamed through the logger.
-func (pm *ProcessManager) RunCommand(ctx context.Context, rule *WatchRule) error {
+// On failure the captured tail output is returned alongside the error.
+func (pm *ProcessManager) RunCommand(ctx context.Context, rule *WatchRule) (string, error) {
 	pm.logger.Info("running", "rule", rule.Name, "cmd", rule.Cmd)
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", rule.Cmd)
 	cmd.Env = buildEnv(rule.Env)
-	cmd.Stdout = newPrefixWriter(os.Stdout, rule.Name)
-	cmd.Stderr = newPrefixWriter(os.Stderr, rule.Name)
+	color := nextColor()
+	capture := newTailBuffer()
+
+	var lw *logWriter
+	if pm.logBuf != nil {
+		lw = newLogWriter(rule.Name, color, pm.logBuf, pm.logBroker)
+		cmd.Stdout = io.MultiWriter(newPrefixWriter(os.Stdout, rule.Name, color), capture, lw)
+		cmd.Stderr = io.MultiWriter(newPrefixWriter(os.Stderr, rule.Name, color), capture, lw)
+	} else {
+		cmd.Stdout = io.MultiWriter(newPrefixWriter(os.Stdout, rule.Name, color), capture)
+		cmd.Stderr = io.MultiWriter(newPrefixWriter(os.Stderr, rule.Name, color), capture)
+	}
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("rule %q cmd failed: %w", rule.Name, err)
+		if lw != nil {
+			lw.Flush()
+		}
+		return capture.String(), fmt.Errorf("rule %q cmd failed: %w", rule.Name, err)
 	}
-	return nil
+	if lw != nil {
+		lw.Flush()
+	}
+	return "", nil
 }
 
 // StartProcess starts a long-running process, killing any previous instance.
@@ -58,8 +151,18 @@ func (pm *ProcessManager) StartProcess(ctx context.Context, rule *WatchRule) err
 	cmd.Env = buildEnv(rule.Env)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = newPrefixWriter(os.Stdout, rule.Name)
-	cmd.Stderr = newPrefixWriter(os.Stderr, rule.Name)
+	color := nextColor()
+	capture := newTailBuffer()
+
+	var lw *logWriter
+	if pm.logBuf != nil {
+		lw = newLogWriter(rule.Name, color, pm.logBuf, pm.logBroker)
+		cmd.Stdout = io.MultiWriter(newPrefixWriter(os.Stdout, rule.Name, color), capture, lw)
+		cmd.Stderr = io.MultiWriter(newPrefixWriter(os.Stderr, rule.Name, color), capture, lw)
+	} else {
+		cmd.Stdout = io.MultiWriter(newPrefixWriter(os.Stdout, rule.Name, color), capture)
+		cmd.Stderr = io.MultiWriter(newPrefixWriter(os.Stderr, rule.Name, color), capture)
+	}
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("rule %q start failed: %w", rule.Name, err)
@@ -70,15 +173,25 @@ func (pm *ProcessManager) StartProcess(ctx context.Context, rule *WatchRule) err
 	pm.mu.Unlock()
 
 	// Wait in background so we can clean up the map entry.
+	ruleName := rule.Name
 	go func() {
 		err := cmd.Wait()
-		pm.mu.Lock()
-		if pm.procs[rule.Name] == cmd.Process {
-			delete(pm.procs, rule.Name)
+		if lw != nil {
+			lw.Flush()
 		}
+		pm.mu.Lock()
+		tracked := pm.procs[ruleName] == cmd.Process
+		if tracked {
+			delete(pm.procs, ruleName)
+		}
+		cb := pm.OnProcessExit
 		pm.mu.Unlock()
 		if err != nil {
-			pm.logger.Warn("process exited", "rule", rule.Name, "err", err)
+			pm.logger.Warn("process exited", "rule", ruleName, "err", err)
+		}
+		// Only invoke callback if the process was still tracked (not intentionally stopped).
+		if tracked && cb != nil && err != nil {
+			cb(ruleName, err, capture.String())
 		}
 	}()
 
@@ -198,8 +311,7 @@ func nextColor() string {
 	return c
 }
 
-func newPrefixWriter(dest *os.File, name string) *prefixWriter {
-	color := nextColor()
+func newPrefixWriter(dest *os.File, name, color string) *prefixWriter {
 	tag := []byte(color + "[" + name + "]" + colorReset + " ")
 	return &prefixWriter{dest: dest, tag: tag}
 }

@@ -1,28 +1,39 @@
 name: Release
 
 on:
-  push:
-    branches: [master]
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
-  release-please:
+  release:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'master'
     runs-on: ubuntu-latest
     outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.semantic.outputs.version }}
     steps:
-      - uses: googleapis/release-please-action@v4
-        id: release
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          release-type: go
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Semantic release
+        id: semantic
+        uses: go-semantic-release/action@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-release:
-    needs: release-please
-    if: ${{ needs.release-please.outputs.release_created }}
+    needs: release
+    if: needs.release.outputs.version != ''
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -35,6 +46,9 @@ jobs:
             goarch: amd64
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha }}
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -42,14 +56,16 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          VERSION: v${{ needs.release.outputs.version }}
         run: |
           go build -ldflags "\
-            -X github.com/FyrmForge/hamr/internal/cli/cmd.version=${{ needs.release-please.outputs.tag_name }} \
-            -X github.com/FyrmForge/hamr/internal/cli/cmd.commit=${{ github.sha }}" \
+            -X github.com/FyrmForge/hamr/internal/cli/cmd.version=${VERSION} \
+            -X github.com/FyrmForge/hamr/internal/cli/cmd.commit=${{ github.event.workflow_run.head_sha }}" \
             -o hamr-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/hamr
       - name: Upload release asset
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: v${{ needs.release.outputs.version }}
         run: |
-          gh release upload ${{ needs.release-please.outputs.tag_name }} \
+          gh release upload ${VERSION} \
             hamr-${{ matrix.goos }}-${{ matrix.goarch }}
