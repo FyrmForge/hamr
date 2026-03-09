@@ -65,3 +65,10 @@ func WithMaxBodySize(size string) Option {
 func WithShutdownTimeout(d time.Duration) Option {
 	return func(s *Server) { s.shutdownTimeout = d }
 }
+
+// WithGeneratedDir sets the directory for pre-rendered static pages.
+// When set, a middleware serves matching files from this directory before
+// the rest of the handler chain.
+func WithGeneratedDir(dir string) Option {
+	return func(s *Server) { s.generatedDir = dir }
+}

@@ -4,7 +4,7 @@ target = ":8080"
 inject_reload = true
 
 [[dev.docker_compose]]
-name = "infra"
+name = "deps"
 file = "docker/docker-compose.yaml"
 keep_running = true
 
@@ -36,7 +36,12 @@ run = "./bin/app"
 depends = ["templ"]
 reload = "full"
 
-# Multi service example 
+# Sync generated static pages to S3 (uncomment to enable)
+# [[dev.daemon]]
+# name = "sync-generated"
+# cmd = "hamr sync --dir generated --watch --bucket {{.Name}}-static"
+
+# Multi service example
 # [[dev.watch]]
 # name = "site"
 # watch = ["internal/**/*.go", "cmd/server/*.go", "**/*.templ"]

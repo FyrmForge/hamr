@@ -1,5 +1,18 @@
 # Storage — Pluggable File Storage
 
+## CLI
+
+Storage backend is configured during project scaffolding:
+
+```bash
+hamr new myapp --storage local    # local filesystem storage
+hamr new myapp --storage s3       # S3-compatible storage (MinIO, AWS, R2)
+hamr new myapp --storage none     # no file storage (default)
+hamr new myapp --static-s3        # sync static assets to S3 bucket
+```
+
+---
+
 `hamr/pkg/storage` provides a file storage abstraction with local filesystem and
 S3-compatible backends (AWS S3, MinIO, Cloudflare R2).
 
@@ -125,8 +138,8 @@ Storage backend: Local folder / S3 (MinIO)
 Or via flags:
 
 ```bash
-hamr new myapp --no-prompt --storage local --module github.com/user/myapp
-hamr new myapp --no-prompt --storage s3 --s3-watcher --module github.com/user/myapp
+hamr new myapp --storage local --module github.com/user/myapp
+hamr new myapp --storage s3 --static-s3 --module github.com/user/myapp
 ```
 
 ### What gets generated
@@ -142,7 +155,7 @@ hamr new myapp --no-prompt --storage s3 --s3-watcher --module github.com/user/my
 - `storage.NewS3Storage(...)` in `cmd/server/main.go`
 - `FileStorage` wired into `web.Deps`
 
-**S3 static asset sync** (`--s3-watcher`, only with `--storage s3`):
+**S3 static asset sync** (`--static-s3`, only with `--storage s3`):
 - `make sync-static` target in Makefile (runs `hamr sync --watch`)
 - `STATIC_BASE_URL` defaults to MinIO bucket URL so templates reference S3
 - Use `hamr sync` for one-shot uploads (CI) or `hamr sync --watch` for development

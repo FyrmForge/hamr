@@ -4,12 +4,13 @@
 
 ```bash
 make install        # Install dev tools (templ)
+make docker-up      # Start PostgreSQL
+make migrate        # Apply database migrations explicitly
 hamr dev            # Run dev server (file watching, builds, live reload)
 make build          # Build binary (generates templ first)
 make test           # Run tests
 make lint           # Run linters
 make templint       # Lint .templ files for silent failures and a11y issues
-make docker-up      # Start PostgreSQL
 make docker-down    # Stop PostgreSQL
 ```
 

@@ -1,21 +1,22 @@
 # Templint — `.templ` File Linter
 
-`pkg/templint` is a static linter for `.templ` files. It catches patterns that templ silently ignores (producing no output and no error), accessibility gaps, and style issues.
-
-## CLI Usage
+## CLI
 
 ```bash
-# Lint the current directory (recursive)
-hamr lint templ
+hamr lint templ [flags]
+```
 
-# Run only specific rules
-hamr lint templ --rule inline-if,img-alt
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--rule` | all | Run only these rules (comma-separated IDs) |
+| `--config` | `.templint.yml` | Path to config file |
+| `--severity` | all | Minimum severity to report: `warning` or `error` |
 
-# Only report errors (skip warnings)
-hamr lint templ --severity error
-
-# Use a custom config file
-hamr lint templ --config .templint.yml
+```bash
+hamr lint templ                          # lint current directory (recursive)
+hamr lint templ --rule inline-if,img-alt # run only specific rules
+hamr lint templ --severity error         # only report errors (skip warnings)
+hamr lint templ --config .templint.yml   # use a custom config file
 ```
 
 **Exit codes:** `0` if no error-severity diagnostics, `1` if any errors found. Warnings alone do not cause a non-zero exit.
@@ -26,6 +27,10 @@ hamr lint templ --config .templint.yml
 internal/web/handler/home/home.templ:12:3: error[inline-if] inline if with HTML body is silently dropped by templ
 static/css/layout.templ:8:5: warning[img-alt] <img> tag missing alt attribute
 ```
+
+---
+
+`pkg/templint` is a static linter for `.templ` files. It catches patterns that templ silently ignores (producing no output and no error), accessibility gaps, and style issues.
 
 ## Rules
 

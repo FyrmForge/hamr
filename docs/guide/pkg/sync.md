@@ -1,6 +1,33 @@
-# pkg/sync
+# Sync — S3 File Synchronization
 
-S3 sync for static assets. Performs a one-shot upload of all files in a directory, then optionally watches for filesystem changes and syncs them continuously.
+## CLI
+
+```bash
+hamr sync [flags]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--dir` | `static` | Local directory to sync |
+| `--watch` | `false` | Watch for changes after initial sync |
+| `--endpoint` | env `S3_ENDPOINT` | S3 endpoint URL |
+| `--bucket` | env `S3_BUCKET` | S3 bucket name |
+| `--region` | env `S3_REGION` | S3 region |
+| `--access-key` | env `S3_ACCESS_KEY` | S3 access key |
+| `--secret-key` | env `S3_SECRET_KEY` | S3 secret key |
+| `--path-style` | `true` | Use path-style addressing (required for MinIO) |
+
+```bash
+hamr sync                              # one-shot sync of static/ to S3
+hamr sync --watch                      # watch for changes and sync continuously
+hamr sync --dir dist --bucket my-cdn   # sync a different directory to a specific bucket
+```
+
+S3 credentials can be provided via flags or environment variables (`S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`).
+
+---
+
+`pkg/sync` performs a one-shot upload of all files in a directory, then optionally watches for filesystem changes and syncs them continuously.
 
 ## SyncAll
 
@@ -60,14 +87,3 @@ key := sync.Key("static", "static/.gitkeep")
 // key == "" (skipped)
 ```
 
-## CLI usage
-
-The `hamr sync` CLI command wraps this package for direct use:
-
-```bash
-hamr sync                              # one-shot sync of static/ to S3
-hamr sync --watch                      # watch for changes and sync continuously
-hamr sync --dir dist --bucket my-cdn   # sync a different directory to a specific bucket
-```
-
-S3 credentials can be provided via flags or environment variables (`S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`).

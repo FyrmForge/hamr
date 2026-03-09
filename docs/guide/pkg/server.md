@@ -1,7 +1,7 @@
-# Server — Echo Wrapper with Lifecycle Hooks
+# Server — Echo Wrapper
 
 `hamr/pkg/server` wraps Echo v4 with functional options, production-safe defaults, and
-lifecycle hooks. Handles graceful shutdown on SIGINT/SIGTERM.
+graceful shutdown on SIGINT/SIGTERM.
 
 ## Quick Start
 
@@ -44,6 +44,7 @@ if err := srv.Start(); err != nil {
 | `WithTimeout(d)` | 30s | Request context timeout |
 | `WithMaxBodySize(size)` | `"2M"` | Max request body (`"500K"`, `"2M"`, etc.) |
 | `WithShutdownTimeout(d)` | 10s | Graceful shutdown timeout |
+| `WithGeneratedDir(dir)` | — | Serve pre-rendered static pages from directory |
 
 ## Production Defaults
 
@@ -69,34 +70,6 @@ api := srv.Group("/api", corsMiddleware, rateLimitMiddleware)
 api.GET("/users", listUsersHandler)
 api.POST("/users", createUserHandler)
 ```
-
-## Lifecycle Hooks
-
-### Migration hooks
-
-Run hooks before/after database migrations:
-
-```go
-srv, err := server.New(
-    server.WithOnBeforeMigrate(func(ctx context.Context) error {
-        log.Println("Running migrations...")
-        return nil
-    }),
-    server.WithOnAfterMigrate(func(ctx context.Context) error {
-        log.Println("Migrations complete")
-        return nil
-    }),
-)
-
-// Trigger migration hooks manually
-srv.RunBeforeMigrate(ctx)
-db.Migrate(database, migrateCfg)
-srv.RunAfterMigrate(ctx)
-```
-
-### Hook execution
-
-- **OnBeforeMigrate / OnAfterMigrate**: called explicitly by the project, stop on first error
 
 ## Escape Hatch
 
@@ -181,11 +154,10 @@ func WithErrorHandler(h echo.HTTPErrorHandler) Option
 func WithTimeout(d time.Duration) Option
 func WithMaxBodySize(size string) Option
 func WithShutdownTimeout(d time.Duration) Option
+func WithGeneratedDir(dir string) Option
 
-// Hooks
-type HookFunc func(ctx context.Context) error
-func WithOnBeforeMigrate(fn HookFunc) Option
-func WithOnAfterMigrate(fn HookFunc) Option
-func (s *Server) RunBeforeMigrate(ctx context.Context) error
-func (s *Server) RunAfterMigrate(ctx context.Context) error
+// Static generation
+func (s *Server) StaticPage(path string, handler echo.HandlerFunc)
+func (s *Server) GenerateStatic(dir string) error
+
 ```

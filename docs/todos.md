@@ -1,4 +1,5 @@
-move bin out from ./tmp to ./bin
-implement the static page gen  
-look at adding a [dev.deps] for hamr dev 
-
+- Need to assess various packages in hamr and assess which need to be expanded with options 
+    - e.g. middleware.RequestId should be configurable
+- hamr convert or smth like that
+    - so we need to be able to point the cli at a folder full of picutre type assets and have it convert all of them to good formats and multiple sizes
+- metrics and dashboards option 

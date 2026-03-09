@@ -1,10 +1,16 @@
 # Dev Server — Live Reload Development Environment
 
-`hamr dev` runs your entire development stack with a single command: file watching,
-build orchestration, process management, Docker Compose dependencies, and a reverse
-proxy that injects live reload into every HTML response.
+## CLI
 
-## Quick Start
+```bash
+hamr dev [flags]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | `hamr.toml` | Path to config file |
+| `--no-proxy` | `false` | Skip the reverse proxy, just run watchers |
+| `--verbose`, `-v` | `false` | Enable verbose (debug) logging |
 
 ```bash
 hamr dev                    # reads hamr.toml from current directory
@@ -12,6 +18,12 @@ hamr dev --config my.toml   # custom config path
 hamr dev --no-proxy         # skip proxy, just run watchers
 hamr dev --verbose          # detailed watcher/rebuild logs
 ```
+
+---
+
+`hamr dev` runs your entire development stack with a single command: file watching,
+build orchestration, process management, Docker Compose dependencies, and a reverse
+proxy that injects live reload into every HTML response.
 
 ## Configuration
 

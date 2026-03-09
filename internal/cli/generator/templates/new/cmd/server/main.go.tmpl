@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log/slog"
 	"os"
 	"time"
@@ -22,7 +23,6 @@ import (
 	"github.com/FyrmForge/hamr/pkg/websocket"
 {{- end}}
 
-	appdb "{{.Module}}/internal/db"
 	"{{.Module}}/internal/repo/postgres"
 {{- if .IncludeAuth}}
 	"{{.Module}}/internal/service"
@@ -56,11 +56,36 @@ var (
 )
 
 func main() {
+	generateFlag := flag.Bool("generate", false, "generate static pages and exit")
+	flag.Parse()
+
 	log := logging.New(!envDevMode)
 	slog.SetDefault(log)
 
 	components.StaticBaseURL = envStaticBaseURL
 	components.StaticVersion = version
+
+	// Server.
+	srv, err := server.New(
+		server.WithPort(envPort),
+		server.WithDevMode(envDevMode),
+		server.WithStaticDir("static"),
+		server.WithGeneratedDir("generated"),
+	)
+	if err != nil {
+		log.Error("failed to create server", "error", err)
+		os.Exit(1)
+	}
+
+	// Static page generation — no heavy deps needed.
+	web.RegisterStaticPages(srv, log)
+	if *generateFlag {
+		if err := srv.GenerateStatic("generated"); err != nil {
+			log.Error("generate static pages failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	// Database.
 	connectCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -69,11 +94,6 @@ func main() {
 	database, err := db.ConnectContext(connectCtx, envDatabaseURL)
 	if err != nil {
 		log.Error("failed to connect to database", "error", err)
-		os.Exit(1)
-	}
-
-	if err := db.Migrate(database, appdb.MigrateConfig()); err != nil {
-		log.Error("failed to run migrations", "error", err)
 		os.Exit(1)
 	}
 
@@ -119,17 +139,6 @@ func main() {
 	hub := websocket.NewHub(websocket.WithLogger(log))
 	defer hub.Close()
 {{- end}}
-
-	// Server.
-	srv, err := server.New(
-		server.WithPort(envPort),
-		server.WithDevMode(envDevMode),
-		server.WithStaticDir("static"),
-	)
-	if err != nil {
-		log.Error("failed to create server", "error", err)
-		os.Exit(1)
-	}
 
 	api.RegisterRoutes(srv, &api.Deps{
 		Log:   log,

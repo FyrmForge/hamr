@@ -101,7 +101,7 @@ err := db.Migrate(database, db.MigrateConfig{
 })
 ```
 
-`ErrNoChange` is ignored, so running this on startup is safe.
+`ErrNoChange` is ignored, so rerunning a dedicated migration command is safe.
 
 ### Rolling back
 
@@ -112,9 +112,13 @@ err := db.MigrateDown(database, db.MigrateConfig{
 })
 ```
 
+Typical pattern: put this in a separate migration entrypoint such as `cmd/migrate/main.go`,
+not in your HTTP server startup path.
+
 ## Typical Usage
 
 ```go
+// cmd/migrate/main.go
 package main
 
 import (

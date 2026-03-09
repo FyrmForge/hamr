@@ -78,7 +78,6 @@ github.com/FyrmForge/hamr/
 │   ├── server/
 │   │   ├── server.go                   # Echo wrapper with functional options
 │   │   ├── options.go                  # All WithXxx option functions
-│   │   └── hooks.go                    # Lifecycle hooks (OnStart, OnShutdown, etc.)
 │   ├── storage/
 │   │   ├── storage.go                  # FileStorage + SignableStorage interfaces
 │   │   ├── local.go                    # Local filesystem implementation
@@ -295,7 +294,7 @@ Response headers:
 
 ## Phase 5: Server + Infrastructure Packages
 
-### 23. `pkg/server/server.go` + `options.go` + `hooks.go`
+### 23. `pkg/server/server.go` + `options.go`
 - `Server` wrapping Echo with functional options
 - `New(opts ...Option) *Server`
 - Options: `WithHost`, `WithPort`, `WithDevMode`, `WithMiddleware`, `WithStaticDir`,
@@ -303,7 +302,6 @@ Response headers:
 - Route methods: `GET`, `POST`, `PUT`, `DELETE`, `PATCH`, `Group`
 - `Echo() *echo.Echo` for escape hatch
 - `Start() error`, `Shutdown(ctx) error`
-- Hooks: `WithOnBeforeMigrate(fn)`, `WithOnAfterMigrate(fn)`
 - **Production defaults** (enabled unless overridden):
   - Panic recovery (`middleware.Recover()`)
   - Request timeout: 30s
@@ -734,17 +732,17 @@ e2e-run-local:        ## Run specific E2E test locally: make e2e-run-local T=Tes
 
 ### Migration Strategy Options
 
-MVP runs migrations on application startup (`db.Migrate()` in `main.go`). This is
-simple and works for single-instance deploys, but not all environments want this.
+Generated projects should not run migrations during HTTP server startup.
+Schema changes should be applied explicitly as a separate step.
 
-Planned alternatives:
+Current and planned options:
 
-- **On startup** (current default) — `db.Migrate()` called in `main.go` before server starts. Simple, works for single-instance. `golang-migrate` uses advisory locks so concurrent starts don't corrupt, but multiple instances can still race on "is migration X applied?"
-- **CLI command** — `hamr migrate up`, `hamr migrate down`, `hamr migrate status`. Runs migrations explicitly as a deploy step. Better for CI/CD pipelines and multi-instance deploys. Generated project's `cmd/server/main.go` would skip auto-migration when `MIGRATE_ON_STARTUP=false`
+- **Standalone migration runner** (current generated default) — `cmd/migrate/main.go`, typically invoked via `make migrate`. Runs migrations explicitly before starting the server or as a deployment step.
+- **Framework CLI command** — `hamr migrate up`, `hamr migrate down`, `hamr migrate status`. Future UX improvement over the standalone runner.
 - **Init container / job** — Kubernetes pattern: run migration as a one-shot container before the app container starts. The generated Dockerfile and Helm chart (future) would support a `migrate` entrypoint alongside the `server` entrypoint
 - **Makefile targets** — `make migrate-up`, `make migrate-down`, `make migrate-create NAME=add_posts`. Wraps the CLI or calls `golang-migrate` directly
 
-Implementation plan: add a `--migrate` flag to `hamr new` (default `startup`) with options `startup | cli | none`. When `cli`, generate `cmd/migrate/main.go` as a separate binary. When `none`, leave migration wiring to the user.
+Implementation plan: expand the generated migration workflow around the explicit runner. If `hamr new` gains a `--migrate` flag later, `cli` should remain the default and `none` should leave migration wiring to the user.
 
 ### Static Asset CDN Upload
 

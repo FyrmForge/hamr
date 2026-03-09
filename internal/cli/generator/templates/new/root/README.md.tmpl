@@ -15,7 +15,11 @@ A Go web application built with the [HAMR framework](https://github.com/FyrmForg
 # Install dev tools (templ)
 make install
 
-# Run the dev server (starts Docker, builds, live reload)
+# Start local services and apply the schema
+make docker-up
+make migrate
+
+# Run the dev server (builds, live reload)
 hamr dev
 ```
 
@@ -29,7 +33,7 @@ make build          # Build binary to bin/server
 make test           # Run tests
 make lint           # Run golangci-lint
 make templint       # Lint .templ files
-make migrate        # Run database migrations
+make migrate        # Run database migrations explicitly
 make db-sh          # Open pgcli shell to local dev DB
 make docker-up      # Start services
 make docker-down    # Stop services

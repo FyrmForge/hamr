@@ -1,5 +1,5 @@
 // Package server wraps Echo v4 with functional options, production-safe
-// defaults, and lifecycle hooks.
+// defaults, and graceful shutdown.
 package server
 
 import (
@@ -36,9 +36,9 @@ type Server struct {
 	staticDir      string
 	embeddedFS     fs.FS
 	embeddedPrefix string
+	generatedDir   string
+	staticPages    []staticRoute
 
-	onBeforeMigrate []HookFunc
-	onAfterMigrate  []HookFunc
 }
 
 // New creates a Server with sensible defaults, applies options, and configures
@@ -79,6 +79,9 @@ func New(opts ...Option) (*Server, error) {
 
 	// Production defaults — applied in order.
 	e.Use(echoMw.Recover())
+	if s.generatedDir != "" {
+		e.Use(generatedMiddleware(s.generatedDir))
+	}
 	e.Use(echoMw.BodyLimit(s.maxBodySize))
 	e.Use(echoMw.ContextTimeoutWithConfig(echoMw.ContextTimeoutConfig{
 		Timeout: s.timeout,

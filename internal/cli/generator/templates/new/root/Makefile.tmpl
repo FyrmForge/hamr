@@ -1,4 +1,4 @@
-.PHONY: build test lint templint migrate db-sh docker-up docker-down docker-delete docker-reload clean install check-templ{{- if eq .CSS "tailwind"}} check-node-modules css css-build{{- end}}{{- if .StaticS3}} sync-static{{- end}}
+.PHONY: build test lint templint migrate db-sh docker-up docker-down docker-delete docker-reload clean install check-templ generate{{- if eq .CSS "tailwind"}} check-node-modules css css-build{{- end}}{{- if .StaticS3}} sync-static{{- end}}
 
 ## install: Install development dependencies
 install:
@@ -34,13 +34,18 @@ build: check-templ{{- if eq .CSS "tailwind"}} check-node-modules{{- end}}
 	npm run css:build
 {{- end}}
 	go build -ldflags "-X main.version=$(VERSION)" -o bin/server ./cmd/server
+	$(MAKE) generate
+
+## generate: Generate static pages
+generate:
+	./bin/server --generate
 
 ## test: Run all tests
 test: check-templ
 	templ generate
 	go test ./...
 
-## migrate: Run database migrations
+## migrate: Run database migrations explicitly (local or CI)
 migrate:
 	go run ./cmd/migrate
 

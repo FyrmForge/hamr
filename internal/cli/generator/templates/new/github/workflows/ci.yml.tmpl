@@ -19,6 +19,22 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    # Optional: uncomment this service and the migration step below
+    # if you want CI to apply schema changes as part of the workflow.
+    # services:
+    #   postgres:
+    #     image: postgres:16
+    #     env:
+    #       POSTGRES_USER: postgres
+    #       POSTGRES_PASSWORD: postgres
+    #       POSTGRES_DB: {{.Name}}
+    #     ports:
+    #       - 5432:5432
+    #     options: >-
+    #       --health-cmd "pg_isready -U postgres -d {{.Name}}"
+    #       --health-interval 10s
+    #       --health-timeout 5s
+    #       --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
@@ -63,6 +79,24 @@ jobs:
             exit 1
           fi
 {{- end}}
+
+      - name: Generate static pages
+        run: |
+          go build -o bin/server ./cmd/server
+          ./bin/server --generate
+
+      # - name: Run migrations
+      #   env:
+      #     DATABASE_URL: postgres://postgres:postgres@localhost:5432/{{.Name}}?sslmode=disable
+      #   run: make migrate
+
+      - name: Verify generated static pages are committed
+        run: |
+          if ! git diff --quiet -- 'generated/'; then
+            echo "::error::Generated static pages are out of date. Run 'make generate' and commit."
+            git diff --stat -- 'generated/'
+            exit 1
+          fi
 
       - name: Run tests
         run: go test -v -race ./...

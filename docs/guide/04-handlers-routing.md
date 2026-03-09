@@ -1,0 +1,187 @@
+# Handlers & Routing
+
+HAMR's server package wraps Echo with opinionated defaults — panic recovery, graceful shutdown, security headers — so you can focus on handlers rather than boilerplate. This guide covers server setup, route groups, writing handlers, middleware wiring, and error handling.
+
+**Package references:** [Server](pkg/server.md), [Respond](pkg/respond.md), [Middleware](pkg/middleware.md), [Ctx](pkg/ctx.md)
+
+---
+
+## Server Setup
+
+Create a server with functional options:
+
+```go
+import "github.com/FyrmForge/hamr/pkg/server"
+
+srv, err := server.New(
+    server.WithPort(envPort),
+    server.WithDevMode(envDevMode),
+    server.WithTimeout(30*time.Second),
+    server.WithStaticDir("static"),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Register routes...
+
+if err := srv.Start(); err != nil {
+    log.Fatal(err)
+}
+```
+
+`Start` blocks until SIGINT/SIGTERM, then performs graceful shutdown.
+
+### Production Defaults
+
+Enabled automatically:
+- Panic recovery
+- Request timeout: 30s
+- Max request body: 2MB
+- Security headers (disabled in dev mode): `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Content-Security-Policy`
+
+---
+
+## Route Groups
+
+Organize routes into groups with shared middleware:
+
+```go
+// Global middleware (all routes)
+srv.Echo().Use(middleware.RequestID())
+
+// Site routes — sessions, CSRF, flash
+site := srv.Group("", middleware.Flash(), middleware.CSRF())
+site.GET("/", homeHandler.Home)
+site.GET("/login", authHandler.LoginForm)
+site.POST("/login", authHandler.Login)
+
+// API routes — CORS, rate limiting
+api := srv.Group("/api", middleware.CORS(), middleware.RateLimit(store))
+api.GET("/users", userHandler.List)
+api.POST("/users", userHandler.Create)
+```
+
+### Typical Middleware Layout
+
+```
+Global  (all routes)  → recovery, request ID, logging, audit
+Site    (/)           → sessions, CSRF, flash, cache, secure headers
+API     (/api/)       → CORS, rate limit, bearer auth
+```
+
+---
+
+## Writing Handlers
+
+Handlers are methods on a struct that holds dependencies:
+
+```go
+type Handler struct {
+    repo   *UserRepo
+    log    *slog.Logger
+}
+
+func NewHandler(repo *UserRepo, log *slog.Logger) *Handler {
+    return &Handler{repo: repo, log: log}
+}
+```
+
+### HTML Response
+
+Render a templ component:
+
+```go
+func (h *Handler) Home(c echo.Context) error {
+    return respond.HTML(c, http.StatusOK, templates.HomePage())
+}
+```
+
+### JSON Response
+
+```go
+func (h *Handler) GetUser(c echo.Context) error {
+    id := c.Param("id")
+    user, err := h.repo.GetByID(c.Request().Context(), id)
+    if err != nil {
+        return respond.Error(c, http.StatusNotFound, "User not found")
+    }
+    return respond.JSON(c, http.StatusOK, user)
+}
+```
+
+### Error Responses
+
+```go
+// Simple error — negotiates format (JSON vs HTML) automatically
+respond.Error(c, http.StatusForbidden, "Access denied")
+
+// With an HTML error component
+respond.Error(c, http.StatusNotFound, "Not found", templates.NotFoundPage())
+```
+
+JSON output: `{"error": "Forbidden", "message": "Access denied", "code": 403}`
+
+---
+
+## Context Helpers
+
+Use type-safe context keys instead of string lookups:
+
+```go
+import "github.com/FyrmForge/hamr/pkg/ctx"
+
+// Get the string ID (works with session-based and trusted-header auth)
+userID, ok := ctx.Get(c, ctx.SubjectIDKey)
+
+// Get the fully loaded model (only available when SubjectLoader is configured)
+if subject := middleware.GetSubject(c); subject != nil {
+    user := subject.(*models.User)
+}
+
+// Create custom keys for your project
+var TenantKey = ctx.NewKey[string]("tenant_id")
+ctx.Set(c, TenantKey, tenantID)
+```
+
+---
+
+## Pagination
+
+```go
+func (h *Handler) ListUsers(c echo.Context) error {
+    page, size := respond.ParsePagination(c, 20)
+
+    users, total, err := h.repo.List(c.Request().Context(), page, size)
+    if err != nil {
+        return respond.Error(c, http.StatusInternalServerError, "Failed to list users")
+    }
+
+    return respond.JSON(c, http.StatusOK, respond.PagedResponse[User]{
+        Data: users,
+        Page: respond.NewPage(page, size, total),
+    })
+}
+```
+
+`ParsePagination` reads `page` and `size` query params, defaulting page to 1 and clamping size to [1, 100].
+
+---
+
+## Escape Hatch
+
+Access the underlying Echo instance for anything not covered by the wrapper:
+
+```go
+e := srv.Echo()
+e.Validator = myValidator
+e.IPExtractor = echo.ExtractIPFromXFFHeader()
+```
+
+---
+
+## Next Steps
+
+- [Templates & Frontend](05-templates-frontend.md) — Templ components, HTMX, Alpine.js
+- [Forms & Validation](06-forms-validation.md) — Form handling and validation
+- [Authentication](07-authentication.md) — Sessions and auth middleware

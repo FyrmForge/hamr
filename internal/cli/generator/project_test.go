@@ -277,6 +277,7 @@ func TestGenerateProject_createsFiles(t *testing.T) {
 	// Check name substitution.
 	readme := readFile(t, dir, "README.md")
 	assert.Contains(t, readme, "testproj")
+	assert.Contains(t, readme, "make migrate")
 
 	// Check main.go has correct imports and env config pattern.
 	mainGo := readFile(t, dir, "cmd/server/main.go")
@@ -284,6 +285,7 @@ func TestGenerateProject_createsFiles(t *testing.T) {
 	assert.Contains(t, mainGo, "github.com/FyrmForge/hamr/pkg/server")
 	assert.Contains(t, mainGo, "envPort")
 	assert.Contains(t, mainGo, "envDatabaseURL")
+	assert.NotContains(t, mainGo, "db.Migrate(")
 }
 
 func TestGenerateProject_withAuth(t *testing.T) {
@@ -644,7 +646,13 @@ func TestGenerateProject_ciWorkflow(t *testing.T) {
 	assert.Contains(t, ci, "templ generate")
 	assert.Contains(t, ci, "templ files are out of date")
 	assert.Contains(t, ci, "golangci-lint-action")
+	assert.Contains(t, ci, "# - name: Run migrations")
+	assert.Contains(t, ci, "#   run: make migrate")
 	assert.NotContains(t, ci, "setup-node")
+
+	makefile := readFile(t, dir, "Makefile")
+	assert.Contains(t, makefile, "## migrate: Run database migrations explicitly (local or CI)")
+	assert.Contains(t, makefile, "migrate:\n\tgo run ./cmd/migrate")
 
 	deploy := readFile(t, dir, ".github/workflows/deploy.yml")
 	// Every non-empty line should be a comment.

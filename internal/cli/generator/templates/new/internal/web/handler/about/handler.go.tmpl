@@ -1,0 +1,24 @@
+package about
+
+import (
+	"log/slog"
+	"net/http"
+
+	"github.com/FyrmForge/hamr/pkg/respond"
+	"github.com/labstack/echo/v4"
+)
+
+// Handler handles about page requests.
+type handler struct {
+	log *slog.Logger
+}
+
+// NewHandler creates a new about handler.
+func NewHandler(log *slog.Logger) *handler {
+	return &handler{log: log}
+}
+
+// GET /about
+func (h *handler) About(c echo.Context) error {
+	return respond.HTML(c, http.StatusOK, aboutPage(c))
+}
