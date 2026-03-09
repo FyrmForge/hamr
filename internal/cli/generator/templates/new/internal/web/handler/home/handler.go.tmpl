@@ -20,5 +20,5 @@ func NewHandler(log *slog.Logger) *handler {
 
 // GET /
 func (h *handler) Index(c echo.Context) error {
-	return respond.HTML(c, http.StatusOK, homePage())
+	return respond.HTML(c, http.StatusOK, homePage(c))
 }

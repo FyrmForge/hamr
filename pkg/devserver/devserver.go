@@ -4,24 +4,33 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 const schedulerBatchWindow = 20 * time.Millisecond
 
+// ErrConfigReload is returned by Run when the config file changes.
+// The caller should reload the config and call Run again.
+var ErrConfigReload = errors.New("config changed, reloading")
+
 // Runner is the top-level dev server orchestrator.
 type Runner struct {
-	cfg     *Config
-	logger  *slog.Logger
-	verbose bool
-	noProxy bool
+	cfg        *Config
+	configPath string
+	logger     *slog.Logger
+	verbose    bool
+	noProxy    bool
 }
 
 // Option configures a Runner.
@@ -40,6 +49,11 @@ func WithVerbose(v bool) Option {
 // WithNoProxy disables the reverse proxy.
 func WithNoProxy(v bool) Option {
 	return func(r *Runner) { r.noProxy = v }
+}
+
+// WithConfigPath sets the config file path so the runner can watch it for changes.
+func WithConfigPath(path string) Option {
+	return func(r *Runner) { r.configPath = path }
 }
 
 // NewRunner creates a new Runner with the given config and options.
@@ -73,12 +87,16 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 	var schedulerWG sync.WaitGroup
 	var watcher *Watcher
+	configReloadCh := make(chan struct{}, 1)
+	var configReload bool
 
 	// Start reverse proxy.
 	var proxySrv *http.Server
 	defer func() {
 		r.logger.Info("shutting down")
-		broker.Broadcast(SSEEvent{Type: "shutdown"})
+		if !configReload {
+			broker.Broadcast(SSEEvent{Type: "shutdown"})
+		}
 		pm.ClearCallbacks()
 		cancel()
 		if watcher != nil {
@@ -102,7 +120,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		errorState: errorState, graph: graph, logger: r.logger,
 	}
 
-	if !r.noProxy {
+	if !r.noProxy && r.cfg.ProxyConfigured {
 		inject := r.cfg.Proxy.InjectReload != nil && *r.cfg.Proxy.InjectReload
 		handler := NewProxyHandler(r.cfg.Proxy.Target, broker, errorState, logBuf, actions, inject)
 		srv, _, err := ListenAndServeProxy(r.cfg.Proxy.Listen, handler)
@@ -160,11 +178,19 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 	}
 
-	// If no watch rules, just block until shutdown.
+	// If no watch rules, just block until shutdown or config reload.
 	if len(r.cfg.Dev.Watch) == 0 {
 		r.logger.Info("no watch rules, running daemons only")
-		<-runCtx.Done()
-		return nil
+		if r.configPath != "" {
+			go r.watchConfigFile(runCtx, configReloadCh)
+		}
+		select {
+		case <-runCtx.Done():
+			return nil
+		case <-configReloadCh:
+			configReload = true
+			return ErrConfigReload
+		}
 	}
 
 	// Start file watcher.
@@ -178,6 +204,11 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 
 	r.logger.Info("watching for changes")
+
+	// Watch the config file for changes.
+	if r.configPath != "" {
+		go r.watchConfigFile(runCtx, configReloadCh)
+	}
 
 	dirty := make(map[string]FileEvent, len(r.cfg.Dev.Watch))
 	var dirtyMu sync.Mutex
@@ -274,6 +305,10 @@ func (r *Runner) Run(ctx context.Context) error {
 			return nil
 		case <-runCtx.Done():
 			return nil
+		case <-configReloadCh:
+			r.logger.Info("config changed, reloading")
+			configReload = true
+			return ErrConfigReload
 		case evt, ok := <-watcher.Events():
 			if !ok {
 				return nil
@@ -326,7 +361,7 @@ func (r *Runner) handleEvent(ctx context.Context, evt FileEvent, graph *Graph, p
 	}
 
 	// Wait for the target server to be ready before reloading the browser.
-	if rule.Run != "" && !r.noProxy && rule.Reload != "" && rule.Reload != ReloadNone {
+	if rule.Run != "" && !r.noProxy && r.cfg.ProxyConfigured && rule.Reload != "" && rule.Reload != ReloadNone {
 		target := normalizeHost(r.cfg.Proxy.Target)
 		if !waitForTarget(ctx, target, 5*time.Second) {
 			r.logger.Warn("target not ready, broadcasting reload anyway", "rule", rule.Name)
@@ -339,6 +374,55 @@ func (r *Runner) handleEvent(ctx context.Context, evt FileEvent, graph *Graph, p
 			Type: "reload",
 			Data: string(rule.Reload),
 		})
+	}
+}
+
+// watchConfigFile watches the config file for changes and signals on ch.
+func (r *Runner) watchConfigFile(ctx context.Context, ch chan<- struct{}) {
+	absPath, err := filepath.Abs(r.configPath)
+	if err != nil {
+		r.logger.Error("cannot resolve config path", "path", r.configPath, "err", err)
+		return
+	}
+
+	fsw, err := fsnotify.NewWatcher()
+	if err != nil {
+		r.logger.Error("cannot watch config file", "err", err)
+		return
+	}
+	defer fsw.Close()
+
+	// Watch the directory (editors often write to a temp file and rename).
+	dir := filepath.Dir(absPath)
+	if err := fsw.Add(dir); err != nil {
+		r.logger.Error("cannot watch config directory", "dir", dir, "err", err)
+		return
+	}
+
+	base := filepath.Base(absPath)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-fsw.Events:
+			if !ok {
+				return
+			}
+			if filepath.Base(event.Name) != base {
+				continue
+			}
+			if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) {
+				select {
+				case ch <- struct{}{}:
+				default:
+				}
+				return
+			}
+		case _, ok := <-fsw.Errors:
+			if !ok {
+				return
+			}
+		}
 	}
 }
 

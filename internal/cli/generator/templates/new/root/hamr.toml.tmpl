@@ -28,11 +28,30 @@ cmd = "hamr sync --watch --bucket {{.Name}}-static"
 {{- end}}
 
 [[dev.watch]]
-name = "go"
+name = "site"
 watch = ["**/*.go", "**/*.templ"]
 ignore = ["*_templ.go", "*_test.go"]
 cmd = "go build -o ./bin/app ./cmd/server"
 run = "./bin/app"
 depends = ["templ"]
 reload = "full"
+
+# Multi service example 
+# [[dev.watch]]
+# name = "site"
+# watch = ["internal/**/*.go", "cmd/server/*.go", "**/*.templ"]
+# ignore = ["*_templ.go", "*_test.go", "internal/api/**"]
+# cmd = "go build -o ./bin/app ./cmd/server"
+# run = "./bin/app"
+# depends = ["templ"]
+# reload = "full"
+ 
+# # API service — rebuilt and restarted on change, no proxy
+# [[dev.watch]]
+# name = "api"
+# watch =["cmd/api/*.go", "internal/api/**"] 
+# cmd = "go build -o ./bin/api ./cmd/api"
+# run = "./bin/api"
+# reload = "none"
+# env = ["API_PORT=9090"]
 

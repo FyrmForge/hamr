@@ -17,7 +17,11 @@ hamr dev --verbose          # detailed watcher/rebuild logs
 
 Everything lives in `hamr.toml`. The dev server uses the `[proxy]` and `[dev]` sections.
 
-### Proxy
+### Proxy (Optional)
+
+The `[proxy]` section is optional. When present, hamr starts a reverse proxy with
+live reload. When omitted, hamr just runs watchers, builds, and processes — useful
+for APIs and backend services that don't need browser reload.
 
 ```toml
 [proxy]
@@ -36,6 +40,8 @@ Browser :3000  →  hamr proxy  →  App :8080
 
 All HTML responses get a small script injected before `</body>` that opens an SSE
 connection. When builds complete, the browser reloads automatically.
+
+You can also skip the proxy at runtime with `hamr dev --no-proxy`.
 
 ### Watch Rules
 
@@ -86,9 +92,20 @@ Circular dependencies are detected at startup.
 
 | Scope | Behavior |
 |-------|----------|
-| `"full"` | Full page reload (or DOM morph if idiomorph is available) |
+| `"full"` | Fetch and swap page body without a full browser reload |
 | `"css"` | Hot-swap stylesheets without page reload |
 | `"none"` | Rebuild only, no browser reload |
+
+### Live Reload
+
+When a `"full"` reload is triggered, the dev server fetches the updated page and
+swaps the `<body>` contents via DOMParser — no white flash. Scripts are not
+re-executed (they are already loaded); htmx is re-initialized on the new DOM.
+The hamr widget, panel, and logs overlay survive the swap. If the fetch fails,
+it falls back to `location.reload()`.
+
+`"css"` appends a cache-busting parameter to stylesheet hrefs — no page reload
+at all.
 
 ### Daemons
 
@@ -198,17 +215,20 @@ When hamr stops (Ctrl+C), it broadcasts a shutdown event to the browser. The bro
 stops showing error states and begins reconnecting. When hamr restarts, the UI
 reconnects automatically.
 
-## Full Example
+## Examples
+
+### Standard HAMR Web App
+
+The default `hamr new` setup — Templ + Go + PostgreSQL with live reload:
 
 ```toml
 [proxy]
 listen = ":3000"
 target = ":8080"
-inject_reload = true
 
 [[dev.docker_compose]]
 name = "infra"
-file = "docker-compose.yaml"
+file = "docker/docker-compose.yaml"
 keep_running = true
 
 [[dev.watch]]
@@ -217,10 +237,6 @@ watch = "**/*.templ"
 ignore = "*_templ.go"
 cmd = "templ generate"
 debounce = 100
-
-[[dev.daemon]]
-name = "tailwind"
-cmd = "npm run css"
 
 [[dev.watch]]
 name = "go"
@@ -231,3 +247,194 @@ run = "./bin/app"
 depends = ["templ"]
 reload = "full"
 ```
+
+### With Tailwind CSS
+
+Add a Tailwind daemon for CSS hot-reloading alongside Templ and Go:
+
+```toml
+[proxy]
+listen = ":3000"
+target = ":8080"
+
+[[dev.daemon]]
+name = "tailwind"
+cmd = "npm run css"
+
+[[dev.watch]]
+name = "templ"
+watch = "**/*.templ"
+ignore = "*_templ.go"
+cmd = "templ generate"
+reload = "full"
+
+[[dev.watch]]
+name = "css"
+watch = "static/css/output.css"
+reload = "css"
+
+[[dev.watch]]
+name = "go"
+watch = ["**/*.go", "**/*.templ"]
+ignore = ["*_templ.go", "*_test.go"]
+cmd = "go build -o ./bin/app ./cmd/server"
+run = "./bin/app"
+depends = ["templ"]
+reload = "full"
+```
+
+The Tailwind daemon runs `npm run css` (typically `tailwindcss --watch`). The `css`
+watch rule picks up the output file and hot-swaps stylesheets without a full page reload.
+
+### Web App + API Server
+
+A monorepo with a web frontend (proxied with live reload) and an API service
+(auto-rebuilt but not proxied):
+
+```toml
+[proxy]
+listen = ":3000"
+target = ":8080"
+
+[[dev.docker_compose]]
+name = "infra"
+file = "docker/docker-compose.yaml"
+
+[[dev.watch]]
+name = "templ"
+watch = "**/*.templ"
+cmd = "templ generate"
+reload = "full"
+
+# Web server — proxied with live reload
+[[dev.watch]]
+name = "web"
+watch = ["internal/web/**/*.go", "cmd/server/*.go"]
+cmd = "go build -o bin/server ./cmd/server"
+run = "./bin/server"
+depends = ["templ"]
+reload = "full"
+
+# API server — rebuilt and restarted on change, no browser reload
+[[dev.watch]]
+name = "api"
+watch = ["internal/api/**/*.go", "cmd/api/*.go"]
+cmd = "go build -o bin/api ./cmd/api"
+run = "./bin/api"
+reload = "none"
+env = ["PORT=9090"]
+```
+
+The API gets rebuilt and restarted automatically when its Go files change.
+`reload = "none"` means no browser reload is triggered and no proxy routing
+is involved — it runs independently on its own port.
+
+### API-Only Project
+
+For services that don't serve HTML, omit `[proxy]` entirely. No proxy is started —
+hamr just manages watching, building, and restarting:
+
+```toml
+[[dev.docker_compose]]
+name = "infra"
+file = "docker/docker-compose.yaml"
+
+[[dev.watch]]
+name = "api"
+watch = "**/*.go"
+cmd = "go build -o bin/api ./cmd/api"
+run = "./bin/api"
+reload = "none"
+```
+
+### Background Workers
+
+Run multiple workers alongside a web app. Workers are watch rules with
+`run` but no browser reload:
+
+```toml
+[proxy]
+listen = ":3000"
+target = ":8080"
+
+[[dev.watch]]
+name = "go"
+watch = "**/*.go"
+cmd = "go build -o ./bin/app ./cmd/server"
+run = "./bin/app"
+reload = "full"
+
+[[dev.watch]]
+name = "email-worker"
+watch = ["internal/worker/**/*.go", "cmd/email-worker/*.go"]
+cmd = "go build -o bin/email-worker ./cmd/email-worker"
+run = "./bin/email-worker"
+reload = "none"
+
+[[dev.watch]]
+name = "job-worker"
+watch = ["internal/worker/**/*.go", "cmd/job-worker/*.go"]
+cmd = "go build -o bin/job-worker ./cmd/job-worker"
+run = "./bin/job-worker"
+reload = "none"
+```
+
+### Static Assets with S3 Sync
+
+Use a daemon to continuously sync static files to S3 during development:
+
+```toml
+[proxy]
+listen = ":3000"
+target = ":8080"
+
+[[dev.daemon]]
+name = "sync-static"
+cmd = "hamr sync --watch --bucket myapp-static"
+
+[[dev.watch]]
+name = "go"
+watch = "**/*.go"
+cmd = "go build -o ./bin/app ./cmd/server"
+run = "./bin/app"
+reload = "full"
+
+[[dev.watch]]
+name = "static"
+watch = "static/**/*"
+reload = "full"
+```
+
+### Docker-Heavy Setup
+
+Multiple compose files with selective service management:
+
+```toml
+[proxy]
+listen = ":3000"
+target = ":8080"
+
+# Core infra — keep running between restarts
+[[dev.docker_compose]]
+name = "infra"
+file = "docker/docker-compose.yaml"
+services = ["postgres", "redis"]
+keep_running = true
+
+# Auxiliary services — stop with hamr
+[[dev.docker_compose]]
+name = "services"
+file = "docker/docker-compose.services.yaml"
+services = ["mailhog", "minio"]
+
+[[dev.watch]]
+name = "go"
+watch = "**/*.go"
+cmd = "go build -o ./bin/app ./cmd/server"
+run = "./bin/app"
+reload = "full"
+```
+
+`keep_running = true` on `infra` means Postgres and Redis stay up when you Ctrl+C hamr,
+avoiding slow container restarts between dev sessions. Auxiliary services like mailhog
+are torn down with hamr since they start quickly.

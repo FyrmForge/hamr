@@ -14,6 +14,10 @@ import (
 type Config struct {
 	Dev   DevConfig   `toml:"dev"`
 	Proxy ProxyConfig `toml:"proxy"`
+
+	// ProxyConfigured is true when [proxy] was explicitly present in the TOML.
+	// When false, the proxy is not started and no defaults are applied.
+	ProxyConfigured bool `toml:"-"`
 }
 
 // DevConfig holds the [dev] table with watch rules and daemons.
@@ -150,10 +154,12 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	var cfg Config
-	if err := toml.Unmarshal(data, &cfg); err != nil {
+	meta, err := toml.Decode(string(data), &cfg)
+	if err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
 
+	cfg.ProxyConfigured = meta.IsDefined("proxy")
 	applyDefaults(&cfg)
 
 	if err := validate(&cfg); err != nil {
@@ -164,15 +170,17 @@ func LoadConfig(path string) (*Config, error) {
 }
 
 func applyDefaults(cfg *Config) {
-	if cfg.Proxy.Listen == "" {
-		cfg.Proxy.Listen = ":3000"
-	}
-	if cfg.Proxy.Target == "" {
-		cfg.Proxy.Target = ":8080"
-	}
-	if cfg.Proxy.InjectReload == nil {
-		t := true
-		cfg.Proxy.InjectReload = &t
+	if cfg.ProxyConfigured {
+		if cfg.Proxy.Listen == "" {
+			cfg.Proxy.Listen = ":3000"
+		}
+		if cfg.Proxy.Target == "" {
+			cfg.Proxy.Target = ":8080"
+		}
+		if cfg.Proxy.InjectReload == nil {
+			t := true
+			cfg.Proxy.InjectReload = &t
+		}
 	}
 
 	for i := range cfg.Dev.Watch {
@@ -253,15 +261,17 @@ func validate(cfg *Config) error {
 		return err
 	}
 
-	// Validate proxy listen port.
-	if cfg.Proxy.Listen != "" {
-		if err := validateAddr(cfg.Proxy.Listen); err != nil {
-			return fmt.Errorf("proxy.listen: %w", err)
+	// Validate proxy (only when explicitly configured).
+	if cfg.ProxyConfigured {
+		if cfg.Proxy.Listen != "" {
+			if err := validateAddr(cfg.Proxy.Listen); err != nil {
+				return fmt.Errorf("proxy.listen: %w", err)
+			}
 		}
-	}
-	if cfg.Proxy.Target != "" {
-		if err := validateAddr(cfg.Proxy.Target); err != nil {
-			return fmt.Errorf("proxy.target: %w", err)
+		if cfg.Proxy.Target != "" {
+			if err := validateAddr(cfg.Proxy.Target); err != nil {
+				return fmt.Errorf("proxy.target: %w", err)
+			}
 		}
 	}
 

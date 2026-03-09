@@ -1,6 +1,11 @@
 package components
 
-templ Layout(title string) {
+import (
+	"github.com/labstack/echo/v4"
+	"github.com/FyrmForge/hamr/pkg/middleware"
+)
+
+templ Layout(c echo.Context, title string) {
 	<!DOCTYPE html>
 	<html lang="en" class="dark">
 	<head>
@@ -26,7 +31,7 @@ templ Layout(title string) {
 {{- else}}
 	<body>
 {{- end}}
-		if flash := FlashFromContext(ctx); flash != nil {
+		if flash := middleware.GetFlash(c); flash != nil {
 {{- if eq .CSS "tailwind"}}
 			<div class={ "max-w-4xl mx-auto mt-4 px-4 py-3 rounded-md border text-sm", FlashTailwindClass(flash.Type) }>
 				{ flash.Message }

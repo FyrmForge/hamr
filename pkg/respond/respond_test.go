@@ -159,3 +159,25 @@ func TestValidationError_htmlWithoutComponent(t *testing.T) {
 	assert.Equal(t, http.StatusUnprocessableEntity, w.Code)
 	assert.Contains(t, w.Body.String(), `"error":"Validation failed"`)
 }
+
+// ---------------------------------------------------------------------------
+// Redirect
+// ---------------------------------------------------------------------------
+
+func TestRedirect_htmxRequest(t *testing.T) {
+	c, w := newTestContext(http.MethodPost, "/", map[string]string{"HX-Request": "true"})
+
+	err := Redirect(c, "/dashboard")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "/dashboard", w.Header().Get("HX-Redirect"))
+}
+
+func TestRedirect_regularRequest(t *testing.T) {
+	c, w := newTestContext(http.MethodPost, "/", nil)
+
+	err := Redirect(c, "/dashboard")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusSeeOther, w.Code)
+	assert.Equal(t, "/dashboard", w.Header().Get("Location"))
+}

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -35,18 +36,26 @@ func runDev(cmd *cobra.Command, _ []string) error {
 	noProxy, _ := cmd.Flags().GetBool("no-proxy")
 	verbose, _ := cmd.Flags().GetBool("verbose")
 
-	cfg, err := devserver.LoadConfig(configPath)
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	runner := devserver.NewRunner(cfg,
-		devserver.WithVerbose(verbose),
-		devserver.WithNoProxy(noProxy),
-	)
+	for {
+		cfg, err := devserver.LoadConfig(configPath)
+		if err != nil {
+			return fmt.Errorf("load config: %w", err)
+		}
 
-	return runner.Run(ctx)
+		runner := devserver.NewRunner(cfg,
+			devserver.WithConfigPath(configPath),
+			devserver.WithVerbose(verbose),
+			devserver.WithNoProxy(noProxy),
+		)
+
+		err = runner.Run(ctx)
+		if errors.Is(err, devserver.ErrConfigReload) {
+			fmt.Println("\n--- config changed, restarting ---")
+			continue
+		}
+		return err
+	}
 }

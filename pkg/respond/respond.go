@@ -63,6 +63,16 @@ func Error(c echo.Context, status int, msg string, component ...templ.Component)
 	})
 }
 
+// Redirect sends an HTMX-aware redirect. For HTMX requests it sets the
+// HX-Redirect header and returns 200; for regular requests it returns a 303.
+func Redirect(c echo.Context, url string) error {
+	if htmx.IsHTMX(c.Request()) {
+		htmx.Redirect(c.Response(), url)
+		return c.NoContent(http.StatusOK)
+	}
+	return c.Redirect(http.StatusSeeOther, url)
+}
+
 // ValidationError sends a 422 validation error response.
 // An optional templ component renders the HTML error view.
 func ValidationError(c echo.Context, fields map[string]string, component ...templ.Component) error {

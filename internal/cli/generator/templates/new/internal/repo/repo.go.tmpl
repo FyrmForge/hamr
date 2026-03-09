@@ -19,6 +19,9 @@ type Store interface {
 {{- end}}
 {{- if .IncludeAuth}}
 
+	// GetUserByID returns a user by ID, or nil if not found.
+	GetUserByID(ctx context.Context, id string) (*User, error)
+
 	// GetUserByEmail returns a user by email, or nil if not found.
 	GetUserByEmail(ctx context.Context, email string) (*User, error)
 

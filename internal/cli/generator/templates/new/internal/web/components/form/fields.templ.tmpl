@@ -1,27 +1,32 @@
 package form
 
-// FieldError renders a validation error message for a form field.
-templ FieldError(field string, errors map[string]string) {
-	if msg, ok := errors[field]; ok {
+import "strconv"
+
+// FieldError renders a validation error for a form field.
+// Always renders the element so it can be targeted by OOB swaps.
+templ FieldError(field string, err string) {
 {{- if eq .CSS "tailwind"}}
-		<div class="text-red-400 text-sm mt-1" id={ field + "-error" }>{ msg }</div>
+	<span class="text-red-400 text-sm mt-1 block" id={ "error-" + field } data-has-error={ strconv.FormatBool(err != "") } aria-live="polite">
 {{- else}}
-		<div class="field-error" id={ field + "-error" }>{ msg }</div>
+	<span class="field-error" id={ "error-" + field } data-has-error={ strconv.FormatBool(err != "") } aria-live="polite">
 {{- end}}
-	}
+		if err != "" {
+			{ err }
+		}
+	</span>
 }
 
-// FieldErrorOOB renders an out-of-band swap for a field error (used with HTMX).
-templ FieldErrorOOB(field string, msg string) {
+// FieldErrorOOB renders an out-of-band swap for a field error (used with HTMX blur validation).
+templ FieldErrorOOB(field string, err string) {
 {{- if eq .CSS "tailwind"}}
-	<div class="text-red-400 text-sm mt-1" id={ field + "-error" } hx-swap-oob="true">
+	<span class="text-red-400 text-sm mt-1 block" id={ "error-" + field } data-has-error={ strconv.FormatBool(err != "") } aria-live="polite" hx-swap-oob="true">
 {{- else}}
-	<div class="field-error" id={ field + "-error" } hx-swap-oob="true">
+	<span class="field-error" id={ "error-" + field } data-has-error={ strconv.FormatBool(err != "") } aria-live="polite" hx-swap-oob="true">
 {{- end}}
-		if msg != "" {
-			{ msg }
+		if err != "" {
+			{ err }
 		}
-	</div>
+	</span>
 }
 
 // CSRFField renders a hidden CSRF token input.

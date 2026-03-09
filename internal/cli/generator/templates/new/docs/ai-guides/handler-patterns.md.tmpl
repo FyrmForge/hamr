@@ -34,7 +34,7 @@ func NewHandler(store repo.Store, log *slog.Logger) *Handler {
 // GET /things
 func (h *Handler) List(c echo.Context) error {
     // Fetch data from store
-    return respond.HTML(c, http.StatusOK, ThingsPage())
+    return respond.HTML(c, http.StatusOK, ThingsPage(c))
 }
 
 // POST /things

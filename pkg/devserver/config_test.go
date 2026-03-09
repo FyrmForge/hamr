@@ -33,11 +33,32 @@ cmd = "go build ./cmd/server"
 	assert.Equal(t, "go", cfg.Dev.Watch[0].Name)
 	assert.Equal(t, StringOrSlice{"**/*.go"}, cfg.Dev.Watch[0].Watch)
 
-	// Defaults applied.
+	// No [proxy] section → proxy not configured, no defaults applied.
+	assert.False(t, cfg.ProxyConfigured)
+	assert.Equal(t, "", cfg.Proxy.Listen)
+	assert.Equal(t, "", cfg.Proxy.Target)
+	assert.Nil(t, cfg.Proxy.InjectReload)
+	assert.Equal(t, 100*time.Millisecond, cfg.Dev.Watch[0].Debounce.Duration)
+}
+
+func TestLoadConfig_ProxyDefaults(t *testing.T) {
+	path := writeConfig(t, `
+[proxy]
+
+[[dev.watch]]
+name = "go"
+watch = "**/*.go"
+cmd = "go build ./cmd/server"
+`)
+
+	cfg, err := LoadConfig(path)
+	require.NoError(t, err)
+
+	// Empty [proxy] section → configured with defaults.
+	assert.True(t, cfg.ProxyConfigured)
 	assert.Equal(t, ":3000", cfg.Proxy.Listen)
 	assert.Equal(t, ":8080", cfg.Proxy.Target)
 	assert.True(t, *cfg.Proxy.InjectReload)
-	assert.Equal(t, 100*time.Millisecond, cfg.Dev.Watch[0].Debounce.Duration)
 }
 
 func TestLoadConfig_Full(t *testing.T) {
@@ -70,6 +91,7 @@ env = ["PORT=8080"]
 	cfg, err := LoadConfig(path)
 	require.NoError(t, err)
 
+	assert.True(t, cfg.ProxyConfigured)
 	assert.Equal(t, ":4000", cfg.Proxy.Listen)
 	assert.Equal(t, ":9090", cfg.Proxy.Target)
 	assert.False(t, *cfg.Proxy.InjectReload)

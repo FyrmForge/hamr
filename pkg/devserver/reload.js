@@ -17,6 +17,8 @@
     var config = null;        // {rules:[], daemons:[]}
     var buildingRules = {};   // name -> true while building
     var ruleErrors = {};      // name -> {output: "..."} for failed builds
+    var ruleOk = {};          // name -> true after successful build
+    var ruleOkTimers = {};    // name -> timeout id to clear ok state
     var connectionState = "disconnected";
     var dockerStatus = {};    // compose name -> [{service, state, health, status}]
     var dockerPollTimer = null;
@@ -194,7 +196,8 @@
             "padding:8px;font-family:'SF Mono',Monaco,Consolas,monospace;font-size:11px;color:#F87171;" +
             "max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;margin-bottom:8px;}" +
 
-            // Error dot
+            // Status dots
+            "#__hamr-panel .hp-rule-dot.ok{background:#4ADE80;}" +
             "#__hamr-panel .hp-rule-dot.error{background:#EF4444;}" +
 
             // Footer toggle
@@ -406,7 +409,8 @@
                 var r = config.rules[i];
                 var isBuilding = buildingRules[r.name];
                 var isError = ruleErrors[r.name];
-                var dotCls = isError ? "error" : (isBuilding ? "building" : "");
+                var isOk = ruleOk[r.name];
+                var dotCls = isError ? "error" : (isBuilding ? "building" : (isOk ? "ok" : ""));
                 var detail = r.cmd || r.run || "";
                 html += '<div class="hp-rule">' +
                     '<span class="hp-rule-dot ' + dotCls + '"></span>' +
@@ -810,6 +814,11 @@
             if (ruleName) {
                 buildingRules[ruleName] = true;
                 delete ruleErrors[ruleName];
+                delete ruleOk[ruleName];
+                if (ruleOkTimers[ruleName]) {
+                    clearTimeout(ruleOkTimers[ruleName]);
+                    delete ruleOkTimers[ruleName];
+                }
             }
             setState("reloading");
             updatePanelStatus();
@@ -821,11 +830,18 @@
                 var payload = JSON.parse(e.data);
                 ruleErrors[payload.rule] = {output: payload.output};
                 delete buildingRules[payload.rule];
+                delete ruleOk[payload.rule];
                 updateWidgetState();
                 if (window.__hamr_error_page) {
                     updateErrorPage();
                 } else {
-                    location.reload();
+                    fetch(location.href).then(function(resp) {
+                        return resp.text();
+                    }).then(function(html) {
+                        swapBody(html);
+                    }).catch(function() {
+                        location.reload();
+                    });
                 }
                 console.warn("[hamr] build error: " + payload.rule);
             } catch (err) {
@@ -838,6 +854,13 @@
             if (ruleName) {
                 delete ruleErrors[ruleName];
                 delete buildingRules[ruleName];
+                ruleOk[ruleName] = true;
+                if (ruleOkTimers[ruleName]) clearTimeout(ruleOkTimers[ruleName]);
+                ruleOkTimers[ruleName] = setTimeout(function() {
+                    delete ruleOk[ruleName];
+                    delete ruleOkTimers[ruleName];
+                    updateWidgetState();
+                }, 3000);
             }
             updateWidgetState();
             if (window.__hamr_waiting_page) {
@@ -869,21 +892,17 @@
 
             setState("reloading");
 
-            // Full reload: try morphing with Idiomorph if available.
-            if (typeof Idiomorph !== "undefined") {
-                fetch(location.href).then(function(resp) {
-                    return resp.text();
-                }).then(function(html) {
-                    Idiomorph.morph(document.documentElement, html);
-                    setState("connected");
-                    updatePanelStatus();
-                    console.log("[hamr] page morphed");
-                }).catch(function() {
-                    location.reload();
-                });
-            } else {
+            // Full reload: fetch new page and swap DOM.
+            fetch(location.href).then(function(resp) {
+                return resp.text();
+            }).then(function(html) {
+                swapBody(html);
+                setState("connected");
+                updateWidgetState();
+                console.log("[hamr] page swapped");
+            }).catch(function() {
                 location.reload();
-            }
+            });
         });
 
         source.addEventListener("shutdown", function() {
@@ -924,6 +943,45 @@
             }
         }
         console.log("[hamr] CSS reloaded");
+    }
+
+    function swapBody(html) {
+        var parser = new DOMParser();
+        var newDoc = parser.parseFromString(html, "text/html");
+
+        // Update document title.
+        var newTitle = newDoc.querySelector("title");
+        if (newTitle) document.title = newTitle.textContent;
+
+        // Remove all body children except hamr elements.
+        var hamrIds = {"__hamr-status":1, "__hamr-panel":1, "__hamr-logs":1};
+        var child = document.body.firstChild;
+        while (child) {
+            var next = child.nextSibling;
+            if (child.nodeType === 1 && hamrIds[child.id]) {
+                child = next;
+                continue;
+            }
+            document.body.removeChild(child);
+            child = next;
+        }
+
+        // Append new body content, skipping scripts (already loaded)
+        // and any injected hamr elements.
+        var newChild = newDoc.body.firstChild;
+        while (newChild) {
+            var nextNew = newChild.nextSibling;
+            if (newChild.nodeType === 1) {
+                if (newChild.tagName === "SCRIPT") { newChild = nextNew; continue; }
+                if (hamrIds[newChild.id]) { newChild = nextNew; continue; }
+            }
+            document.body.insertBefore(document.adoptNode(newChild),
+                document.getElementById("__hamr-status"));
+            newChild = nextNew;
+        }
+
+        // Re-initialize htmx on new DOM.
+        if (typeof htmx !== "undefined") htmx.process(document.body);
     }
 
     connect();

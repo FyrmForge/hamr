@@ -1,8 +1,10 @@
 package auth
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/FyrmForge/hamr/pkg/auth"
 	"github.com/FyrmForge/hamr/pkg/middleware"
@@ -11,6 +13,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"{{.Module}}/internal/service"
+	"{{.Module}}/internal/web/components/form"
 )
 
 // Handler handles authentication requests.
@@ -31,25 +34,35 @@ func NewHandler(authService *service.AuthService, sm *auth.SessionManager, log *
 
 // GET /login
 func (h *handler) LoginPage(c echo.Context) error {
-	csrfToken, _ := c.Get("csrf").(string)
-	return respond.HTML(c, http.StatusOK, loginPage(csrfToken))
+	return respond.HTML(c, http.StatusOK, loginPage(c, "", nil))
 }
 
 // POST /login
 func (h *handler) Login(c echo.Context) error {
-	email := c.FormValue("email")
+	email := strings.ToLower(c.FormValue("email"))
 	password := c.FormValue("password")
 
+	fieldErrors := make(map[string]string)
+
 	if msg := validate.Required(email); msg != "" {
-		middleware.SetFlash(c, "Email is required", middleware.FlashError)
-		return c.Redirect(http.StatusSeeOther, "/login")
+		fieldErrors["email"] = msg
+	} else if msg := validate.Email(email); msg != "" {
+		fieldErrors["email"] = msg
+	}
+
+	if msg := validate.Required(password); msg != "" {
+		fieldErrors["password"] = msg
+	}
+
+	if len(fieldErrors) > 0 {
+		return respond.HTML(c, http.StatusUnprocessableEntity, loginForm(c, email, fieldErrors))
 	}
 
 	user, err := h.authService.Authenticate(c.Request().Context(), email, password)
 	if err != nil {
 		h.log.Warn("login failed", "email", email, "error", err)
-		middleware.SetFlash(c, "Invalid email or password", middleware.FlashError)
-		return c.Redirect(http.StatusSeeOther, "/login")
+		fieldErrors["general"] = "Invalid email or password"
+		return respond.HTML(c, http.StatusUnauthorized, loginForm(c, email, fieldErrors))
 	}
 
 	session, err := h.sessionManager.CreateSession(c.Request().Context(), user.ID, nil)
@@ -58,50 +71,70 @@ func (h *handler) Login(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "session error")
 	}
 
-	c.SetCookie(&http.Cookie{
-		Name:     h.sessionManager.CookieName(),
-		Value:    session.Token,
-		Path:     h.sessionManager.CookiePath(),
-		HttpOnly: true,
-		Secure:   h.sessionManager.CookieSecure(),
-		SameSite: h.sessionManager.SameSite(),
-	})
+	h.setSessionCookie(c, session)
+	return respond.Redirect(c, "/")
+}
 
-	return c.Redirect(http.StatusSeeOther, "/")
+// POST /login/validate/:field
+func (h *handler) ValidateLoginField(c echo.Context) error {
+	field := c.Param("field")
+	value := c.FormValue(field)
+	var errMsg string
+
+	switch field {
+	case "email":
+		if msg := validate.Required(value); msg != "" {
+			errMsg = msg
+		} else if msg := validate.Email(value); msg != "" {
+			errMsg = msg
+		}
+	case "password":
+		if msg := validate.Required(value); msg != "" {
+			errMsg = msg
+		}
+	}
+
+	status := http.StatusOK
+	if errMsg != "" {
+		status = http.StatusUnprocessableEntity
+	}
+	return respond.HTML(c, status, form.FieldErrorOOB(field, errMsg))
 }
 
 // GET /register
 func (h *handler) RegisterPage(c echo.Context) error {
-	csrfToken, _ := c.Get("csrf").(string)
-	return respond.HTML(c, http.StatusOK, registerPage(csrfToken, "", "", nil))
+	return respond.HTML(c, http.StatusOK, registerPage(c, "", "", nil))
 }
 
 // POST /register
 func (h *handler) Register(c echo.Context) error {
 	name := c.FormValue("name")
-	email := c.FormValue("email")
+	email := strings.ToLower(c.FormValue("email"))
 	password := c.FormValue("password")
 
-	errs := make(map[string]string)
+	fieldErrors := make(map[string]string)
 	if msg := validate.Required(name); msg != "" {
-		errs["name"] = msg
+		fieldErrors["name"] = msg
 	}
 	if msg := validate.Email(email); msg != "" {
-		errs["email"] = msg
+		fieldErrors["email"] = msg
 	}
 	if msg := validate.PasswordStrength(password); msg != "" {
-		errs["password"] = msg
+		fieldErrors["password"] = msg
 	}
-	if len(errs) > 0 {
-		csrfToken, _ := c.Get("csrf").(string)
-		return respond.HTML(c, http.StatusUnprocessableEntity, registerPage(csrfToken, name, email, errs))
+	if len(fieldErrors) > 0 {
+		return respond.HTML(c, http.StatusUnprocessableEntity, registerForm(c, name, email, fieldErrors))
 	}
 
 	user, err := h.authService.Register(c.Request().Context(), email, password, name)
 	if err != nil {
 		h.log.Warn("registration failed", "email", email, "error", err)
-		middleware.SetFlash(c, "Registration failed. Please try again.", middleware.FlashError)
-		return c.Redirect(http.StatusSeeOther, "/register")
+		if errors.Is(err, service.ErrEmailTaken) {
+			fieldErrors["email"] = "An account with this email already exists"
+		} else {
+			fieldErrors["general"] = "Registration failed. Please try again."
+		}
+		return respond.HTML(c, http.StatusUnprocessableEntity, registerForm(c, name, email, fieldErrors))
 	}
 
 	session, err := h.sessionManager.CreateSession(c.Request().Context(), user.ID, nil)
@@ -110,17 +143,35 @@ func (h *handler) Register(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "session error")
 	}
 
-	c.SetCookie(&http.Cookie{
-		Name:     h.sessionManager.CookieName(),
-		Value:    session.Token,
-		Path:     h.sessionManager.CookiePath(),
-		HttpOnly: true,
-		Secure:   h.sessionManager.CookieSecure(),
-		SameSite: h.sessionManager.SameSite(),
-	})
-
+	h.setSessionCookie(c, session)
 	middleware.SetFlash(c, "Welcome! Your account has been created.", middleware.FlashSuccess)
-	return c.Redirect(http.StatusSeeOther, "/")
+	return respond.Redirect(c, "/")
+}
+
+// POST /register/validate/:field
+func (h *handler) ValidateRegisterField(c echo.Context) error {
+	field := c.Param("field")
+	value := c.FormValue(field)
+	var errMsg string
+
+	switch field {
+	case "name":
+		errMsg = validate.Required(value)
+	case "email":
+		if msg := validate.Required(value); msg != "" {
+			errMsg = msg
+		} else if msg := validate.Email(value); msg != "" {
+			errMsg = msg
+		}
+	case "password":
+		errMsg = validate.PasswordStrength(value)
+	}
+
+	status := http.StatusOK
+	if errMsg != "" {
+		status = http.StatusUnprocessableEntity
+	}
+	return respond.HTML(c, status, form.FieldErrorOOB(field, errMsg))
 }
 
 // POST /logout
@@ -144,5 +195,16 @@ func (h *handler) Logout(c echo.Context) error {
 	})
 
 	middleware.SetFlash(c, "You have been logged out", middleware.FlashInfo)
-	return c.Redirect(http.StatusSeeOther, "/login")
+	return respond.Redirect(c, "/login")
+}
+
+func (h *handler) setSessionCookie(c echo.Context, session *auth.Session) {
+	c.SetCookie(&http.Cookie{
+		Name:     h.sessionManager.CookieName(),
+		Value:    session.Token,
+		Path:     h.sessionManager.CookiePath(),
+		HttpOnly: true,
+		Secure:   h.sessionManager.CookieSecure(),
+		SameSite: h.sessionManager.SameSite(),
+	})
 }
