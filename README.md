@@ -12,6 +12,12 @@ hamr new myproject
 
 You get a production-ready Go + Templ + HTMX + Alpine.js application with sensible defaults, structured logging, database migrations, session auth, and AI-ready documentation baked in.
 
+## Documentation
+
+- **[HAMR Guide](docs/guide/README.md)** -- Learn how to build with HAMR, from [project setup](docs/guide/01-project-setup.md) through [deployment](docs/guide/13-deployment.md)
+- **[Package Reference](docs/guide/pkg/README.md)** -- Full API docs for every `hamr/pkg` package
+- **[CLI Reference](docs/guide/cli.md)** -- All `hamr` commands and flags
+
 ## What's in the box
 
 HAMR is two things:
