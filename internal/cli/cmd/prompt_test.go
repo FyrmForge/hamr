@@ -18,7 +18,7 @@ func TestApplyWizardResult_defaults(t *testing.T) {
 
 	cfg := &generator.ProjectConfig{
 		Name:            "myapp",
-		GoVersion:       "1.25.0",
+		GoVersion:       generator.DetectGoVersion(),
 		IncludeAuth:     true,
 		AuthWithTables:  true,
 		IncludeSessions: true,
@@ -47,7 +47,7 @@ func TestApplyWizardResult_s3Storage(t *testing.T) {
 
 	cfg := &generator.ProjectConfig{
 		Name:            "app",
-		GoVersion:       "1.25.0",
+		GoVersion:       generator.DetectGoVersion(),
 		IncludeAuth:     true,
 		AuthWithTables:  true,
 		IncludeSessions: true,
@@ -68,7 +68,7 @@ func TestApplyWizardResult_noStorage(t *testing.T) {
 
 	cfg := &generator.ProjectConfig{
 		Name:            "app",
-		GoVersion:       "1.25.0",
+		GoVersion:       generator.DetectGoVersion(),
 		IncludeAuth:     true,
 		AuthWithTables:  true,
 		IncludeSessions: true,

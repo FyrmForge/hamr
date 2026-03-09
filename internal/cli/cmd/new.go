@@ -88,7 +88,7 @@ When all flags are provided, no interactive prompts are shown.`,
 
 		cfg := &generator.ProjectConfig{
 			Name:            name,
-			GoVersion:       "1.25.0",
+			GoVersion:       generator.DetectGoVersion(),
 			IncludeAuth:     true,
 			AuthWithTables:  true,
 			IncludeSessions: true,

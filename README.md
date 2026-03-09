@@ -45,14 +45,15 @@ HAMR is two things:
 
 ### CLI commands
 
-| Command                     | What it does                                    |
-| --------------------------- | ----------------------------------------------  |
-| `hamr new <name>`           | Scaffold a new project with interactive options |
-| `hamr sync`                 | Sync a local directory to an S3-compatible bucket |
-| `hamr vendor`               | Download and checksum frontend JS dependencies  |
-| `hamr rename module <path>` | Rename the Go module and update all import paths |
-| `hamr lint templ`           | Lint `.templ` files for common issues           |
-| `hamr version`              | Print version and commit                        |
+| Command                     | What it does                                                        |
+| --------------------------- | ------------------------------------------------------------------- |
+| `hamr new <name>`           | Scaffold a new project with interactive options                     |
+| `hamr dev`                  | File watching, builds, process management, and live-reload proxy    |
+| `hamr vendor`               | Download and checksum frontend JS dependencies (htmx, alpine, etc) |
+| `hamr sync`                 | Sync a local directory to an S3-compatible bucket                   |
+| `hamr rename module <path>` | Rename the Go module and update all import paths                    |
+| `hamr lint templ`           | Lint `.templ` files for common issues                               |
+| `hamr version`              | Print version and commit                                            |
 
 ## Install
 
@@ -90,39 +91,41 @@ go install github.com/FyrmForge/hamr/cmd/hamr@latest
 hamr new myproject
 
 # Follow the prompts to choose:
-#   - Go module path
+#   - GitHub username/org (auto-detected from gh CLI)
 #   - CSS approach (plain CSS with design system or Tailwind)
-#   - Auth scaffolding
-#   - File storage, WebSocket, and notification support
+#   - Database (PostgreSQL)
+#   - File storage (none, local, or S3/MinIO)
+#   - WebSocket support
+#   - E2E testing scaffold
 
 # Run it
 cd myproject
-make docker-up              # start Postgres
-make dev                    # start dev server (migrations run on startup)
-# Or run migrations separately:
-make migrate                # run migrations standalone
+hamr dev                    # starts Postgres, builds, watches, live-reloads
 ```
 
 ## Generated project structure
 
 ```
 myproject/
-├── cmd/server/
-│   ├── main.go              # Bootstrap: config, db, migrate, services, server
-│   └── Dockerfile
+├── cmd/
+│   ├── server/              # Application entry point + Dockerfile
+│   └── migrate/             # Database migration runner
 ├── internal/
-│   ├── config/              # App-specific env vars
 │   ├── db/migrations/       # SQL migrations (embed.FS)
-│   ├── repo/                # Data access layer
-│   ├── service/             # Business logic
+│   ├── repo/                # Data access layer (postgres/)
+│   ├── service/             # Business logic (auth service)
+│   ├── api/                 # JSON API handlers
 │   └── web/
 │       ├── server.go        # Routes and middleware stack
 │       ├── handler/         # One package per domain (home/, auth/, errors/)
 │       └── components/      # Shared Templ components and layout
 ├── static/                  # CSS, JS (vendored HTMX + Alpine), images
 ├── docs/                    # ADRs, feature specs, AI guides
-├── docker/
+├── docker/                  # Docker Compose for PostgreSQL
+├── .github/workflows/       # CI and deploy pipelines
+├── hamr.toml                # Dev server configuration
 ├── Makefile
+├── CLAUDE.md                # Claude Code instructions
 ├── AGENTS.md                # AI coding conventions
 └── go.mod
 ```

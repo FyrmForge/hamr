@@ -3,6 +3,7 @@ package generator
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -43,7 +44,10 @@ func (cfg *ProjectConfig) Validate() error {
 		cfg.Database = "postgres"
 	}
 	if cfg.GoVersion == "" {
-		cfg.GoVersion = "1.25.0"
+		cfg.GoVersion = DetectGoVersion()
+	}
+	if cfg.GoVersion == "" {
+		return fmt.Errorf("could not detect Go version; install Go or set GoVersion explicitly")
 	}
 	if cfg.IncludeAuth {
 		cfg.IncludeSessions = true
@@ -243,4 +247,14 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 	}
 
 	return files
+}
+
+// DetectGoVersion returns the Go version installed on the system (e.g. "1.25.0")
+// by running "go env GOVERSION". Returns "" if detection fails.
+func DetectGoVersion() string {
+	out, err := exec.Command("go", "env", "GOVERSION").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimPrefix(strings.TrimSpace(string(out)), "go")
 }

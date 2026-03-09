@@ -12,15 +12,15 @@ import (
 
 // wizardResult holds the raw values collected by the interactive form.
 type wizardResult struct {
-	Name            string // project name (when no arg provided)
-	Location        string // "subfolder" or "current"
-	Owner           string
-	CSS             string
-	Database        string
-	StorageBackend  string // "none" | "local" | "s3"
-	StaticS3        string // "yes" | "no"
-	WebSocket       string // "yes" | "no"
-	E2E             string // "yes" | "no"
+	Name           string // project name (when no arg provided)
+	Location       string // "subfolder" or "current"
+	Owner          string
+	CSS            string
+	Database       string
+	StorageBackend string // "none" | "local" | "s3"
+	StaticS3       string // "yes" | "no"
+	WebSocket      string // "yes" | "no"
+	E2E            string // "yes" | "no"
 }
 
 // wizardStep pairs a huh group with a callback that prints the selection.
@@ -40,14 +40,14 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 		defaultLocation = "subfolder"
 	}
 	res := &wizardResult{
-		Name:            name,
-		Location:        defaultLocation,
-		CSS:             "plain",
-		Database:        "postgres",
-		StorageBackend:  "none",
-		StaticS3:        "no",
-		WebSocket:       "yes",
-		E2E:             "yes",
+		Name:           name,
+		Location:       defaultLocation,
+		CSS:            "plain",
+		Database:       "postgres",
+		StorageBackend: "none",
+		StaticS3:       "yes",
+		WebSocket:      "yes",
+		E2E:            "yes",
 	}
 
 	var steps []wizardStep

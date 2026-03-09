@@ -73,7 +73,7 @@ func TestProjectConfig_Validate_defaultValues(t *testing.T) {
 	require.NoError(t, cfg.Validate())
 	assert.Equal(t, "plain", cfg.CSS)
 	assert.Equal(t, "postgres", cfg.Database)
-	assert.Equal(t, "1.25.0", cfg.GoVersion)
+	assert.NotEmpty(t, cfg.GoVersion, "GoVersion should be detected from local Go installation")
 }
 
 func TestBuildProjectFileList_coreFiles(t *testing.T) {
