@@ -390,7 +390,7 @@ func (r *Runner) watchConfigFile(ctx context.Context, ch chan<- struct{}) {
 		r.logger.Error("cannot watch config file", "err", err)
 		return
 	}
-	defer fsw.Close()
+	defer func() { _ = fsw.Close() }()
 
 	// Watch the directory (editors often write to a temp file and rename).
 	dir := filepath.Dir(absPath)
