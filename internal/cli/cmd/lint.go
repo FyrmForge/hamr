@@ -31,7 +31,7 @@ func init() {
 
 func addTemplLintFlags(cmd *cobra.Command) {
 	cmd.Flags().StringSlice("rule", nil, "run only these rules (comma-separated IDs)")
-	cmd.Flags().String("config", ".templint.yml", "path to config file")
+	cmd.Flags().String("config", "hamr.toml", "path to hamr.toml config file")
 	cmd.Flags().String("severity", "", "minimum severity to report: warning|error")
 }
 

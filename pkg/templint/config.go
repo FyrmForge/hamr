@@ -4,21 +4,29 @@ import (
 	"fmt"
 	"os"
 
-	"gopkg.in/yaml.v3"
+	"github.com/BurntSushi/toml"
 )
 
 // RuleConfig holds per-rule configuration.
 type RuleConfig struct {
-	Enabled  *bool  `yaml:"enabled"`
-	Severity string `yaml:"severity"`
+	Enabled  *bool  `toml:"enabled"`
+	Severity string `toml:"severity"`
 }
 
 // Config holds the linter configuration.
 type Config struct {
-	Rules map[string]RuleConfig `yaml:"rules"`
+	Rules map[string]RuleConfig `toml:"rules"`
 }
 
-// LoadConfig reads a config file and returns the parsed Config.
+// tomlFile mirrors the hamr.toml structure so we can decode the
+// [lint.templ] section directly.
+type tomlFile struct {
+	Lint struct {
+		Templ Config `toml:"templ"`
+	} `toml:"lint"`
+}
+
+// LoadConfig reads a hamr.toml file and returns the parsed [lint.templ] Config.
 // Returns nil if the file does not exist (use defaults).
 func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
@@ -29,11 +37,14 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 
-	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	var f tomlFile
+	if err := toml.Unmarshal(data, &f); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
-	return &cfg, nil
+	if len(f.Lint.Templ.Rules) == 0 {
+		return nil, nil
+	}
+	return &f.Lint.Templ, nil
 }
 
 // IsEnabled returns whether a rule is enabled in this config.

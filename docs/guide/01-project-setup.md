@@ -11,7 +11,7 @@ HAMR's generator gives you a working app with opinionated conventions so you don
 Create a new project with the interactive wizard:
 
 ```bash
-hamr new myapp
+hamr new
 ```
 
 The wizard prompts for module path, CSS approach, storage backend, and optional features (WebSocket, E2E tests, Stripe). To skip prompts, pass flags directly:

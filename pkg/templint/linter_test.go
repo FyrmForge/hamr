@@ -407,7 +407,7 @@ func TestConfigOverridesSeverity(t *testing.T) {
 }
 
 func TestLoadConfigNotFound(t *testing.T) {
-	cfg, err := LoadConfig("/nonexistent/.templint.yml")
+	cfg, err := LoadConfig("/nonexistent/hamr.toml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,8 +418,8 @@ func TestLoadConfigNotFound(t *testing.T) {
 
 func TestLoadConfigValid(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, ".templint.yml")
-	content := "rules:\n  inline-if:\n    enabled: false\n    severity: warning\n"
+	path := filepath.Join(dir, "hamr.toml")
+	content := "[lint.templ.rules.inline-if]\nenabled = false\nseverity = \"warning\"\n"
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}

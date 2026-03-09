@@ -7,7 +7,7 @@ An opinionated Go full-stack framework and project scaffolding CLI. HAMR extract
 <br clear="left">
 
 ```
-hamr new myproject
+hamr new
 ```
 
 You get a production-ready Go + Templ + HTMX + Alpine.js application with sensible defaults, structured logging, database migrations, session auth, and AI-ready documentation baked in.

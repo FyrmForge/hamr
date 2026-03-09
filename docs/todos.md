@@ -3,3 +3,7 @@
 - hamr convert or smth like that
     - so we need to be able to point the cli at a folder full of picutre type assets and have it convert all of them to good formats and multiple sizes
 - metrics and dashboards option 
+- look into localisation and plan support (both scaffold and pkg)
+    - maybe even a locale generator to generate typesafe locales 
+    - middleware context injection 
+    - middleware redirection to lang pages if needed

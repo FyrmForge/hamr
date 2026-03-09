@@ -119,14 +119,14 @@ hamr lint templ [flags]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--rule` | all | Run only these rules (comma-separated IDs) |
-| `--config` | `.templint.yml` | Path to config file |
+| `--config` | `hamr.toml` | Path to hamr.toml config file |
 | `--severity` | all | Minimum severity to report: `warning` or `error` |
 
 ```bash
 hamr lint templ                          # lint current directory (recursive)
 hamr lint templ --rule inline-if,img-alt # run only specific rules
 hamr lint templ --severity error         # only report errors
-hamr lint templ --config .templint.yml   # use a custom config file
+hamr lint templ --config my-hamr.toml    # use a custom config file
 ```
 
 **Exit codes:** `0` if no error-severity diagnostics, `1` if any errors found.

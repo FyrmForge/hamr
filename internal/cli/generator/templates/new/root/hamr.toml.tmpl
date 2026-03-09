@@ -54,9 +54,15 @@ reload = "full"
 # # API service — rebuilt and restarted on change, no proxy
 # [[dev.watch]]
 # name = "api"
-# watch =["cmd/api/*.go", "internal/api/**"] 
+# watch =["cmd/api/*.go", "internal/api/**"]
 # cmd = "go build -o ./bin/api ./cmd/api"
 # run = "./bin/api"
 # reload = "none"
 # env = ["API_PORT=9090"]
+
+# Templ linter — all rules enabled by default, override here
+# [lint.templ.rules.inline-style]
+# enabled = false
+# [lint.templ.rules.img-alt]
+# severity = "error"
 

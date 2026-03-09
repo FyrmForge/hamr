@@ -9,14 +9,14 @@ hamr lint templ [flags]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--rule` | all | Run only these rules (comma-separated IDs) |
-| `--config` | `.templint.yml` | Path to config file |
+| `--config` | `hamr.toml` | Path to hamr.toml config file |
 | `--severity` | all | Minimum severity to report: `warning` or `error` |
 
 ```bash
 hamr lint templ                          # lint current directory (recursive)
 hamr lint templ --rule inline-if,img-alt # run only specific rules
 hamr lint templ --severity error         # only report errors (skip warnings)
-hamr lint templ --config .templint.yml   # use a custom config file
+hamr lint templ --config my-hamr.toml    # use a custom config file
 ```
 
 **Exit codes:** `0` if no error-severity diagnostics, `1` if any errors found. Warnings alone do not cause a non-zero exit.
@@ -73,17 +73,18 @@ if user != nil {
 
 ## Configuration
 
-Create a `.templint.yml` in your project root (optional — all rules are enabled by default):
+Add a `[lint.templ]` section to your `hamr.toml` (optional — all rules are enabled by default):
 
-```yaml
-rules:
-  inline-if:
-    enabled: true
-    severity: error
-  inline-style:
-    enabled: false
-  img-alt:
-    severity: error
+```toml
+[lint.templ.rules.inline-if]
+enabled = true
+severity = "error"
+
+[lint.templ.rules.inline-style]
+enabled = false
+
+[lint.templ.rules.img-alt]
+severity = "error"
 ```
 
 Each rule accepts:
@@ -114,7 +115,7 @@ The generated CI workflow includes a templ lint step:
 import "github.com/FyrmForge/hamr/pkg/templint"
 
 // Load config (returns nil if file not found — uses defaults)
-cfg, err := templint.LoadConfig(".templint.yml")
+cfg, err := templint.LoadConfig("hamr.toml")
 
 // Create linter (nil config = all rules enabled)
 linter := templint.New(cfg)
