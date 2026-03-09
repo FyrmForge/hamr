@@ -7,3 +7,4 @@
     - maybe even a locale generator to generate typesafe locales 
     - middleware context injection 
     - middleware redirection to lang pages if needed
+- storage option should only be local folder or local + s3
