@@ -8,3 +8,13 @@
     - middleware context injection 
     - middleware redirection to lang pages if needed
 - storage option should only be local folder or local + s3
+- give exec perms to db-sh
+- move db-sh to scripts folder and add alias to makefile
+- migrations are embeded even tho were not running at startup
+- review ai docs
+- do screen captures for marketing
+- look into hamr cli and package versioning 
+    - for cli we dont want to run a mismatching version of hamr against a mismatching project?
+    - semntic versioning 
+- look at removing migrate cmd (binary) and use migrate cli? i think there is one
+- scafold unit tests 
