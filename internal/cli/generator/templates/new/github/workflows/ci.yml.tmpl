@@ -35,22 +35,13 @@ jobs:
       - name: Generate templ files
         run: templ generate
 
-      - name: Verify generated templ files
+      - name: Verify generated templ files are committed
         run: |
           if ! git diff --quiet -- '*_templ.go'; then
             echo "::error::Generated templ files are out of date. Run 'templ generate' and commit."
             git diff --stat -- '*_templ.go'
             exit 1
           fi
-
-      - name: Run tests
-        run: go test -v -race ./...
-
-      - name: Lint
-        uses: golangci/golangci-lint-action@v9
-
-      - name: Lint templ files
-        run: go run github.com/FyrmForge/hamr/cmd/hamr@latest lint templ
 {{- if eq .CSS "tailwind"}}
 
       - uses: actions/setup-node@v4
@@ -63,4 +54,21 @@ jobs:
 
       - name: Build CSS
         run: npm run css:build
+
+      - name: Verify compiled CSS is committed
+        run: |
+          if ! git diff --quiet -- 'static/css/output.css'; then
+            echo "::error::Compiled CSS is out of date. Run 'npm run css:build' and commit."
+            git diff --stat -- 'static/css/output.css'
+            exit 1
+          fi
 {{- end}}
+
+      - name: Run tests
+        run: go test -v -race ./...
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v9
+
+      - name: Lint templ files
+        run: go run github.com/FyrmForge/hamr/cmd/hamr@latest lint templ

@@ -53,7 +53,7 @@ func runDev(cmd *cobra.Command, _ []string) error {
 
 		err = runner.Run(ctx)
 		if errors.Is(err, devserver.ErrConfigReload) {
-			fmt.Println("\n--- config changed, restarting ---")
+			fmt.Printf("\n%s--- config changed, restarting ---\n", devserver.HamrDevTag())
 			continue
 		}
 		return err

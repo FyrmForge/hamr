@@ -28,14 +28,15 @@ are pre-configured to scan `.templ` and `.go` files in `internal/web/`.
 ## File Structure
 
 ```
+css/
+└── input.css          Tailwind directives (@tailwind base, components, utilities)
 static/css/
-├── input.css      Tailwind directives (@tailwind base, components, utilities)
-└── output.css     Generated CSS (do not edit)
+└── output.css         Generated CSS (do not edit)
 ```
 
 ## Custom Components
 
-Use `@apply` in `input.css` for reusable component classes:
+Use `@apply` in `css/input.css` for reusable component classes:
 
 ```css
 @layer components {

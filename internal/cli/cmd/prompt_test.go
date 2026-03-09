@@ -137,6 +137,42 @@ func TestApplyWizardResult_staticS3_nonS3Storage(t *testing.T) {
 	assert.False(t, cfg.StaticS3, "StaticS3 should only be set for s3 storage backend")
 }
 
+func TestApplyWizardResult_stripe(t *testing.T) {
+	res := &wizardResult{
+		Owner:          "user",
+		CSS:            "plain",
+		Database:       "postgres",
+		StorageBackend: "none",
+		Stripe:         "yes",
+	}
+
+	cfg := &generator.ProjectConfig{
+		Name:      "app",
+		GoVersion: "1.25.0",
+	}
+	applyWizardResult(newCmd, "app", res, cfg)
+
+	assert.True(t, cfg.IncludeStripe)
+}
+
+func TestApplyWizardResult_noStripe(t *testing.T) {
+	res := &wizardResult{
+		Owner:          "user",
+		CSS:            "plain",
+		Database:       "postgres",
+		StorageBackend: "none",
+		Stripe:         "no",
+	}
+
+	cfg := &generator.ProjectConfig{
+		Name:      "app",
+		GoVersion: "1.25.0",
+	}
+	applyWizardResult(newCmd, "app", res, cfg)
+
+	assert.False(t, cfg.IncludeStripe)
+}
+
 func TestWizardResult_locationDefault(t *testing.T) {
 	res := &wizardResult{
 		Location: "subfolder",

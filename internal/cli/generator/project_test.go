@@ -737,6 +737,99 @@ func TestGenerateProject_s3WithoutStaticS3(t *testing.T) {
 	assert.NotContains(t, envFile, "S3_STATIC_BUCKET")
 }
 
+func TestBuildProjectFileList_stripe(t *testing.T) {
+	cfg := &ProjectConfig{
+		Name:          "proj",
+		Module:        "github.com/test/proj",
+		CSS:           "plain",
+		IncludeStripe: true,
+	}
+	files := buildProjectFileList(cfg)
+
+	dests := make(map[string]bool)
+	for _, f := range files {
+		dests[f.dest] = true
+	}
+
+	assert.True(t, dests["internal/api/handler/stripe/handler.go"])
+}
+
+func TestBuildProjectFileList_noStripe(t *testing.T) {
+	cfg := &ProjectConfig{Name: "proj", Module: "github.com/test/proj", CSS: "plain"}
+	files := buildProjectFileList(cfg)
+
+	dests := make(map[string]bool)
+	for _, f := range files {
+		dests[f.dest] = true
+	}
+
+	assert.False(t, dests["internal/api/handler/stripe/handler.go"])
+}
+
+func TestGenerateProject_stripe(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "stripeproj")
+
+	cfg := &ProjectConfig{
+		Name:          "stripeproj",
+		Module:        "github.com/test/stripeproj",
+		CSS:           "plain",
+		Database:      "postgres",
+		GoVersion:     "1.25.0",
+		IncludeStripe: true,
+	}
+
+	require.NoError(t, GenerateProject(dir, cfg))
+
+	// Handler file exists.
+	assertFileExists(t, dir, "internal/api/handler/stripe/handler.go")
+
+	// Handler file has expected content.
+	handlerGo := readFile(t, dir, "internal/api/handler/stripe/handler.go")
+	assert.Contains(t, handlerGo, "HandleWebhook")
+	assert.Contains(t, handlerGo, "webhook.ConstructEvent")
+
+	// API server.go imports stripe handler.
+	serverGo := readFile(t, dir, "internal/api/server.go")
+	assert.Contains(t, serverGo, "stripehandler")
+	assert.Contains(t, serverGo, "WebhookSecret")
+	assert.Contains(t, serverGo, "/webhooks/stripe")
+
+	// main.go has webhook secret env var.
+	mainGo := readFile(t, dir, "cmd/server/main.go")
+	assert.Contains(t, mainGo, "envStripeWebhookSecret")
+	assert.Contains(t, mainGo, "STRIPE_WEBHOOK_SECRET")
+
+	// .env has STRIPE_WEBHOOK_SECRET.
+	envFile := readFile(t, dir, ".env.example")
+	assert.Contains(t, envFile, "STRIPE_WEBHOOK_SECRET")
+}
+
+func TestGenerateProject_noStripe(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "nostripeproj")
+
+	cfg := &ProjectConfig{
+		Name:      "nostripeproj",
+		Module:    "github.com/test/nostripeproj",
+		CSS:       "plain",
+		Database:  "postgres",
+		GoVersion: "1.25.0",
+	}
+
+	require.NoError(t, GenerateProject(dir, cfg))
+
+	assertFileNotExists(t, dir, "internal/api/handler/stripe/handler.go")
+
+	serverGo := readFile(t, dir, "internal/api/server.go")
+	assert.NotContains(t, serverGo, "stripehandler")
+	assert.NotContains(t, serverGo, "WebhookSecret")
+
+	mainGo := readFile(t, dir, "cmd/server/main.go")
+	assert.NotContains(t, mainGo, "envStripeWebhookSecret")
+
+	envFile := readFile(t, dir, ".env.example")
+	assert.NotContains(t, envFile, "STRIPE_WEBHOOK_SECRET")
+}
+
 // --- Helpers ---
 
 func assertFileExists(t *testing.T, dir, rel string) {

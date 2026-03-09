@@ -24,6 +24,7 @@ type ProjectConfig struct {
 	StaticS3        bool   // sync static/ to a dedicated S3 bucket
 	IncludeWS       bool
 	IncludeE2E      bool
+	IncludeStripe   bool
 }
 
 // Validate checks that the ProjectConfig has all required fields and valid values.
@@ -175,6 +176,7 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 
 		// root files
 		{"templates/new/root/gitignore.tmpl", ".gitignore"},
+		{"templates/new/root/dockerignore.tmpl", ".dockerignore"},
 		{"templates/new/root/Makefile.tmpl", "Makefile"},
 		{"templates/new/root/env.example.tmpl", ".env.example"},
 		{"templates/new/root/env.example.tmpl", ".env"},
@@ -208,7 +210,7 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 		files = append(files,
 			templateFile{"templates/new/root/tailwind.config.js.tmpl", "tailwind.config.js"},
 			templateFile{"templates/new/root/package.json.tmpl", "package.json"},
-			templateFile{"templates/new/static/css/input.css.tmpl", "static/css/input.css"},
+			templateFile{"templates/new/css/input.css.tmpl", "css/input.css"},
 			templateFile{"templates/new/docs/ai-guides/tailwind.md.tmpl", "docs/ai-guides/tailwind.md"},
 		)
 	}
@@ -232,6 +234,13 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 		)
 	}
 
+	// Stripe webhook handler.
+	if cfg.IncludeStripe {
+		files = append(files,
+			templateFile{"templates/new/internal/api/handler/stripe/handler.go.tmpl", "internal/api/handler/stripe/handler.go"},
+		)
+	}
+
 	// E2E files.
 	if cfg.IncludeE2E {
 		files = append(files,
@@ -251,10 +260,16 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 
 // DetectGoVersion returns the Go version installed on the system (e.g. "1.25.0")
 // by running "go env GOVERSION". Returns "" if detection fails.
+// Build metadata suffixes (e.g. "-X:nodwarf5") are stripped because go.mod only
+// accepts versions matching the format 1.N or 1.N.P.
 func DetectGoVersion() string {
 	out, err := exec.Command("go", "env", "GOVERSION").Output()
 	if err != nil {
 		return ""
 	}
-	return strings.TrimPrefix(strings.TrimSpace(string(out)), "go")
+	v := strings.TrimPrefix(strings.TrimSpace(string(out)), "go")
+	if i := strings.IndexByte(v, '-'); i != -1 {
+		v = v[:i]
+	}
+	return v
 }

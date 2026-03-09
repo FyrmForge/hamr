@@ -8,12 +8,18 @@ import (
 
 	"{{.Module}}/internal/repo"
 	"{{.Module}}/internal/api/handler/health"
+{{- if .IncludeStripe}}
+	stripehandler "{{.Module}}/internal/api/handler/stripe"
+{{- end}}
 )
 
 // Deps holds the dependencies for API route registration.
 type Deps struct {
 	Log   *slog.Logger
 	Store repo.Store
+{{- if .IncludeStripe}}
+	WebhookSecret string
+{{- end}}
 }
 
 // RegisterRoutes registers all API route handlers on the server.
@@ -23,4 +29,9 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 
 	healthHandler := health.NewHandler(deps.Store)
 	api.GET("/health", healthHandler.Health)
+{{- if .IncludeStripe}}
+
+	stripeHandler := stripehandler.NewHandler(deps.WebhookSecret, deps.Log)
+	api.POST("/webhooks/stripe", stripeHandler.HandleWebhook)
+{{- end}}
 }

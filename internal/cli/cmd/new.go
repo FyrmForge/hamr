@@ -246,6 +246,7 @@ func applyWizardResult(cmd *cobra.Command, name string, res *wizardResult, cfg *
 
 	cfg.IncludeWS = res.WebSocket == "yes"
 	cfg.IncludeE2E = res.E2E == "yes"
+	cfg.IncludeStripe = res.Stripe == "yes"
 
 	if res.StorageBackend != "none" && res.StorageBackend != "" {
 		cfg.IncludeStorage = true
@@ -265,4 +266,5 @@ func init() {
 	newCmd.Flags().String("database", "postgres", "database type")
 	newCmd.Flags().String("location", "subfolder", "project location: \"subfolder\" or \"current\"")
 	newCmd.Flags().Bool("static-s3", false, "sync static assets to a dedicated S3 bucket")
+	newCmd.Flags().Bool("stripe", false, "include Stripe webhook handler")
 }

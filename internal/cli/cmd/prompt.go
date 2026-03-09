@@ -21,6 +21,7 @@ type wizardResult struct {
 	StaticS3       string // "yes" | "no"
 	WebSocket      string // "yes" | "no"
 	E2E            string // "yes" | "no"
+	Stripe         string // "yes" | "no"
 }
 
 // wizardStep pairs a huh group with a callback that prints the selection.
@@ -48,6 +49,7 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 		StaticS3:       "yes",
 		WebSocket:      "yes",
 		E2E:            "yes",
+		Stripe:         "yes",
 	}
 
 	var steps []wizardStep
@@ -305,6 +307,33 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 			res.E2E = "yes"
 		} else {
 			res.E2E = "no"
+		}
+	}
+
+	// ── Payment provider ───────────────────────────────────
+	if !cmd.Flags().Changed("stripe") {
+		if err := huh.NewForm(huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Payment provider").
+				Description("Adds a webhook handler with signature verification and an event-type dispatch map.").
+				Options(
+					huh.NewOption("Stripe — webhook handler using the stripe-go SDK", "yes"),
+					huh.NewOption("None", "no"),
+				).
+				Value(&res.Stripe),
+		)).Run(); err != nil {
+			return nil, err
+		}
+		if res.Stripe == "yes" {
+			fmt.Println("  Payment provider: Stripe")
+		} else {
+			fmt.Println("  Payment provider: None")
+		}
+	} else {
+		if v, _ := cmd.Flags().GetBool("stripe"); v {
+			res.Stripe = "yes"
+		} else {
+			res.Stripe = "no"
 		}
 	}
 

@@ -50,6 +50,9 @@ var (
 	envS3AccessKey   = config.GetEnvOrDefault("S3_ACCESS_KEY", "minioadmin")
 	envS3SecretKey   = config.GetEnvOrDefault("S3_SECRET_KEY", "minioadmin")
 {{- end}}
+{{- if .IncludeStripe}}
+	envStripeWebhookSecret = config.GetEnvOrDefault("STRIPE_WEBHOOK_SECRET", "")
+{{- end}}
 )
 
 func main() {
@@ -131,6 +134,9 @@ func main() {
 	api.RegisterRoutes(srv, &api.Deps{
 		Log:   log,
 		Store: store,
+{{- if .IncludeStripe}}
+		WebhookSecret: envStripeWebhookSecret,
+{{- end}}
 	})
 
 	web.RegisterRoutes(srv, &web.Deps{

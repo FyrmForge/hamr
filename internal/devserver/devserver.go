@@ -63,11 +63,7 @@ func NewRunner(cfg *Config, opts ...Option) *Runner {
 		opt(r)
 	}
 	if r.logger == nil {
-		level := slog.LevelInfo
-		if r.verbose {
-			level = slog.LevelDebug
-		}
-		r.logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+		r.logger = newDevLogger(os.Stderr, r.verbose)
 	}
 	return r
 }
