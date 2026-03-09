@@ -19,13 +19,9 @@ var reloadJS []byte
 //go:embed logo.png
 var logoPNG []byte
 
-var reloadScript = []byte("\n<script>\n" + string(reloadJS) + "\n</script>\n")
+var reloadScript []byte
 
 func init() {
-	// Rebuild reloadScript after init since string(reloadJS) in var decl
-	// doesn't work with embed at package init time — embed is populated
-	// before init() runs but the var decl for reloadScript uses the
-	// zero-value reloadJS. Rebuild here.
 	reloadScript = []byte("\n<script>\n" + string(reloadJS) + "\n</script>\n")
 }
 
@@ -34,7 +30,7 @@ func init() {
 // The SSE broker handler is mounted at /__hamr/reload.
 // If errorState is non-nil, HTML requests are intercepted with an error page
 // when there are active build errors.
-func NewProxyHandler(target string, broker *SSEBroker, errorState *ErrorState, logBuf *LogBuffer, injectReload bool) http.Handler {
+func NewProxyHandler(target string, broker *SSEBroker, errorState *ErrorState, logBuf *LogBuffer, actions *DevActions, injectReload bool) http.Handler {
 	targetURL := &url.URL{
 		Scheme: "http",
 		Host:   normalizeHost(target),
@@ -59,6 +55,22 @@ func NewProxyHandler(target string, broker *SSEBroker, errorState *ErrorState, l
 		proxy.ModifyResponse = injectReloadScript
 	}
 
+	// Handle transport errors (backend down / connection refused).
+	waitingPage := renderWaitingPage(target)
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		if acceptsHTML(r) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("X-Hamr-Waiting", "1")
+			w.WriteHeader(http.StatusBadGateway)
+			w.Write(waitingPage) //nolint:errcheck
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Hamr-Waiting", "1")
+		w.WriteHeader(http.StatusBadGateway)
+		w.Write([]byte(`{"error":"backend unavailable"}`)) //nolint:errcheck
+	}
+
 	var rootHandler http.Handler = proxy
 	if errorState != nil {
 		rootHandler = &errorInterceptor{errorState: errorState, next: proxy}
@@ -71,6 +83,9 @@ func NewProxyHandler(target string, broker *SSEBroker, errorState *ErrorState, l
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		w.Write(logoPNG) //nolint:errcheck
 	})
+	if actions != nil {
+		actions.RegisterRoutes(mux)
+	}
 	if logBuf != nil {
 		mux.HandleFunc("/__hamr/logs", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")

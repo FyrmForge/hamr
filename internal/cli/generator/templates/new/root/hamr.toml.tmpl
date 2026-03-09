@@ -3,6 +3,11 @@ listen = ":3000"
 target = ":8080"
 inject_reload = true
 
+[[dev.docker_compose]]
+name = "infra"
+file = "docker/docker-compose.yaml"
+keep_running = true
+
 [[dev.watch]]
 name = "templ"
 watch = "**/*.templ"

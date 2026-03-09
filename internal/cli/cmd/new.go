@@ -227,8 +227,7 @@ When all flags are provided, no interactive prompts are shown.`,
 		if !inPlace {
 			fmt.Printf("  cd %s\n", dir)
 		}
-		fmt.Println("  make docker-up")
-		fmt.Println("  make dev")
+		fmt.Println("  hamr dev")
 
 		return nil
 	},

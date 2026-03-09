@@ -15,19 +15,16 @@ A Go web application built with the [HAMR framework](https://github.com/FyrmForg
 # Install dev tools (templ)
 make install
 
-# Start the database
-make docker-up
-
-# Run the server (generates templ files + live reload)
-make dev
+# Run the dev server (starts Docker, builds, live reload)
+hamr dev
 ```
 
-The server starts at [http://localhost:8080](http://localhost:8080).
+The server starts at [http://localhost:3000](http://localhost:3000) (proxied from :8080).
 
 ## Development
 
 ```bash
-make dev            # Run dev server (live reload)
+hamr dev            # Run dev server (live reload)
 make build          # Build binary to bin/server
 make test           # Run tests
 make lint           # Run golangci-lint

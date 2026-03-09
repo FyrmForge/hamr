@@ -30,10 +30,18 @@ type sseDaemon struct {
 	Cmd  string `json:"cmd"`
 }
 
+// sseDockerCompose is a docker compose entry serialized for the config SSE event.
+type sseDockerCompose struct {
+	Name     string   `json:"name"`
+	File     string   `json:"file"`
+	Services []string `json:"services,omitempty"`
+}
+
 // sseConfig is the payload for the "config" SSE event.
 type sseConfig struct {
-	Rules   []sseRule   `json:"rules"`
-	Daemons []sseDaemon `json:"daemons"`
+	Rules         []sseRule          `json:"rules"`
+	Daemons       []sseDaemon        `json:"daemons"`
+	DockerCompose []sseDockerCompose `json:"docker_compose,omitempty"`
 }
 
 // SSEBroker manages SSE client connections and broadcasts events.
@@ -44,9 +52,10 @@ type SSEBroker struct {
 	configJSON string // pre-serialized config payload
 }
 
-// NewSSEBroker creates a new SSE broker. The provided watch rules and daemons
-// are serialized once and sent to each client on connect as a "config" event.
-func NewSSEBroker(rules []WatchRule, daemons []Daemon) *SSEBroker {
+// NewSSEBroker creates a new SSE broker. The provided watch rules, daemons, and
+// docker compose entries are serialized once and sent to each client on connect
+// as a "config" event.
+func NewSSEBroker(rules []WatchRule, daemons []Daemon, dockerCompose []DockerCompose) *SSEBroker {
 	cfg := sseConfig{
 		Rules:   make([]sseRule, len(rules)),
 		Daemons: make([]sseDaemon, len(daemons)),
@@ -63,6 +72,16 @@ func NewSSEBroker(rules []WatchRule, daemons []Daemon) *SSEBroker {
 	}
 	for i, d := range daemons {
 		cfg.Daemons[i] = sseDaemon{Name: d.Name, Cmd: d.Cmd}
+	}
+	if len(dockerCompose) > 0 {
+		cfg.DockerCompose = make([]sseDockerCompose, len(dockerCompose))
+		for i, dc := range dockerCompose {
+			cfg.DockerCompose[i] = sseDockerCompose{
+				Name:     dc.Name,
+				File:     dc.File,
+				Services: dc.Services,
+			}
+		}
 	}
 	data, _ := json.Marshal(cfg)
 	return &SSEBroker{

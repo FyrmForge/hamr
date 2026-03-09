@@ -18,21 +18,28 @@
     var buildingRules = {};   // name -> true while building
     var ruleErrors = {};      // name -> {output: "..."} for failed builds
     var connectionState = "disconnected";
+    var dockerStatus = {};    // compose name -> [{service, state, health, status}]
+    var dockerPollTimer = null;
+    var closeMenusListener = null;  // stored to avoid leak on re-render
 
     // --- Logs State ---
 
     var logLines = [];           // accumulated {rule, text} entries
     var logOverlay = null;       // overlay DOM element
-    var LOG_VISIBLE = 50;        // visible lines (controls window height)
+    var LOG_VISIBLE = 20;        // visible lines (controls window height)
     var BUFFER_MAX = 5000;       // max stored lines (internal cap)
     var LOG_LINE_H = 16.5;       // line height in px (11px * 1.5)
     var STORAGE_KEY = "__hamr_logs";
     var STORAGE_KEY_CAP = "__hamr_logs_cap";
+    var STORAGE_KEY_TAB = "__hamr_logs_tab";
+    var activeLogTab = "hamr";   // "hamr" or "docker"
 
-    // Restore saved visible lines.
+    // Restore saved settings.
     try {
         var savedCap = parseInt(localStorage.getItem(STORAGE_KEY_CAP), 10);
         if (savedCap > 0) LOG_VISIBLE = savedCap;
+        var savedTab = localStorage.getItem(STORAGE_KEY_TAB);
+        if (savedTab === "docker") activeLogTab = "docker";
     } catch(e) {}
 
     // --- ANSI to HTML ---
@@ -103,19 +110,14 @@
             "#__hamr-status.reloading{border-color:#FF8C32;opacity:1}" +
             "#__hamr-status.reloading img{animation:__hamr-spin 1s ease-out infinite}" +
 
-            // Logs checkbox in panel
-            "#__hamr-panel .hp-logs-row{display:flex;align-items:center;gap:8px;padding:10px 14px;" +
-            "border-top:1px solid #2E3338;cursor:pointer;user-select:none;}" +
-            "#__hamr-panel .hp-logs-row:hover{background:#2A2E33;}" +
-            "#__hamr-panel .hp-logs-row input{accent-color:#FFB347;margin:0;cursor:pointer;}" +
-            "#__hamr-panel .hp-logs-row span{font-size:12px;font-weight:600;color:#8B8B8B;}" +
-            "#__hamr-panel .hp-logs-row:hover span{color:#E8E8E8;}" +
+
+
 
             // Panel styles — opens upward above the widget
             "#__hamr-panel{position:fixed;bottom:86px;left:16px;z-index:100001;" +
             "width:320px;max-height:calc(100vh - 102px);overflow-y:auto;background:#1F2326;border:1px solid #3A3F45;border-radius:10px;" +
             "box-shadow:0 4px 20px rgba(0,0,0,0.5);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;" +
-            "font-size:13px;color:#D4D4D4;overflow:hidden;" +
+            "font-size:13px;color:#D4D4D4;overflow-x:hidden;" +
             "transform:translateY(8px);opacity:0;transition:transform 0.15s ease-out,opacity 0.15s ease-out;pointer-events:none;}" +
             "#__hamr-panel.open{transform:translateY(0);opacity:1;pointer-events:auto;}" +
             "#__hamr-panel *{box-sizing:border-box;}" +
@@ -142,10 +144,48 @@
             "#__hamr-panel .hp-rule-detail{color:#6B7280;font-size:11px;margin-left:auto;white-space:nowrap;" +
             "overflow:hidden;text-overflow:ellipsis;max-width:160px;}" +
 
+            // Action buttons
+            "#__hamr-panel .hp-action-btn{background:none;border:1px solid #3A3F45;border-radius:4px;" +
+            "color:#6B7280;font-size:11px;padding:2px 6px;cursor:pointer;line-height:1.3;" +
+            "transition:color 0.15s,border-color 0.15s;}" +
+            "#__hamr-panel .hp-action-btn:hover{color:#E8E8E8;border-color:#6B7280;}" +
+            "#__hamr-panel .hp-run-btn{background:none;border:none;color:#6B7280;font-size:13px;" +
+            "cursor:pointer;padding:0 4px;line-height:1;flex-shrink:0;transition:color 0.15s;}" +
+            "#__hamr-panel .hp-run-btn:hover{color:#4ADE80;}" +
+
+            // Docker section
+            "#__hamr-panel .hp-docker-svc{display:flex;align-items:center;gap:8px;padding:4px 0;}" +
+            "#__hamr-panel .hp-docker-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;background:#4B5563;}" +
+            "#__hamr-panel .hp-docker-dot.running{background:#4ADE80;}" +
+            "#__hamr-panel .hp-docker-dot.exited{background:#EF4444;}" +
+            "#__hamr-panel .hp-docker-dot.restarting{background:#FCD34D;animation:__hamr-pulse 1s ease-in-out infinite;}" +
+            "#__hamr-panel .hp-docker-dot.paused{background:#FCD34D;}" +
+            "#__hamr-panel .hp-docker-dot.dead{background:#EF4444;}" +
+            "#__hamr-panel .hp-docker-dot.created{background:#6B7280;}" +
+            "#__hamr-panel .hp-docker-svc-name{font-weight:500;color:#E8E8E8;}" +
+            "#__hamr-panel .hp-docker-svc-file{color:#6B7280;font-size:11px;margin-left:auto;white-space:nowrap;" +
+            "overflow:hidden;text-overflow:ellipsis;max-width:140px;}" +
+            "#__hamr-panel .hp-docker-cog{position:relative;flex-shrink:0;}" +
+            "#__hamr-panel .hp-docker-cog-btn{background:none;border:none;color:#4B5563;font-size:14px;" +
+            "cursor:pointer;padding:0 2px;line-height:1;transition:color 0.15s;}" +
+            "#__hamr-panel .hp-docker-cog-btn:hover{color:#E8E8E8;}" +
+            "#__hamr-panel .hp-docker-menu{display:none;position:absolute;right:0;bottom:100%;z-index:100002;" +
+            "background:#2A2E33;border:1px solid #3A3F45;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.4);" +
+            "min-width:90px;overflow:hidden;}" +
+            "#__hamr-panel .hp-docker-menu.open{display:block;}" +
+            "#__hamr-panel .hp-docker-menu-item{display:block;width:100%;background:none;border:none;" +
+            "color:#D4D4D4;font-size:12px;padding:6px 12px;cursor:pointer;text-align:left;}" +
+            "#__hamr-panel .hp-docker-menu-item:hover{background:#3A3F45;color:#E8E8E8;}" +
+            "#__hamr-panel .hp-docker-menu-item.danger{color:#F87171;}" +
+            "#__hamr-panel .hp-docker-menu-item.danger:hover{background:#3A2020;color:#FCA5A5;}" +
+
             // Daemon row
-            "#__hamr-panel .hp-daemon{padding:4px 0;}" +
-            "#__hamr-panel .hp-daemon-name{color:#E8E8E8;font-weight:500;}" +
-            "#__hamr-panel .hp-daemon-cmd{color:#6B7280;font-size:11px;margin-top:1px;}" +
+            "#__hamr-panel .hp-daemon{display:flex;align-items:center;gap:8px;padding:4px 0;}" +
+            "#__hamr-panel .hp-daemon-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;background:#4ADE80;}" +
+            "#__hamr-panel .hp-daemon-dot.error{background:#EF4444;}" +
+            "#__hamr-panel .hp-daemon-name{font-weight:500;color:#E8E8E8;}" +
+            "#__hamr-panel .hp-daemon-cmd{color:#6B7280;font-size:11px;margin-left:auto;white-space:nowrap;" +
+            "overflow:hidden;text-overflow:ellipsis;max-width:160px;}" +
 
             // Error section
             "#__hamr-panel .hp-error-label{color:#EF4444;}" +
@@ -157,17 +197,28 @@
             // Error dot
             "#__hamr-panel .hp-rule-dot.error{background:#EF4444;}" +
 
+            // Footer toggle
+            "#__hamr-panel .hp-footer{padding:10px 14px;border-top:1px solid #2E3338;display:flex;align-items:center;gap:8px;}" +
+            "#__hamr-panel .hp-footer label{display:flex;align-items:center;gap:6px;font-size:12px;color:#6B7280;cursor:pointer;}" +
+            "#__hamr-panel .hp-footer label:hover{color:#D4D4D4;}" +
+            "#__hamr-panel .hp-footer input[type=checkbox]{accent-color:#FFB347;cursor:pointer;}" +
+
             // Logs overlay — to the right of the widget, fills remaining width
             "#__hamr-logs{position:fixed;bottom:16px;left:86px;right:16px;z-index:100000;" +
             "background:#1A1D20;border:1px solid #3A3F45;border-radius:10px;" +
             "box-shadow:0 4px 24px rgba(0,0,0,0.6);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;" +
             "font-size:13px;color:#D4D4D4;overflow:hidden;}" +
             "#__hamr-logs *{box-sizing:border-box;}" +
-            "#__hamr-logs .hl-header{display:flex;align-items:center;justify-content:space-between;" +
-            "padding:10px 14px;border-bottom:1px solid #3A3F45;flex-shrink:0;}" +
-            "#__hamr-logs .hl-title{font-weight:600;font-size:14px;color:#E8E8E8;}" +
+            "#__hamr-logs .hl-header{display:flex;align-items:center;" +
+            "padding:0 14px 0 0;border-bottom:1px solid #3A3F45;flex-shrink:0;}" +
+            "#__hamr-logs .hl-tabs{display:flex;gap:0;}" +
+            "#__hamr-logs .hl-tab{padding:10px 14px;font-weight:600;font-size:13px;color:#6B7280;" +
+            "cursor:pointer;border-bottom:2px solid transparent;transition:color 0.15s,border-color 0.15s;" +
+            "background:none;border-top:none;border-left:none;border-right:none;}" +
+            "#__hamr-logs .hl-tab:hover{color:#D4D4D4;}" +
+            "#__hamr-logs .hl-tab.active{color:#E8E8E8;border-bottom-color:#FFB347;}" +
             "#__hamr-logs .hl-close{background:none;border:none;color:#6B7280;font-size:18px;" +
-            "cursor:pointer;padding:0 4px;line-height:1;}" +
+            "cursor:pointer;padding:0 4px;line-height:1;margin-left:auto;}" +
             "#__hamr-logs .hl-close:hover{color:#E8E8E8;}" +
             "#__hamr-logs .hl-cap{display:flex;align-items:center;gap:0;margin-left:auto;margin-right:12px;" +
             "font-size:11px;color:#6B7280;background:#2A2E33;border:1px solid #3A3F45;border-radius:5px;" +
@@ -183,7 +234,10 @@
             "font-family:'SF Mono',Monaco,Consolas,monospace;font-size:11px;" +
             "line-height:1.5;white-space:pre-wrap;word-break:break-all;}" +
             "#__hamr-logs .hl-line{}" +
-            "#__hamr-logs .hl-rule{color:#6B7280;}";
+            "#__hamr-logs .hl-rule{color:#6B7280;}" +
+            "#__hamr-logs .hl-docker-body{overflow-y:auto;padding:8px 12px;" +
+            "font-family:'SF Mono',Monaco,Consolas,monospace;font-size:11px;" +
+            "line-height:1.5;white-space:pre-wrap;word-break:break-all;}";
         document.head.appendChild(style);
 
         widget = document.createElement("div");
@@ -281,17 +335,52 @@
     function openPanel() {
         if (!config) return;
         ensurePanel();
+        pollDockerStatus();
         renderPanel();
         panelOpen = true;
         // Trigger reflow then add class for animation.
         panel.offsetHeight; // eslint-disable-line no-unused-expressions
         panel.classList.add("open");
+        startDockerPoll();
     }
 
     function closePanel() {
         panelOpen = false;
         if (panel) {
             panel.classList.remove("open");
+        }
+        stopDockerPoll();
+    }
+
+    // --- Docker Status Polling ---
+
+    function pollDockerStatus() {
+        if (!config || !config.docker_compose) return;
+        for (var i = 0; i < config.docker_compose.length; i++) {
+            (function(dc) {
+                fetch("/__hamr/docker/" + encodeURIComponent(dc.name) + "/status")
+                    .then(function(resp) { return resp.json(); })
+                    .then(function(data) {
+                        if (Array.isArray(data)) {
+                            dockerStatus[dc.name] = data;
+                            if (panelOpen) renderPanel();
+                        }
+                    })
+                    .catch(function() {});
+            })(config.docker_compose[i]);
+        }
+    }
+
+    function startDockerPoll() {
+        stopDockerPoll();
+        if (!config || !config.docker_compose || config.docker_compose.length === 0) return;
+        dockerPollTimer = setInterval(pollDockerStatus, 5000);
+    }
+
+    function stopDockerPoll() {
+        if (dockerPollTimer) {
+            clearInterval(dockerPollTimer);
+            dockerPollTimer = null;
         }
     }
 
@@ -323,6 +412,7 @@
                     '<span class="hp-rule-dot ' + dotCls + '"></span>' +
                     '<span class="hp-rule-name">' + esc(r.name) + '</span>' +
                     '<span class="hp-rule-detail" title="' + esc(detail) + '">' + esc(detail) + '</span>' +
+                    '<button class="hp-run-btn" data-rule="' + esc(r.name) + '" title="Run build">\u25B6</button>' +
                     '</div>';
             }
             html += '</div>';
@@ -350,35 +440,137 @@
             html += '<div class="hp-section"><div class="hp-label">Daemons</div>';
             for (var j = 0; j < config.daemons.length; j++) {
                 var d = config.daemons[j];
+                var daemonErr = ruleErrors[d.name];
+                var daemonDotCls = daemonErr ? "error" : "";
                 html += '<div class="hp-daemon">' +
+                    '<span class="hp-daemon-dot ' + daemonDotCls + '"></span>' +
                     '<span class="hp-daemon-name">' + esc(d.name) + '</span>' +
-                    '<div class="hp-daemon-cmd">' + esc(d.cmd) + '</div>' +
+                    '<span class="hp-daemon-cmd" title="' + esc(d.cmd) + '">' + esc(d.cmd) + '</span>' +
                     '</div>';
             }
             html += '</div>';
         }
 
-        // Logs checkbox row.
-        var checked = isLogOverlayOpen() ? " checked" : "";
-        html += '<label class="hp-logs-row">' +
-            '<input type="checkbox" id="__hamr-logscb"' + checked + '>' +
-            '<span>Terminal Logs</span>' +
-            '</label>';
+        // Docker compose section — list each service with health LED and cog menu.
+        if (config.docker_compose && config.docker_compose.length > 0) {
+            html += '<div class="hp-section"><div class="hp-label">Docker</div>';
+            for (var di = 0; di < config.docker_compose.length; di++) {
+                var dc = config.docker_compose[di];
+                var statuses = dockerStatus[dc.name] || [];
+                // Build a set of known services from config or from live status.
+                var svcs = (dc.services && dc.services.length > 0) ? dc.services.slice() : [];
+                if (svcs.length === 0 && statuses.length > 0) {
+                    for (var si = 0; si < statuses.length; si++) svcs.push(statuses[si].service);
+                }
+                // Render each service as its own row with cog menu.
+                for (var sj = 0; sj < svcs.length; sj++) {
+                    var svcName = svcs[sj];
+                    var svcState = "";
+                    for (var sk = 0; sk < statuses.length; sk++) {
+                        if (statuses[sk].service === svcName) { svcState = statuses[sk].state; break; }
+                    }
+                    html += '<div class="hp-docker-svc">' +
+                        '<span class="hp-docker-dot ' + esc(svcState) + '"></span>' +
+                        '<span class="hp-docker-svc-name">' + esc(svcName) + '</span>' +
+                        '<span class="hp-docker-svc-file" title="' + esc(dc.file) + '">' + esc(dc.file) + '</span>' +
+                        '<span class="hp-docker-cog">' +
+                        '<button class="hp-docker-cog-btn" data-docker="' + esc(dc.name) + '" data-svc="' + esc(svcName) + '">' +
+                        '\u2699</button>' +
+                        '<div class="hp-docker-menu">' +
+                        '<button class="hp-docker-menu-item" data-docker="' + esc(dc.name) + '" data-svc="' + esc(svcName) + '" data-action="restart">Restart</button>' +
+                        '<button class="hp-docker-menu-item danger" data-docker="' + esc(dc.name) + '" data-svc="' + esc(svcName) + '" data-action="wipe">Wipe &amp; Recreate</button>' +
+                        '</div></span></div>';
+                }
+                // If no services known yet, show compose name as placeholder.
+                if (svcs.length === 0) {
+                    html += '<div class="hp-docker-svc">' +
+                        '<span class="hp-docker-dot"></span>' +
+                        '<span class="hp-docker-svc-name">' + esc(dc.name) + '</span>' +
+                        '<span class="hp-docker-svc-file" title="' + esc(dc.file) + '">' + esc(dc.file) + '</span>' +
+                        '</div>';
+                }
+            }
+            html += '</div>';
+        }
+
+        // Logs toggle.
+        var logsChecked = isLogOverlayOpen();
+        html += '<div class="hp-footer">' +
+            '<label><input type="checkbox" class="hp-logs-toggle"' + (logsChecked ? " checked" : "") + '> Show logs</label>' +
+            '</div>';
 
         panel.innerHTML = html;
 
-        // Wire up the logs checkbox after innerHTML.
-        var cb = document.getElementById("__hamr-logscb");
-        if (cb) {
-            cb.addEventListener("change", function() {
-                if (cb.checked) {
+        // Wire up logs toggle.
+        var logsToggle = panel.querySelector(".hp-logs-toggle");
+        if (logsToggle) {
+            logsToggle.addEventListener("change", function() {
+                if (logsToggle.checked) {
                     openLogOverlay();
+                    try { localStorage.setItem(STORAGE_KEY, "1"); } catch(e) {}
                 } else {
                     closeLogOverlay();
+                    try { localStorage.setItem(STORAGE_KEY, "0"); } catch(e) {}
                 }
-                try { localStorage.setItem(STORAGE_KEY, cb.checked ? "1" : "0"); } catch(e) {}
             });
         }
+
+        // Wire up run buttons for watch rules.
+        var runBtns = panel.querySelectorAll(".hp-run-btn");
+        for (var ri = 0; ri < runBtns.length; ri++) {
+            (function(btn) {
+                btn.addEventListener("click", function(e) {
+                    e.stopPropagation();
+                    var name = btn.getAttribute("data-rule");
+                    fetch("/__hamr/rule/" + encodeURIComponent(name) + "/run", {method: "POST"})
+                        .catch(function(err) { console.warn("[hamr] run rule failed", err); });
+                });
+            })(runBtns[ri]);
+        }
+
+        // Wire up docker cog menus.
+        var cogBtns = panel.querySelectorAll(".hp-docker-cog-btn");
+        for (var ci = 0; ci < cogBtns.length; ci++) {
+            (function(btn) {
+                btn.addEventListener("click", function(e) {
+                    e.stopPropagation();
+                    var menu = btn.nextElementSibling;
+                    // Close all other menus first.
+                    var allMenus = panel.querySelectorAll(".hp-docker-menu.open");
+                    for (var mi = 0; mi < allMenus.length; mi++) {
+                        if (allMenus[mi] !== menu) allMenus[mi].classList.remove("open");
+                    }
+                    menu.classList.toggle("open");
+                });
+            })(cogBtns[ci]);
+        }
+        // Wire up menu items.
+        var menuItems = panel.querySelectorAll(".hp-docker-menu-item");
+        for (var mii = 0; mii < menuItems.length; mii++) {
+            (function(item) {
+                item.addEventListener("click", function(e) {
+                    e.stopPropagation();
+                    var name = item.getAttribute("data-docker");
+                    var svc = item.getAttribute("data-svc");
+                    var action = item.getAttribute("data-action");
+                    // Close menu.
+                    item.parentElement.classList.remove("open");
+                    if (action === "wipe" && !confirm("Wipe and recreate " + svc + "?")) return;
+                    var url = "/__hamr/docker/" + encodeURIComponent(name) + "/" + action + "?service=" + encodeURIComponent(svc);
+                    fetch(url, {method: "POST"})
+                        .catch(function(err) { console.warn("[hamr] docker " + action + " failed", err); });
+                });
+            })(menuItems[mii]);
+        }
+        // Close menus on outside click (remove previous listener to avoid leak).
+        if (closeMenusListener) {
+            document.removeEventListener("click", closeMenusListener);
+        }
+        closeMenusListener = function() {
+            var openMenus = panel.querySelectorAll(".hp-docker-menu.open");
+            for (var omi = 0; omi < openMenus.length; omi++) openMenus[omi].classList.remove("open");
+        };
+        document.addEventListener("click", closeMenusListener);
     }
 
     function updatePanelStatus() {
@@ -403,18 +595,44 @@
 
         logOverlay = document.createElement("div");
         logOverlay.id = "__hamr-logs";
-        logOverlay.innerHTML =
-            '<div class="hl-header">' +
-            '<span class="hl-title">Terminal Logs</span>' +
+
+        var headerHTML = '<div class="hl-header">' +
+            '<div class="hl-tabs">' +
+            '<button class="hl-tab' + (activeLogTab === "hamr" ? " active" : "") + '" data-tab="hamr">Hamr</button>' +
+            '<button class="hl-tab' + (activeLogTab === "docker" ? " active" : "") + '" data-tab="docker">Docker</button>' +
+            '</div>' +
             '<div class="hl-cap"><span>Max lines</span><input type="number" min="10" max="10000" step="10" value="' + LOG_VISIBLE + '"></div>' +
             '<button class="hl-close">&times;</button>' +
             '</div>' +
-            '<div class="hl-body"></div>';
+            '<div class="hl-body"' + (activeLogTab !== "hamr" ? ' style="display:none"' : "") + '></div>' +
+            '<div class="hl-docker-body"' + (activeLogTab !== "docker" ? ' style="display:none"' : "") + '></div>';
+
+        logOverlay.innerHTML = headerHTML;
         document.body.appendChild(logOverlay);
 
-        // Set body height based on visible lines.
+        // Set body heights based on visible lines.
         var body = logOverlay.querySelector(".hl-body");
-        body.style.height = (LOG_VISIBLE * LOG_LINE_H) + "px";
+        var dockerBody = logOverlay.querySelector(".hl-docker-body");
+        var h = (LOG_VISIBLE * LOG_LINE_H) + "px";
+        body.style.height = h;
+        dockerBody.style.height = h;
+
+        // Tab switching.
+        var tabs = logOverlay.querySelectorAll(".hl-tab");
+        for (var ti = 0; ti < tabs.length; ti++) {
+            (function(tab) {
+                tab.addEventListener("click", function() {
+                    activeLogTab = tab.getAttribute("data-tab");
+                    try { localStorage.setItem(STORAGE_KEY_TAB, activeLogTab); } catch(e) {}
+                    for (var tj = 0; tj < tabs.length; tj++) {
+                        tabs[tj].classList.toggle("active", tabs[tj].getAttribute("data-tab") === activeLogTab);
+                    }
+                    body.style.display = activeLogTab === "hamr" ? "" : "none";
+                    dockerBody.style.display = activeLogTab === "docker" ? "" : "none";
+                    if (activeLogTab === "docker") fetchDockerLogs();
+                });
+            })(tabs[ti]);
+        }
 
         var capInput = logOverlay.querySelector(".hl-cap input");
         capInput.addEventListener("change", function() {
@@ -422,21 +640,18 @@
             if (val >= 10 && val <= 10000) {
                 LOG_VISIBLE = val;
                 try { localStorage.setItem(STORAGE_KEY_CAP, String(val)); } catch(e) {}
-                // Resize the body.
-                var b = logOverlay.querySelector(".hl-body");
-                if (b) b.style.height = (LOG_VISIBLE * LOG_LINE_H) + "px";
+                var newH = (LOG_VISIBLE * LOG_LINE_H) + "px";
+                body.style.height = newH;
+                dockerBody.style.height = newH;
             }
         });
 
         logOverlay.querySelector(".hl-close").addEventListener("click", function() {
             closeLogOverlay();
             try { localStorage.setItem(STORAGE_KEY, "0"); } catch(e) {}
-            // Sync the panel checkbox if panel is open.
-            var cb = document.getElementById("__hamr-logscb");
-            if (cb) cb.checked = false;
         });
 
-        // Fetch history then render.
+        // Fetch hamr log history.
         fetch("/__hamr/logs").then(function(resp) {
             return resp.json();
         }).then(function(lines) {
@@ -453,6 +668,45 @@
             }
             body.scrollTop = body.scrollHeight;
         });
+
+        // If docker tab is active, fetch docker logs.
+        if (activeLogTab === "docker") fetchDockerLogs();
+    }
+
+    function fetchDockerLogs() {
+        if (!isLogOverlayOpen() || !config || !config.docker_compose) return;
+        var dockerBody = logOverlay.querySelector(".hl-docker-body");
+        if (!dockerBody) return;
+        dockerBody.textContent = "Loading...";
+
+        // Fetch logs from all compose entries and concat.
+        var pending = config.docker_compose.length;
+        var allOutput = [];
+        for (var i = 0; i < config.docker_compose.length; i++) {
+            (function(idx, dc) {
+                fetch("/__hamr/docker/" + encodeURIComponent(dc.name) + "/logs")
+                    .then(function(resp) { return resp.json(); })
+                    .then(function(data) {
+                        allOutput[idx] = data.output || data.error || "";
+                        pending--;
+                        if (pending <= 0) renderDockerLogs(allOutput);
+                    })
+                    .catch(function() {
+                        allOutput[idx] = "";
+                        pending--;
+                        if (pending <= 0) renderDockerLogs(allOutput);
+                    });
+            })(i, config.docker_compose[i]);
+        }
+    }
+
+    function renderDockerLogs(outputs) {
+        if (!isLogOverlayOpen()) return;
+        var dockerBody = logOverlay.querySelector(".hl-docker-body");
+        if (!dockerBody) return;
+        var combined = outputs.join("");
+        dockerBody.innerHTML = ansiToHtml(combined) || '<span style="color:#6B7280">No docker logs available</span>';
+        dockerBody.scrollTop = dockerBody.scrollHeight;
     }
 
     function closeLogOverlay() {
@@ -586,6 +840,10 @@
                 delete buildingRules[ruleName];
             }
             updateWidgetState();
+            if (window.__hamr_waiting_page) {
+                location.reload();
+                return;
+            }
             if (window.__hamr_error_page) {
                 if (!hasErrors()) {
                     location.reload();
@@ -626,6 +884,17 @@
             } else {
                 location.reload();
             }
+        });
+
+        source.addEventListener("shutdown", function() {
+            console.log("[hamr] dev server shutting down, will reconnect when available");
+            if (source) {
+                source.close();
+                source = null;
+            }
+            setState("disconnected");
+            delay = MIN_DELAY;
+            reconnect();
         });
 
         source.onerror = function() {

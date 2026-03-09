@@ -1,6 +1,7 @@
 package devserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"sync"
 	"time"
 )
@@ -61,7 +63,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	graph := NewGraph(r.cfg.Dev.Watch)
 	pm := NewProcessManager(r.logger)
-	broker := NewSSEBroker(r.cfg.Dev.Watch, r.cfg.Dev.Daemons)
+	broker := NewSSEBroker(r.cfg.Dev.Watch, r.cfg.Dev.Daemons, r.cfg.Dev.DockerCompose)
 	errorState := NewErrorState()
 	logBuf := NewLogBuffer(1000)
 	pm.SetLogOutput(logBuf, broker)
@@ -76,26 +78,52 @@ func (r *Runner) Run(ctx context.Context) error {
 	var proxySrv *http.Server
 	defer func() {
 		r.logger.Info("shutting down")
+		broker.Broadcast(SSEEvent{Type: "shutdown"})
+		pm.ClearCallbacks()
 		cancel()
 		if watcher != nil {
 			watcher.Stop()
 		}
 		schedulerWG.Wait()
 		pm.StopAll()
+		for i := range r.cfg.Dev.DockerCompose {
+			dc := &r.cfg.Dev.DockerCompose[i]
+			if !dc.KeepRunning {
+				r.stopDockerCompose(dc)
+			}
+		}
 		if proxySrv != nil {
 			_ = proxySrv.Close()
 		}
 	}()
 
+	actions := &DevActions{
+		ctx: runCtx, cfg: r.cfg, pm: pm, broker: broker,
+		errorState: errorState, graph: graph, logger: r.logger,
+	}
+
 	if !r.noProxy {
 		inject := r.cfg.Proxy.InjectReload != nil && *r.cfg.Proxy.InjectReload
-		handler := NewProxyHandler(r.cfg.Proxy.Target, broker, errorState, logBuf, inject)
+		handler := NewProxyHandler(r.cfg.Proxy.Target, broker, errorState, logBuf, actions, inject)
 		srv, _, err := ListenAndServeProxy(r.cfg.Proxy.Listen, handler)
 		if err != nil {
 			return fmt.Errorf("start proxy: %w", err)
 		}
 		proxySrv = srv
 		r.logger.Info("proxy listening", "addr", r.cfg.Proxy.Listen, "target", r.cfg.Proxy.Target)
+	}
+
+	// Ensure docker compose services are running before build.
+	for i := range r.cfg.Dev.DockerCompose {
+		dc := &r.cfg.Dev.DockerCompose[i]
+		r.logger.Info("ensuring docker compose", "name", dc.Name, "file", dc.File)
+		if output, err := r.ensureDockerCompose(runCtx, dc); err != nil {
+			r.logger.Error("docker compose failed", "name", dc.Name, "err", err)
+			errorState.Set(dc.Name, output)
+			broker.Broadcast(buildErrorEvent(dc.Name, output))
+		} else {
+			errorState.Clear(dc.Name)
+		}
 	}
 
 	// Initial build: run all rules in topological order.
@@ -351,4 +379,35 @@ func (r *Runner) findRule(name string) *WatchRule {
 		}
 	}
 	return nil
+}
+
+// ensureDockerCompose runs "docker compose up -d" for a compose entry.
+func (r *Runner) ensureDockerCompose(ctx context.Context, dc *DockerCompose) (string, error) {
+	args := []string{"compose", "-f", dc.File, "up", "-d"}
+	args = append(args, dc.Services...)
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.Env = buildEnv(dc.Env)
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	if err := cmd.Run(); err != nil {
+		return buf.String(), fmt.Errorf("docker compose up failed: %w", err)
+	}
+	return "", nil
+}
+
+// stopDockerCompose runs "docker compose down" for a compose entry during shutdown.
+func (r *Runner) stopDockerCompose(dc *DockerCompose) {
+	r.logger.Info("stopping docker compose", "name", dc.Name)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	args := []string{"compose", "-f", dc.File, "down"}
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.Env = buildEnv(dc.Env)
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	if err := cmd.Run(); err != nil {
+		r.logger.Error("docker compose down failed", "name", dc.Name, "err", err, "output", buf.String())
+	}
 }

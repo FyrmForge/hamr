@@ -18,8 +18,18 @@ type Config struct {
 
 // DevConfig holds the [dev] table with watch rules and daemons.
 type DevConfig struct {
-	Watch   []WatchRule `toml:"watch"`
-	Daemons []Daemon    `toml:"daemon"`
+	Watch         []WatchRule      `toml:"watch"`
+	Daemons       []Daemon         `toml:"daemon"`
+	DockerCompose []DockerCompose  `toml:"docker_compose"`
+}
+
+// DockerCompose declares a docker compose file that hamr ensures is running.
+type DockerCompose struct {
+	Name        string   `toml:"name"`
+	File        string   `toml:"file"`
+	Services    []string `toml:"services"`
+	KeepRunning bool     `toml:"keep_running"`
+	Env         []string `toml:"env"`
 }
 
 // Daemon defines a long-running background process started once at launch.
@@ -173,11 +183,25 @@ func applyDefaults(cfg *Config) {
 }
 
 func validate(cfg *Config) error {
-	if len(cfg.Dev.Watch) == 0 && len(cfg.Dev.Daemons) == 0 {
-		return fmt.Errorf("no watch rules or daemons defined in [dev]")
+	if len(cfg.Dev.Watch) == 0 && len(cfg.Dev.Daemons) == 0 && len(cfg.Dev.DockerCompose) == 0 {
+		return fmt.Errorf("no watch rules, daemons, or docker compose entries defined in [dev]")
 	}
 
-	names := make(map[string]bool, len(cfg.Dev.Watch)+len(cfg.Dev.Daemons))
+	names := make(map[string]bool, len(cfg.Dev.Watch)+len(cfg.Dev.Daemons)+len(cfg.Dev.DockerCompose))
+
+	// Validate docker compose entries.
+	for i, dc := range cfg.Dev.DockerCompose {
+		if dc.Name == "" {
+			return fmt.Errorf("docker_compose %d: name is required", i)
+		}
+		if dc.File == "" {
+			return fmt.Errorf("docker_compose %q: file is required", dc.Name)
+		}
+		if names[dc.Name] {
+			return fmt.Errorf("duplicate name %q (docker_compose collides with another entry)", dc.Name)
+		}
+		names[dc.Name] = true
+	}
 
 	// Validate daemons.
 	for i, d := range cfg.Dev.Daemons {

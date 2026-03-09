@@ -9,7 +9,7 @@ import (
 
 func newTestLogWriter(rule string) (*logWriter, *LogBuffer, *SSEBroker) {
 	buf := NewLogBuffer(100)
-	broker := NewSSEBroker(nil, nil)
+	broker := NewSSEBroker(nil, nil, nil)
 	lw := newLogWriter(rule, "", buf, broker)
 	return lw, buf, broker
 }

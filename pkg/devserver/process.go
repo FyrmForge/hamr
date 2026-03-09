@@ -198,6 +198,14 @@ func (pm *ProcessManager) StartProcess(ctx context.Context, rule *WatchRule) err
 	return nil
 }
 
+// ClearCallbacks disables all process exit callbacks.
+// Used during shutdown to prevent spurious build_error events.
+func (pm *ProcessManager) ClearCallbacks() {
+	pm.mu.Lock()
+	pm.OnProcessExit = nil
+	pm.mu.Unlock()
+}
+
 // StopAll gracefully stops all tracked processes.
 func (pm *ProcessManager) StopAll() {
 	pm.mu.Lock()

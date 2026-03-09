@@ -3,12 +3,14 @@ package devserver
 import (
 	"bytes"
 	"encoding/json"
+	"sync"
 )
 
 // logWriter implements io.Writer. It line-buffers output, tags each complete
 // line with a rule name, appends to a shared LogBuffer, and broadcasts an SSE
 // "output" event.
 type logWriter struct {
+	mu      sync.Mutex
 	rule    string
 	color   string
 	buf     *LogBuffer
@@ -21,6 +23,8 @@ func newLogWriter(rule, color string, buf *LogBuffer, broker *SSEBroker) *logWri
 }
 
 func (lw *logWriter) Write(p []byte) (int, error) {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
 	lw.partial.Write(p)
 	for {
 		line, err := lw.partial.ReadBytes('\n')
@@ -39,6 +43,8 @@ func (lw *logWriter) Write(p []byte) (int, error) {
 
 // Flush broadcasts any remaining partial line.
 func (lw *logWriter) Flush() {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
 	if lw.partial.Len() == 0 {
 		return
 	}

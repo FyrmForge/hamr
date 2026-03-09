@@ -14,7 +14,7 @@ import (
 )
 
 func TestSSEBroker_Handler(t *testing.T) {
-	broker := NewSSEBroker(nil, nil)
+	broker := NewSSEBroker(nil, nil, nil)
 	srv := httptest.NewServer(broker.Handler())
 	defer srv.Close()
 
@@ -41,7 +41,7 @@ func TestSSEBroker_Handler(t *testing.T) {
 }
 
 func TestSSEBroker_Broadcast(t *testing.T) {
-	broker := NewSSEBroker(nil, nil)
+	broker := NewSSEBroker(nil, nil, nil)
 	srv := httptest.NewServer(broker.Handler())
 	defer srv.Close()
 
@@ -68,7 +68,7 @@ func TestSSEBroker_Broadcast(t *testing.T) {
 }
 
 func TestSSEBroker_Broadcast_MultipleEvents(t *testing.T) {
-	broker := NewSSEBroker(nil, nil)
+	broker := NewSSEBroker(nil, nil, nil)
 	srv := httptest.NewServer(broker.Handler())
 	defer srv.Close()
 
@@ -94,7 +94,7 @@ func TestSSEBroker_Broadcast_MultipleEvents(t *testing.T) {
 }
 
 func TestSSEBroker_MultipleClients(t *testing.T) {
-	broker := NewSSEBroker(nil, nil)
+	broker := NewSSEBroker(nil, nil, nil)
 	srv := httptest.NewServer(broker.Handler())
 	defer srv.Close()
 
@@ -132,7 +132,7 @@ func TestSSEBroker_MultipleClients(t *testing.T) {
 }
 
 func TestSSEBroker_ClientDisconnect(t *testing.T) {
-	broker := NewSSEBroker(nil, nil)
+	broker := NewSSEBroker(nil, nil, nil)
 	srv := httptest.NewServer(broker.Handler())
 	defer srv.Close()
 
@@ -150,7 +150,7 @@ func TestSSEBroker_ClientDisconnect(t *testing.T) {
 }
 
 func TestSSEBroker_Broadcast_NoClients(t *testing.T) {
-	broker := NewSSEBroker(nil, nil)
+	broker := NewSSEBroker(nil, nil, nil)
 	assert.Equal(t, 0, broker.ClientCount())
 
 	// Should not panic or block.
@@ -158,7 +158,7 @@ func TestSSEBroker_Broadcast_NoClients(t *testing.T) {
 }
 
 func TestSSEBroker_Broadcast_FullChannel(t *testing.T) {
-	broker := NewSSEBroker(nil, nil)
+	broker := NewSSEBroker(nil, nil, nil)
 	srv := httptest.NewServer(broker.Handler())
 	defer srv.Close()
 
@@ -193,7 +193,7 @@ func TestSSEBroker_ConfigEvent(t *testing.T) {
 	daemons := []Daemon{
 		{Name: "server", Cmd: "go run ./cmd/server"},
 	}
-	broker := NewSSEBroker(rules, daemons)
+	broker := NewSSEBroker(rules, daemons, nil)
 	srv := httptest.NewServer(broker.Handler())
 	defer srv.Close()
 
@@ -213,7 +213,7 @@ func TestSSEBroker_ConfigEvent(t *testing.T) {
 }
 
 func TestSSEBroker_ClientCount(t *testing.T) {
-	broker := NewSSEBroker(nil, nil)
+	broker := NewSSEBroker(nil, nil, nil)
 	assert.Equal(t, 0, broker.ClientCount())
 }
 

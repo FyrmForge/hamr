@@ -268,7 +268,7 @@ func TestLoadConfig_ValidationErrors(t *testing.T) {
 		{
 			name:    "no watch rules or daemons",
 			toml:    `[dev]`,
-			wantErr: "no watch rules or daemons",
+			wantErr: "no watch rules, daemons, or docker compose",
 		},
 		{
 			name: "missing name",
@@ -510,6 +510,118 @@ func TestDetectCycles(t *testing.T) {
 		})
 		assert.NoError(t, err)
 	})
+}
+
+func TestLoadConfig_DockerCompose(t *testing.T) {
+	path := writeConfig(t, `
+[[dev.docker_compose]]
+name = "infra"
+file = "docker-compose.yml"
+services = ["postgres", "redis"]
+keep_running = true
+env = ["COMPOSE_PROJECT_NAME=myapp"]
+
+[[dev.watch]]
+name = "go"
+watch = "**/*.go"
+cmd = "go build ./cmd/server"
+`)
+	cfg, err := LoadConfig(path)
+	require.NoError(t, err)
+	require.Len(t, cfg.Dev.DockerCompose, 1)
+	dc := cfg.Dev.DockerCompose[0]
+	assert.Equal(t, "infra", dc.Name)
+	assert.Equal(t, "docker-compose.yml", dc.File)
+	assert.Equal(t, []string{"postgres", "redis"}, dc.Services)
+	assert.True(t, dc.KeepRunning)
+	assert.Equal(t, []string{"COMPOSE_PROJECT_NAME=myapp"}, dc.Env)
+}
+
+func TestLoadConfig_DockerComposeOnly(t *testing.T) {
+	path := writeConfig(t, `
+[[dev.docker_compose]]
+name = "infra"
+file = "docker-compose.yml"
+`)
+	cfg, err := LoadConfig(path)
+	require.NoError(t, err)
+	require.Len(t, cfg.Dev.DockerCompose, 1)
+	assert.Empty(t, cfg.Dev.Watch)
+	assert.Empty(t, cfg.Dev.Daemons)
+}
+
+func TestLoadConfig_DockerCompose_ValidationErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		toml    string
+		wantErr string
+	}{
+		{
+			name: "missing name",
+			toml: `
+[[dev.docker_compose]]
+file = "docker-compose.yml"
+`,
+			wantErr: "name is required",
+		},
+		{
+			name: "missing file",
+			toml: `
+[[dev.docker_compose]]
+name = "infra"
+`,
+			wantErr: "file is required",
+		},
+		{
+			name: "duplicate docker compose name",
+			toml: `
+[[dev.docker_compose]]
+name = "infra"
+file = "docker-compose.yml"
+
+[[dev.docker_compose]]
+name = "infra"
+file = "docker-compose.dev.yml"
+`,
+			wantErr: "duplicate name",
+		},
+		{
+			name: "docker compose name collides with daemon",
+			toml: `
+[[dev.docker_compose]]
+name = "bg"
+file = "docker-compose.yml"
+
+[[dev.daemon]]
+name = "bg"
+cmd = "echo daemon"
+`,
+			wantErr: "duplicate",
+		},
+		{
+			name: "docker compose name collides with watch rule",
+			toml: `
+[[dev.docker_compose]]
+name = "go"
+file = "docker-compose.yml"
+
+[[dev.watch]]
+name = "go"
+watch = "*.go"
+cmd = "echo"
+`,
+			wantErr: "duplicate name",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeConfig(t, tt.toml)
+			_, err := LoadConfig(path)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
 }
 
 func TestLoadConfig_RunOnly(t *testing.T) {

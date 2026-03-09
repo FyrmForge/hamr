@@ -1,4 +1,4 @@
-.PHONY: dev build test lint templint migrate db-sh docker-up docker-down docker-delete docker-reload clean install check-templ{{- if eq .CSS "tailwind"}} check-node-modules css css-build{{- end}}{{- if .StaticS3}} sync-static{{- end}}
+.PHONY: build test lint templint migrate db-sh docker-up docker-down docker-delete docker-reload clean install check-templ{{- if eq .CSS "tailwind"}} check-node-modules css css-build{{- end}}{{- if .StaticS3}} sync-static{{- end}}
 
 ## install: Install development dependencies
 install:
@@ -24,10 +24,6 @@ css: check-node-modules
 css-build: check-node-modules
 	npm run css:build
 {{- end}}
-
-## dev: Run the dev server with file watching, builds, and live reload
-dev:
-	hamr dev
 
 VERSION := $(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
 
