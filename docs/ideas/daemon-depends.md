@@ -61,8 +61,8 @@ Add `findDaemon(name)` helper.
 
 ## Files
 
-1. `pkg/devserver/config.go`
-2. `pkg/devserver/graph.go`
-3. `pkg/devserver/devserver.go`
-4. `pkg/devserver/config_test.go`
-5. `pkg/devserver/graph_test.go`
+1. `internal/devserver/config.go`
+2. `internal/devserver/graph.go`
+3. `internal/devserver/devserver.go`
+4. `internal/devserver/config_test.go`
+5. `internal/devserver/graph_test.go`

@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/FyrmForge/hamr/pkg/devserver"
+	"github.com/FyrmForge/hamr/internal/devserver"
 	"github.com/spf13/cobra"
 )
 
