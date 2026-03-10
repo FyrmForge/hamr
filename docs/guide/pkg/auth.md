@@ -90,6 +90,41 @@ back with `SessionMetadata[T](session)`. Store implementations that persist
 metadata should call `session.SetMetadata(v)` after scanning and can read the
 raw value with `session.RawMetadata()`.
 
+#### Storing metadata in your SessionStore
+
+Add your own columns to the sessions table and map them in your store:
+
+```go
+// Create — extract metadata into your columns
+func (s *Store) Create(ctx context.Context, session *auth.Session) error {
+    meta, _ := auth.SessionMetadata[SessionMeta](session)
+    _, err := s.db.ExecContext(ctx,
+        `INSERT INTO sessions (id, subject_id, token, expires_at, created_at, ip, user_agent)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        session.ID, session.SubjectID, session.Token,
+        session.ExpiresAt, session.CreatedAt, meta.IP, meta.UserAgent,
+    )
+    return err
+}
+
+// GetByToken — reconstruct metadata from your columns
+func (s *Store) GetByToken(ctx context.Context, token string) (*auth.Session, error) {
+    var id, subjectID, tok, ip, ua string
+    var expiresAt, createdAt time.Time
+    err := s.db.QueryRowContext(ctx,
+        `SELECT id, subject_id, token, expires_at, created_at, ip, user_agent
+         FROM sessions WHERE token = $1`, token,
+    ).Scan(&id, &subjectID, &tok, &expiresAt, &createdAt, &ip, &ua)
+    // ... handle err ...
+    sess := &auth.Session{ID: id, SubjectID: subjectID, Token: tok, ExpiresAt: expiresAt, CreatedAt: createdAt}
+    sess.SetMetadata(SessionMeta{IP: ip, UserAgent: ua})
+    return sess, nil
+}
+```
+
+If you prefer a single JSON column instead, use `session.RawMetadata()` to
+marshal on write and `session.SetMetadata(json.RawMessage(...))` on read.
+
 ### Creating a SessionManager
 
 ```go
