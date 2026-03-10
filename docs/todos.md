@@ -19,3 +19,12 @@
 - [x] look at removing migrate cmd (binary) and use migrate cli? i think there is one
 - [] scafold unit tests 
 - [] by default add light/dark mode support
+- [] DO NOT make an initial commit
+- [] add loading spinner to hamr new and dev
+- [] add a "done" or ready message for hamr dev 
+- [] add hotkey system for hamr dev so we can do stuff like force refresh watchers, or open browser
+- [] change hamr dev log colour from white to smth else
+- [] fix the modernice loops in scaffold
+  1. for loop can be modernized using range over int [default]
+- [] does the repo model make sense with gorm? surely we should do gorm ways of doing db ops
+  - or maybe keep repo model but use gorm ways of doing things

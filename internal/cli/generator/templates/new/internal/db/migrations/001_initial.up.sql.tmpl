@@ -5,8 +5,8 @@ CREATE TABLE sessions (
     subject_id  TEXT,
     token       TEXT        NOT NULL UNIQUE,
     expires_at  TIMESTAMPTZ NOT NULL,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    metadata    JSONB
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    -- Add your own metadata columns here
 );
 
 CREATE INDEX idx_sessions_token ON sessions (token);

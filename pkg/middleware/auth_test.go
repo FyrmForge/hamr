@@ -158,7 +158,7 @@ func TestAuth_noSessionLoaderSetsIDOnly(t *testing.T) {
 }
 
 func TestAuth_invalidSession(t *testing.T) {
-	_, mgr, c, _ := setupAuthTest(t, "bad-token")
+	_, mgr, c, rec := setupAuthTest(t, "bad-token")
 
 	handler := middleware.Auth(middleware.AuthConfig{
 		SessionManager: mgr,
@@ -172,6 +172,12 @@ func TestAuth_invalidSession(t *testing.T) {
 	he, ok := err.(*echo.HTTPError)
 	require.True(t, ok)
 	assert.Equal(t, http.StatusUnauthorized, he.Code)
+
+	// Stale cookie must be cleared so the browser stops sending it.
+	cookies := rec.Result().Cookies()
+	require.Len(t, cookies, 1, "expected a Set-Cookie header to clear the stale cookie")
+	assert.Equal(t, "session_token", cookies[0].Name)
+	assert.Equal(t, -1, cookies[0].MaxAge)
 }
 
 func TestAuth_noCookie(t *testing.T) {

@@ -56,11 +56,19 @@ Defaults: 7-day duration, cookie name `session_token`, Secure true, SameSite Lax
 ### Session Operations
 
 ```go
-// Create a session after login
-session, err := sm.CreateSession(ctx, userID, map[string]any{"ip": clientIP})
+type SessionMeta struct {
+    IP        string `json:"ip"`
+    UserAgent string `json:"ua"`
+}
+
+// Create a session after login — metadata can be any JSON-serializable type
+session, err := sm.CreateSession(ctx, userID, SessionMeta{IP: clientIP, UserAgent: ua})
 
 // Validate a session (deletes expired sessions automatically)
 session, err := sm.ValidateSession(ctx, token)
+
+// Read metadata back into your struct
+meta, err := auth.SessionMetadata[SessionMeta](session)
 
 // Delete on logout
 err := sm.DeleteSession(ctx, sessionID)

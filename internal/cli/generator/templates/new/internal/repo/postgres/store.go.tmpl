@@ -48,12 +48,15 @@ func (s *Store) DB() *sqlx.DB {
 // auth.SessionStore implementation
 // ---------------------------------------------------------------------------
 
+// Create inserts a new session row.
+// To store extra metadata, add your own columns to the sessions table and
+// populate them here, or store a JSON blob if you prefer.
 func (s *Store) Create(ctx context.Context, session *auth.Session) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO sessions (id, subject_id, token, expires_at, created_at, metadata)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		`INSERT INTO sessions (id, subject_id, token, expires_at, created_at)
+		 VALUES ($1, $2, $3, $4, $5)`,
 		session.ID, session.SubjectID, session.Token,
-		session.ExpiresAt, session.CreatedAt, nil,
+		session.ExpiresAt, session.CreatedAt,
 	)
 	return err
 }
@@ -133,11 +136,13 @@ type sessionRow struct {
 	Token     string     `gorm:"uniqueIndex;not null"`
 	ExpiresAt time.Time  `gorm:"not null"`
 	CreatedAt time.Time  `gorm:"not null"`
-	Metadata  *string    `gorm:"type:jsonb"`
 }
 
 func (sessionRow) TableName() string { return "sessions" }
 
+// Create inserts a new session row.
+// To store extra metadata, add your own columns to the sessions table and
+// populate them here, or store a JSON blob if you prefer.
 func (s *Store) Create(ctx context.Context, session *auth.Session) error {
 	row := sessionRow{
 		ID:        session.ID,

@@ -78,12 +78,17 @@ type Session struct {
     Token     string
     ExpiresAt time.Time
     CreatedAt time.Time
-    Metadata  map[string]any
+    // metadata is private — use the accessors below
 }
 ```
 
 `SubjectID` is always a `string` — projects convert their native ID type at the
 boundary.
+
+**Metadata:** Pass any value as the third argument to `CreateSession`. Read it
+back with `SessionMetadata[T](session)`. Store implementations that persist
+metadata should call `session.SetMetadata(v)` after scanning and can read the
+raw value with `session.RawMetadata()`.
 
 ### Creating a SessionManager
 
@@ -102,14 +107,26 @@ SameSite Lax.
 ### Session Operations
 
 ```go
-// Create
-session, err := sm.CreateSession(ctx, userID, map[string]any{"ip": clientIP})
+type SessionMeta struct {
+    IP        string `json:"ip"`
+    UserAgent string `json:"ua"`
+}
+
+// Create — pass any JSON-serializable value as metadata
+session, err := sm.CreateSession(ctx, userID, SessionMeta{
+    IP:        clientIP,
+    UserAgent: userAgent,
+})
 
 // Validate (deletes expired sessions automatically)
 session, err := sm.ValidateSession(ctx, token)
 if session == nil {
     // not found or expired
 }
+
+// Read metadata back into your struct
+meta, err := auth.SessionMetadata[SessionMeta](session)
+fmt.Println(meta.IP)
 
 // Delete
 err := sm.DeleteSession(ctx, sessionID)
@@ -149,7 +166,7 @@ func GenerateTokenN(n int) (string, error)
 
 // Session management
 func NewSessionManager(store SessionStore, opts ...SessionOption) *SessionManager
-func (m *SessionManager) CreateSession(ctx context.Context, subjectID string, metadata map[string]any) (*Session, error)
+func (m *SessionManager) CreateSession(ctx context.Context, subjectID string, metadata any) (*Session, error)
 func (m *SessionManager) ValidateSession(ctx context.Context, token string) (*Session, error)
 func (m *SessionManager) DeleteSession(ctx context.Context, id string) error
 func (m *SessionManager) DeleteSubjectSessions(ctx context.Context, subjectID string) error
@@ -158,6 +175,11 @@ func (m *SessionManager) CookiePath() string
 func (m *SessionManager) CookieSecure() bool
 func (m *SessionManager) SameSite() http.SameSite
 func (m *SessionManager) Duration() time.Duration
+
+// Metadata
+func SessionMetadata[T any](s *Session) (T, error)
+func (s *Session) SetMetadata(v any)
+func (s *Session) RawMetadata() any
 
 // Session options
 func WithDuration(d time.Duration) SessionOption

@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -16,8 +18,15 @@ type Session struct {
 	Token     string
 	ExpiresAt time.Time
 	CreatedAt time.Time
-	Metadata  map[string]any
+	metadata  any
 }
+
+// SetMetadata sets the session metadata. This is intended for use by
+// SessionStore implementations when populating a Session from the database.
+func (s *Session) SetMetadata(v any) { s.metadata = v }
+
+// RawMetadata returns the raw metadata value without type conversion.
+func (s *Session) RawMetadata() any { return s.metadata }
 
 // SessionStore is the persistence interface for sessions.
 // GetByToken returns (nil, nil) when the token is not found.
@@ -98,7 +107,7 @@ func NewSessionManager(store SessionStore, opts ...SessionOption) *SessionManage
 }
 
 // CreateSession creates a new session for the given subject.
-func (m *SessionManager) CreateSession(ctx context.Context, subjectID string, metadata map[string]any) (*Session, error) {
+func (m *SessionManager) CreateSession(ctx context.Context, subjectID string, metadata any) (*Session, error) {
 	token, err := GenerateToken()
 	if err != nil {
 		return nil, err
@@ -111,7 +120,7 @@ func (m *SessionManager) CreateSession(ctx context.Context, subjectID string, me
 		Token:     token,
 		ExpiresAt: now.Add(m.duration),
 		CreatedAt: now,
-		Metadata:  metadata,
+		metadata:  metadata,
 	}
 
 	if err := m.store.Create(ctx, s); err != nil {
@@ -172,3 +181,24 @@ func (m *SessionManager) SameSite() http.SameSite { return m.sameSite }
 
 // Duration returns the configured session duration.
 func (m *SessionManager) Duration() time.Duration { return m.duration }
+
+// SessionMetadata extracts session metadata into the target type T.
+// It handles both in-memory stores (direct type assertion) and database
+// stores (json.RawMessage unmarshal) transparently.
+func SessionMetadata[T any](s *Session) (T, error) {
+	var zero T
+	if s.metadata == nil {
+		return zero, nil
+	}
+	if v, ok := s.metadata.(T); ok {
+		return v, nil
+	}
+	if raw, ok := s.metadata.(json.RawMessage); ok {
+		var v T
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return zero, err
+		}
+		return v, nil
+	}
+	return zero, fmt.Errorf("auth: unexpected metadata type %T", s.metadata)
+}

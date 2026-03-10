@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"sync"
@@ -128,22 +129,50 @@ func TestSessionCreate(t *testing.T) {
 	assert.True(t, s.ExpiresAt.After(time.Now()), "ExpiresAt should be in the future")
 }
 
+type testSessionMeta struct {
+	IP        string `json:"ip"`
+	UserAgent string `json:"ua"`
+}
+
 func TestSessionCreateWithMetadata(t *testing.T) {
 	ctx := context.Background()
 	m := NewSessionManager(newMockStore())
 
-	meta := map[string]any{"ip": "10.0.0.1", "ua": "test-agent"}
+	meta := testSessionMeta{IP: "10.0.0.1", UserAgent: "test-agent"}
 	s, err := m.CreateSession(ctx, "user-1", meta)
 	require.NoError(t, err)
 
-	assert.Equal(t, "10.0.0.1", s.Metadata["ip"])
-	assert.Equal(t, "test-agent", s.Metadata["ua"])
-
-	// Validate round-trip preserves metadata.
-	got, err := m.ValidateSession(ctx, s.Token)
+	got, err := SessionMetadata[testSessionMeta](s)
 	require.NoError(t, err)
-	require.NotNil(t, got)
-	assert.Equal(t, "10.0.0.1", got.Metadata["ip"])
+	assert.Equal(t, "10.0.0.1", got.IP)
+	assert.Equal(t, "test-agent", got.UserAgent)
+
+	// Validate round-trip preserves metadata (in-memory).
+	validated, err := m.ValidateSession(ctx, s.Token)
+	require.NoError(t, err)
+	require.NotNil(t, validated)
+
+	got2, err := SessionMetadata[testSessionMeta](validated)
+	require.NoError(t, err)
+	assert.Equal(t, "10.0.0.1", got2.IP)
+}
+
+func TestSessionMetadataFromRawMessage(t *testing.T) {
+	s := &Session{}
+	s.SetMetadata(json.RawMessage(`{"ip":"192.168.1.1","ua":"curl"}`))
+
+	got, err := SessionMetadata[testSessionMeta](s)
+	require.NoError(t, err)
+	assert.Equal(t, "192.168.1.1", got.IP)
+	assert.Equal(t, "curl", got.UserAgent)
+}
+
+func TestSessionMetadataNil(t *testing.T) {
+	s := &Session{}
+
+	got, err := SessionMetadata[testSessionMeta](s)
+	require.NoError(t, err)
+	assert.Zero(t, got)
 }
 
 func TestSessionCreateTimestamps(t *testing.T) {

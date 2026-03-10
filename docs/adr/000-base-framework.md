@@ -157,7 +157,7 @@ github.com/FyrmForge/hamr/
 
 ### 6. `pkg/auth/session.go`
 - `SessionStore` interface: `Create`, `GetByToken`, `Delete`, `DeleteBySubjectID`
-- `Session` struct: `ID`, `SubjectID` (string — the project's user/account/member ID, converted to string; empty for anonymous sessions), `Token`, `ExpiresAt`, `CreatedAt`, `Metadata map[string]any`
+- `Session` struct: `ID`, `SubjectID` (string — the project's user/account/member ID, converted to string; empty for anonymous sessions), `Token`, `ExpiresAt`, `CreatedAt`, private `metadata` (set via `SetMetadata`, read via `SessionMetadata[T]()` or `RawMetadata()`)
 - `SessionManager` with functional options: `NewSessionManager(store, ...SessionOption)`
 - `SessionConfig`: Duration (7d default), CookieName, CookiePath, CookieSecure, SameSite
 - Methods: `CreateSession`, `ValidateSession`, `DeleteSession`, `DeleteSubjectSessions`
@@ -172,8 +172,8 @@ CREATE TABLE sessions (
     subject_id  TEXT,
     token       TEXT        NOT NULL UNIQUE,
     expires_at  TIMESTAMPTZ NOT NULL,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    metadata    JSONB
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    -- Add your own metadata columns here
 );
 CREATE INDEX idx_sessions_token ON sessions (token);
 CREATE INDEX idx_sessions_subject_id ON sessions (subject_id) WHERE subject_id IS NOT NULL;

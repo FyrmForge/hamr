@@ -93,10 +93,18 @@ func authenticateSession(c echo.Context, cfg AuthConfig) error {
 	}
 
 	session, err := cfg.SessionManager.ValidateSession(c.Request().Context(), cookie.Value)
-	if err != nil || session == nil {
-		if err != nil {
-			return err
-		}
+	if err != nil {
+		return err
+	}
+	if session == nil {
+		c.SetCookie(&http.Cookie{
+			Name:     cfg.SessionManager.CookieName(),
+			Path:     cfg.SessionManager.CookiePath(),
+			MaxAge:   -1,
+			HttpOnly: true,
+			Secure:   cfg.SessionManager.CookieSecure(),
+			SameSite: cfg.SessionManager.SameSite(),
+		})
 		return echo.NewHTTPError(http.StatusUnauthorized, "unauthorized")
 	}
 
