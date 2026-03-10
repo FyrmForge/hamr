@@ -182,9 +182,9 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 			group: huh.NewGroup(
 				huh.NewSelect[string]().
 					Title("Database").
-					Description("Sets up a connection pool, migration runner, and Docker Compose service for local development.").
+					Description("Sets up a connection pool and Docker Compose service for local development.").
 					Options(
-						huh.NewOption("PostgreSQL — pgx driver with sqlx for query helpers", "postgres"),
+						huh.NewOption("PostgreSQL", "postgres"),
 					).
 					Value(&res.Database),
 			),
