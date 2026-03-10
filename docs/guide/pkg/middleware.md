@@ -265,9 +265,78 @@ e.Use(middleware.AuditWithConfig(middleware.AuditConfig{
 }))
 ```
 
+## Locale
+
+Two middleware variants resolve the user's locale and inject a `Translator` into
+the Echo context.
+
+### Path-based (SEO pages)
+
+Extracts the locale from the first URL segment (`/en/about`, `/fr/contact`) and
+strips it before routing. Register with `e.Pre()`:
+
+```go
+e.Pre(middleware.LocaleFromPath(middleware.LocaleConfig{
+    Bundle: bundle,
+}))
+```
+
+Requests without a valid locale prefix are redirected to `/{defaultLocale}/...`
+(301 for GET/HEAD, 307 for POST).
+
+### Preference-based (dashboards)
+
+Resolves locale from multiple sources in priority order:
+
+```go
+dashGroup.Use(middleware.LocaleFromPreference(middleware.LocaleConfig{
+    Bundle: bundle,
+    UserLocaleFunc: func(c echo.Context) string {
+        return currentUser(c).Locale // e.g. "fr-FR"
+    },
+}))
+```
+
+Resolution order: **UserLocaleFunc → cookie → Accept-Language header → default**.
+
+Region-tagged locales (e.g. `fr-FR`) are automatically resolved to the base
+language (`fr`) if the exact tag isn't loaded. This applies to all sources.
+
+### LocaleConfig
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `Bundle` | required | The i18n Bundle |
+| `CookieName` | `"hamr_locale"` | Cookie name for persisting locale |
+| `CookieMaxAge` | 1 year | Cookie max-age in seconds |
+| `CookieSecure` | `false` | Secure flag on locale cookie |
+| `DefaultLocale` | from bundle | Fallback locale |
+| `UserLocaleFunc` | nil | Optional function returning user's preferred locale |
+
+### Reading locale in handlers
+
+```go
+locale    := middleware.GetLocale(c)    // "fr"
+direction := middleware.GetDirection(c) // "ltr" or "rtl"
+```
+
+Or use the i18n package directly:
+
+```go
+tr := i18n.FromContext(c)
+tr.T("home.title")
+```
+
 ## API Reference
 
 ```go
+// Locale
+type LocaleConfig struct { ... }
+func LocaleFromPath(cfg LocaleConfig) echo.MiddlewareFunc
+func LocaleFromPreference(cfg LocaleConfig) echo.MiddlewareFunc
+func GetLocale(c echo.Context) string
+func GetDirection(c echo.Context) string
+
 // Auth
 type SubjectLoader func(ctx context.Context, subjectID string) (any, error)
 type AuthConfig struct { ... }

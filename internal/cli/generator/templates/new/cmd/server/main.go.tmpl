@@ -21,6 +21,10 @@ import (
 {{- if .IncludeStorage}}
 	"github.com/FyrmForge/hamr/pkg/storage"
 {{- end}}
+{{- if .IncludeLocale}}
+	"github.com/FyrmForge/hamr/pkg/i18n"
+	"github.com/FyrmForge/hamr/pkg/ptr"
+{{- end}}
 {{- if .IncludeWS}}
 	"github.com/FyrmForge/hamr/pkg/websocket"
 {{- end}}
@@ -179,6 +183,20 @@ func main() {
 	defer hub.Close()
 {{- end}}
 
+{{- if .IncludeLocale}}
+
+	// Locale bundle.
+	localeBundle, err := i18n.NewBundle(i18n.BundleConfig{
+		LocaleDir:         "locales",
+		DefaultLocale:     "{{.DefaultLocale}}",
+		FallbackToDefault: ptr.To(true),
+	})
+	if err != nil {
+		log.Error("failed to load locale bundle", "error", err)
+		os.Exit(1)
+	}
+{{- end}}
+
 	api.RegisterRoutes(srv, &api.Deps{
 		Log:   log,
 		Store: store,
@@ -203,6 +221,9 @@ func main() {
 {{- end}}
 {{- if .IncludeWS}}
 		Hub: hub,
+{{- end}}
+{{- if .IncludeLocale}}
+		LocaleBundle: localeBundle,
 {{- end}}
 	})
 

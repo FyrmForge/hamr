@@ -1,0 +1,109 @@
+# Internationalisation (i18n)
+
+## Overview
+
+This project uses HAMR's built-in i18n system. Translation files live in `locales/*.json`,
+and type-safe Go accessors are generated into `internal/locale/locale.go`.
+
+## Adding a New Language
+
+1. Copy `locales/en.json` to `locales/fr.json` (or your target language code)
+2. Translate the values (keep the keys identical)
+3. Run `hamr locale gen` to validate and regenerate accessors
+
+## Translation Keys
+
+Keys use dot-separated paths matching the JSON structure:
+
+```json
+{
+  "home": {
+    "title": "Home",
+    "welcome": "Welcome to {{.Name}}"
+  }
+}
+```
+
+This produces `home.title` and `home.welcome` keys. The generated accessor for
+`home.welcome` will require a `name string` parameter.
+
+## Plurals
+
+Use CLDR plural category keys (`zero`, `one`, `two`, `few`, `many`, `other`):
+
+```json
+{
+  "items": {
+    "one": "{{"{{"}}".Count{{"}}"}} item",
+    "other": "{{"{{"}}".Count{{"}}"}} items"
+  }
+}
+```
+
+The generated accessor will take `count int` as the first parameter.
+`Count` is automatically injected into the template data.
+
+## Key Naming Rules
+
+- Keys starting with a digit (e.g. `2fa.title`, `404.error`) are valid but the
+  generated Go method name will be prefixed with `X` to form a valid identifier
+  (e.g. `X2faTitle`, `X404Error`).
+
+## Build-time Validation
+
+`hamr locale gen` (and `make build` / `make test`) validates all locale files
+against the default locale. **Interpolation mismatches are hard errors** — if
+`en.json` uses `{{"{{"}}.Name{{"}}"}}` but `fr.json` uses `{{"{{"}}.FirstName{{"}}"}}` for the same key,
+the build will fail. Missing keys are warnings only (they fall back to the
+default locale at runtime).
+
+## Regenerating Accessors
+
+```bash
+hamr locale gen
+# or
+go generate ./internal/locale/...
+```
+
+The `hamr dev` watcher also runs this automatically when locale files change.
+
+## Using Translations in Handlers
+
+```go
+import (
+    "github.com/FyrmForge/hamr/pkg/i18n"
+)
+
+func (h *Handler) Index(c echo.Context) error {
+    tr := i18n.FromContext(c)
+    title := tr.T("home.title")
+    // ...
+}
+```
+
+## Using Translations in Templates
+
+```
+templ Page(c echo.Context) {
+    <h1>{ i18n.FromContext(c).T("home.title") }</h1>
+}
+```
+
+## Middleware
+
+- `LocaleFromPath` — extracts locale from URL path prefix (`/en/about`)
+- `LocaleFromPreference` — resolves from cookie/Accept-Language/user pref
+
+Region-tagged locales (e.g. `fr-FR`) are automatically resolved to the base
+language (`fr`) if the exact tag isn't loaded. This applies to all resolution
+sources: user preference function, cookies, and Accept-Language headers.
+
+## RTL Support
+
+The layout template uses `lang` and `dir` attributes:
+```html
+<html lang={ middleware.GetLocale(c) } dir={ middleware.GetDirection(c) }>
+```
+
+Arabic, Hebrew, Farsi, and other RTL languages are detected automatically.
+Override via `_meta.direction` in the locale JSON file.

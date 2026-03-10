@@ -1,0 +1,21 @@
+{
+  "_meta": {
+    "direction": "ltr",
+    "displayName": "French"
+  },
+  "app": {
+    "title": "Mon App"
+  },
+  "home": {
+    "title": "Accueil",
+    "welcome": "Bienvenue, {{.Name}} !",
+    "items": {
+      "one": "{{.Count}} objet",
+      "other": "{{.Count}} objets"
+    }
+  },
+  "nav": {
+    "about": "A propos",
+    "login": "Connexion"
+  }
+}

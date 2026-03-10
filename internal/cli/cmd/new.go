@@ -249,6 +249,7 @@ func applyWizardResult(cmd *cobra.Command, name string, res *wizardResult, cfg *
 	cfg.IncludeWS = res.WebSocket == "yes"
 	cfg.IncludeE2E = res.E2E == "yes"
 	cfg.IncludeStripe = res.Stripe == "yes"
+	cfg.IncludeLocale = res.Locale == "yes"
 
 	cfg.StorageBackend = res.StorageBackend
 	cfg.IncludeStorage = res.StorageBackend == "local" || res.StorageBackend == "s3"
@@ -269,4 +270,5 @@ func init() {
 	newCmd.Flags().String("location", "subfolder", "project location: \"subfolder\" or \"current\"")
 	newCmd.Flags().Bool("static-s3", false, "sync static assets to a dedicated S3 bucket")
 	newCmd.Flags().Bool("stripe", false, "include Stripe webhook handler")
+	newCmd.Flags().Bool("locale", false, "include localisation (i18n) support")
 }

@@ -1,4 +1,4 @@
-.PHONY: build test lint templint{{- if not .MigrateAtStartup}} migrate{{- if eq .DBConnector "sqlx"}} migrate-down migrate-status migrate-create{{- end}}{{- end}} db-sh docker-up docker-down docker-delete docker-reload clean install check-templ generate{{- if eq .CSS "tailwind"}} check-node-modules css css-build{{- end}}{{- if .StaticS3}} sync-static{{- end}}
+.PHONY: build test lint templint{{- if not .MigrateAtStartup}} migrate{{- if eq .DBConnector "sqlx"}} migrate-down migrate-status migrate-create{{- end}}{{- end}} db-sh docker-up docker-down docker-delete docker-reload clean install check-templ generate{{- if eq .CSS "tailwind"}} check-node-modules css css-build{{- end}}{{- if .StaticS3}} sync-static{{- end}}{{- if .IncludeLocale}} locale-gen{{- end}}
 
 ## install: Install development dependencies
 install:
@@ -30,6 +30,9 @@ VERSION := $(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
 ## build: Build the server binary
 build: check-templ{{- if eq .CSS "tailwind"}} check-node-modules{{- end}}
 	templ generate
+{{- if .IncludeLocale}}
+	hamr locale gen
+{{- end}}
 {{- if eq .CSS "tailwind"}}
 	npm run css:build
 {{- end}}
@@ -43,6 +46,9 @@ generate:
 ## test: Run all tests
 test: check-templ
 	templ generate
+{{- if .IncludeLocale}}
+	hamr locale gen
+{{- end}}
 	go test ./...
 {{- if not .MigrateAtStartup}}
 
@@ -108,6 +114,13 @@ e2e-run:
 ## e2e-run-local: Run specific E2E test locally: make e2e-run-local T=TestName
 e2e-run-local:
 	go test -v -tags=e2e ./e2e-go -local -run "$(T)" -timeout 2m
+{{- end}}
+
+{{- if .IncludeLocale}}
+
+## locale-gen: Regenerate type-safe Go accessors from locale JSON files
+locale-gen:
+	hamr locale gen
 {{- end}}
 
 ## clean: Remove build artifacts

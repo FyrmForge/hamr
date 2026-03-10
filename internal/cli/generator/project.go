@@ -27,6 +27,8 @@ type ProjectConfig struct {
 	IncludeWS        bool
 	IncludeE2E       bool
 	IncludeStripe    bool
+	IncludeLocale    bool
+	DefaultLocale    string // default: "en"
 }
 
 // Validate checks that the ProjectConfig has all required fields and valid values.
@@ -60,6 +62,9 @@ func (cfg *ProjectConfig) Validate() error {
 	}
 	if cfg.IncludeAuth {
 		cfg.IncludeSessions = true
+	}
+	if cfg.IncludeLocale && cfg.DefaultLocale == "" {
+		cfg.DefaultLocale = "en"
 	}
 	if cfg.StorageBackend == "" && cfg.IncludeStorage {
 		cfg.StorageBackend = "local"
@@ -288,6 +293,14 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 			templateFile{"templates/new/internal/db/db.go.tmpl", "internal/db/db.go"},
 			templateFile{"templates/new/internal/db/migrations/001_initial.up.sql.tmpl", "internal/db/migrations/001_initial.up.sql"},
 			templateFile{"templates/new/internal/db/migrations/001_initial.down.sql.tmpl", "internal/db/migrations/001_initial.down.sql"},
+		)
+	}
+
+	// Locale (i18n) files.
+	if cfg.IncludeLocale {
+		files = append(files,
+			templateFile{"templates/new/locales/en.json.tmpl", "locales/en.json"},
+			templateFile{"templates/new/docs/ai-guides/i18n.md.tmpl", "docs/ai-guides/i18n.md"},
 		)
 	}
 

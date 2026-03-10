@@ -14,6 +14,9 @@ import (
 {{- if .IncludeStorage}}
 	"github.com/FyrmForge/hamr/pkg/storage"
 {{- end}}
+{{- if .IncludeLocale}}
+	"github.com/FyrmForge/hamr/pkg/i18n"
+{{- end}}
 {{- if .IncludeWS}}
 	"github.com/FyrmForge/hamr/pkg/websocket"
 {{- end}}
@@ -46,6 +49,9 @@ type Deps struct {
 {{- end}}
 {{- if .IncludeWS}}
 	Hub *websocket.Hub
+{{- end}}
+{{- if .IncludeLocale}}
+	LocaleBundle *i18n.Bundle
 {{- end}}
 }
 
@@ -81,6 +87,12 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 {{- if .IncludeSessions}}
 	site.Use(middleware.FlashWithConfig(middleware.FlashConfig{Secure: !deps.DevMode}))
 	site.Use(middleware.CSRFWithConfig(middleware.CSRFConfig{Secure: !deps.DevMode}))
+{{- end}}
+{{- if .IncludeLocale}}
+	site.Use(middleware.LocaleFromPreference(middleware.LocaleConfig{
+		Bundle:       deps.LocaleBundle,
+		CookieSecure: !deps.DevMode,
+	}))
 {{- end}}
 {{- if .IncludeAuth}}
 

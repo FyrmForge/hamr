@@ -21,6 +21,7 @@ type wizardResult struct {
 	MigrateAtStartup string // "yes" | "no"
 	StorageBackend   string // "local" | "s3"
 	StaticS3         string // "yes" | "no"
+	Locale           string // "yes" | "no"
 	WebSocket        string // "yes" | "no"
 	E2E              string // "yes" | "no"
 	Stripe           string // "yes" | "no"
@@ -51,6 +52,7 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 		MigrateAtStartup: "no",
 		StorageBackend:   "local",
 		StaticS3:         "yes",
+		Locale:           "yes",
 		WebSocket:        "yes",
 		E2E:              "yes",
 		Stripe:           "yes",
@@ -309,6 +311,33 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 			res.StaticS3 = "yes"
 		} else {
 			res.StaticS3 = "no"
+		}
+	}
+
+	// ── Localisation (i18n) ────────────────────────────────
+	if !cmd.Flags().Changed("locale") {
+		if err := huh.NewForm(huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Localisation (i18n)").
+				Description("Adds JSON translation files, generated type-safe Go accessors, plural rules, and locale middleware for multi-language support.").
+				Options(
+					huh.NewOption("Yes", "yes"),
+					huh.NewOption("No", "no"),
+				).
+				Value(&res.Locale),
+		)).Run(); err != nil {
+			return nil, err
+		}
+		if res.Locale == "yes" {
+			fmt.Println("  Locale (i18n): Yes")
+		} else {
+			fmt.Println("  Locale (i18n): No")
+		}
+	} else {
+		if v, _ := cmd.Flags().GetBool("locale"); v {
+			res.Locale = "yes"
+		} else {
+			res.Locale = "no"
 		}
 	}
 

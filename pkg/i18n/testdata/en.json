@@ -1,0 +1,22 @@
+{
+  "_meta": {
+    "direction": "ltr",
+    "displayName": "English"
+  },
+  "app": {
+    "title": "My App"
+  },
+  "home": {
+    "title": "Home",
+    "welcome": "Welcome, {{.Name}}!",
+    "items": {
+      "one": "{{.Count}} item",
+      "other": "{{.Count}} items"
+    }
+  },
+  "nav": {
+    "about": "About",
+    "login": "Login"
+  },
+  "only_en": "English only"
+}

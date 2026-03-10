@@ -54,6 +54,7 @@ func init() {
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(lintCmd)
 	rootCmd.AddCommand(devCmd)
+	rootCmd.AddCommand(localeCmd)
 }
 
 // Execute runs the root command.

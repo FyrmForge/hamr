@@ -74,9 +74,11 @@ func MustGetAs[T any](c echo.Context, key Key[any]) T {
 
 // Pre-defined keys used across the framework.
 var (
-	SubjectIDKey = NewKey[string]("subject_id")
-	SubjectKey   = NewKey[any]("subject")
-	SessionKey   = NewKey[any]("session")
-	RequestIDKey = NewKey[string]("request_id")
-	FlashKey     = NewKey[any]("flash")
+	SubjectIDKey  = NewKey[string]("subject_id")
+	SubjectKey    = NewKey[any]("subject")
+	SessionKey    = NewKey[any]("session")
+	RequestIDKey  = NewKey[string]("request_id")
+	FlashKey      = NewKey[any]("flash")
+	TranslatorKey = NewKey[any]("i18n_translator")
+	LocaleKey     = NewKey[string]("i18n_locale")
 )

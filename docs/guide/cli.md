@@ -10,6 +10,8 @@ hamr
 ├── vendor [dep[@version]]  Download/checksum frontend JS deps
 ├── lint
 │   └── templ               Lint .templ files
+├── locale
+│   └── gen                 Generate type-safe Go accessors from locale JSON
 ├── rename
 │   └── module <new-path>   Rename Go module and rewrite imports
 └── version                 Print hamr version
@@ -145,6 +147,50 @@ hamr lint templ --config my-hamr.toml    # use a custom config file
 | `js-href` | warning | `href="javascript:..."` links |
 
 **Guide:** [Templint](pkg/templint.md) covers rules, configuration, and library usage.
+
+---
+
+## hamr locale gen
+
+Generate type-safe Go accessor methods from locale JSON files.
+
+```bash
+hamr locale gen [flags]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | `hamr.toml` | Path to hamr.toml config file |
+| `--dir` | from config | Locale directory (overrides config) |
+| `--out` | from config | Output file path (overrides config) |
+
+```bash
+hamr locale gen                            # use hamr.toml settings
+hamr locale gen --dir locales --out internal/locale/locale.go
+```
+
+Reads the default locale JSON, flattens all keys, and generates a Go file with
+a `T` wrapper struct containing a typed method per translation key. Non-default
+locales are validated — interpolation mismatches are errors, missing keys are
+warnings.
+
+Keys starting with a digit (e.g. `2fa.title`) produce method names prefixed
+with `X` (e.g. `X2faTitle`).
+
+**Configuration** via `hamr.toml`:
+
+```toml
+[locale]
+default = "en"
+dir     = "locales"
+output  = "internal/locale/locale.go"
+package = "locale"
+```
+
+The scaffolded `Makefile` runs `hamr locale gen` as part of `make build` and
+`make test` when the project includes locale support.
+
+**Guide:** [I18n](pkg/i18n.md) covers the runtime library.
 
 ---
 

@@ -24,22 +24,23 @@ API reference for every `hamr/pkg` package.
 
 ## Middleware & Auth
 
-12. [Middleware](middleware.md) — Auth, RBAC, flash, rate limiting, CSRF, CORS
+12. [Middleware](middleware.md) — Auth, RBAC, flash, rate limiting, locale, CSRF, CORS
 13. [Auth](auth.md) — Password hashing and session management
+14. [I18n](i18n.md) — Internationalisation: translation bundles, plurals, RTL
 
 ## Infrastructure
 
-14. [Janitor](janitor.md) — Cron-based background task scheduler
-15. [Async](async.md) — Concurrency helpers
-16. [Sync](sync.md) — File synchronization (local to S3)
-17. [WebSocket](websocket.md) — Session and room-based real-time hub
+15. [Janitor](janitor.md) — Cron-based background task scheduler
+16. [Async](async.md) — Concurrency helpers
+17. [Sync](sync.md) — File synchronization (local to S3)
+18. [WebSocket](websocket.md) — Session and room-based real-time hub
 
 ## Testing
 
-18. [E2E](e2e.md) — Reusable Go-Rod browser helpers for end-to-end tests
+19. [E2E](e2e.md) — Reusable Go-Rod browser helpers for end-to-end tests
 
 ## Tooling
 
-19. [Templint](templint.md) — Static linter for `.templ` files
-20. [Static Generation](static-generation.md) — Build-time page generation
-21. [Dev](dev.md) — Live reload development environment
+20. [Templint](templint.md) — Static linter for `.templ` files
+21. [Static Generation](static-generation.md) — Build-time page generation
+22. [Dev](dev.md) — Live reload development environment

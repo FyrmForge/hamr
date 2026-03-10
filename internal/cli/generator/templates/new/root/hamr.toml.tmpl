@@ -26,6 +26,14 @@ cmd = "npm run css"
 name = "sync-static"
 cmd = "hamr sync --watch --bucket {{.Name}}-static"
 {{- end}}
+{{- if .IncludeLocale}}
+
+[[dev.watch]]
+name = "locale"
+watch = "locales/*.json"
+cmd = "hamr locale gen"
+debounce = 200
+{{- end}}
 
 [[dev.watch]]
 name = "site"
@@ -33,7 +41,7 @@ watch = ["**/*.go", "**/*.templ"]
 ignore = ["*_templ.go", "*_test.go"]
 cmd = "go build -o ./bin/app ./cmd/server"
 run = "./bin/app"
-depends = ["templ"]
+depends = ["templ"{{- if .IncludeLocale}}, "locale"{{- end}}]
 reload = "full"
 
 # Sync generated static pages to S3 (uncomment to enable)
@@ -65,4 +73,12 @@ reload = "full"
 # enabled = false
 # [lint.templ.rules.img-alt]
 # severity = "error"
+{{- if .IncludeLocale}}
+
+[locale]
+default = "{{.DefaultLocale}}"
+dir = "locales"
+output = "internal/locale/locale.go"
+package = "locale"
+{{- end}}
 

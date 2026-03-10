@@ -1,0 +1,8 @@
+{
+  "app": {
+    "title": "Test"
+  },
+  "home": {
+    "welcome": "Hello {{.FirstName}}!"
+  }
+}

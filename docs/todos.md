@@ -1,14 +1,14 @@
 - [] Need to assess various packages in hamr and assess which need to be expanded with options 
-  []   - e.g. middleware.RequestId should be configurable
+     - e.g. middleware.RequestId should be configurable
 - [] hamr convert or smth like that
      - so we need to be able to point the cli at a folder full of picutre type assets and have it convert all of them to good formats and multiple sizes
 - [] metrics and dashboards option 
-- [] look into localisation and plan support (both scaffold and pkg)
-     - maybe even a locale generator to generate typesafe locales 
-     - middleware context injection 
+- [x] look into localisation and plan support (both scaffold and pkg)
+     - maybe even a locale generator to generate typesafe locales
+     - middleware context injection
      - middleware redirection to lang pages if needed
 - [x] storage option should only be local folder or local + s3
-- [] give exec perms to db-sh
+- [x] give exec perms to db-sh
 - [x] move db-sh to scripts folder and add alias to makefile
 - [x] migrations are embeded even tho were not running at startup
 - [] review ai docs
@@ -18,3 +18,4 @@
      - semntic versioning 
 - [x] look at removing migrate cmd (binary) and use migrate cli? i think there is one
 - [] scafold unit tests 
+- [] by default add light/dark mode support
