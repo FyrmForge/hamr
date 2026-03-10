@@ -1,3 +1,4 @@
+BEGIN;
 {{- if .IncludeSessions}}
 CREATE TABLE sessions (
     id          TEXT PRIMARY KEY,
@@ -35,3 +36,4 @@ CREATE INDEX idx_users_email ON users (email);
 --     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 -- );
 {{- end}}
+COMMIT;

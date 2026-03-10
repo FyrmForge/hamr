@@ -13,7 +13,9 @@ import (
 	"github.com/FyrmForge/hamr/pkg/auth"
 {{- end}}
 	"github.com/FyrmForge/hamr/pkg/config"
+{{- if eq .DBConnector "sqlx"}}
 	"github.com/FyrmForge/hamr/pkg/db"
+{{- end}}
 	"github.com/FyrmForge/hamr/pkg/logging"
 	"github.com/FyrmForge/hamr/pkg/server"
 {{- if .IncludeStorage}}
@@ -23,6 +25,13 @@ import (
 	"github.com/FyrmForge/hamr/pkg/websocket"
 {{- end}}
 
+{{- if eq .DBConnector "sqlx"}}
+{{- if .MigrateAtStartup}}
+	appdb "{{.Module}}/internal/db"
+{{- end}}
+{{- else}}
+	appdb "{{.Module}}/internal/db"
+{{- end}}
 	"{{.Module}}/internal/repo/postgres"
 {{- if .IncludeAuth}}
 	"{{.Module}}/internal/service"
@@ -90,14 +99,44 @@ func main() {
 	// Database.
 	connectCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
+{{- if eq .DBConnector "sqlx"}}
 
 	database, err := db.ConnectContext(connectCtx, envDatabaseURL)
 	if err != nil {
 		log.Error("failed to connect to database", "error", err)
 		os.Exit(1)
 	}
+{{- if .MigrateAtStartup}}
+
+	// Run migrations at startup.
+	if err := db.Migrate(database, appdb.MigrateConfig()); err != nil {
+		log.Error("migration failed", "error", err)
+		os.Exit(1)
+	}
+	log.Info("migrations completed")
+{{- end}}
 
 	store := postgres.NewStore(database)
+{{- else}}
+	_ = connectCtx
+
+	database, err := appdb.Connect(envDatabaseURL)
+	if err != nil {
+		log.Error("failed to connect to database", "error", err)
+		os.Exit(1)
+	}
+{{- if .MigrateAtStartup}}
+
+	// Run migrations at startup.
+	if err := appdb.AutoMigrate(database); err != nil {
+		log.Error("auto-migration failed", "error", err)
+		os.Exit(1)
+	}
+	log.Info("auto-migration completed")
+{{- end}}
+
+	store := postgres.NewStore(database)
+{{- end}}
 {{- if .IncludeSessions}}
 
 	// Sessions.

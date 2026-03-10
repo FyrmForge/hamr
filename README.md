@@ -1,3 +1,6 @@
+# Disclaimer
+This library and cli is still in development and can/will change. Meaning, if you use this now, features might be deprecated and you might need to pin version. 
+
 # HAMR
 
 <img src="hamr_logo.png" alt="HAMR" width="200" align="left">

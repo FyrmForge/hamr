@@ -1,36 +1,226 @@
 package main
 
 import (
+{{- if eq .DBConnector "sqlx"}}
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	_ "github.com/joho/godotenv/autoload"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/FyrmForge/hamr/pkg/config"
 	"github.com/FyrmForge/hamr/pkg/db"
 
 	appdb "{{.Module}}/internal/db"
+{{- else}}
+	"fmt"
+	"os"
+
+	_ "github.com/joho/godotenv/autoload"
+
+	"github.com/FyrmForge/hamr/pkg/config"
+
+	appdb "{{.Module}}/internal/db"
+{{- end}}
 )
 
 var envDatabaseURL = config.GetEnvOrDefault("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/{{.Name}}?sslmode=disable")
+{{- if eq .DBConnector "sqlx"}}
+
+const usage = `Usage: migrate <command> [args]
+
+Commands:
+  up              Run all pending migrations (default)
+  down [N]        Roll back the last N migrations (default 1)
+  status          Show current migration version
+  create <name>   Create a new migration file pair
+  force <version> Force-set the migration version (fix dirty state)
+`
 
 func main() {
-	connectCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
+	cmd := "up"
+	if len(os.Args) > 1 {
+		cmd = os.Args[1]
+	}
 
-	database, err := db.ConnectContext(connectCtx, envDatabaseURL)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to connect to database: %v\n", err)
+	switch cmd {
+	case "up":
+		runUp()
+	case "down":
+		n := 1
+		if len(os.Args) > 2 {
+			var err error
+			n, err = strconv.Atoi(os.Args[2])
+			if err != nil || n < 1 {
+				fatal("invalid step count: %s", os.Args[2])
+			}
+		}
+		runDown(n)
+	case "status":
+		runStatus()
+	case "create":
+		if len(os.Args) < 3 {
+			fatal("usage: migrate create <name>")
+		}
+		runCreate(os.Args[2])
+	case "force":
+		if len(os.Args) < 3 {
+			fatal("usage: migrate force <version>")
+		}
+		v, err := strconv.Atoi(os.Args[2])
+		if err != nil {
+			fatal("invalid version: %s", os.Args[2])
+		}
+		runForce(v)
+	default:
+		fmt.Fprint(os.Stderr, usage)
 		os.Exit(1)
 	}
+}
+
+func connect() *sqlx.DB {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	database, err := db.ConnectContext(ctx, envDatabaseURL)
+	if err != nil {
+		fatal("failed to connect to database: %v", err)
+	}
+	return database
+}
+
+func runUp() {
+	database := connect()
 	defer database.Close()
 
 	if err := db.Migrate(database, appdb.MigrateConfig()); err != nil {
-		fmt.Fprintf(os.Stderr, "migration failed: %v\n", err)
-		os.Exit(1)
+		fatal("migration failed: %v", err)
+	}
+	fmt.Println("migrations completed successfully")
+}
+
+func runDown(n int) {
+	database := connect()
+	defer database.Close()
+
+	if err := db.MigrateSteps(database, appdb.MigrateConfig(), -n); err != nil {
+		fatal("rollback failed: %v", err)
+	}
+	fmt.Printf("rolled back %d migration(s)\n", n)
+}
+
+func runStatus() {
+	database := connect()
+	defer database.Close()
+
+	version, dirty, err := db.MigrateVersion(database, appdb.MigrateConfig())
+	if err != nil {
+		fatal("failed to get version: %v", err)
+	}
+	dirtyStr := ""
+	if dirty {
+		dirtyStr = " (dirty)"
+	}
+	fmt.Printf("version: %d%s\n", version, dirtyStr)
+}
+
+func runCreate(name string) {
+	dir := filepath.Join("internal", "db", "migrations")
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		fatal("failed to read migrations directory: %v", err)
 	}
 
-	fmt.Println("migrations completed successfully")
+	// Find the highest existing migration number.
+	highest := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		parts := strings.SplitN(e.Name(), "_", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		n, err := strconv.Atoi(parts[0])
+		if err != nil {
+			continue
+		}
+		if n > highest {
+			highest = n
+		}
+	}
+
+	next := highest + 1
+	prefix := fmt.Sprintf("%03d_%s", next, name)
+	upFile := filepath.Join(dir, prefix+".up.sql")
+	downFile := filepath.Join(dir, prefix+".down.sql")
+
+	scaffold := "BEGIN;\n\n\nCOMMIT;\n"
+
+	if err := os.WriteFile(upFile, []byte(scaffold), 0o644); err != nil {
+		fatal("failed to create %s: %v", upFile, err)
+	}
+	if err := os.WriteFile(downFile, []byte(scaffold), 0o644); err != nil {
+		fatal("failed to create %s: %v", downFile, err)
+	}
+
+	fmt.Printf("created %s\n", upFile)
+	fmt.Printf("created %s\n", downFile)
+}
+
+func runForce(version int) {
+	database := connect()
+	defer database.Close()
+
+	if err := db.MigrateForce(database, appdb.MigrateConfig(), version); err != nil {
+		fatal("force failed: %v", err)
+	}
+	fmt.Printf("forced version to %d\n", version)
+}
+
+{{- else}}
+
+const usage = `Usage: migrate <command>
+
+Commands:
+  up    Run auto-migration (default)
+`
+
+func main() {
+	cmd := "up"
+	if len(os.Args) > 1 {
+		cmd = os.Args[1]
+	}
+
+	switch cmd {
+	case "up":
+		runUp()
+	default:
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(1)
+	}
+}
+
+func runUp() {
+	database, err := appdb.Connect(envDatabaseURL)
+	if err != nil {
+		fatal("failed to connect to database: %v", err)
+	}
+
+	if err := appdb.AutoMigrate(database); err != nil {
+		fatal("auto-migration failed: %v", err)
+	}
+	fmt.Println("auto-migration completed successfully")
+}
+{{- end}}
+
+func fatal(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
+	os.Exit(1)
 }

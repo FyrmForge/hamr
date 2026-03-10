@@ -12,16 +12,18 @@ import (
 
 // wizardResult holds the raw values collected by the interactive form.
 type wizardResult struct {
-	Name           string // project name (when no arg provided)
-	Location       string // "subfolder" or "current"
-	Owner          string
-	CSS            string
-	Database       string
-	StorageBackend string // "none" | "local" | "s3"
-	StaticS3       string // "yes" | "no"
-	WebSocket      string // "yes" | "no"
-	E2E            string // "yes" | "no"
-	Stripe         string // "yes" | "no"
+	Name             string // project name (when no arg provided)
+	Location         string // "subfolder" or "current"
+	Owner            string
+	CSS              string
+	Database         string
+	DBConnector      string // "sqlx" | "gorm"
+	MigrateAtStartup string // "yes" | "no"
+	StorageBackend   string // "local" | "s3"
+	StaticS3         string // "yes" | "no"
+	WebSocket        string // "yes" | "no"
+	E2E              string // "yes" | "no"
+	Stripe           string // "yes" | "no"
 }
 
 // wizardStep pairs a huh group with a callback that prints the selection.
@@ -41,15 +43,17 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 		defaultLocation = "subfolder"
 	}
 	res := &wizardResult{
-		Name:           name,
-		Location:       defaultLocation,
-		CSS:            "plain",
-		Database:       "postgres",
-		StorageBackend: "none",
-		StaticS3:       "yes",
-		WebSocket:      "yes",
-		E2E:            "yes",
-		Stripe:         "yes",
+		Name:             name,
+		Location:         defaultLocation,
+		CSS:              "plain",
+		Database:         "postgres",
+		DBConnector:      "sqlx",
+		MigrateAtStartup: "no",
+		StorageBackend:   "local",
+		StaticS3:         "yes",
+		WebSocket:        "yes",
+		E2E:              "yes",
+		Stripe:           "yes",
 	}
 
 	var steps []wizardStep
@@ -190,6 +194,61 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 		res.Database, _ = cmd.Flags().GetString("database")
 	}
 
+	// ── DB connector ───────────────────────────────────────
+	if !cmd.Flags().Changed("db-connector") {
+		steps = append(steps, wizardStep{
+			group: huh.NewGroup(
+				huh.NewSelect[string]().
+					Title("DB connector").
+					Description("Choose how your application talks to the database.").
+					Options(
+						huh.NewOption("sqlx — raw SQL with pgx", "sqlx"),
+						huh.NewOption("GORM — ORM with struct-based models", "gorm"),
+					).
+					Value(&res.DBConnector),
+			),
+			print: func() {
+				switch res.DBConnector {
+				case "gorm":
+					fmt.Println("  DB connector: GORM")
+				default:
+					fmt.Println("  DB connector: sqlx")
+				}
+			},
+		})
+	} else {
+		res.DBConnector, _ = cmd.Flags().GetString("db-connector")
+	}
+
+	// ── Migrate at startup ─────────────────────────────────
+	if !cmd.Flags().Changed("migrate-startup") {
+		steps = append(steps, wizardStep{
+			group: huh.NewGroup(
+				huh.NewSelect[string]().
+					Title("Migrate at startup").
+					Description("Run migrations automatically when the server starts, or use a separate command.").
+					Options(
+						huh.NewOption("No — run via separate command", "no"),
+						huh.NewOption("Yes — run migrations when server starts", "yes"),
+					).
+					Value(&res.MigrateAtStartup),
+			),
+			print: func() {
+				if res.MigrateAtStartup == "yes" {
+					fmt.Println("  Migrate at startup: Yes")
+				} else {
+					fmt.Println("  Migrate at startup: No")
+				}
+			},
+		})
+	} else {
+		if v, _ := cmd.Flags().GetBool("migrate-startup"); v {
+			res.MigrateAtStartup = "yes"
+		} else {
+			res.MigrateAtStartup = "no"
+		}
+	}
+
 	// ── File storage ────────────────────────────────────────
 	if !cmd.Flags().Changed("storage") {
 		steps = append(steps, wizardStep{
@@ -198,20 +257,17 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 					Title("File storage").
 					Description("Adds a storage layer for handling user-uploaded files like avatars or documents.").
 					Options(
-						huh.NewOption("None — no file upload support", "none"),
-						huh.NewOption("Local folder — saves uploads to a directory on disk", "local"),
-						huh.NewOption("S3 (MinIO) — saves uploads to an S3-compatible bucket with MinIO for local dev", "s3"),
+						huh.NewOption("Local", "local"),
+						huh.NewOption("Local + S3 (with MinIO for local dev)", "s3"),
 					).
 					Value(&res.StorageBackend),
 			),
 			print: func() {
 				switch res.StorageBackend {
-				case "local":
-					fmt.Println("  Storage: Local disk")
 				case "s3":
-					fmt.Println("  Storage: S3 (MinIO)")
+					fmt.Println("  Storage: Local + S3 (MinIO)")
 				default:
-					fmt.Println("  Storage: None")
+					fmt.Println("  Storage: Local")
 				}
 			},
 		})

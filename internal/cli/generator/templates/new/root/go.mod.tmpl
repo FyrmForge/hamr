@@ -1,3 +1,10 @@
 module {{.Module}}
 
 go {{.GoVersion}}
+{{- if eq .DBConnector "gorm"}}
+
+require (
+	gorm.io/gorm v1.25.12
+	gorm.io/driver/postgres v1.5.11
+)
+{{- end}}

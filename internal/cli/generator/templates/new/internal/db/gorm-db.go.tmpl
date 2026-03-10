@@ -1,0 +1,16 @@
+package db
+
+import (
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+)
+
+// Connect opens a GORM connection to the given DSN.
+func Connect(dsn string) (*gorm.DB, error) {
+	return gorm.Open(postgres.Open(dsn), &gorm.Config{})
+}
+
+// AutoMigrate runs GORM auto-migration for all registered models.
+func AutoMigrate(db *gorm.DB) error {
+	return db.AutoMigrate(models()...)
+}

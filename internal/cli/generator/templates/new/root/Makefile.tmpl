@@ -1,4 +1,4 @@
-.PHONY: build test lint templint migrate db-sh docker-up docker-down docker-delete docker-reload clean install check-templ generate{{- if eq .CSS "tailwind"}} check-node-modules css css-build{{- end}}{{- if .StaticS3}} sync-static{{- end}}
+.PHONY: build test lint templint{{- if not .MigrateAtStartup}} migrate{{- if eq .DBConnector "sqlx"}} migrate-down migrate-status migrate-create{{- end}}{{- end}} db-sh docker-up docker-down docker-delete docker-reload clean install check-templ generate{{- if eq .CSS "tailwind"}} check-node-modules css css-build{{- end}}{{- if .StaticS3}} sync-static{{- end}}
 
 ## install: Install development dependencies
 install:
@@ -44,14 +44,30 @@ generate:
 test: check-templ
 	templ generate
 	go test ./...
+{{- if not .MigrateAtStartup}}
 
-## migrate: Run database migrations explicitly (local or CI)
+## migrate: Run all pending migrations
 migrate:
-	go run ./cmd/migrate
+	go run ./cmd/migrate up
+{{- if eq .DBConnector "sqlx"}}
+
+## migrate-down: Roll back the last migration
+migrate-down:
+	go run ./cmd/migrate down
+
+## migrate-status: Show current migration version
+migrate-status:
+	go run ./cmd/migrate status
+
+## migrate-create: Create a new migration (usage: make migrate-create NAME=add_users)
+migrate-create:
+	go run ./cmd/migrate create $(NAME)
+{{- end}}
+{{- end}}
 
 ## db-sh: Open a pgcli shell to the local dev database
 db-sh:
-	bash ./db-sh
+	./scripts/db-shell.sh
 
 ## lint: Run linters
 lint:

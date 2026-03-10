@@ -47,6 +47,11 @@ func TestProjectConfig_Validate(t *testing.T) {
 			name: "auth implies sessions",
 			cfg:  ProjectConfig{Name: "proj", Module: "github.com/test/proj", IncludeAuth: true},
 		},
+		{
+			name:    "invalid storage backend",
+			cfg:     ProjectConfig{Name: "proj", Module: "github.com/test/proj", StorageBackend: "none"},
+			wantErr: "invalid --storage value",
+		},
 	}
 
 	for _, tt := range tests {
@@ -104,7 +109,7 @@ func TestBuildProjectFileList_coreFiles(t *testing.T) {
 		"internal/web/components/layout.templ",
 		".gitignore",
 		"Makefile",
-		"db-sh",
+		"scripts/db-shell.sh",
 		"go.mod",
 		"README.md",
 	}
@@ -268,7 +273,7 @@ func TestGenerateProject_createsFiles(t *testing.T) {
 	assertFileExists(t, dir, "internal/web/server.go")
 	assertFileExists(t, dir, "go.mod")
 	assertFileExists(t, dir, ".gitignore")
-	assertFileExists(t, dir, "db-sh")
+	assertFileExists(t, dir, "scripts/db-shell.sh")
 
 	// Check module substitution.
 	gomod := readFile(t, dir, "go.mod")
@@ -309,8 +314,10 @@ func TestGenerateProject_withAuth(t *testing.T) {
 	assertFileExists(t, dir, "internal/service/auth.go")
 	assertFileExists(t, dir, "internal/web/handler/auth/handler.go")
 
-	// Check migrations include users table.
+	// Check migrations include users table and are wrapped in a transaction.
 	upSQL := readFile(t, dir, "internal/db/migrations/001_initial.up.sql")
+	assert.Contains(t, upSQL, "BEGIN;")
+	assert.Contains(t, upSQL, "COMMIT;")
 	assert.Contains(t, upSQL, "CREATE TABLE sessions")
 	assert.Contains(t, upSQL, "CREATE TABLE users")
 
@@ -541,6 +548,13 @@ func TestProjectConfig_Validate_storageBackendSetsIncludeStorage(t *testing.T) {
 	assert.True(t, cfg.IncludeStorage, "StorageBackend should imply IncludeStorage")
 }
 
+func TestProjectConfig_Validate_includeStorageDefaultsToLocal(t *testing.T) {
+	cfg := ProjectConfig{Name: "proj", Module: "github.com/test/proj", IncludeStorage: true}
+	require.NoError(t, cfg.Validate())
+	assert.True(t, cfg.IncludeStorage)
+	assert.Equal(t, "local", cfg.StorageBackend)
+}
+
 func TestGenerateProject_s3Storage(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "s3proj")
 
@@ -625,6 +639,25 @@ func TestGenerateProject_localStorage(t *testing.T) {
 	assert.NotContains(t, localMakefile, "sync-static:")
 }
 
+func TestGenerateProject_dbShellUsesProjectRootEnv(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "dbshellproj")
+
+	cfg := &ProjectConfig{
+		Name:      "dbshellproj",
+		Module:    "github.com/test/dbshellproj",
+		CSS:       "plain",
+		Database:  "postgres",
+		GoVersion: "1.25.0",
+	}
+
+	require.NoError(t, GenerateProject(dir, cfg))
+
+	script := readFile(t, dir, "scripts/db-shell.sh")
+	assert.Contains(t, script, `PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"`)
+	assert.Contains(t, script, `source "$PROJECT_ROOT/.env"`)
+	assert.NotContains(t, script, `source "$SCRIPT_DIR/.env"`)
+}
+
 func TestGenerateProject_ciWorkflow(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "ciproj")
 
@@ -651,8 +684,8 @@ func TestGenerateProject_ciWorkflow(t *testing.T) {
 	assert.NotContains(t, ci, "setup-node")
 
 	makefile := readFile(t, dir, "Makefile")
-	assert.Contains(t, makefile, "## migrate: Run database migrations explicitly (local or CI)")
-	assert.Contains(t, makefile, "migrate:\n\tgo run ./cmd/migrate")
+	assert.Contains(t, makefile, "## migrate: Run all pending migrations")
+	assert.Contains(t, makefile, "migrate:\n\tgo run ./cmd/migrate up")
 
 	deploy := readFile(t, dir, ".github/workflows/deploy.yml")
 	// Every non-empty line should be a comment.
@@ -836,6 +869,274 @@ func TestGenerateProject_noStripe(t *testing.T) {
 
 	envFile := readFile(t, dir, ".env.example")
 	assert.NotContains(t, envFile, "STRIPE_WEBHOOK_SECRET")
+}
+
+func TestBuildProjectFileList_gorm(t *testing.T) {
+	cfg := &ProjectConfig{
+		Name:        "proj",
+		Module:      "github.com/test/proj",
+		CSS:         "plain",
+		DBConnector: "gorm",
+	}
+	files := buildProjectFileList(cfg)
+
+	dests := make(map[string]bool)
+	for _, f := range files {
+		dests[f.dest] = true
+	}
+
+	// GORM files present.
+	assert.True(t, dests["internal/db/db.go"])
+	assert.True(t, dests["internal/db/models.go"])
+
+	// sqlx migration files absent.
+	assert.False(t, dests["internal/db/migrations/001_initial.up.sql"])
+	assert.False(t, dests["internal/db/migrations/001_initial.down.sql"])
+
+	// cmd/migrate present (not MigrateAtStartup).
+	assert.True(t, dests["cmd/migrate/main.go"])
+}
+
+func TestBuildProjectFileList_migrateAtStartup(t *testing.T) {
+	cfg := &ProjectConfig{
+		Name:             "proj",
+		Module:           "github.com/test/proj",
+		CSS:              "plain",
+		MigrateAtStartup: true,
+	}
+	files := buildProjectFileList(cfg)
+
+	dests := make(map[string]bool)
+	for _, f := range files {
+		dests[f.dest] = true
+	}
+
+	// cmd/migrate should NOT be present.
+	assert.False(t, dests["cmd/migrate/main.go"])
+
+	// DB files should still exist (sqlx default).
+	assert.True(t, dests["internal/db/db.go"])
+}
+
+func TestBuildProjectFileList_gormNoMigrateAtStartup(t *testing.T) {
+	cfg := &ProjectConfig{
+		Name:             "proj",
+		Module:           "github.com/test/proj",
+		CSS:              "plain",
+		DBConnector:      "gorm",
+		MigrateAtStartup: false,
+	}
+	files := buildProjectFileList(cfg)
+
+	dests := make(map[string]bool)
+	for _, f := range files {
+		dests[f.dest] = true
+	}
+
+	assert.True(t, dests["internal/db/db.go"])
+	assert.True(t, dests["internal/db/models.go"])
+	assert.True(t, dests["cmd/migrate/main.go"])
+	assert.False(t, dests["internal/db/migrations/001_initial.up.sql"])
+}
+
+func TestGenerateProject_gorm(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "gormproj")
+
+	cfg := &ProjectConfig{
+		Name:            "gormproj",
+		Module:          "github.com/test/gormproj",
+		CSS:             "plain",
+		Database:        "postgres",
+		DBConnector:     "gorm",
+		GoVersion:       "1.25.0",
+		IncludeSessions: true,
+		IncludeAuth:     true,
+		AuthWithTables:  true,
+	}
+
+	require.NoError(t, GenerateProject(dir, cfg))
+
+	// GORM model file exists.
+	assertFileExists(t, dir, "internal/db/models.go")
+	models := readFile(t, dir, "internal/db/models.go")
+	assert.Contains(t, models, "Session")
+	assert.Contains(t, models, "User")
+	assert.Contains(t, models, "models()")
+
+	// db.go uses GORM.
+	dbGo := readFile(t, dir, "internal/db/db.go")
+	assert.Contains(t, dbGo, "gorm.io/gorm")
+	assert.Contains(t, dbGo, "AutoMigrate")
+
+	// No SQL migration files.
+	assertFileNotExists(t, dir, "internal/db/migrations/001_initial.up.sql")
+	assertFileNotExists(t, dir, "internal/db/migrations/001_initial.down.sql")
+
+	// Store uses GORM.
+	storeGo := readFile(t, dir, "internal/repo/postgres/store.go")
+	assert.Contains(t, storeGo, "*gorm.DB")
+	assert.NotContains(t, storeGo, "*sqlx.DB")
+
+	// Users use GORM.
+	usersGo := readFile(t, dir, "internal/repo/postgres/users.go")
+	assert.Contains(t, usersGo, "gorm.ErrRecordNotFound")
+	assert.NotContains(t, usersGo, "sql.ErrNoRows")
+
+	// go.mod has GORM deps.
+	gomod := readFile(t, dir, "go.mod")
+	assert.Contains(t, gomod, "gorm.io/gorm")
+	assert.Contains(t, gomod, "gorm.io/driver/postgres")
+
+	// cmd/migrate exists (MigrateAtStartup is false).
+	assertFileExists(t, dir, "cmd/migrate/main.go")
+	migrateGo := readFile(t, dir, "cmd/migrate/main.go")
+	assert.Contains(t, migrateGo, "appdb.AutoMigrate")
+	assert.NotContains(t, migrateGo, "db.Migrate(")
+
+	// Server main.go uses GORM connection.
+	mainGo := readFile(t, dir, "cmd/server/main.go")
+	assert.Contains(t, mainGo, "appdb.Connect")
+	assert.NotContains(t, mainGo, "db.ConnectContext")
+	assert.NotContains(t, mainGo, "appdb.AutoMigrate") // Not MigrateAtStartup
+
+	// README mentions GORM.
+	readme := readFile(t, dir, "README.md")
+	assert.Contains(t, readme, "GORM")
+}
+
+func TestGenerateProject_sqlxMigrateCommandUsesSQLXDB(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "sqlxmigproj")
+
+	cfg := &ProjectConfig{
+		Name:        "sqlxmigproj",
+		Module:      "github.com/test/sqlxmigproj",
+		CSS:         "plain",
+		Database:    "postgres",
+		DBConnector: "sqlx",
+		GoVersion:   "1.25.0",
+	}
+
+	require.NoError(t, GenerateProject(dir, cfg))
+
+	migrateGo := readFile(t, dir, "cmd/migrate/main.go")
+	assert.Contains(t, migrateGo, `"github.com/jmoiron/sqlx"`)
+	assert.Contains(t, migrateGo, "func connect() *sqlx.DB")
+	assert.NotContains(t, migrateGo, "func connect() *db.DB")
+}
+
+func TestGenerateProject_migrateAtStartup(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "migstartproj")
+
+	cfg := &ProjectConfig{
+		Name:             "migstartproj",
+		Module:           "github.com/test/migstartproj",
+		CSS:              "plain",
+		Database:         "postgres",
+		DBConnector:      "sqlx",
+		MigrateAtStartup: true,
+		GoVersion:        "1.25.0",
+	}
+
+	require.NoError(t, GenerateProject(dir, cfg))
+
+	// cmd/migrate should NOT exist.
+	assertFileNotExists(t, dir, "cmd/migrate/main.go")
+
+	// Server main.go should run migrations at startup.
+	mainGo := readFile(t, dir, "cmd/server/main.go")
+	assert.Contains(t, mainGo, "db.Migrate(database, appdb.MigrateConfig())")
+	assert.Contains(t, mainGo, "migrations completed")
+
+	// Makefile should NOT have migrate targets.
+	makefile := readFile(t, dir, "Makefile")
+	assert.NotContains(t, makefile, "## migrate:")
+	assert.NotContains(t, makefile, "migrate-down")
+	assert.NotContains(t, makefile, "migrate-status")
+
+	// README should NOT mention make migrate.
+	readme := readFile(t, dir, "README.md")
+	assert.NotContains(t, readme, "make migrate")
+	assert.Contains(t, readme, "Migrations run automatically")
+}
+
+func TestGenerateProject_gormMigrateAtStartup(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "gormmigproj")
+
+	cfg := &ProjectConfig{
+		Name:             "gormmigproj",
+		Module:           "github.com/test/gormmigproj",
+		CSS:              "plain",
+		Database:         "postgres",
+		DBConnector:      "gorm",
+		MigrateAtStartup: true,
+		GoVersion:        "1.25.0",
+		IncludeSessions:  true,
+		IncludeAuth:      true,
+		AuthWithTables:   true,
+	}
+
+	require.NoError(t, GenerateProject(dir, cfg))
+
+	// No cmd/migrate.
+	assertFileNotExists(t, dir, "cmd/migrate/main.go")
+
+	// Server main.go should auto-migrate at startup.
+	mainGo := readFile(t, dir, "cmd/server/main.go")
+	assert.Contains(t, mainGo, "appdb.AutoMigrate(database)")
+	assert.Contains(t, mainGo, "auto-migration completed")
+	assert.NotContains(t, mainGo, "db.ConnectContext")
+
+	// GORM model files exist.
+	assertFileExists(t, dir, "internal/db/models.go")
+	assertFileExists(t, dir, "internal/db/db.go")
+
+	// No SQL migrations.
+	assertFileNotExists(t, dir, "internal/db/migrations/001_initial.up.sql")
+}
+
+func TestGenerateProject_gormNoMigrateAtStartup(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "gormnomig")
+
+	cfg := &ProjectConfig{
+		Name:        "gormnomig",
+		Module:      "github.com/test/gormnomig",
+		CSS:         "plain",
+		Database:    "postgres",
+		DBConnector: "gorm",
+		GoVersion:   "1.25.0",
+	}
+
+	require.NoError(t, GenerateProject(dir, cfg))
+
+	// cmd/migrate exists with GORM variant.
+	assertFileExists(t, dir, "cmd/migrate/main.go")
+	migrateGo := readFile(t, dir, "cmd/migrate/main.go")
+	assert.Contains(t, migrateGo, "appdb.AutoMigrate")
+	assert.Contains(t, migrateGo, "appdb.Connect")
+
+	// Server main.go should NOT have auto-migrate.
+	mainGo := readFile(t, dir, "cmd/server/main.go")
+	assert.NotContains(t, mainGo, "appdb.AutoMigrate")
+
+	// Makefile should have migrate target but NOT migrate-down/status/create (GORM).
+	makefile := readFile(t, dir, "Makefile")
+	assert.Contains(t, makefile, "## migrate:")
+	assert.NotContains(t, makefile, "migrate-down")
+	assert.NotContains(t, makefile, "migrate-status")
+	assert.NotContains(t, makefile, "migrate-create")
+}
+
+func TestProjectConfig_Validate_invalidDBConnector(t *testing.T) {
+	cfg := ProjectConfig{Name: "proj", Module: "github.com/test/proj", DBConnector: "mysql"}
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid --db-connector value")
+}
+
+func TestProjectConfig_Validate_dbConnectorDefaults(t *testing.T) {
+	cfg := ProjectConfig{Name: "proj", Module: "github.com/test/proj"}
+	require.NoError(t, cfg.Validate())
+	assert.Equal(t, "sqlx", cfg.DBConnector)
 }
 
 // --- Helpers ---

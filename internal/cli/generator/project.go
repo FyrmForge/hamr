@@ -10,21 +10,23 @@ import (
 
 // ProjectConfig holds the data used to render project templates.
 type ProjectConfig struct {
-	Name            string // "myproject"
-	Module          string // "github.com/user/myproject"
-	CSS             string // "plain" | "tailwind"
-	Database        string // "postgres"
-	GoVersion       string // "1.25.0"
-	InPlace         bool   // generate into existing directory
-	IncludeSessions bool
-	IncludeAuth     bool
-	AuthWithTables  bool
-	IncludeStorage  bool   // true when StorageBackend != ""
-	StorageBackend  string // "" | "local" | "s3"
-	StaticS3        bool   // sync static/ to a dedicated S3 bucket
-	IncludeWS       bool
-	IncludeE2E      bool
-	IncludeStripe   bool
+	Name             string // "myproject"
+	Module           string // "github.com/user/myproject"
+	CSS              string // "plain" | "tailwind"
+	Database         string // "postgres"
+	DBConnector      string // "sqlx" | "gorm"
+	MigrateAtStartup bool   // run migrations when server starts
+	GoVersion        string // "1.25.0"
+	InPlace          bool   // generate into existing directory
+	IncludeSessions  bool
+	IncludeAuth      bool
+	AuthWithTables   bool
+	IncludeStorage   bool   // true when StorageBackend != ""
+	StorageBackend   string // "" | "local" | "s3"
+	StaticS3         bool   // sync static/ to a dedicated S3 bucket
+	IncludeWS        bool
+	IncludeE2E       bool
+	IncludeStripe    bool
 }
 
 // Validate checks that the ProjectConfig has all required fields and valid values.
@@ -44,6 +46,12 @@ func (cfg *ProjectConfig) Validate() error {
 	if cfg.Database == "" {
 		cfg.Database = "postgres"
 	}
+	if cfg.DBConnector == "" {
+		cfg.DBConnector = "sqlx"
+	}
+	if cfg.DBConnector != "sqlx" && cfg.DBConnector != "gorm" {
+		return fmt.Errorf("invalid --db-connector value %q: must be \"sqlx\" or \"gorm\"", cfg.DBConnector)
+	}
 	if cfg.GoVersion == "" {
 		cfg.GoVersion = DetectGoVersion()
 	}
@@ -53,8 +61,16 @@ func (cfg *ProjectConfig) Validate() error {
 	if cfg.IncludeAuth {
 		cfg.IncludeSessions = true
 	}
-	if cfg.StorageBackend != "" {
+	if cfg.StorageBackend == "" && cfg.IncludeStorage {
+		cfg.StorageBackend = "local"
+	}
+	switch cfg.StorageBackend {
+	case "":
+		cfg.IncludeStorage = false
+	case "local", "s3":
 		cfg.IncludeStorage = true
+	default:
+		return fmt.Errorf("invalid --storage value %q: must be \"local\" or \"s3\"", cfg.StorageBackend)
 	}
 	return nil
 }
@@ -68,6 +84,11 @@ type templateFile struct {
 // When cfg.InPlace is true, it generates into an existing directory, skipping
 // files that already exist (notably go.mod).
 func GenerateProject(dir string, cfg *ProjectConfig) error {
+	// Apply defaults for fields that may not be set when called without Validate().
+	if cfg.DBConnector == "" {
+		cfg.DBConnector = "sqlx"
+	}
+
 	if cfg.InPlace {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("create project directory: %w", err)
@@ -104,6 +125,11 @@ func GenerateProject(dir string, cfg *ProjectConfig) error {
 		}
 	}
 
+	// Make scripts executable.
+	if err := os.Chmod(filepath.Join(dir, "scripts", "db-shell.sh"), 0o755); err != nil {
+		return fmt.Errorf("chmod scripts/db-shell.sh: %w", err)
+	}
+
 	if len(skipped) > 0 {
 		fmt.Printf("Skipped %d existing files: %s\n", len(skipped), strings.Join(skipped, ", "))
 	}
@@ -126,14 +152,6 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 		// cmd/server
 		{"templates/new/cmd/server/main.go.tmpl", "cmd/server/main.go"},
 		{"templates/new/cmd/server/Dockerfile.tmpl", "cmd/server/Dockerfile"},
-
-		// cmd/migrate
-		{"templates/new/cmd/migrate/main.go.tmpl", "cmd/migrate/main.go"},
-
-		// internal/db
-		{"templates/new/internal/db/db.go.tmpl", "internal/db/db.go"},
-		{"templates/new/internal/db/migrations/001_initial.up.sql.tmpl", "internal/db/migrations/001_initial.up.sql"},
-		{"templates/new/internal/db/migrations/001_initial.down.sql.tmpl", "internal/db/migrations/001_initial.down.sql"},
 
 		// internal/repo
 		{"templates/new/internal/repo/repo.go.tmpl", "internal/repo/repo.go"},
@@ -186,7 +204,7 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 		{"templates/new/root/AGENTS.md.tmpl", "AGENTS.md"},
 		{"templates/new/root/CLAUDE.md.tmpl", "CLAUDE.md"},
 		{"templates/new/root/README.md.tmpl", "README.md"},
-		{"templates/new/root/db-sh.tmpl", "db-sh"},
+		{"templates/new/scripts/db-shell.sh.tmpl", "scripts/db-shell.sh"},
 		{"templates/new/root/go.mod.tmpl", "go.mod"},
 		{"templates/new/root/golangci.yml.tmpl", ".golangci.yml"},
 		{"templates/new/root/hamr.toml.tmpl", "hamr.toml"},
@@ -255,6 +273,28 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 			templateFile{"templates/new/e2e-go/home_test.go.tmpl", "e2e-go/home_test.go"},
 			templateFile{"templates/new/e2e-go/testdata/seed_e2e.sql.tmpl", "e2e-go/testdata/seed_e2e.sql"},
 			templateFile{"templates/new/e2e-go/README.md.tmpl", "e2e-go/README.md"},
+		)
+	}
+
+	// DB connector-specific files.
+	if cfg.DBConnector == "gorm" {
+		files = append(files,
+			templateFile{"templates/new/internal/db/gorm-db.go.tmpl", "internal/db/db.go"},
+			templateFile{"templates/new/internal/db/models.go.tmpl", "internal/db/models.go"},
+		)
+	} else {
+		// sqlx (default)
+		files = append(files,
+			templateFile{"templates/new/internal/db/db.go.tmpl", "internal/db/db.go"},
+			templateFile{"templates/new/internal/db/migrations/001_initial.up.sql.tmpl", "internal/db/migrations/001_initial.up.sql"},
+			templateFile{"templates/new/internal/db/migrations/001_initial.down.sql.tmpl", "internal/db/migrations/001_initial.down.sql"},
+		)
+	}
+
+	// cmd/migrate — only when migrations are NOT run at startup.
+	if !cfg.MigrateAtStartup {
+		files = append(files,
+			templateFile{"templates/new/cmd/migrate/main.go.tmpl", "cmd/migrate/main.go"},
 		)
 	}
 

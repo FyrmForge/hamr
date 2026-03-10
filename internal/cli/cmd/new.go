@@ -243,27 +243,29 @@ func applyWizardResult(cmd *cobra.Command, name string, res *wizardResult, cfg *
 
 	cfg.CSS = res.CSS
 	cfg.Database = res.Database
+	cfg.DBConnector = res.DBConnector
+	cfg.MigrateAtStartup = res.MigrateAtStartup == "yes"
 
 	cfg.IncludeWS = res.WebSocket == "yes"
 	cfg.IncludeE2E = res.E2E == "yes"
 	cfg.IncludeStripe = res.Stripe == "yes"
 
-	if res.StorageBackend != "none" && res.StorageBackend != "" {
-		cfg.IncludeStorage = true
-		cfg.StorageBackend = res.StorageBackend
-		if res.StorageBackend == "s3" {
-			cfg.StaticS3 = res.StaticS3 == "yes"
-		}
+	cfg.StorageBackend = res.StorageBackend
+	cfg.IncludeStorage = res.StorageBackend == "local" || res.StorageBackend == "s3"
+	if res.StorageBackend == "s3" {
+		cfg.StaticS3 = res.StaticS3 == "yes"
 	}
 }
 
 func init() {
 	newCmd.Flags().String("module", "", "Go module path (e.g. github.com/user/project); prompted if omitted")
 	newCmd.Flags().String("css", "plain", "CSS approach: \"plain\" or \"tailwind\"")
-	newCmd.Flags().String("storage", "none", "storage backend: \"none\", \"local\", or \"s3\"")
+	newCmd.Flags().String("storage", "local", "storage backend: \"local\" or \"s3\"")
 	newCmd.Flags().Bool("websocket", false, "include WebSocket support")
 	newCmd.Flags().Bool("e2e", false, "include E2E testing scaffolding")
 	newCmd.Flags().String("database", "postgres", "database type")
+	newCmd.Flags().String("db-connector", "sqlx", "DB connector: \"sqlx\" or \"gorm\"")
+	newCmd.Flags().Bool("migrate-startup", false, "run migrations at server startup instead of separate command")
 	newCmd.Flags().String("location", "subfolder", "project location: \"subfolder\" or \"current\"")
 	newCmd.Flags().Bool("static-s3", false, "sync static assets to a dedicated S3 bucket")
 	newCmd.Flags().Bool("stripe", false, "include Stripe webhook handler")

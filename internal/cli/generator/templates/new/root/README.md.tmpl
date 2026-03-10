@@ -15,9 +15,11 @@ A Go web application built with the [HAMR framework](https://github.com/FyrmForg
 # Install dev tools (templ)
 make install
 
-# Start local services and apply the schema
+# Start local services{{- if not .MigrateAtStartup}} and apply the schema{{- end}}
 make docker-up
+{{- if not .MigrateAtStartup}}
 make migrate
+{{- end}}
 
 # Run the dev server (builds, live reload)
 hamr dev
@@ -33,11 +35,22 @@ make build          # Build binary to bin/server
 make test           # Run tests
 make lint           # Run golangci-lint
 make templint       # Lint .templ files
-make migrate        # Run database migrations explicitly
+{{- if not .MigrateAtStartup}}
+make migrate        # Run all pending migrations
+{{- if eq .DBConnector "sqlx"}}
+make migrate-down   # Roll back the last migration
+make migrate-status # Show current migration version
+make migrate-create NAME=xxx  # Create a new migration
+{{- end}}
+{{- end}}
 make db-sh          # Open pgcli shell to local dev DB
 make docker-up      # Start services
 make docker-down    # Stop services
 ```
+{{- if .MigrateAtStartup}}
+
+> **Note:** Migrations run automatically when the server starts.
+{{- end}}
 {{- if .IncludeE2E}}
 
 ## E2E Testing
@@ -53,10 +66,12 @@ make e2e-run T=Test # Run specific test
 
 ```
 cmd/server/              Application entry point
-cmd/migrate/             Standalone migration runner
+{{- if not .MigrateAtStartup}}
+cmd/migrate/             {{- if eq .DBConnector "sqlx"}} Standalone migration runner{{- else}} GORM auto-migration runner{{- end}}
+{{- end}}
 internal/
   config/                Environment configuration
-  db/                    Database + migrations
+  db/                    Database{{- if eq .DBConnector "sqlx"}} + migrations{{- else}} + models{{- end}}
   repo/                  Data access layer
   web/                   HTTP handlers + components
 static/                  CSS, JS, images
@@ -68,5 +83,5 @@ docs/                    Documentation
 
 - **Go** {{.GoVersion}} + Echo v4
 - **Templ** + HTMX + Alpine.js
-- **PostgreSQL**
+- **PostgreSQL**{{- if eq .DBConnector "gorm"}} + GORM{{- end}}
 - **HAMR Framework** — server, middleware, validation, responses

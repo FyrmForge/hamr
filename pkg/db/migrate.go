@@ -44,6 +44,50 @@ func MigrateDown(db *sqlx.DB, cfg MigrateConfig) error {
 	return nil
 }
 
+// MigrateSteps runs n migration steps. Positive n migrates up, negative migrates down.
+func MigrateSteps(db *sqlx.DB, cfg MigrateConfig, n int) error {
+	m, err := newMigrate(db, cfg)
+	if err != nil {
+		return err
+	}
+
+	if err := m.Steps(n); err != nil {
+		return fmt.Errorf("db: migrate steps(%d): %w", n, err)
+	}
+	return nil
+}
+
+// MigrateVersion returns the current migration version and dirty flag.
+func MigrateVersion(db *sqlx.DB, cfg MigrateConfig) (version uint, dirty bool, err error) {
+	m, err := newMigrate(db, cfg)
+	if err != nil {
+		return 0, false, err
+	}
+
+	version, dirty, err = m.Version()
+	if err != nil {
+		if err == migrate.ErrNilVersion {
+			return 0, false, nil
+		}
+		return 0, false, fmt.Errorf("db: migrate version: %w", err)
+	}
+	return version, dirty, nil
+}
+
+// MigrateForce sets the migration version without running any migrations.
+// Use this to fix a dirty migration state.
+func MigrateForce(db *sqlx.DB, cfg MigrateConfig, version int) error {
+	m, err := newMigrate(db, cfg)
+	if err != nil {
+		return err
+	}
+
+	if err := m.Force(version); err != nil {
+		return fmt.Errorf("db: migrate force(%d): %w", version, err)
+	}
+	return nil
+}
+
 func newMigrate(db *sqlx.DB, cfg MigrateConfig) (*migrate.Migrate, error) {
 	driver := cfg.Driver
 	if driver == "" {

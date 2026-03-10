@@ -58,7 +58,7 @@ func TestApplyWizardResult_s3Storage(t *testing.T) {
 	assert.Equal(t, "s3", cfg.StorageBackend)
 }
 
-func TestApplyWizardResult_noStorage(t *testing.T) {
+func TestApplyWizardResult_invalidStorageDoesNotEnableStorage(t *testing.T) {
 	res := &wizardResult{
 		Owner:          "user",
 		CSS:            "plain",
@@ -76,7 +76,7 @@ func TestApplyWizardResult_noStorage(t *testing.T) {
 	applyWizardResult(newCmd, "app", res, cfg)
 
 	assert.False(t, cfg.IncludeStorage)
-	assert.Equal(t, "", cfg.StorageBackend)
+	assert.Equal(t, "none", cfg.StorageBackend)
 }
 
 func TestApplyWizardResult_staticS3(t *testing.T) {
@@ -142,7 +142,7 @@ func TestApplyWizardResult_stripe(t *testing.T) {
 		Owner:          "user",
 		CSS:            "plain",
 		Database:       "postgres",
-		StorageBackend: "none",
+		StorageBackend: "local",
 		Stripe:         "yes",
 	}
 
@@ -160,7 +160,7 @@ func TestApplyWizardResult_noStripe(t *testing.T) {
 		Owner:          "user",
 		CSS:            "plain",
 		Database:       "postgres",
-		StorageBackend: "none",
+		StorageBackend: "local",
 		Stripe:         "no",
 	}
 
@@ -178,4 +178,64 @@ func TestWizardResult_locationDefault(t *testing.T) {
 		Location: "subfolder",
 	}
 	assert.Equal(t, "subfolder", res.Location)
+}
+
+func TestApplyWizardResult_sqlxNoMigrateAtStartup(t *testing.T) {
+	res := &wizardResult{
+		Owner:            "user",
+		CSS:              "plain",
+		Database:         "postgres",
+		DBConnector:      "sqlx",
+		MigrateAtStartup: "no",
+		StorageBackend:   "local",
+	}
+
+	cfg := &generator.ProjectConfig{
+		Name:      "app",
+		GoVersion: "1.25.0",
+	}
+	applyWizardResult(newCmd, "app", res, cfg)
+
+	assert.Equal(t, "sqlx", cfg.DBConnector)
+	assert.False(t, cfg.MigrateAtStartup)
+}
+
+func TestApplyWizardResult_gormMigrateAtStartup(t *testing.T) {
+	res := &wizardResult{
+		Owner:            "user",
+		CSS:              "plain",
+		Database:         "postgres",
+		DBConnector:      "gorm",
+		MigrateAtStartup: "yes",
+		StorageBackend:   "local",
+	}
+
+	cfg := &generator.ProjectConfig{
+		Name:      "app",
+		GoVersion: "1.25.0",
+	}
+	applyWizardResult(newCmd, "app", res, cfg)
+
+	assert.Equal(t, "gorm", cfg.DBConnector)
+	assert.True(t, cfg.MigrateAtStartup)
+}
+
+func TestApplyWizardResult_gormNoMigrateAtStartup(t *testing.T) {
+	res := &wizardResult{
+		Owner:            "user",
+		CSS:              "plain",
+		Database:         "postgres",
+		DBConnector:      "gorm",
+		MigrateAtStartup: "no",
+		StorageBackend:   "local",
+	}
+
+	cfg := &generator.ProjectConfig{
+		Name:      "app",
+		GoVersion: "1.25.0",
+	}
+	applyWizardResult(newCmd, "app", res, cfg)
+
+	assert.Equal(t, "gorm", cfg.DBConnector)
+	assert.False(t, cfg.MigrateAtStartup)
 }

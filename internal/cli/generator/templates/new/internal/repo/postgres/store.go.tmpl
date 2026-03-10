@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+{{- if eq .DBConnector "sqlx"}}
 {{- if .IncludeSessions}}
 	"database/sql"
 	"errors"
@@ -10,7 +11,17 @@ import (
 	"github.com/FyrmForge/hamr/pkg/auth"
 {{- end}}
 	"github.com/jmoiron/sqlx"
+{{- else}}
+{{- if .IncludeSessions}}
+	"errors"
+	"time"
+
+	"github.com/FyrmForge/hamr/pkg/auth"
+{{- end}}
+	"gorm.io/gorm"
+{{- end}}
 )
+{{- if eq .DBConnector "sqlx"}}
 
 // Store implements repo.Store using PostgreSQL.
 type Store struct {
@@ -83,4 +94,91 @@ func (s *Store) DeleteBySubjectID(ctx context.Context, subjectID string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE subject_id = $1`, subjectID)
 	return err
 }
+{{- end}}
+
+{{- else}}
+
+// Store implements repo.Store using PostgreSQL via GORM.
+type Store struct {
+	db *gorm.DB
+}
+
+// NewStore creates a new PostgreSQL-backed store.
+func NewStore(db *gorm.DB) *Store {
+	return &Store{db: db}
+}
+
+// Health checks the database connection.
+func (s *Store) Health(ctx context.Context) error {
+	sqlDB, err := s.db.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.PingContext(ctx)
+}
+
+// DB returns the underlying GORM database connection.
+func (s *Store) DB() *gorm.DB {
+	return s.db
+}
+{{- if .IncludeSessions}}
+
+// ---------------------------------------------------------------------------
+// auth.SessionStore implementation
+// ---------------------------------------------------------------------------
+
+type sessionRow struct {
+	ID        string     `gorm:"primaryKey"`
+	SubjectID *string    `gorm:"index"`
+	Token     string     `gorm:"uniqueIndex;not null"`
+	ExpiresAt time.Time  `gorm:"not null"`
+	CreatedAt time.Time  `gorm:"not null"`
+	Metadata  *string    `gorm:"type:jsonb"`
+}
+
+func (sessionRow) TableName() string { return "sessions" }
+
+func (s *Store) Create(ctx context.Context, session *auth.Session) error {
+	row := sessionRow{
+		ID:        session.ID,
+		Token:     session.Token,
+		ExpiresAt: session.ExpiresAt,
+		CreatedAt: session.CreatedAt,
+	}
+	if session.SubjectID != "" {
+		row.SubjectID = &session.SubjectID
+	}
+	return s.db.WithContext(ctx).Create(&row).Error
+}
+
+func (s *Store) GetByToken(ctx context.Context, token string) (*auth.Session, error) {
+	var row sessionRow
+	err := s.db.WithContext(ctx).Where("token = ?", token).First(&row).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	subjectID := ""
+	if row.SubjectID != nil {
+		subjectID = *row.SubjectID
+	}
+	return &auth.Session{
+		ID:        row.ID,
+		SubjectID: subjectID,
+		Token:     row.Token,
+		ExpiresAt: row.ExpiresAt,
+		CreatedAt: row.CreatedAt,
+	}, nil
+}
+
+func (s *Store) Delete(ctx context.Context, id string) error {
+	return s.db.WithContext(ctx).Where("id = ?", id).Delete(&sessionRow{}).Error
+}
+
+func (s *Store) DeleteBySubjectID(ctx context.Context, subjectID string) error {
+	return s.db.WithContext(ctx).Where("subject_id = ?", subjectID).Delete(&sessionRow{}).Error
+}
+{{- end}}
 {{- end}}

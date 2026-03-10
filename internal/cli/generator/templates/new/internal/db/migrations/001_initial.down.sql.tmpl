@@ -1,3 +1,4 @@
+BEGIN;
 {{- if and .IncludeAuth .AuthWithTables}}
 DROP TABLE IF EXISTS users;
 {{- end}}
@@ -9,3 +10,4 @@ DROP TABLE IF EXISTS sessions;
 -- Example:
 -- DROP TABLE IF EXISTS examples;
 {{- end}}
+COMMIT;
