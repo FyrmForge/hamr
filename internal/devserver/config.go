@@ -33,6 +33,7 @@ type DockerCompose struct {
 	File        string   `toml:"file"`
 	Services    []string `toml:"services"`
 	KeepRunning bool     `toml:"keep_running"`
+	WaitReady   bool     `toml:"wait_ready"`
 	Env         []string `toml:"env"`
 }
 

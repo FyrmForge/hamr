@@ -122,9 +122,8 @@ func main() {
 
 	store := postgres.NewStore(database)
 {{- else}}
-	_ = connectCtx
 
-	database, err := appdb.Connect(envDatabaseURL)
+	database, err := appdb.ConnectContext(connectCtx, envDatabaseURL)
 	if err != nil {
 		log.Error("failed to connect to database", "error", err)
 		os.Exit(1)

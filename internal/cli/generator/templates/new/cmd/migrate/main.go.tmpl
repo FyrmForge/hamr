@@ -18,8 +18,10 @@ import (
 
 	appdb "{{.Module}}/internal/db"
 {{- else}}
+	"context"
 	"fmt"
 	"os"
+	"time"
 
 	_ "github.com/joho/godotenv/autoload"
 
@@ -208,7 +210,10 @@ func main() {
 }
 
 func runUp() {
-	database, err := appdb.Connect(envDatabaseURL)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	database, err := appdb.ConnectContext(ctx, envDatabaseURL)
 	if err != nil {
 		fatal("failed to connect to database: %v", err)
 	}

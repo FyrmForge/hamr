@@ -464,6 +464,9 @@ func (r *Runner) findRule(name string) *WatchRule {
 // ensureDockerCompose runs "docker compose up -d" for a compose entry.
 func (r *Runner) ensureDockerCompose(ctx context.Context, dc *DockerCompose) (string, error) {
 	args := []string{"compose", "-f", dc.File, "up", "-d"}
+	if dc.WaitReady {
+		args = append(args, "--wait")
+	}
 	args = append(args, dc.Services...)
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Env = buildEnv(dc.Env)

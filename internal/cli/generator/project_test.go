@@ -993,10 +993,9 @@ func TestGenerateProject_gorm(t *testing.T) {
 	assert.Contains(t, migrateGo, "appdb.AutoMigrate")
 	assert.NotContains(t, migrateGo, "db.Migrate(")
 
-	// Server main.go uses GORM connection.
+	// Server main.go uses GORM connection with retry.
 	mainGo := readFile(t, dir, "cmd/server/main.go")
-	assert.Contains(t, mainGo, "appdb.Connect")
-	assert.NotContains(t, mainGo, "db.ConnectContext")
+	assert.Contains(t, mainGo, "appdb.ConnectContext")
 	assert.NotContains(t, mainGo, "appdb.AutoMigrate") // Not MigrateAtStartup
 
 	// README mentions GORM.
@@ -1084,7 +1083,7 @@ func TestGenerateProject_gormMigrateAtStartup(t *testing.T) {
 	mainGo := readFile(t, dir, "cmd/server/main.go")
 	assert.Contains(t, mainGo, "appdb.AutoMigrate(database)")
 	assert.Contains(t, mainGo, "auto-migration completed")
-	assert.NotContains(t, mainGo, "db.ConnectContext")
+	assert.Contains(t, mainGo, "appdb.ConnectContext")
 
 	// GORM model files exist.
 	assertFileExists(t, dir, "internal/db/models.go")
