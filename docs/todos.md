@@ -17,10 +17,8 @@
      - for cli we dont want to run a mismatching version of hamr against a mismatching project?
      - semntic versioning 
 - [x] look at removing migrate cmd (binary) and use migrate cli? i think there is one
-- [] scafold unit tests 
-- [] by default add light/dark mode support
 - [x] DO NOT make an initial commit
-- [] add loading spinner to hamr new and dev
+- [x] add loading spinner to hamr new and dev
 - [x] add a "done" or ready message for hamr dev
 - [x] add hotkey system for hamr dev so we can do stuff like force refresh watchers, or open browser
 - [x] change hamr dev log colour from white to smth else
