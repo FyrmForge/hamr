@@ -36,6 +36,7 @@ import (
 type Deps struct {
 	Log            *slog.Logger
 	Store          repo.Store
+	BaseURL        string
 	StaticBaseURL  string
 	DevMode        bool
 {{- if .IncludeSessions}}

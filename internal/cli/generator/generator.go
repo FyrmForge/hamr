@@ -40,6 +40,18 @@ func renderFromFS(fsys embed.FS, tmplPath, destPath string, data any) error {
 	return tmpl.Execute(f, data)
 }
 
+// copyRawFile writes content to destPath, creating parent directories as needed.
+// Used for files that are embedded as-is (not templates).
+func copyRawFile(content []byte, destPath string) error {
+	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+		return fmt.Errorf("create directory: %w", err)
+	}
+	if err := os.WriteFile(destPath, content, 0o644); err != nil {
+		return fmt.Errorf("write file %s: %w", destPath, err)
+	}
+	return nil
+}
+
 func parseGoMod(path string) (module, goVersion string, err error) {
 	f, err := os.Open(path)
 	if err != nil {

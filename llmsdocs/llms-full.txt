@@ -1,0 +1,1689 @@
+# HAMR Framework — Complete Package Reference
+
+> Full API documentation for hamr/pkg packages.
+> Import base: github.com/FyrmForge/hamr/pkg/<name>
+
+## Glossary
+
+- **templ**: Go HTML templating language (NOT Go's html/template). Compiled to Go.
+  Files use .templ extension. Components are Go functions returning templ.Component.
+- **HTMX**: JavaScript library for HTML-over-the-wire. Attributes like hx-post,
+  hx-swap, hx-target drive server interaction without writing JS.
+- **OOB swap**: HTMX out-of-band swap. Element with hx-swap-oob="true" replaces
+  a matching element by ID anywhere in the DOM, independent of the main swap target.
+- **PRG pattern**: Post-Redirect-Get. POST handlers redirect with 303 to prevent
+  form resubmission.
+- **PHC format**: Password Hash Competition format string for Argon2id hashes.
+- **Echo context (echo.Context)**: The request/response wrapper in Echo v4.
+  NOT Go's context.Context. Use c.Request().Context() for the stdlib context.
+- **functional options**: Constructor pattern using variadic Option functions
+  (e.g., server.New(server.WithPort(8080))).
+- **Store interface**: Repository pattern used in scaffolded projects.
+  Generated projects define a Store interface in their internal/repo/repo.go;
+  it is not part of the hamr framework itself.
+- **hamr dev**: Dev server with file watching, auto-rebuild, and live reload.
+- **hamr locale gen**: Code generator for type-safe i18n accessors.
+- **respond.Redirect**: HTMX-aware redirect that sets HX-Redirect for HTMX
+  requests and falls back to HTTP 303.
+
+---
+
+## Core Packages
+
+### config
+
+> Package config provides typed accessors for environment variables with
+> sensible defaults and panic-on-missing semantics.
+> For .env file loading, use the godotenv/autoload blank import in your main
+> package: `import _ "github.com/joho/godotenv/autoload"`
+
+```go
+func ParseBaseURL(raw string) (origin, hostname string, err error)
+```
+Validates a raw base URL string and returns the origin (scheme://host, including
+port if present) and the hostname (without port). An empty input is valid and
+returns zero values (optional in dev).
+
+```go
+func GetEnvOrDefault(key, def string) string
+```
+Returns the value of the environment variable named by key, or `def` if the
+variable is unset or empty.
+
+```go
+func GetEnvOrPanic(key string) string
+```
+Returns the value of the environment variable named by key. Panics if the
+variable is unset or empty.
+
+```go
+func GetEnvOrDefaultInt(key string, def int) int
+```
+Returns the environment variable as an int, falling back to `def` if unset,
+empty, or not a valid integer.
+
+```go
+func GetEnvOrDefaultBool(key string, def bool) bool
+```
+Returns the environment variable as a bool, falling back to `def` if unset,
+empty, or not a valid boolean.
+
+```go
+func GetEnvOrDefaultDuration(key string, def time.Duration) time.Duration
+```
+Returns the environment variable as a time.Duration, falling back to `def` if
+unset, empty, or not a valid duration string.
+
+---
+
+### server
+
+> Package server wraps Echo v4 with functional options, production-safe
+> defaults, and graceful shutdown.
+
+#### Types
+
+```go
+type Server struct{ /* unexported fields */ }
+type Option func(*Server)
+```
+
+#### Constructor
+
+```go
+func New(opts ...Option) (*Server, error)
+```
+Creates a Server with sensible defaults, applies options, and configures
+production middleware. Returns an error if any option value is invalid.
+
+#### Option Functions
+
+```go
+func WithHost(host string) Option                        // bind address
+func WithPort(port int) Option                           // listen port (1-65535)
+func WithDevMode(dev bool) Option                        // skip security headers in dev
+func WithMiddleware(mw ...echo.MiddlewareFunc) Option    // append global middleware
+func WithStaticDir(path string) Option                   // serve static/ at /static
+func WithEmbeddedStatic(fsys fs.FS, prefix string) Option // serve from embed.FS
+func WithErrorHandler(h echo.HTTPErrorHandler) Option    // custom error handler
+func WithTimeout(d time.Duration) Option                 // request context timeout
+func WithMaxBodySize(size string) Option                 // e.g. "2M", "500K"
+func WithShutdownTimeout(d time.Duration) Option         // graceful shutdown (default 10s)
+func WithGeneratedDir(dir string) Option                 // pre-rendered static pages dir
+```
+
+#### Methods
+
+```go
+func (s *Server) Echo() *echo.Echo                       // underlying Echo instance
+func (s *Server) Addr() string                           // "host:port"
+func (s *Server) Start() error                           // blocks, graceful shutdown on signal
+func (s *Server) Shutdown(ctx context.Context) error     // manual shutdown
+
+// Route registration
+func (s *Server) GET(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route
+func (s *Server) POST(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route
+func (s *Server) PUT(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route
+func (s *Server) DELETE(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route
+func (s *Server) PATCH(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) *echo.Route
+func (s *Server) Group(prefix string, m ...echo.MiddlewareFunc) *echo.Group
+
+// Static page generation
+func (s *Server) StaticPage(path string, handler echo.HandlerFunc)
+func (s *Server) GenerateStatic(dir string) error
+```
+
+---
+
+### logging
+
+> Package logging provides context-aware structured logging wrapping log/slog.
+> Production mode uses JSON handler; dev mode uses coloured tint handler.
+
+```go
+func New(production bool) *slog.Logger
+```
+Creates a new logger. JSON handler for production, tint handler for dev.
+
+```go
+func FromContext(ctx context.Context) *slog.Logger
+```
+Extracts the logger from ctx. Falls back to the package-level default.
+
+```go
+func WithLogger(ctx context.Context, l *slog.Logger) context.Context
+```
+Returns a copy of ctx carrying l.
+
+```go
+func With(ctx context.Context, args ...any) context.Context
+```
+Returns a copy of ctx whose logger has the supplied slog attributes appended.
+
+---
+
+### ctx
+
+> Package ctx provides type-safe context key helpers for Echo handlers.
+> Wraps Echo's context Set/Get with generics to avoid type assertion boilerplate.
+
+#### Types
+
+```go
+type Key[T any] struct{ /* unexported: name string */ }
+```
+
+#### Functions
+
+```go
+func NewKey[T any](name string) Key[T]
+func (k Key[T]) String() string
+
+func Set[T any](c echo.Context, key Key[T], value T)
+func Get[T any](c echo.Context, key Key[T]) (T, bool)
+func MustGet[T any](c echo.Context, key Key[T]) T
+
+func GetAs[T any](c echo.Context, key Key[any]) (T, bool)
+func MustGetAs[T any](c echo.Context, key Key[any]) T
+```
+
+#### Pre-defined Keys
+
+```go
+var (
+    SubjectIDKey  = NewKey[string]("subject_id")
+    SubjectKey    = NewKey[any]("subject")
+    SessionKey    = NewKey[any]("session")
+    RequestIDKey  = NewKey[string]("request_id")
+    FlashKey      = NewKey[any]("flash")
+    TranslatorKey = NewKey[any]("i18n_translator")
+    LocaleKey     = NewKey[string]("i18n_locale")
+)
+```
+
+---
+
+### respond
+
+> Package respond provides HTTP response helpers for HTMX-first applications.
+> Renders templ components or JSON payloads via Echo.
+
+#### Functions
+
+```go
+func HTML(c echo.Context, status int, component templ.Component) error
+```
+Renders a templ component with the given status code.
+
+```go
+func JSON(c echo.Context, status int, data any) error
+```
+Sends a JSON response with the given status code.
+
+```go
+func Error(c echo.Context, status int, msg string, component ...templ.Component) error
+```
+Sends an error response, negotiating between HTML and JSON. Optional templ
+component renders the HTML error page.
+
+```go
+func Redirect(c echo.Context, url string) error
+```
+HTMX-aware redirect. For HTMX requests: sets HX-Redirect header, returns 200.
+For regular requests: returns 303.
+
+```go
+func ValidationError(c echo.Context, fields map[string]string, component ...templ.Component) error
+```
+Sends a 422 validation error response. Optional templ component renders the
+HTML error view.
+
+#### Pagination
+
+```go
+func ParsePagination(c echo.Context, defaultSize int) (page, size int)
+```
+Reads page and size query params. Defaults page to 1, clamps size to [1, 100].
+
+```go
+func NewPage(page, size, total int) Page
+```
+Computes pagination metadata.
+
+```go
+type Page struct {
+    Number     int  `json:"number"`
+    Size       int  `json:"size"`
+    Total      int  `json:"total"`
+    TotalPages int  `json:"total_pages"`
+    HasNext    bool `json:"has_next"`
+    HasPrev    bool `json:"has_prev"`
+}
+
+type PagedResponse[T any] struct {
+    Data []T  `json:"data"`
+    Page Page `json:"page"`
+}
+```
+
+---
+
+### validate
+
+> Package validate provides pure-function validators that return "" on success
+> or a human-readable error message string on failure.
+
+#### Constants
+
+```go
+const (
+    MsgRequired          = "This field is required"
+    MsgEmailInvalid      = "Invalid email address"
+    MsgPhoneInvalid      = "Invalid phone number"
+    MsgURLInvalid        = "Invalid URL"
+    MsgMinLength         = "Too short"
+    MsgMaxLength         = "Too long"
+    MsgOneOf             = "Invalid selection"
+    MsgIntRange          = "Value out of range"
+    MsgMinAge            = "Does not meet minimum age requirement"
+    MsgMaxAge            = "Exceeds maximum age"
+    MsgPasswordWeak      = "Password is too weak"
+    MsgValidatorNotFound = "Unknown validator"
+)
+```
+
+#### Types
+
+```go
+type PasswordRequirement struct {
+    Description string
+    Met         bool
+}
+
+type FieldResult struct {
+    Name    string
+    Message string
+}
+```
+
+#### Core Validators
+
+Each validator returns "" for valid, error string for invalid.
+Every validator has a `*Msg` variant that accepts a custom error message.
+
+```go
+func Required(value string) string
+func RequiredMsg(value, msg string) string
+
+func EmptyOr(fn func(string) string) func(string) string  // wraps validator for optional fields
+
+func Email(value string) string
+func EmailMsg(value, msg string) string
+
+func Phone(value string) string                // accepts optional '+' + 7-15 digits
+func PhoneMsg(value, msg string) string
+
+func URL(value string) string
+func URLMsg(value, msg string) string
+
+func MinLength(value string, min int) string
+func MinLengthMsg(value string, min int, msg string) string
+
+func MaxLength(value string, max int) string
+func MaxLengthMsg(value string, max int, msg string) string
+
+func OneOf(value string, options ...string) string
+func OneOfMsg(value, msg string, options ...string) string
+
+func IntRange(value int, min, max int) string
+func IntRangeMsg(value, min, max int, msg string) string
+```
+
+#### Date/Age Validators
+
+```go
+func MinAge(birthDate string, minAge int) string      // birthDate: YYYY-MM-DD
+func MinAgeMsg(birthDate string, minAge int, msg string) string
+func MaxAge(birthDate string, maxAge int) string
+func MaxAgeMsg(birthDate string, maxAge int, msg string) string
+```
+
+#### Password Strength
+
+```go
+func CheckPasswordRequirements(password string) []PasswordRequirement
+func PasswordStrength(password string) string
+func PasswordStrengthMsg(password, msg string) string
+```
+
+#### URL Normalisation
+
+```go
+func NormalizeURL(value string) string  // prepends "https://" when no scheme
+```
+
+#### Custom Validator Registry
+
+```go
+func Register(name string, fn func(string) string)
+func Run(name, value string) string  // returns MsgValidatorNotFound if not registered
+```
+
+#### Field + Check Helpers
+
+```go
+func Field(name, result string, msg ...string) FieldResult
+func Check(fields ...FieldResult) map[string]string  // returns nil when all pass
+```
+
+---
+
+### htmx
+
+> Package htmx provides request detection and response header helpers for htmx.
+> All functions operate on standard net/http types.
+
+#### Request Headers (constants)
+
+```go
+const (
+    HeaderRequest        = "HX-Request"
+    HeaderBoosted        = "HX-Boosted"
+    HeaderTrigger        = "HX-Trigger"
+    HeaderTarget         = "HX-Target"
+    HeaderCurrentURL     = "HX-Current-URL"
+    HeaderPrompt         = "HX-Prompt"
+    HeaderHistoryRestore = "HX-History-Restore-Request"
+)
+```
+
+#### Response Headers (constants)
+
+```go
+const (
+    HeaderRedirect           = "HX-Redirect"
+    HeaderTriggerResponse    = "HX-Trigger"
+    HeaderTriggerAfterSettle = "HX-Trigger-After-Settle"
+    HeaderTriggerAfterSwap   = "HX-Trigger-After-Swap"
+    HeaderReswap             = "HX-Reswap"
+    HeaderRetarget           = "HX-Retarget"
+    HeaderRefresh            = "HX-Refresh"
+    HeaderPushURL            = "HX-Push-Url"
+    HeaderReplaceURL         = "HX-Replace-Url"
+)
+```
+
+#### Request Detection
+
+```go
+func IsHTMX(r *http.Request) bool
+func IsBoosted(r *http.Request) bool
+func GetTrigger(r *http.Request) string
+func GetTarget(r *http.Request) string
+```
+
+#### Response Helpers
+
+```go
+func Redirect(w http.ResponseWriter, url string)
+func Trigger(w http.ResponseWriter, events ...string)
+func TriggerAfterSettle(w http.ResponseWriter, events ...string)
+func TriggerAfterSwap(w http.ResponseWriter, events ...string)
+func Reswap(w http.ResponseWriter, strategy string)
+func Retarget(w http.ResponseWriter, selector string)
+func Refresh(w http.ResponseWriter)
+func PushURL(w http.ResponseWriter, url string)
+func ReplaceURL(w http.ResponseWriter, url string)
+```
+
+---
+
+### db
+
+> Package db provides PostgreSQL connection management with retry, keep-alive,
+> and schema migration utilities.
+
+#### Types
+
+```go
+type OnRetryFunc func(attempt int, err error, backoff time.Duration)
+
+type ConnectConfig struct {
+    MaxOpenConns    int
+    MaxIdleConns    int
+    ConnMaxIdleTime time.Duration
+    ConnMaxLifetime time.Duration
+    MaxRetries      int
+    AttemptTimeout  time.Duration
+    PgBouncerSafe   bool
+    Logger          *slog.Logger
+    OnRetry         OnRetryFunc
+}
+
+type ConnectOption func(*ConnectConfig)
+
+type KeepAliveConfig struct {
+    Interval time.Duration
+    Timeout  time.Duration
+}
+
+type MigrateConfig struct {
+    FS        embed.FS
+    Directory string
+    Driver    string
+}
+```
+
+#### Connection
+
+```go
+func Connect(databaseURL string, opts ...ConnectOption) (*sqlx.DB, error)
+```
+Opens a PostgreSQL connection using context.Background().
+
+```go
+func ConnectContext(ctx context.Context, databaseURL string, opts ...ConnectOption) (*sqlx.DB, error)
+```
+Opens a PostgreSQL connection with retry and exponential backoff + jitter.
+
+#### Connection Options
+
+```go
+func WithMaxOpenConns(n int) ConnectOption
+func WithMaxIdleConns(n int) ConnectOption
+func WithConnMaxIdleTime(d time.Duration) ConnectOption
+func WithConnMaxLifetime(d time.Duration) ConnectOption
+func WithMaxRetries(n int) ConnectOption
+func WithAttemptTimeout(d time.Duration) ConnectOption
+func WithPgBouncerSafe(enabled bool) ConnectOption      // forces pgx simple protocol
+func WithLogger(l *slog.Logger) ConnectOption
+func WithOnRetry(fn OnRetryFunc) ConnectOption
+```
+
+#### Keep-Alive
+
+```go
+func StartKeepAlive(ctx context.Context, db *sqlx.DB, interval time.Duration, _ int)
+```
+Backward-compatible keep-alive loop. poolSize parameter is ignored.
+
+```go
+func StartKeepAliveWithConfig(ctx context.Context, db *sqlx.DB, cfg KeepAliveConfig)
+```
+Launches a goroutine that periodically runs PingContext with a timeout.
+
+#### Migration
+
+```go
+func Migrate(db *sqlx.DB, cfg MigrateConfig) error          // run all up migrations
+func MigrateDown(db *sqlx.DB, cfg MigrateConfig) error      // roll back all
+func MigrateSteps(db *sqlx.DB, cfg MigrateConfig, n int) error  // +n up, -n down
+func MigrateVersion(db *sqlx.DB, cfg MigrateConfig) (version uint, dirty bool, err error)
+func MigrateForce(db *sqlx.DB, cfg MigrateConfig, version int) error  // fix dirty state
+```
+
+---
+
+### middleware
+
+> Package middleware provides HTTP middleware for the HAMR framework.
+
+#### Auth Types
+
+```go
+type SubjectLoader func(ctx context.Context, subjectID string) (any, error)
+
+type AuthConfig struct {
+    SessionManager *auth.SessionManager
+    SubjectLoader  SubjectLoader  // optional — if nil, only SubjectIDKey is set
+    LoginRedirect  string         // default: "/login"
+    HomeRedirect   string         // default: "/dashboard"
+}
+```
+
+#### Auth Middleware
+
+```go
+func Auth(cfg AuthConfig) echo.MiddlewareFunc
+```
+Requires a valid session. Returns 401 on failure.
+
+```go
+func RequireAuth(cfg AuthConfig) echo.MiddlewareFunc
+```
+Requires a valid session. Redirects to login page on failure.
+
+```go
+func OptionalAuth(cfg AuthConfig) echo.MiddlewareFunc
+```
+Populates context if user is logged in, never blocks.
+
+```go
+func RequireNotAuth(cfg AuthConfig) echo.MiddlewareFunc
+```
+Redirects already-authenticated users to the home page.
+
+#### Subject Helpers
+
+```go
+func GetSubjectID(c echo.Context) string   // from session or trusted header
+func GetSubject(c echo.Context) any        // only when SubjectLoader is configured
+func TrustedSubject() echo.MiddlewareFunc  // reads X-Subject-ID from trusted internal requests
+```
+
+#### CSRF
+
+```go
+type CSRFConfig struct {
+    CookieName  string  // default: "csrf"
+    TokenLookup string  // default: "form:csrf_token,header:X-CSRF-Token"
+    Secure      bool    // default: true
+}
+
+func CSRF() echo.MiddlewareFunc
+func CSRFWithConfig(cfg CSRFConfig) echo.MiddlewareFunc
+```
+
+#### CORS
+
+```go
+type CORSConfig struct {
+    AllowOrigins     []string
+    AllowMethods     []string
+    AllowHeaders     []string
+    AllowCredentials bool
+}
+
+func CORS() echo.MiddlewareFunc
+func CORSWithConfig(cfg CORSConfig) echo.MiddlewareFunc
+```
+
+#### Flash
+
+```go
+type FlashType string
+
+const (
+    FlashInfo    FlashType = "info"
+    FlashSuccess FlashType = "success"
+    FlashWarning FlashType = "warning"
+    FlashError   FlashType = "error"
+)
+
+type FlashMessage struct {
+    Message string    `json:"message"`
+    Type    FlashType `json:"type"`
+}
+
+type FlashConfig struct {
+    Path   string  // default: "/"
+    Secure bool    // default: true
+}
+
+const FlashCookieName = "hamr_flash"
+
+func Flash() echo.MiddlewareFunc
+func FlashWithConfig(cfg FlashConfig) echo.MiddlewareFunc
+func SetFlash(c echo.Context, message string, flashType FlashType)
+func GetFlash(c echo.Context) *FlashMessage  // nil if none
+```
+
+#### Request ID
+
+```go
+const HeaderRequestID = "X-Request-ID"
+
+func RequestID() echo.MiddlewareFunc
+```
+Generates or propagates a request ID, attaches a structured logger, and
+logs request completion.
+
+#### Cache Control
+
+```go
+func CacheControl(disableCaching bool) echo.MiddlewareFunc
+```
+Sets Cache-Control headers based on asset type. When disableCaching is true,
+every response gets no-cache directives.
+
+#### Security Headers
+
+```go
+type SecureConfig struct {
+    ContentSecurityPolicy string
+}
+
+func Secure() echo.MiddlewareFunc
+func SecureWithConfig(cfg SecureConfig) echo.MiddlewareFunc
+```
+
+#### RBAC
+
+```go
+type RoleChecker func(subject any, roles []string) bool
+type ActiveChecker func(subject any) bool
+
+func RequireRoles(checker RoleChecker, roles ...string) echo.MiddlewareFunc
+```
+Returns 401 if no subject, 403 if role check fails.
+
+```go
+func RequireActive(checker ActiveChecker) echo.MiddlewareFunc
+```
+Returns 401 if no subject, 403 if account not active.
+
+#### Audit
+
+```go
+type AuditEntry struct {
+    ActorID    string         `json:"actor_id"`
+    Action     string         `json:"action"`
+    EntityType string         `json:"entity_type"`
+    Data       map[string]any `json:"data"`
+    Timestamp  time.Time      `json:"timestamp"`
+}
+
+type AuditLogger interface {
+    Log(ctx context.Context, entry *AuditEntry) error
+}
+
+type AuditConfig struct {
+    Logger      AuditLogger
+    ActorIDFunc func(c echo.Context) string  // default: GetSubjectID
+}
+
+func Audit(logger AuditLogger) echo.MiddlewareFunc
+func AuditWithConfig(cfg AuditConfig) echo.MiddlewareFunc
+```
+
+#### Rate Limiting
+
+```go
+type DB interface {
+    ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+    QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+type RateLimitStore interface {
+    Allow(ctx context.Context, key string, rate int, window time.Duration) (allowed bool, remaining int, resetAt time.Time, err error)
+}
+
+type RateLimitConfig struct {
+    Store      RateLimitStore
+    Rate       int                                   // max requests per window (default: 60)
+    Burst      int                                   // additional burst (default: 10)
+    Window     time.Duration                         // sliding window (default: 1 minute)
+    KeyFunc    func(c echo.Context) (string, error)  // default: c.RealIP()
+    FailClosed bool                                  // deny on store errors (default: false)
+}
+
+func RateLimit(store RateLimitStore) echo.MiddlewareFunc
+func RateLimitWithConfig(cfg RateLimitConfig) echo.MiddlewareFunc
+```
+
+##### Memory Store
+
+```go
+type MemoryStore struct{ /* unexported */ }
+type MemoryStoreOption func(*MemoryStore)
+
+func NewMemoryStore(opts ...MemoryStoreOption) *MemoryStore
+func WithMaxSize(n int) MemoryStoreOption
+func WithAutoCleanup(ctx context.Context, interval time.Duration) MemoryStoreOption
+func WithWindow(d time.Duration) MemoryStoreOption
+
+func (s *MemoryStore) Allow(_ context.Context, key string, rate int, dur time.Duration) (bool, int, time.Time, error)
+func (s *MemoryStore) CleanupExpired(window time.Duration)
+```
+
+##### PostgreSQL Store
+
+```go
+type PGStore struct{ /* unexported */ }
+
+func NewPGStore(db DB) *PGStore
+func (s *PGStore) CreateTable(ctx context.Context) error         // creates _rate_limits table
+func (s *PGStore) Allow(ctx context.Context, key string, rate int, dur time.Duration) (bool, int, time.Time, error)
+func (s *PGStore) Cleanup(ctx context.Context, dur time.Duration) (int64, error)
+```
+
+#### Locale
+
+```go
+type LocaleConfig struct {
+    Bundle         *i18n.Bundle
+    CookieName     string                       // default: "hamr_locale"
+    CookieMaxAge   int                          // default: 31536000 (1 year)
+    CookieSecure   bool
+    DefaultLocale  string                       // from bundle if empty
+    UserLocaleFunc func(c echo.Context) string  // optional: user preference
+}
+
+func LocaleFromPath(cfg LocaleConfig) echo.MiddlewareFunc
+```
+Pre-router middleware (register with e.Pre()). Extracts locale from first URL
+path segment. Redirects to /{defaultLocale}/... if no valid prefix found.
+
+```go
+func LocaleFromPreference(cfg LocaleConfig) echo.MiddlewareFunc
+```
+Resolves locale from: UserLocaleFunc > cookie > Accept-Language > default.
+
+```go
+func GetLocale(c echo.Context) string
+func GetDirection(c echo.Context) string
+```
+
+---
+
+### ptr
+
+> Package ptr provides generic and concrete helpers for working with pointers.
+
+```go
+func To[T any](v T) *T                // returns pointer to v
+func From[T any](p *T) T              // dereferences, zero value if nil
+func FromOr[T any](p *T, def T) T     // dereferences, def if nil
+
+func String(p *string) string          // "" if nil
+func Int(p *int) int                   // 0 if nil
+func Bool(p *bool) bool               // false if nil
+
+func IntToStr(p *int) string           // "" if nil, else strconv.Itoa
+func BoolToYesNo(p *bool) string       // "" if nil, "Yes"/"No"
+```
+
+---
+
+## Utility Packages
+
+### janitor
+
+> Package janitor provides a cron-based background task runner with per-task
+> schedules, timeouts, and pre/post hooks.
+
+#### Task Interface
+
+```go
+type Task interface {
+    Name() string
+    Run(ctx context.Context) (int64, error)
+}
+```
+
+#### Hook Types
+
+```go
+type PreRunFunc  func(ctx context.Context, taskName string) error
+type PostRunFunc func(ctx context.Context, taskName string, affected int64, taskErr error)
+type PreTickFunc func(ctx context.Context) error
+type PostTickFunc func(ctx context.Context)
+```
+
+#### Janitor
+
+```go
+type Janitor struct{ /* unexported */ }
+type Option func(*Janitor)
+
+func New(opts ...Option) *Janitor
+func (j *Janitor) AddTask(schedule string, task Task) *Janitor
+func (j *Janitor) Start(ctx context.Context) error
+func (j *Janitor) Stop()
+```
+
+Schedules support standard cron syntax and robfig/cron descriptors
+("@every 5m", "@daily", "@hourly").
+
+#### Options
+
+```go
+func WithTimeout(d time.Duration) Option   // per-task timeout (default 30s)
+func WithLogger(l *slog.Logger) Option
+func WithPreRun(fn PreRunFunc) Option      // runs before each task
+func WithPostRun(fn PostRunFunc) Option    // runs after each task
+func WithPreTick(fn PreTickFunc) Option    // runs before scheduled execution
+func WithPostTick(fn PostTickFunc) Option  // runs after scheduled execution
+```
+
+---
+
+### async
+
+> Package async provides concurrency primitives with panic recovery.
+
+#### Concurrency Functions
+
+```go
+func All(ctx context.Context, fns ...func(context.Context) error) error
+```
+Runs fns concurrently. First error cancels remaining work via derived context.
+Panics recovered and converted to errors.
+
+```go
+func Settle(ctx context.Context, fns ...func(context.Context) error) []error
+```
+Runs fns concurrently. Never short-circuits — all functions run to completion.
+
+```go
+func Map[T, R any](ctx context.Context, items []T, fn func(context.Context, T) (R, error)) ([]R, error)
+```
+Applies fn to every item concurrently, returns results in order. First error
+cancels remaining.
+
+```go
+func Fire(fn func())
+```
+Spawns a goroutine with panic recovery. Panics logged to slog.Default().
+
+#### Group
+
+```go
+type Group struct{ /* unexported */ }
+type GroupOption func(*Group)
+
+func NewGroup(opts ...GroupOption) *Group
+func (g *Group) Go(fn func())    // spawns work; blocks at limit; no-op after Close
+func (g *Group) Close()          // waits for all in-flight goroutines
+
+func WithGroupLogger(l *slog.Logger) GroupOption
+func WithLimit(n int) GroupOption  // caps concurrent goroutines (clamped to >= 1)
+```
+
+---
+
+### templint
+
+> Package templint provides a static linter for .templ files.
+> Checks for inline control flow (silently dropped by templ), missing
+> accessibility attributes, and style anti-patterns.
+
+#### Types
+
+```go
+type Severity int
+
+const (
+    Warning Severity = iota
+    Error
+)
+
+func (s Severity) String() string
+func ParseSeverity(s string) (Severity, error)
+
+type Diagnostic struct {
+    File     string
+    Line     int
+    Col      int
+    Rule     string
+    Severity Severity
+    Message  string
+}
+
+func (d Diagnostic) String() string  // "file:line:col: severity[rule] message"
+
+type Rule interface {
+    ID() string
+    Check(filename string, lines []string) []Diagnostic
+}
+```
+
+#### Configuration
+
+```go
+type RuleConfig struct {
+    Enabled  *bool  `toml:"enabled"`
+    Severity string `toml:"severity"`
+}
+
+type Config struct {
+    Rules map[string]RuleConfig `toml:"rules"`
+}
+
+func LoadConfig(path string) (*Config, error)  // reads [lint.templ] from hamr.toml; nil if missing
+func (c *Config) IsEnabled(ruleID string) bool // true if nil config or rule not configured
+func (c *Config) GetSeverity(ruleID string, defaultSev Severity) Severity
+```
+
+#### Linter
+
+```go
+type Linter struct{ /* unexported */ }
+
+func New(cfg *Config) *Linter  // nil cfg = all rules enabled with defaults
+func (l *Linter) LintFile(path string) ([]Diagnostic, error)
+func (l *Linter) LintDir(dir string) ([]Diagnostic, error)
+
+func FilterBySeverity(diags []Diagnostic, minSev Severity) []Diagnostic
+func HasErrors(diags []Diagnostic) bool
+```
+
+#### Built-in Rules
+
+| ID | Default Severity | Detects |
+|---|---|---|
+| `inline-if` | Error | `if cond { <html>` on same line (silently dropped by templ) |
+| `inline-for` | Error | `for expr { <html>` on same line |
+| `inline-switch` | Error | `switch expr { <html>` on same line |
+| `img-alt` | Warning | `<img>` tags missing `alt` attribute |
+| `no-href` | Warning | `<a>` tags missing `href` attribute |
+| `inline-style` | Warning | `style="..."` or `style={` attributes |
+| `empty-class` | Warning | `class=""` attributes |
+| `js-href` | Warning | `href="javascript:..."` |
+
+---
+
+## Optional Packages
+
+### e2e
+
+> Package e2e provides reusable go-rod browser helpers for E2E testing.
+> Projects import this package in their e2e-go/ test files.
+
+#### Config & Options
+
+```go
+type Config struct {
+    Headless            bool          // default: true,  env: E2E_HEADLESS
+    NoSandbox           bool          // default: true,  env: E2E_NO_SANDBOX
+    SlowMotion          time.Duration // default: 0,     env: E2E_SLOW_MOTION
+    Timeout             time.Duration // default: 10s,   env: E2E_TIMEOUT
+    ArtifactDir         string        // default: "testdata/e2e-artifacts", env: E2E_ARTIFACT_DIR
+    ScreenshotOnFailure bool          // default: true,  env: E2E_SCREENSHOT_ON_FAIL
+    HTMLDumpOnFailure   bool          // default: true,  env: E2E_HTML_DUMP_ON_FAIL
+}
+
+type Option func(*Config)
+
+func WithHeadless(b bool) Option
+func WithSlowMotion(d time.Duration) Option
+func WithTimeout(d time.Duration) Option
+func WithArtifactDir(path string) Option
+func WithScreenshotOnFailure(b bool) Option
+func WithHTMLDumpOnFailure(b bool) Option
+func WithNoSandbox(b bool) Option
+```
+
+#### Browser Lifecycle
+
+```go
+func SetupBrowser(t *testing.T, opts ...Option) *rod.Browser
+```
+Launches Chromium configured via opts and env vars. Registers t.Cleanup to
+close browser.
+
+```go
+func NewPage(t *testing.T, browser *rod.Browser, url string) *rod.Page
+```
+Creates a tab, navigates to url, waits for load. Captures screenshot/HTML on
+failure. Closed via t.Cleanup.
+
+#### Element Actions
+
+```go
+func Input(t *testing.T, page *rod.Page, selector, value string)      // clear + type
+func Click(t *testing.T, page *rod.Page, selector string)
+func SelectOption(t *testing.T, page *rod.Page, selector, value string)
+```
+
+#### Element Queries
+
+```go
+func ElementExists(t *testing.T, page *rod.Page, selector string) bool
+func ElementNotExists(t *testing.T, page *rod.Page, selector string) bool
+func ElementText(t *testing.T, page *rod.Page, selector string) string
+func ElementAttribute(t *testing.T, page *rod.Page, selector, attr string) string
+func ElementCount(t *testing.T, page *rod.Page, selector string) int
+```
+
+#### Waiters
+
+```go
+func WaitForElement(t *testing.T, page *rod.Page, selector string, timeout time.Duration) *rod.Element
+func WaitForURLChange(t *testing.T, page *rod.Page, currentURL string, timeout time.Duration)
+func WaitForElementRemoved(t *testing.T, page *rod.Page, selector string, timeout time.Duration)
+```
+
+#### HTMX Helpers
+
+```go
+func WaitForHTMXIdle(t *testing.T, page *rod.Page, timeout time.Duration)
+```
+Waits until no elements carry the htmx-request class.
+
+```go
+func WaitForHTMXSwap(t *testing.T, page *rod.Page, selector string, timeout time.Duration)
+```
+Waits until the HTML of selector changes (indicating an HTMX swap).
+
+```go
+func ClickAndWaitHTMX(t *testing.T, page *rod.Page, selector string, timeout time.Duration)
+```
+Clicks selector and waits for all HTMX requests to settle.
+
+#### Assertions
+
+```go
+func AssertElementExists(t *testing.T, page *rod.Page, selector string)
+func AssertElementNotExists(t *testing.T, page *rod.Page, selector string)
+func AssertElementNotVisible(t *testing.T, page *rod.Page, selector string)
+func AssertElementContainsText(t *testing.T, page *rod.Page, selector, text string)
+func AssertElementHasClass(t *testing.T, page *rod.Page, selector, class string)
+func AssertElementCount(t *testing.T, page *rod.Page, selector string, expected int)
+func AssertURL(t *testing.T, page *rod.Page, expected string)
+func AssertURLContains(t *testing.T, page *rod.Page, substring string)
+```
+
+#### Artifacts
+
+```go
+func SaveScreenshot(t *testing.T, page *rod.Page, name string)  // logs warning on failure
+func SavePageHTML(t *testing.T, page *rod.Page, name string)    // logs warning on failure
+```
+
+---
+
+### auth
+
+> Package auth provides password hashing with Argon2id and
+> cryptographically-secure token generation.
+
+#### Password Hashing
+
+```go
+type HashConfig struct {
+    Time        uint32
+    Memory      uint32
+    Parallelism uint8
+    KeyLength   uint32
+    SaltLength  uint32
+}
+
+var DefaultHashConfig = HashConfig{
+    Time: 3, Memory: 64 * 1024, Parallelism: 2,
+    KeyLength: 32, SaltLength: 16,
+}
+
+func HashPassword(password string) (string, error)
+```
+Hashes using DefaultHashConfig. Returns PHC-format encoded string.
+
+```go
+func HashPasswordWithConfig(password string, cfg HashConfig) (string, error)
+```
+
+```go
+func CheckPassword(password, encodedHash string) (bool, error)
+```
+(true, nil) on match, (false, nil) on mismatch, error if hash cannot be parsed.
+
+```go
+func NeedsRehash(encodedHash string) (bool, error)
+```
+Reports whether hash was created with different parameters than DefaultHashConfig.
+
+#### Token Generation
+
+```go
+func GenerateToken() (string, error)      // 32-byte, base64 raw-URL encoded
+func GenerateTokenN(n int) (string, error) // n-byte variant
+```
+
+#### Session Types
+
+```go
+type Session struct {
+    ID        string
+    SubjectID string
+    Token     string
+    ExpiresAt time.Time
+    CreatedAt time.Time
+    // unexported: metadata any
+}
+
+func (s *Session) SetMetadata(v any)       // for SessionStore implementations
+func (s *Session) RawMetadata() any
+func SessionMetadata[T any](s *Session) (T, error)  // type-safe extraction
+```
+
+#### Session Store Interface
+
+```go
+type SessionStore interface {
+    Create(ctx context.Context, s *Session) error
+    GetByToken(ctx context.Context, token string) (*Session, error)  // (nil, nil) = not found
+    Delete(ctx context.Context, id string) error
+    DeleteBySubjectID(ctx context.Context, subjectID string) error
+}
+
+type SessionToucher interface {
+    Touch(ctx context.Context, id string, newExpiresAt time.Time) error
+}
+```
+
+#### Session Manager
+
+```go
+type SessionManager struct{ /* unexported */ }
+type SessionOption func(*SessionManager)
+
+func NewSessionManager(store SessionStore, opts ...SessionOption) *SessionManager
+```
+Defaults: 7-day duration, cookie "session_token", path "/", Secure, SameSiteLax.
+
+```go
+func (m *SessionManager) CreateSession(ctx context.Context, subjectID string, metadata any) (*Session, error)
+func (m *SessionManager) ValidateSession(ctx context.Context, token string) (*Session, error)
+func (m *SessionManager) DeleteSession(ctx context.Context, id string) error
+func (m *SessionManager) DeleteSubjectSessions(ctx context.Context, subjectID string) error
+
+func (m *SessionManager) CookieName() string
+func (m *SessionManager) CookiePath() string
+func (m *SessionManager) CookieDomain() string
+func (m *SessionManager) CookieSecure() bool
+func (m *SessionManager) SameSite() http.SameSite
+func (m *SessionManager) Duration() time.Duration
+```
+
+#### Session Options
+
+```go
+func WithDuration(d time.Duration) SessionOption
+func WithCookieName(name string) SessionOption
+func WithCookiePath(path string) SessionOption
+func WithCookieDomain(domain string) SessionOption
+func WithCookieSecure(secure bool) SessionOption
+func WithSameSite(ss http.SameSite) SessionOption
+func WithSlidingRefresh(threshold time.Duration) SessionOption
+```
+WithSlidingRefresh: when session age exceeds threshold, type-asserts store to
+SessionToucher and calls Touch to extend expiry.
+
+---
+
+### i18n
+
+> Package i18n provides internationalisation support: JSON translation files,
+> CLDR plural rules, text/template interpolation, and a Bundle that holds
+> per-locale Translators.
+
+#### Plural Types
+
+```go
+type PluralCategory string
+
+const (
+    Zero  PluralCategory = "zero"
+    One   PluralCategory = "one"
+    Two   PluralCategory = "two"
+    Few   PluralCategory = "few"
+    Many  PluralCategory = "many"
+    Other PluralCategory = "other"
+)
+
+type PluralRule func(n int) PluralCategory
+```
+
+#### Plural Functions
+
+```go
+func RegisterRule(lang string, rule PluralRule)
+func RuleFor(lang string) PluralRule
+```
+Tries full tag (e.g. "fr-CA"), then base language ("fr"), then custom rules,
+then builtins, falling back to English.
+
+#### Direction
+
+```go
+func DirectionFor(lang string) string  // "rtl" for RTL languages, "ltr" otherwise
+```
+
+#### JSON Helpers
+
+```go
+func IsPluralObject(obj map[string]any) bool
+func InterpolationVars(s string) []string  // extracts {{.VarName}} placeholders
+```
+
+#### Validation
+
+```go
+type ValidationError struct {
+    Locale  string
+    Key     string
+    Message string
+}
+
+func (e ValidationError) Error() string  // "[locale] key: message"
+```
+
+#### Bundle
+
+```go
+type BundleConfig struct {
+    LocaleDir         string  // directory containing *.json files
+    DefaultLocale     string  // e.g. "en"
+    FallbackToDefault *bool   // default true; nil = true
+}
+
+type Bundle struct{ /* unexported */ }
+
+func NewBundle(cfg BundleConfig) (*Bundle, error)
+func (b *Bundle) Translator(locale string) *Translator
+func (b *Bundle) SupportedLocales() []string
+func (b *Bundle) HasLocale(locale string) bool
+func (b *Bundle) ResolveLocale(code string) (string, bool)  // handles region tags
+func (b *Bundle) DefaultLocale() string
+```
+
+#### Translator
+
+```go
+type Translator struct{ /* unexported */ }
+
+func (t *Translator) Locale() string
+func (t *Translator) Direction() string   // "ltr" or "rtl"
+func (t *Translator) Has(key string) bool
+func (t *Translator) T(key string, args ...any) string
+```
+T argument patterns:
+- No args: return plain string
+- int arg: use as plural count; remaining args for interpolation
+- map[string]any arg: use as interpolation data
+Falls back to fallback translator, then returns key as-is.
+
+#### Context Helpers
+
+```go
+func FromContext(c echo.Context) *Translator   // panics if not set
+func LocaleFromContext(c echo.Context) string
+func DirectionFromContext(c echo.Context) string
+```
+
+---
+
+### storage
+
+> Package storage provides a pluggable file storage abstraction with local
+> filesystem and S3-compatible backends (AWS S3, MinIO, Cloudflare R2).
+
+#### Interfaces
+
+```go
+type FileStorage interface {
+    Save(ctx context.Context, path string, r io.Reader) error
+    Open(ctx context.Context, path string) (io.ReadCloser, error)
+    Delete(ctx context.Context, path string) error
+    Exists(ctx context.Context, path string) (bool, error)
+    List(ctx context.Context, prefix string) ([]string, error)
+}
+
+type SignableStorage interface {
+    FileStorage
+    SignURL(ctx context.Context, path string, expiry time.Duration) (string, error)
+}
+```
+Save overwrites existing files. Delete is idempotent. List returns all file
+paths under the given prefix.
+
+#### Local Storage
+
+```go
+type LocalStorage struct{ /* unexported */ }
+type LocalOption func(*LocalStorage)
+
+func NewLocalStorage(basePath string, opts ...LocalOption) (*LocalStorage, error)
+func WithLocalLogger(l *slog.Logger) LocalOption
+```
+Methods: Save, Open, Delete, Exists, List (implementing FileStorage).
+
+#### S3 Storage
+
+```go
+type S3Config struct {
+    Endpoint       string  // e.g. "http://localhost:9000" for MinIO
+    Bucket         string
+    Region         string
+    AccessKeyID    string
+    SecretAccessKey string
+    UsePathStyle   bool    // true for MinIO / path-style addressing
+}
+
+type S3Storage struct{ /* unexported */ }
+type S3Option func(*S3Storage)
+
+func NewS3Storage(cfg S3Config, opts ...S3Option) (*S3Storage, error)
+func WithS3Logger(l *slog.Logger) S3Option
+func WithPublicRead(v bool) S3Option  // applies public-read policy on EnsureBucket
+
+func (s *S3Storage) EnsureBucket(ctx context.Context) error
+```
+Methods: Save, Open, Delete, Exists, List, SignURL (implementing SignableStorage).
+
+---
+
+### media
+
+> Package media provides high-level image and video upload, processing, and
+> serving on top of the storage package.
+
+#### Constants
+
+```go
+const (
+    KB int64 = 1024
+    MB int64 = 1024 * 1024
+    GB int64 = 1024 * 1024 * 1024
+)
+
+const (
+    FormatWebP = "webp"
+    FormatJPEG = "jpeg"
+    FormatPNG  = "png"
+)
+
+const (
+    TypeImage = "image"
+    TypeVideo = "video"
+)
+```
+
+#### Errors
+
+```go
+var (
+    ErrFileTooLarge   = errors.New("media: file too large")
+    ErrUnknownType    = errors.New("media: unsupported file type")
+    ErrVideoTooLong   = errors.New("media: video exceeds maximum duration")
+    ErrFFmpegNotFound = errors.New("media: ffmpeg not found in PATH")
+)
+```
+
+#### Types
+
+```go
+type ImageSize struct {
+    Name   string
+    Width  int
+    Height int
+}
+
+type ImageStoreConfig struct {
+    Category    string
+    Sizes       []ImageSize
+    Quality     int
+    Format      string
+    MaxSize     int64
+    SignedExpiry time.Duration
+    BaseURL     string
+}
+
+type VideoStoreConfig struct {
+    Category          string
+    MaxSize           int64
+    MaxDuration       float64
+    GenerateThumbnail bool
+    ThumbnailWidth    int
+    BaseURL           string
+    SignedExpiry       time.Duration
+}
+
+type Option func(*options)
+```
+
+#### Preset Size Sets
+
+```go
+var SizesAvatar = []ImageSize{
+    {Name: "thumb", Width: 64, Height: 64},
+    {Name: "small", Width: 150, Height: 150},
+    {Name: "medium", Width: 400, Height: 400},
+}
+
+var SizesCard = []ImageSize{
+    {Name: "thumb", Width: 64, Height: 64},
+    {Name: "small", Width: 150, Height: 150},
+    {Name: "medium", Width: 400, Height: 400},
+    {Name: "large", Width: 800, Height: 800},
+    {Name: "xlarge", Width: 1200, Height: 1200},
+}
+
+var SizesIcon = []ImageSize{
+    {Name: "small", Width: 100, Height: 100},
+    {Name: "medium", Width: 200, Height: 200},
+    {Name: "large", Width: 400, Height: 400},
+}
+
+var SizeOriginal = []ImageSize{
+    {Name: "original", Width: 0, Height: 0},
+}
+```
+
+#### Detection
+
+```go
+func DetectType(fh *multipart.FileHeader) (mediaType string, mimeType string, err error)
+```
+
+#### Media Option
+
+```go
+func WithLogger(l *slog.Logger) Option
+```
+
+#### Image Store
+
+```go
+type ImageStore struct{ /* unexported */ }
+
+func NewLocalImageStore(store *storage.LocalStorage, urlPrefix string, cfg ImageStoreConfig, opts ...Option) (*ImageStore, error)
+func NewS3ImageStore(store *storage.S3Storage, cfg ImageStoreConfig, opts ...Option) (*ImageStore, error)
+
+func (s *ImageStore) Upload(ctx context.Context, fh *multipart.FileHeader) (*ImageUploadResult, error)
+func (s *ImageStore) UploadFromReader(ctx context.Context, r io.Reader, size int64) (*ImageUploadResult, error)
+func (s *ImageStore) Delete(ctx context.Context, id string) error
+func (s *ImageStore) GetMedia(id string) ImageRef
+func (s *ImageStore) GetMediaCtx(ctx context.Context, id string) ImageRef  // may use signed URLs
+func (s *ImageStore) SignedURL(ctx context.Context, path string, expiry time.Duration) (string, error)
+func (s *ImageStore) ServeHandler() echo.HandlerFunc
+```
+
+#### Image Upload Result
+
+```go
+type ImageUploadResult struct {
+    ID        string
+    MediaType string
+    MimeType  string
+}
+
+func (r *ImageUploadResult) Path(size string) string
+```
+
+#### Image Ref
+
+```go
+type ImageRef struct{ /* unexported */ }
+
+func (r ImageRef) Size(name string) string   // URL for named size variant
+func (r ImageRef) Thumb() string             // "thumb" size or smallest
+func (r ImageRef) Smallest() string          // smallest by width
+func (r ImageRef) Biggest() string           // largest by width
+```
+
+#### Video Store
+
+```go
+type VideoStore struct{ /* unexported */ }
+
+func NewLocalVideoStore(store *storage.LocalStorage, urlPrefix string, cfg VideoStoreConfig, opts ...Option) (*VideoStore, error)
+func NewS3VideoStore(store *storage.S3Storage, cfg VideoStoreConfig, opts ...Option) (*VideoStore, error)
+
+func (s *VideoStore) Upload(ctx context.Context, fh *multipart.FileHeader) (*VideoUploadResult, error)
+func (s *VideoStore) Delete(ctx context.Context, id string) error
+func (s *VideoStore) GetMedia(id string) VideoRef
+func (s *VideoStore) GetMediaCtx(ctx context.Context, id string) VideoRef
+func (s *VideoStore) SignedURL(ctx context.Context, path string, expiry time.Duration) (string, error)
+func (s *VideoStore) ServeHandler() echo.HandlerFunc
+```
+
+#### Video Upload Result
+
+```go
+type VideoUploadResult struct {
+    ID            string
+    MediaType     string
+    MimeType      string
+    Duration      float64
+    FileSize      int64
+    ThumbnailPath string
+}
+
+func (r *VideoUploadResult) Path() string
+```
+
+#### Video Ref
+
+```go
+type VideoRef struct{ /* unexported */ }
+
+func (r VideoRef) Video() string        // video file URL
+func (r VideoRef) Thumbnail() string    // thumbnail URL (empty if not generated)
+```
+
+---
+
+### websocket
+
+> WebSocket hub with session, subject, and room routing.
+> Pure mutex design with no background event-loop goroutine.
+
+#### Event Types
+
+```go
+type EventType string
+
+type Event struct {
+    Type    EventType       `json:"type"`
+    Payload json.RawMessage `json:"payload,omitempty"`
+    Target  string          `json:"target,omitempty"`   // CSS selector
+    Swap    string          `json:"swap,omitempty"`     // "innerHTML" or "outerHTML"
+    HTML    string          `json:"html,omitempty"`     // rendered HTML to swap in
+    Trigger string          `json:"trigger,omitempty"`  // HTMX event name
+}
+```
+Three delivery modes:
+1. HTML Direct: set Target + HTML, client swaps HTML into target
+2. HTMX Trigger: set Target + Trigger, client calls htmx.trigger()
+3. Data Only: set Payload only, client handles via registered callback
+
+#### Event Constructors
+
+```go
+func NewEvent(eventType EventType, payload any) *Event
+func NewHTMLEvent(eventType EventType, target, html string) *Event
+func NewOuterHTMLEvent(eventType EventType, target, html string) *Event
+func NewTriggerEvent(eventType EventType, target, trigger string) *Event
+func (e *Event) JSON() []byte
+```
+
+#### Client
+
+```go
+type Client struct {
+    SessionID string
+    SubjectID string
+    Rooms     map[string]bool
+    Meta      map[string]any
+}
+```
+
+#### Hub
+
+```go
+type Hub struct{ /* unexported */ }
+type HubOption func(*Hub)
+
+type HubStats struct {
+    Clients  int
+    Subjects int
+    Rooms    int
+}
+
+func NewHub(opts ...HubOption) *Hub
+func (h *Hub) Handler() echo.HandlerFunc     // upgrades HTTP to WebSocket
+func (h *Hub) Close()                        // cancels context, waits for pumps
+func (h *Hub) Stats() HubStats
+```
+
+#### Hub Options
+
+```go
+func WithSessionIDFunc(fn func(r *http.Request) string) HubOption
+func WithSubjectIDFunc(fn func(r *http.Request) string) HubOption
+func WithOnMessage(fn func(*Client, []byte)) HubOption       // nil = server-push-only
+func WithAcceptOptions(opts *ws.AcceptOptions) HubOption
+func WithLogger(l *slog.Logger) HubOption
+```
+
+#### Hub Sending
+
+```go
+func (h *Hub) SendToSession(sessionID string, msg []byte) bool
+func (h *Hub) SendToSubject(subjectID string, msg []byte) int   // returns drop count
+func (h *Hub) SendToRoom(room string, msg []byte) int
+func (h *Hub) SendToRoomExcept(room string, msg []byte, exceptSessionID string) int
+func (h *Hub) Broadcast(msg []byte) int
+```
+
+#### Hub Room/Subject Management
+
+```go
+func (h *Hub) JoinRoom(c *Client, room string)
+func (h *Hub) LeaveRoom(c *Client, room string)
+func (h *Hub) AssociateSubject(sessionID, subjectID string)
+```
+
+#### Emitter
+
+```go
+type Emitter struct{ /* unexported */ }
+
+func NewEmitter(hub *Hub) *Emitter
+func (e *Emitter) ToSession(sessionID string, event *Event)
+func (e *Emitter) ToSubject(subjectID string, event *Event)
+func (e *Emitter) ToRoom(room string, event *Event)
+func (e *Emitter) ToRoomExcept(room string, event *Event, exceptSessionID string)
+func (e *Emitter) Broadcast(event *Event)
+```
+
+---
+
+### sync
+
+> Package sync provides file-watching and S3-syncing for static assets.
+
+```go
+func SyncAll(ctx context.Context, store storage.FileStorage, dir string) error
+```
+One-shot upload of all files under dir. Creates bucket if store implements
+BucketEnsurer.
+
+```go
+func WatchAndSync(ctx context.Context, store storage.FileStorage, dir string) error
+```
+Watches dir for filesystem changes and syncs to storage. Blocks until ctx
+cancelled.
+
+```go
+func Key(dir, path string) string
+```
+Converts filesystem path to S3 key relative to dir. Returns "" for skippable
+files (e.g. .gitkeep).
+
+```go
+type BucketEnsurer interface {
+    EnsureBucket(ctx context.Context) error
+}
+```

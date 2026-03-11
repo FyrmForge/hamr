@@ -89,7 +89,7 @@ func (sb *StatusBar) Stop() {
 	_, h, err := term.GetSize(sb.fd)
 	if err != nil {
 		termMu.Lock()
-		os.Stdout.Write([]byte("\033[r"))
+		_, _ = os.Stdout.Write([]byte("\033[r"))
 		termMu.Unlock()
 		return
 	}
@@ -100,7 +100,7 @@ func (sb *StatusBar) Stop() {
 	fmt.Fprintf(&buf, "\033[%d;1H", h-1)                // cursor above bar
 
 	termMu.Lock()
-	os.Stdout.Write(buf.Bytes())
+	_, _ = os.Stdout.Write(buf.Bytes())
 	termMu.Unlock()
 }
 
@@ -132,6 +132,6 @@ func (sb *StatusBar) draw() {
 	fmt.Fprintf(&buf, "\033[%d;1H", h-1)                 // cursor to bottom of scroll region
 
 	termMu.Lock()
-	os.Stdout.Write(buf.Bytes())
+	_, _ = os.Stdout.Write(buf.Bytes())
 	termMu.Unlock()
 }

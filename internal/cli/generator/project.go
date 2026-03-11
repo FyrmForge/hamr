@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/FyrmForge/hamr/llmsdocs"
 )
 
 // ProjectConfig holds the data used to render project templates.
@@ -130,6 +132,14 @@ func GenerateProject(dir string, cfg *ProjectConfig) error {
 		}
 	}
 
+	// Copy framework reference docs (not templates, raw embedded files).
+	if err := copyRawFile(llmsdocs.LLMsTxt, filepath.Join(dir, "docs", "llms.txt")); err != nil {
+		return fmt.Errorf("copy llms.txt: %w", err)
+	}
+	if err := copyRawFile(llmsdocs.LLMsFullTxt, filepath.Join(dir, "docs", "llms-full.txt")); err != nil {
+		return fmt.Errorf("copy llms-full.txt: %w", err)
+	}
+
 	// Make scripts executable.
 	if err := os.Chmod(filepath.Join(dir, "scripts", "db-shell.sh"), 0o755); err != nil {
 		return fmt.Errorf("chmod scripts/db-shell.sh: %w", err)
@@ -192,10 +202,6 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 		// docs
 		{"templates/new/docs/adr/000-base-framework.md.tmpl", "docs/adr/000-base-framework.md"},
 		{"templates/new/docs/features/TEMPLATE.md.tmpl", "docs/features/TEMPLATE.md"},
-		{"templates/new/docs/ai-guides/handler-patterns.md.tmpl", "docs/ai-guides/handler-patterns.md"},
-		{"templates/new/docs/ai-guides/validation.md.tmpl", "docs/ai-guides/validation.md"},
-		{"templates/new/docs/ai-guides/forms.md.tmpl", "docs/ai-guides/forms.md"},
-
 		// GitHub Actions
 		{"templates/new/github/workflows/ci.yml.tmpl", ".github/workflows/ci.yml"},
 		{"templates/new/github/workflows/deploy.yml.tmpl", ".github/workflows/deploy.yml"},
@@ -227,7 +233,6 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 			templateFile{"templates/new/static/css/layout/header.css.tmpl", "static/css/layout/header.css"},
 			templateFile{"templates/new/static/css/layout/footer.css.tmpl", "static/css/layout/footer.css"},
 			templateFile{"templates/new/static/css/pages/home.css.tmpl", "static/css/pages/home.css"},
-			templateFile{"templates/new/docs/ai-guides/css.md.tmpl", "docs/ai-guides/css.md"},
 		)
 	}
 
@@ -237,7 +242,6 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 			templateFile{"templates/new/root/tailwind.config.js.tmpl", "tailwind.config.js"},
 			templateFile{"templates/new/root/package.json.tmpl", "package.json"},
 			templateFile{"templates/new/css/input.css.tmpl", "css/input.css"},
-			templateFile{"templates/new/docs/ai-guides/tailwind.md.tmpl", "docs/ai-guides/tailwind.md"},
 		)
 	}
 
@@ -300,7 +304,6 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 	if cfg.IncludeLocale {
 		files = append(files,
 			templateFile{"templates/new/locales/en.json.tmpl", "locales/en.json"},
-			templateFile{"templates/new/docs/ai-guides/i18n.md.tmpl", "docs/ai-guides/i18n.md"},
 		)
 	}
 

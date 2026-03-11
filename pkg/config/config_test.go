@@ -7,6 +7,46 @@ import (
 	"github.com/FyrmForge/hamr/pkg/config"
 )
 
+func TestParseBaseURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		origin   string
+		hostname string
+		wantErr  bool
+	}{
+		{"empty", "", "", "", false},
+		{"https", "https://example.com", "https://example.com", "example.com", false},
+		{"http", "http://localhost", "http://localhost", "localhost", false},
+		{"with port", "https://example.com:8443", "https://example.com:8443", "example.com", false},
+		{"with path stripped", "https://example.com/app", "https://example.com", "example.com", false},
+		{"bad scheme", "ftp://example.com", "", "", true},
+		{"no host", "https://", "", "", true},
+		{"no scheme", "example.com", "", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origin, hostname, err := config.ParseBaseURL(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for input %q", tt.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if origin != tt.origin {
+				t.Fatalf("origin: got %q, want %q", origin, tt.origin)
+			}
+			if hostname != tt.hostname {
+				t.Fatalf("hostname: got %q, want %q", hostname, tt.hostname)
+			}
+		})
+	}
+}
+
 func TestGetEnvOrDefault(t *testing.T) {
 	const key = "HAMR_TEST_DEFAULT"
 

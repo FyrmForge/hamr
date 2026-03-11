@@ -100,6 +100,7 @@ func authenticateSession(c echo.Context, cfg AuthConfig) error {
 		c.SetCookie(&http.Cookie{
 			Name:     cfg.SessionManager.CookieName(),
 			Path:     cfg.SessionManager.CookiePath(),
+			Domain:   cfg.SessionManager.CookieDomain(),
 			MaxAge:   -1,
 			HttpOnly: true,
 			Secure:   cfg.SessionManager.CookieSecure(),

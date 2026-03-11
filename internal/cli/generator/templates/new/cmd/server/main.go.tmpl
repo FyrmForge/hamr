@@ -17,6 +17,9 @@ import (
 	"github.com/FyrmForge/hamr/pkg/db"
 {{- end}}
 	"github.com/FyrmForge/hamr/pkg/logging"
+{{- if .IncludeSessions}}
+	"github.com/FyrmForge/hamr/pkg/middleware"
+{{- end}}
 	"github.com/FyrmForge/hamr/pkg/server"
 {{- if .IncludeStorage}}
 	"github.com/FyrmForge/hamr/pkg/storage"
@@ -51,6 +54,7 @@ var version = "dev"
 var (
 	envPort          = config.GetEnvOrDefaultInt("PORT", 8080)
 	envDevMode       = config.GetEnvOrDefaultBool("DEV_MODE", true)
+	envBaseURL       = config.GetEnvOrDefault("BASE_URL", "")
 	envDatabaseURL   = config.GetEnvOrDefault("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/{{.Name}}?sslmode=disable")
 	envStaticBaseURL = config.GetEnvOrDefault("STATIC_BASE_URL", "/static")
 {{- if eq .StorageBackend "local"}}
@@ -78,6 +82,14 @@ func main() {
 	components.StaticBaseURL = envStaticBaseURL
 	components.StaticVersion = version
 
+	// Base URL (cookie domain & CORS).
+	baseOrigin, {{- if .IncludeSessions}} baseDomain{{- else}} _{{- end}}, err := config.ParseBaseURL(envBaseURL)
+	if err != nil {
+		log.Error("invalid BASE_URL", "error", err)
+		os.Exit(1)
+	}
+	components.BaseURL = baseOrigin
+
 	// Server.
 	srv, err := server.New(
 		server.WithPort(envPort),
@@ -89,6 +101,15 @@ func main() {
 		log.Error("failed to create server", "error", err)
 		os.Exit(1)
 	}
+{{- if .IncludeSessions}}
+
+	if baseOrigin != "" {
+		srv.Echo().Use(middleware.CORSWithConfig(middleware.CORSConfig{
+			AllowOrigins:     []string{baseOrigin},
+			AllowCredentials: true,
+		}))
+	}
+{{- end}}
 
 	// Static page generation — no heavy deps needed.
 	web.RegisterStaticPages(srv, log)
@@ -143,7 +164,10 @@ func main() {
 {{- if .IncludeSessions}}
 
 	// Sessions.
-	sessionManager := auth.NewSessionManager(store, auth.WithCookieSecure(!envDevMode))
+	sessionManager := auth.NewSessionManager(store,
+		auth.WithCookieSecure(!envDevMode),
+		auth.WithCookieDomain(baseDomain),
+	)
 {{- end}}
 {{- if .IncludeAuth}}
 
@@ -207,6 +231,7 @@ func main() {
 	web.RegisterRoutes(srv, &web.Deps{
 		Log:           log,
 		Store:         store,
+		BaseURL:       baseOrigin,
 		StaticBaseURL: envStaticBaseURL,
 		DevMode:       envDevMode,
 {{- if .IncludeSessions}}

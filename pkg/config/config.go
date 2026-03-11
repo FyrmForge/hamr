@@ -8,10 +8,38 @@
 package config
 
 import (
+	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
 )
+
+// ParseBaseURL validates a raw base URL string and returns the origin
+// (scheme://host, including port if present) and the hostname (without port).
+// An empty input is valid and returns zero values (optional in dev).
+func ParseBaseURL(raw string) (origin, hostname string, err error) {
+	if raw == "" {
+		return "", "", nil
+	}
+
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", "", fmt.Errorf("config: invalid BASE_URL: %w", err)
+	}
+
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", "", fmt.Errorf("config: BASE_URL scheme must be http or https, got %q", u.Scheme)
+	}
+
+	if u.Hostname() == "" {
+		return "", "", fmt.Errorf("config: BASE_URL must include a host")
+	}
+
+	origin = u.Scheme + "://" + u.Host // Host includes port if present
+	hostname = u.Hostname()            // without port
+	return origin, hostname, nil
+}
 
 // GetEnvOrDefault returns the value of the environment variable named by key,
 // or def if the variable is unset or empty.

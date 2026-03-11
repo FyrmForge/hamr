@@ -21,3 +21,8 @@ vet:
 
 install: 
 	go install -ldflags '$(LDFLAGS)' ./cmd/hamr 
+
+aiquestion:
+	@echo "Is this of the highest code quality and usability? Are user and ai docs updated?"
+	
+ai: build lint test vet aiquestion

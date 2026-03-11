@@ -50,6 +50,7 @@ type SessionManager struct {
 	slidingThreshold  time.Duration
 	cookieName        string
 	cookiePath        string
+	cookieDomain      string
 	cookieSecure      bool
 	sameSite          http.SameSite
 }
@@ -70,6 +71,12 @@ func WithCookieName(name string) SessionOption {
 // WithCookiePath sets the session cookie path.
 func WithCookiePath(path string) SessionOption {
 	return func(m *SessionManager) { m.cookiePath = path }
+}
+
+// WithCookieDomain sets the Domain attribute on the session cookie.
+// Empty (default) scopes the cookie to the exact host.
+func WithCookieDomain(domain string) SessionOption {
+	return func(m *SessionManager) { m.cookieDomain = domain }
 }
 
 // WithCookieSecure sets the Secure flag on the session cookie.
@@ -172,6 +179,9 @@ func (m *SessionManager) CookieName() string { return m.cookieName }
 
 // CookiePath returns the configured cookie path.
 func (m *SessionManager) CookiePath() string { return m.cookiePath }
+
+// CookieDomain returns the configured Domain attribute.
+func (m *SessionManager) CookieDomain() string { return m.cookieDomain }
 
 // CookieSecure returns the configured Secure flag.
 func (m *SessionManager) CookieSecure() bool { return m.cookieSecure }

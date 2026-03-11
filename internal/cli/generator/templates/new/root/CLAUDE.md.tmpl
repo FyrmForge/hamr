@@ -14,33 +14,11 @@ make templint       # Lint .templ files for silent failures and a11y issues
 make docker-down    # Stop PostgreSQL
 ```
 
-## Framework
+## Project Conventions
 
-This project uses the HAMR framework (`github.com/FyrmForge/hamr`). Key packages:
+See AGENTS.md for all project conventions, patterns, and guides.
 
-- `hamr/pkg/server` — Echo wrapper with functional options
-- `hamr/pkg/respond` — Content-negotiated responses (HTML/JSON)
-- `hamr/pkg/validate` — Validation helpers (return "" or error string)
-- `hamr/pkg/middleware` — Auth, CSRF, flash, rate limiting, etc.
-- `hamr/pkg/db` — Database connection with retry + migrations
-- `hamr/pkg/config` — Environment variable helpers
-- `hamr/pkg/logging` — Structured logging (slog)
-- `hamr/pkg/htmx` — HTMX request/response helpers
+## Framework Reference
 
-## Key Patterns
-
-- Handlers: constructor injection, one package per domain
-- Config: `config.GetEnvOrDefault()` helpers read environment variables
-- Routes: registered in `internal/web/server.go`
-- Responses: `respond.HTML(c, status, templComponent)` or `respond.JSON(c, status, data)`
-- Validation: `validate.Required(v)` returns "" or error message
-- Flash: `middleware.SetFlash(c, msg, type)` before redirect
-- Errors: custom handler in `internal/web/handler/errors/`
-
-## Code Style
-
-- Follow existing patterns in the codebase
-- Use `hamr/pkg` helpers instead of reimplementing
-- Prefer `respond.HTML`/`respond.JSON` over raw `c.HTML()`
-- Add `// GET /path` comments above handler methods
-- Keep handlers thin — business logic in service layer
+See `docs/llms.txt` for a compact HAMR API reference.
+See `docs/llms-full.txt` for complete package documentation.

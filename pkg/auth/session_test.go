@@ -100,6 +100,7 @@ func TestSessionManagerOptions(t *testing.T) {
 		WithDuration(1*time.Hour),
 		WithCookieName("my_sess"),
 		WithCookiePath("/app"),
+		WithCookieDomain("example.com"),
 		WithCookieSecure(false),
 		WithSameSite(http.SameSiteStrictMode),
 	)
@@ -107,8 +108,14 @@ func TestSessionManagerOptions(t *testing.T) {
 	assert.Equal(t, 1*time.Hour, m.Duration())
 	assert.Equal(t, "my_sess", m.CookieName())
 	assert.Equal(t, "/app", m.CookiePath())
+	assert.Equal(t, "example.com", m.CookieDomain())
 	assert.False(t, m.CookieSecure())
 	assert.Equal(t, http.SameSiteStrictMode, m.SameSite())
+}
+
+func TestSessionManagerCookieDomainDefault(t *testing.T) {
+	m := NewSessionManager(newMockStore())
+	assert.Equal(t, "", m.CookieDomain(), "default cookie domain should be empty")
 }
 
 // ---------------------------------------------------------------------------

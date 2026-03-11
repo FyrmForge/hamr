@@ -1,4 +1,22 @@
-# {{.Name}} — AI Coding Rules
+# {{.Name}} — Project Conventions
+
+## Build & Test
+
+```bash
+make install        # Install dev tools (templ)
+make docker-up      # Start PostgreSQL
+make migrate        # Apply database migrations explicitly
+hamr dev            # Run dev server (file watching, builds, live reload)
+make build          # Build binary (generates templ first)
+make test           # Run tests
+make lint           # Run linters
+make templint       # Lint .templ files for silent failures and a11y issues
+make docker-down    # Stop PostgreSQL
+{{- if .IncludeE2E}}
+make e2e            # Run E2E tests (containerized)
+make e2e-local      # Run E2E tests locally
+{{- end}}
+```
 
 ## Project Structure
 
@@ -11,39 +29,303 @@ internal/web/server.go   Route registration + middleware groups
 internal/web/handler/    One package per domain (home, health, errors{{- if .IncludeAuth}}, auth{{- end}})
 internal/web/components/ Shared templ components (layout, form helpers)
 static/                  CSS, JS, images
+{{- if .IncludeLocale}}
+locales/                 Translation JSON files (one per language)
+internal/locale/         Generated type-safe i18n accessors
+{{- end}}
 ```
+
+## Framework Reference
+
+This project uses the HAMR framework (`github.com/FyrmForge/hamr`). Key packages:
+
+- `hamr/pkg/server` — Echo wrapper with functional options
+- `hamr/pkg/respond` — Content-negotiated responses (HTML/JSON)
+- `hamr/pkg/validate` — Validation helpers (return "" or error string)
+- `hamr/pkg/middleware` — Auth, CSRF, flash, rate limiting, etc.
+- `hamr/pkg/db` — Database connection with retry + migrations
+- `hamr/pkg/config` — Environment variable helpers
+- `hamr/pkg/logging` — Structured logging (slog)
+- `hamr/pkg/htmx` — HTMX request/response helpers
+
+See `docs/llms.txt` for a compact API reference and `docs/llms-full.txt` for
+complete package documentation.
 
 ## Handler Pattern
 
-- One handler package per domain: `internal/web/handler/<name>/`
-- Constructor injection: `NewHandler(store repo.Store, log *slog.Logger) *Handler`
-- Route comments above methods: `// GET /path`
-- Register routes in `internal/web/server.go`
-- Use `respond.HTML` or `respond.JSON` for responses
+One handler package per domain: `internal/web/handler/<name>/`
 
-## Validation
+### Creating a New Handler
 
-- Use `hamr/pkg/validate` — validators return `""` for valid, error string for invalid
-- Two-level validation:
-  1. **Blur**: HTMX `hx-post` to validate single field, return OOB swap
-  2. **Submit**: Validate all fields, return 422 with form re-render
-- Never validate in the repo/store layer
+1. Create a package under `internal/web/handler/<name>/`
+2. Define a `Handler` struct with dependencies injected via constructor
+3. Add route comments above each method: `// GET /path`
+4. Register routes in `internal/web/server.go`
+
+### Example
+
+```go
+package things
+
+import (
+    "log/slog"
+    "net/http"
+
+    "github.com/FyrmForge/hamr/pkg/respond"
+    "github.com/labstack/echo/v4"
+
+    "{{.Module}}/internal/repo"
+)
+
+type Handler struct {
+    store repo.Store
+    log   *slog.Logger
+}
+
+func NewHandler(store repo.Store, log *slog.Logger) *Handler {
+    return &Handler{store: store, log: log}
+}
+
+// GET /things
+func (h *Handler) List(c echo.Context) error {
+    return respond.HTML(c, http.StatusOK, ThingsPage(c))
+}
+
+// POST /things
+func (h *Handler) Create(c echo.Context) error {
+    name := c.FormValue("name")
+
+    errs := make(map[string]string)
+    if msg := validate.Required(name); msg != "" {
+        errs["name"] = msg
+    }
+    if len(errs) > 0 {
+        return respond.HTML(c, http.StatusUnprocessableEntity, createForm(c, name, errs))
+    }
+
+    // Save to database...
+
+    middleware.SetFlash(c, "Created successfully!", middleware.FlashSuccess)
+    return respond.Redirect(c, "/things")
+}
+```
+
+### Response Functions
+
+- `respond.HTML(c, status, component)` — Render a templ component
+- `respond.JSON(c, status, data)` — Return JSON
+- `respond.Error(c, status, msg)` — Error response (HTML or JSON)
+- `respond.ValidationError(c, fields)` — 422 with field errors
+- `respond.Redirect(c, url)` — HTMX-aware (sets HX-Redirect for HTMX, 303 otherwise)
+
+### Status Codes
+
+- `200` — Successful GET
+- `303` — Redirect after POST (PRG pattern)
+- `400` — Bad request
+- `401` — Unauthorized
+- `403` — Forbidden
+- `404` — Not found
+- `422` — Validation error
+- `500` — Server error
+
+## Forms & Validation
+
+### Validation Basics
+
+Use `hamr/pkg/validate` — all validators return `""` for valid, error string
+for invalid. Every validator has a `*Msg` variant for custom messages.
+
+```go
+validate.Required(value)          // "This field is required"
+validate.Email(value)             // "Invalid email address"
+validate.MinLength(value, 8)      // "Must be at least 8 characters"
+validate.MaxLength(value, 100)    // "Must be at most 100 characters"
+validate.PasswordStrength(value)  // Checks upper, lower, digit, special, length
+validate.URL(value)               // "Invalid URL"
+validate.Phone(value)             // "Invalid phone number"
+validate.OneOf(value, "a", "b")   // "Must be one of: a, b"
+```
+
+Custom validators:
+
+```go
+validate.Register("slug", func(v string) string {
+    if !regexp.MustCompile(`^[a-z0-9-]+$`).MatchString(v) {
+        return "Must contain only lowercase letters, numbers, and hyphens"
+    }
+    return ""
+})
+msg := validate.Run("slug", value)
+```
+
+### Two-Level Validation
+
+1. **Blur** (inline): HTMX `hx-post` to validate a single field, return OOB swap
+2. **Submit** (full): Validate all fields, return 422 with form re-render
+
+Never validate in the repo/store layer.
+
+### Form Template Pattern
+
+Separate the **page** (wraps layout) from the **form** (what HTMX swaps):
+
+```
+templ createForm(c echo.Context, name string, errors map[string]string) {
+    <form
+        id="create-form"
+        hx-post="/things"
+        hx-swap="outerHTML"
+        hx-target="#create-form"
+        method="POST"
+        action="/things"
+    >
+        @form.CSRFField(c.Get("csrf").(string))
+        <div class="form-group">
+            <label for="name">Name</label>
+            <input type="text" id="name" name="name" value={ name }
+                hx-post="/things/validate/name"
+                hx-trigger="blur, input[this.closest('.form-group').querySelector('[data-has-error=true]')] delay:300ms"
+                hx-swap="none"/>
+            @form.FieldError("name", form.GetError(errors, "name"))
+        </div>
+        <button type="submit" class="btn btn-primary">Create</button>
+    </form>
+}
+```
+
+Key HTMX attributes:
+- `hx-post` — Submit via HTMX
+- `hx-swap="outerHTML"` — Replace the entire form on validation errors
+- `hx-target="#create-form"` — Target the form element
+- `hx-swap="none"` on inputs — Field validation uses OOB swaps, no explicit target
+- `hx-trigger` — Validate on blur; re-validate on input only if an error is showing
+
+### Inline Validation Endpoint
+
+```go
+// POST /things/validate/:field
+func (h *Handler) ValidateField(c echo.Context) error {
+    field := c.Param("field")
+    value := c.FormValue(field)
+    var errMsg string
+
+    switch field {
+    case "name":
+        errMsg = validate.Required(value)
+    }
+
+    status := http.StatusOK
+    if errMsg != "" {
+        status = http.StatusUnprocessableEntity
+    }
+    return respond.HTML(c, status, form.FieldErrorOOB(field, errMsg))
+}
+```
+
+### Field Error Components
+
+- `form.FieldError(field, err)` — Renders inline; always present in DOM for OOB targeting
+- `form.FieldErrorOOB(field, err)` — Same but with `hx-swap-oob="true"` for blur validation
+- `form.GetError(errors, field)` — Safe map lookup, returns `""` if nil or missing
+
+### CSRF Token
+
+The CSRF middleware stores the token in `c.Get("csrf")`. Pass `echo.Context`
+to templ components and use `form.CSRFField(c.Get("csrf").(string))`.
+The `htmx:configRequest` listener in `layout.templ` automatically attaches it
+to HTMX requests via the `X-CSRF-Token` header.
+
+### Flash Messages
+
+```go
+middleware.SetFlash(c, "Saved!", middleware.FlashSuccess)
+return respond.Redirect(c, "/things")
+```
+
+Read in templates via `middleware.GetFlash(c)` — returns `*middleware.FlashMessage`
+with `.Message` and `.Type` fields. Layout renders these automatically.
 
 ## Responses
 
-- `200` for successful GET
-- `303` (See Other) for redirects after POST (PRG pattern)
-- `422` for validation errors
-- Use `middleware.SetFlash()` before redirects for success/error messages
+Use `respond.Redirect` for HTMX-aware redirects — it sets `HX-Redirect` for
+HTMX requests and falls back to 303 for regular requests.
+
+On validation errors, return the **form component** (not the full page) with
+status 422. HTMX swaps the form in-place; for non-JS fallback the full page
+renders.
+{{- if eq .CSS "plain"}}
 
 ## CSS
-{{- if eq .CSS "plain"}}
-- Plain CSS with design system in `static/css/`
-- Variables in `base/variables.css`, reset in `base/reset.css`
-- Component styles in `components/`, layout in `layout/`, pages in `pages/`
+
+Plain CSS with design system in `static/css/`:
+
+```
+static/css/
+├── base/
+│   ├── variables.css    CSS custom properties (colors, spacing, typography)
+│   ├── reset.css        Minimal reset + base element styles
+│   └── utilities.css    Utility classes (container, spacing, flex, text)
+├── components/
+│   ├── buttons.css      Button variants (.btn, .btn-primary, .btn-secondary)
+│   ├── forms.css        Form groups, inputs, field errors
+│   └── alerts.css       Alert/flash message styles
+├── layout/
+│   ├── header.css       Header bar + navigation
+│   └── footer.css       Footer
+└── pages/
+    └── home.css         Home page specific styles
+```
+
+### Adding Styles
+
+- New component: create `static/css/components/<name>.css`, add `<link>` in `layout.templ`
+- New page: create `static/css/pages/<name>.css`, add `<link>` in the page templ or layout
+
+### Design System
+
+Values come from CSS custom properties in `variables.css`:
+
+- **Colors**: `--color-primary`, `--color-error`, etc.
+- **Spacing**: `--space-xs` through `--space-2xl`
+- **Typography**: `--font-sans`, `--font-size-sm` through `--font-size-3xl`
+- **Borders**: `--border-color`, `--border-radius`
+
+Prefer using variables over hard-coded values.
+
+### Utility Classes
+
+- `.container` — Max-width centered content
+- `.text-center`, `.text-muted`, `.text-error`
+- `.mt-sm`, `.mt-md`, `.mt-lg`, `.mt-xl` — Top margin
+- `.flex`, `.flex-col`, `.items-center`, `.justify-between`
+- `.hidden`, `.sr-only`
 {{- else}}
-- Tailwind CSS — classes directly in templ components
-- Config in `tailwind.config.js`
+
+## CSS
+
+Tailwind CSS — classes directly in templ components. Config in `tailwind.config.js`.
+
+```bash
+npm install
+npm run css        # Watch mode
+npm run css:build  # Production build
+```
+
+```
+css/input.css          Tailwind directives (@tailwind base, components, utilities)
+static/css/output.css  Generated CSS (do not edit)
+```
+
+Custom components via `@apply` in `css/input.css`:
+
+```css
+@layer components {
+    .btn-primary {
+        @apply px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700;
+    }
+}
+```
 {{- end}}
 
 ## Templ Linting
@@ -68,3 +350,209 @@ static/                  CSS, JS, images
 - Migrations in `internal/db/migrations/` (sequential numbering)
 - Use `sqlx` for queries in repo implementations
 - Store interface in `internal/repo/repo.go`
+{{- if .IncludeAuth}}
+
+## Auth
+
+Session-based authentication using `hamr/pkg/auth` and `hamr/pkg/middleware`.
+
+### Middleware Wiring
+
+Middleware is configured in `internal/web/server.go`:
+
+- `middleware.RequireAuth(cfg)` — redirects unauthenticated users to login
+- `middleware.OptionalAuth(cfg)` — populates context if logged in, never blocks
+- `middleware.RequireNotAuth(cfg)` — redirects authenticated users away from login/register
+
+### Handler Pattern
+
+```go
+// Login handler
+func (h *Handler) Login(c echo.Context) error {
+    email := c.FormValue("email")
+    password := c.FormValue("password")
+
+    user, err := h.store.GetUserByEmail(c.Request().Context(), email)
+    if err != nil { /* handle */ }
+
+    ok, err := auth.CheckPassword(password, user.PasswordHash)
+    if !ok { /* return error */ }
+
+    session, err := h.sessions.CreateSession(c.Request().Context(), user.ID, nil)
+    // Set session cookie...
+
+    return respond.Redirect(c, "/dashboard")
+}
+```
+
+### Key Functions
+
+- `auth.HashPassword(password) (string, error)` — Argon2id hashing
+- `auth.CheckPassword(password, hash) (bool, error)` — verify password
+- `middleware.GetSubjectID(c) string` — get authenticated user ID
+- `middleware.GetSubject(c) any` — get loaded user object (needs SubjectLoader)
+{{- end}}
+{{- if .IncludeLocale}}
+
+## Internationalisation
+
+Translation files live in `locales/*.json`. Type-safe Go accessors are generated
+into `internal/locale/locale.go`.
+
+### Translation Keys
+
+Keys use dot-separated paths matching the JSON structure:
+
+```json
+{
+  "home": {
+    "title": "Home",
+    "welcome": "Welcome to {{.Name}}"
+  }
+}
+```
+
+### Plurals
+
+Use CLDR plural category keys (`zero`, `one`, `two`, `few`, `many`, `other`):
+
+```json
+{
+  "items": {
+    "one": "{{"{{"}}".Count{{"}}"}} item",
+    "other": "{{"{{"}}".Count{{"}}"}} items"
+  }
+}
+```
+
+### Key Naming Rules
+
+Keys starting with a digit (e.g. `2fa.title`) produce Go methods prefixed with
+`X` (e.g. `X2faTitle`).
+
+### Using Translations
+
+In handlers:
+```go
+tr := i18n.FromContext(c)
+title := tr.T("home.title")
+```
+
+In templates:
+```
+templ Page(c echo.Context) {
+    <h1>{ i18n.FromContext(c).T("home.title") }</h1>
+}
+```
+
+### Build-time Validation
+
+`hamr locale gen` validates all locale files against the default locale.
+Interpolation mismatches are hard errors. Missing keys are warnings (they
+fall back to the default locale at runtime).
+
+### Regenerating Accessors
+
+```bash
+hamr locale gen
+# or
+go generate ./internal/locale/...
+```
+
+The `hamr dev` watcher runs this automatically when locale files change.
+
+### Middleware
+
+- `LocaleFromPath` — extracts locale from URL path prefix (`/en/about`).
+  Register with `e.Pre()`, not `e.Use()`.
+- `LocaleFromPreference` — resolves from cookie/Accept-Language/user pref
+
+Region-tagged locales (e.g. `fr-FR`) resolve to the base language (`fr`)
+automatically.
+
+### RTL Support
+
+Layout uses `lang` and `dir` attributes:
+```html
+<html lang={ middleware.GetLocale(c) } dir={ middleware.GetDirection(c) }>
+```
+
+RTL languages (Arabic, Hebrew, Farsi, etc.) are detected automatically.
+Override via `_meta.direction` in the locale JSON.
+{{- end}}
+{{- if .IncludeStorage}}
+
+## Storage
+
+Pluggable file storage with `hamr/pkg/storage`:
+
+- `storage.FileStorage` interface: `Save`, `Open`, `Delete`, `Exists`, `List`
+- `storage.NewLocalStorage(basePath)` — local filesystem backend
+- `storage.NewS3Storage(cfg)` — S3-compatible backend (AWS, MinIO, R2)
+
+### Environment Variables
+
+{{- if eq .StorageBackend "local"}}
+- `STORAGE_PATH` — local directory for file uploads
+{{- else}}
+- `S3_ENDPOINT` — S3 endpoint URL
+- `S3_BUCKET` — bucket name
+- `S3_REGION` — AWS region
+- `S3_ACCESS_KEY_ID` — access key
+- `S3_SECRET_ACCESS_KEY` — secret key
+{{- end}}
+{{- end}}
+{{- if .IncludeWS}}
+
+## WebSockets
+
+WebSocket support via `hamr/pkg/websocket`:
+
+### Hub Setup
+
+```go
+hub := websocket.NewHub(
+    websocket.WithSubjectIDFunc(func(r *http.Request) string {
+        return middleware.GetSubjectID(echoCtx)
+    }),
+)
+defer hub.Close()
+```
+
+### Sending Messages
+
+```go
+emitter := websocket.NewEmitter(hub)
+
+// Send HTML to a specific user
+emitter.ToSubject(userID, websocket.NewHTMLEvent("update", "#target", htmlStr))
+
+// Broadcast to a room
+emitter.ToRoom("chat", websocket.NewEvent("message", payload))
+
+// Trigger HTMX event
+emitter.ToSession(sessionID, websocket.NewTriggerEvent("refresh", "#list", "reload"))
+```
+
+### Rooms
+
+```go
+hub.JoinRoom(client, "chat:123")
+hub.LeaveRoom(client, "chat:123")
+hub.SendToRoom("chat:123", msg)
+```
+
+### Event Types
+
+1. **HTML Direct**: set Target + HTML — client swaps HTML into target
+2. **HTMX Trigger**: set Target + Trigger — client calls htmx.trigger()
+3. **Data Only**: set Payload — client handles via registered callback
+{{- end}}
+
+## Code Style
+
+- Follow existing patterns in the codebase
+- Use `hamr/pkg` helpers instead of reimplementing
+- Prefer `respond.HTML`/`respond.JSON` over raw `c.HTML()`
+- Add `// GET /path` comments above handler methods
+- Keep handlers thin — business logic in service layer

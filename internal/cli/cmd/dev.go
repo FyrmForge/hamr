@@ -41,7 +41,7 @@ func runDev(cmd *cobra.Command, _ []string) error {
 	// (the hotkey reader puts the terminal into raw mode).
 	if fd := int(os.Stdin.Fd()); term.IsTerminal(fd) {
 		if oldState, err := term.GetState(fd); err == nil {
-			defer term.Restore(fd, oldState)
+			defer func() { _ = term.Restore(fd, oldState) }()
 		}
 	}
 

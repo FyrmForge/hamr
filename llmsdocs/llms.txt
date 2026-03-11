@@ -1,0 +1,213 @@
+# HAMR Framework
+
+> HAMR is a Go web framework built on Echo v4 for server-rendered HTML
+> applications using templ + HTMX + Alpine.js, backed by PostgreSQL.
+> Import path: github.com/FyrmForge/hamr
+
+## Glossary
+
+- **templ**: Go HTML templating language (NOT Go's html/template). Compiled to Go.
+  Files use .templ extension. Components are Go functions returning templ.Component.
+- **HTMX**: JavaScript library for HTML-over-the-wire. Attributes like hx-post,
+  hx-swap, hx-target drive server interaction without writing JS.
+- **OOB swap**: HTMX out-of-band swap. Element with hx-swap-oob="true" replaces
+  a matching element by ID anywhere in the DOM, independent of the main swap target.
+- **PRG pattern**: Post-Redirect-Get. POST handlers redirect with 303 to prevent
+  form resubmission.
+- **PHC format**: Password Hash Competition format string for Argon2id hashes.
+- **Echo context (echo.Context)**: The request/response wrapper in Echo v4.
+  NOT Go's context.Context. Use c.Request().Context() for the stdlib context.
+- **functional options**: Constructor pattern using variadic Option functions
+  (e.g., server.New(server.WithPort(8080))).
+- **Store interface**: Repository pattern used in scaffolded projects.
+  Generated projects define a Store interface in their internal/repo/repo.go;
+  it is not part of the hamr framework itself.
+- **hamr dev**: Dev server with file watching, auto-rebuild, and live reload.
+- **hamr locale gen**: Code generator for type-safe i18n accessors.
+- **respond.Redirect**: HTMX-aware redirect that sets HX-Redirect for HTMX
+  requests and falls back to HTTP 303.
+
+## Core Packages
+
+### config
+Typed accessors for environment variables.
+- `GetEnvOrDefault(key, def string) string`
+- `GetEnvOrPanic(key string) string`
+- `GetEnvOrDefaultInt(key string, def int) int`
+- `GetEnvOrDefaultBool(key string, def bool) bool`
+- `GetEnvOrDefaultDuration(key string, def time.Duration) time.Duration`
+- `ParseBaseURL(raw string) (origin, hostname string, err error)`
+
+### server
+Echo wrapper with functional options, graceful shutdown.
+- `New(opts ...Option) (*Server, error)` — constructor
+- Options: `WithHost`, `WithPort`, `WithDevMode`, `WithMiddleware`, `WithStaticDir`,
+  `WithEmbeddedStatic`, `WithErrorHandler`, `WithTimeout`, `WithMaxBodySize`,
+  `WithShutdownTimeout`, `WithGeneratedDir`
+- Methods: `Echo()`, `Addr()`, `Start()`, `Shutdown(ctx)`, `GET/POST/PUT/DELETE/PATCH`,
+  `Group(prefix, mw...)`, `StaticPage(path, handler)`, `GenerateStatic(dir)`
+
+### logging
+Context-aware structured logging wrapping log/slog.
+- `New(production bool) *slog.Logger`
+- `FromContext(ctx) *slog.Logger`
+- `WithLogger(ctx, l) context.Context`
+- `With(ctx, args...) context.Context`
+
+### ctx
+Type-safe Echo context key helpers using generics.
+- `NewKey[T](name) Key[T]`
+- `Set[T](c, key, value)`, `Get[T](c, key) (T, bool)`, `MustGet[T](c, key) T`
+- Pre-defined keys: `SubjectIDKey`, `SubjectKey`, `SessionKey`, `RequestIDKey`,
+  `FlashKey`, `TranslatorKey`, `LocaleKey`
+
+### respond
+HTTP response helpers for HTMX-first applications.
+- `HTML(c, status, component) error`
+- `JSON(c, status, data) error`
+- `Error(c, status, msg, component...) error`
+- `Redirect(c, url) error` — HTMX-aware (sets HX-Redirect for HTMX, 303 otherwise)
+- `ValidationError(c, fields, component...) error` — returns 422
+- `ParsePagination(c, defaultSize) (page, size int)`
+- `NewPage(page, size, total) Page`
+
+### validate
+Pure-function validators returning "" on success or error message string.
+- `Required(value)`, `Email(value)`, `Phone(value)`, `URL(value)`
+- `MinLength(value, min)`, `MaxLength(value, max)`, `OneOf(value, options...)`
+- `IntRange(value, min, max)`, `MinAge(birthDate, minAge)`, `MaxAge(birthDate, maxAge)`
+- `PasswordStrength(password)`, `CheckPasswordRequirements(password) []PasswordRequirement`
+- `NormalizeURL(value)` — prepends "https://" when missing
+- `EmptyOr(fn)` — wraps a validator so empty values pass
+- Every validator has a `*Msg` variant for custom messages
+- `Register(name, fn)`, `Run(name, value)` — custom validator registry
+- `Field(name, result, msg...)`, `Check(fields...) map[string]string` — collect errors
+
+### htmx
+Request detection and response header helpers for HTMX.
+- Request: `IsHTMX(r)`, `IsBoosted(r)`, `GetTrigger(r)`, `GetTarget(r)`
+- Response: `Redirect(w, url)`, `Trigger(w, events...)`, `TriggerAfterSettle`,
+  `TriggerAfterSwap`, `Reswap(w, strategy)`, `Retarget(w, selector)`,
+  `Refresh(w)`, `PushURL(w, url)`, `ReplaceURL(w, url)`
+
+### db
+PostgreSQL connection with retry + migrations.
+- `Connect(databaseURL, opts...) (*sqlx.DB, error)`
+- `ConnectContext(ctx, databaseURL, opts...) (*sqlx.DB, error)`
+- Options: `WithMaxOpenConns`, `WithMaxIdleConns`, `WithConnMaxIdleTime`,
+  `WithConnMaxLifetime`, `WithMaxRetries`, `WithAttemptTimeout`,
+  `WithPgBouncerSafe`, `WithLogger`, `WithOnRetry`
+- `Migrate(db, cfg) error`, `MigrateDown`, `MigrateSteps`, `MigrateVersion`, `MigrateForce`
+- `StartKeepAlive(ctx, db, interval, _)`, `StartKeepAliveWithConfig(ctx, db, cfg)`
+
+### middleware
+HTTP middleware for auth, CSRF, CORS, flash, security, RBAC, audit, rate limiting, locale.
+- Auth: `Auth(cfg)`, `RequireAuth(cfg)`, `OptionalAuth(cfg)`, `RequireNotAuth(cfg)`
+- Subject: `GetSubjectID(c) string`, `GetSubject(c) any`, `TrustedSubject()`
+- CSRF: `CSRF()`, `CSRFWithConfig(cfg)`
+- CORS: `CORS()`, `CORSWithConfig(cfg)`
+- Flash: `Flash()`, `FlashWithConfig(cfg)`, `SetFlash(c, message, flashType)`, `GetFlash(c)`
+- Security: `Secure()`, `SecureWithConfig(cfg)`, `CacheControl(disableCaching)`
+- RBAC: `RequireRoles(checker, roles...)`, `RequireActive(checker)`
+- Audit: `Audit(logger)`, `AuditWithConfig(cfg)`
+- Rate Limit: `RateLimit(store)`, `RateLimitWithConfig(cfg)`,
+  `NewMemoryStore(opts...)`, `NewPGStore(db)`
+- Locale: `LocaleFromPath(cfg)`, `LocaleFromPreference(cfg)`,
+  `GetLocale(c)`, `GetDirection(c)`
+- Request: `RequestID()`
+
+### ptr
+Generic pointer helpers.
+- `To[T](v) *T`, `From[T](p) T`, `FromOr[T](p, def) T`
+- `String(p)`, `Int(p)`, `Bool(p)`, `IntToStr(p)`, `BoolToYesNo(p)`
+
+## Utility Packages
+
+### janitor
+Cron-based background task runner.
+- `Task` interface: `Name() string`, `Run(ctx) (int64, error)`
+- `New(opts...) *Janitor`, `AddTask(schedule, task) *Janitor`
+- `Start(ctx) error`, `Stop()`
+- Options: `WithTimeout`, `WithLogger`, `WithPreRun`, `WithPostRun`,
+  `WithPreTick`, `WithPostTick`
+
+### async
+Concurrency primitives with panic recovery.
+- `All(ctx, fns...) error` — first error cancels remaining
+- `Settle(ctx, fns...) []error` — waits for all
+- `Map[T,R](ctx, items, fn) ([]R, error)` — concurrent map
+- `Fire(fn)` — fire-and-forget goroutine
+- `NewGroup(opts...) *Group`, `Go(fn)`, `Close()` — managed goroutine pool
+- Options: `WithGroupLogger`, `WithLimit(n)`
+
+### templint
+Static linter for .templ files.
+- `New(cfg *Config) *Linter` — creates linter (nil cfg = all rules, defaults)
+- `LintFile(path) ([]Diagnostic, error)`, `LintDir(dir) ([]Diagnostic, error)`
+- `FilterBySeverity(diags, minSev) []Diagnostic`, `HasErrors(diags) bool`
+- `LoadConfig(path) (*Config, error)` — reads [lint.templ] from hamr.toml
+- Rules: `inline-if`, `inline-for`, `inline-switch` (Error),
+  `img-alt`, `no-href`, `inline-style`, `empty-class`, `js-href` (Warning)
+
+## Optional Packages
+
+### e2e
+Reusable go-rod browser helpers for E2E testing.
+- `SetupBrowser(t, opts...) *rod.Browser` — launches Chromium, auto-cleanup
+- `NewPage(t, browser, url) *rod.Page` — navigates + screenshot on failure
+- Actions: `Input(t, page, selector, value)`, `Click(t, page, selector)`,
+  `SelectOption(t, page, selector, value)`
+- Queries: `ElementExists`, `ElementNotExists`, `ElementText`,
+  `ElementAttribute`, `ElementCount`
+- Waits: `WaitForElement`, `WaitForURLChange`, `WaitForElementRemoved`
+- HTMX: `WaitForHTMXIdle`, `WaitForHTMXSwap`, `ClickAndWaitHTMX`
+- Asserts: `AssertElementExists`, `AssertElementContainsText`, `AssertURL`,
+  `AssertElementCount`, `AssertElementHasClass`, `AssertURLContains`
+- Options: `WithHeadless`, `WithSlowMotion`, `WithTimeout`, `WithArtifactDir`
+
+### auth
+Password hashing (Argon2id) + session management.
+- `HashPassword(password) (string, error)`
+- `CheckPassword(password, encodedHash) (bool, error)`
+- `NeedsRehash(encodedHash) (bool, error)`
+- `GenerateToken() (string, error)`, `GenerateTokenN(n) (string, error)`
+- `NewSessionManager(store, opts...) *SessionManager`
+- Session methods: `CreateSession`, `ValidateSession`, `DeleteSession`,
+  `DeleteSubjectSessions`, `CookieName`, `Duration`
+- `SessionStore` interface: `Create`, `GetByToken`, `Delete`, `DeleteBySubjectID`
+- Options: `WithDuration`, `WithCookieName`, `WithCookiePath`, `WithCookieDomain`,
+  `WithCookieSecure`, `WithSameSite`, `WithSlidingRefresh`
+
+### i18n
+JSON translation files, CLDR plural rules, text/template interpolation.
+- `NewBundle(cfg) (*Bundle, error)` — loads locale/*.json files
+- `Bundle.Translator(locale)`, `SupportedLocales()`, `HasLocale()`, `ResolveLocale()`
+- `Translator.T(key, args...)` — translates with optional count/data
+- `FromContext(c) *Translator` — retrieve from Echo context
+- `DirectionFor(lang)` — "ltr" or "rtl"
+
+### storage
+Pluggable file storage (local filesystem + S3-compatible).
+- `FileStorage` interface: `Save`, `Open`, `Delete`, `Exists`, `List`
+- `SignableStorage` extends with `SignURL`
+- `NewLocalStorage(basePath, opts...)`, `NewS3Storage(cfg, opts...)`
+
+### media
+Image/video upload, processing, serving on top of storage.
+- `NewLocalImageStore(store, urlPrefix, cfg, opts...)` / `NewS3ImageStore(store, cfg, opts...)`
+- `NewLocalVideoStore(store, urlPrefix, cfg, opts...)` / `NewS3VideoStore(store, cfg, opts...)`
+- `Upload(ctx, fileHeader)`, `Delete(ctx, id)`, `GetMedia(id)`, `ServeHandler()`
+- Preset sizes: `SizesAvatar`, `SizesCard`, `SizesIcon`, `SizeOriginal`
+
+### websocket
+WebSocket hub with session, subject, and room routing.
+- `NewHub(opts...) *Hub`, `Hub.Handler() echo.HandlerFunc`, `Hub.Close()`
+- Sending: `SendToSession`, `SendToSubject`, `SendToRoom`, `SendToRoomExcept`, `Broadcast`
+- Rooms: `JoinRoom`, `LeaveRoom`
+- Events: `NewEvent`, `NewHTMLEvent`, `NewOuterHTMLEvent`, `NewTriggerEvent`
+- `NewEmitter(hub)` — typed event wrapper over Hub
+
+### sync
+File-watching and S3-syncing for static assets.
+- `SyncAll(ctx, store, dir) error`
+- `WatchAndSync(ctx, store, dir) error`

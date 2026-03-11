@@ -46,7 +46,7 @@ func (h *HotkeyReader) Start(ctx context.Context) {
 	// Restore terminal on context cancellation.
 	go func() {
 		<-ctx.Done()
-		term.Restore(fd, oldState)
+		_ = term.Restore(fd, oldState)
 	}()
 
 	go func() {
@@ -111,7 +111,7 @@ func openBrowser(url string) {
 // clearTerminal clears the terminal screen using ANSI escape codes.
 func clearTerminal() {
 	termMu.Lock()
-	os.Stdout.Write([]byte("\033[2J\033[H"))
-	os.Stderr.Write([]byte("\033[2J\033[H"))
+	_, _ = os.Stdout.Write([]byte("\033[2J\033[H"))
+	_, _ = os.Stderr.Write([]byte("\033[2J\033[H"))
 	termMu.Unlock()
 }

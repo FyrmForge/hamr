@@ -130,7 +130,6 @@ func TestBuildProjectFileList_plainCSS(t *testing.T) {
 
 	assert.True(t, dests["static/css/base/variables.css"])
 	assert.True(t, dests["static/css/components/buttons.css"])
-	assert.True(t, dests["docs/ai-guides/css.md"])
 	assert.False(t, dests["tailwind.config.js"])
 	assert.False(t, dests["package.json"])
 }
@@ -146,9 +145,7 @@ func TestBuildProjectFileList_tailwind(t *testing.T) {
 
 	assert.True(t, dests["tailwind.config.js"])
 	assert.True(t, dests["package.json"])
-	assert.True(t, dests["docs/ai-guides/tailwind.md"])
 	assert.False(t, dests["static/css/base/variables.css"])
-	assert.False(t, dests["docs/ai-guides/css.md"])
 }
 
 func TestBuildProjectFileList_auth(t *testing.T) {
@@ -275,6 +272,10 @@ func TestGenerateProject_createsFiles(t *testing.T) {
 	assertFileExists(t, dir, ".gitignore")
 	assertFileExists(t, dir, "scripts/db-shell.sh")
 
+	// Framework reference docs (raw-copied, not templated).
+	assertFileExists(t, dir, "docs/llms.txt")
+	assertFileExists(t, dir, "docs/llms-full.txt")
+
 	// Check module substitution.
 	gomod := readFile(t, dir, "go.mod")
 	assert.Contains(t, gomod, "module github.com/test/testproj")
@@ -392,11 +393,9 @@ func TestGenerateProject_tailwindCSS(t *testing.T) {
 
 	assertFileExists(t, dir, "tailwind.config.js")
 	assertFileExists(t, dir, "package.json")
-	assertFileExists(t, dir, "docs/ai-guides/tailwind.md")
 
 	// Plain CSS files should NOT exist.
 	assertFileNotExists(t, dir, "static/css/base/variables.css")
-	assertFileNotExists(t, dir, "docs/ai-guides/css.md")
 }
 
 func TestGenerateProject_e2eFiles(t *testing.T) {
@@ -1155,7 +1154,6 @@ func TestBuildProjectFileList_locale(t *testing.T) {
 		}
 
 		assert.True(t, dests["locales/en.json"], "expected locales/en.json")
-		assert.True(t, dests["docs/ai-guides/i18n.md"], "expected docs/ai-guides/i18n.md")
 	})
 
 	t.Run("IncludeLocale false", func(t *testing.T) {
@@ -1172,7 +1170,6 @@ func TestBuildProjectFileList_locale(t *testing.T) {
 		}
 
 		assert.False(t, dests["locales/en.json"])
-		assert.False(t, dests["docs/ai-guides/i18n.md"])
 	})
 }
 
@@ -1235,7 +1232,6 @@ func TestGenerateProject_noLocale(t *testing.T) {
 
 	assertFileNotExists(t, dir, "locales/en.json")
 	assertFileNotExists(t, dir, "internal/locale/locale.go")
-	assertFileNotExists(t, dir, "docs/ai-guides/i18n.md")
 
 	hamrToml := readFile(t, dir, "hamr.toml")
 	assert.NotContains(t, hamrToml, "[locale]")
