@@ -29,7 +29,7 @@ func (f *failingStore) Allow(_ context.Context, _ string, _ int, _ time.Duration
 func TestMemoryStore_allowsWithinRate(t *testing.T) {
 	store := middleware.NewMemoryStore()
 	ctx := context.Background()
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		allowed, _, _, err := store.Allow(ctx, "key1", 10, time.Minute)
 		require.NoError(t, err)
 		assert.True(t, allowed, "request %d should be allowed", i+1)
@@ -39,7 +39,7 @@ func TestMemoryStore_allowsWithinRate(t *testing.T) {
 func TestMemoryStore_deniesOverRate(t *testing.T) {
 	store := middleware.NewMemoryStore()
 	ctx := context.Background()
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		allowed, _, _, err := store.Allow(ctx, "key1", 10, time.Minute)
 		require.NoError(t, err)
 		assert.True(t, allowed)
@@ -55,7 +55,7 @@ func TestMemoryStore_windowReset(t *testing.T) {
 	ctx := context.Background()
 
 	// Fill up the window.
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		_, _, _, err := store.Allow(ctx, "key1", 10, 50*time.Millisecond)
 		require.NoError(t, err)
 	}
@@ -73,7 +73,7 @@ func TestMemoryStore_differentKeys(t *testing.T) {
 	ctx := context.Background()
 
 	// Fill key1.
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		_, _, _, err := store.Allow(ctx, "key1", 10, time.Minute)
 		require.NoError(t, err)
 	}
@@ -258,7 +258,7 @@ func TestRateLimit_defaultsToIP(t *testing.T) {
 		Burst: 0,
 	})
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("X-Real-Ip", "10.0.0.1")
 		rec := httptest.NewRecorder()

@@ -91,6 +91,8 @@ type ProcessManager struct {
 	OnProcessExit func(rule string, err error, output string)
 	logBuf        *LogBuffer
 	logBroker     *SSEBroker
+	stdinR        *os.File // read end of pipe, given to child processes
+	stdinW        *os.File // write end, kept open to prevent EOF
 }
 
 // SetLogOutput enables streaming process output to a LogBuffer and SSE broker.
@@ -101,9 +103,12 @@ func (pm *ProcessManager) SetLogOutput(buf *LogBuffer, broker *SSEBroker) {
 
 // NewProcessManager creates a new process manager.
 func NewProcessManager(logger *slog.Logger) *ProcessManager {
+	stdinR, stdinW, _ := os.Pipe()
 	return &ProcessManager{
 		procs:  make(map[string]*os.Process),
 		logger: logger,
+		stdinR: stdinR,
+		stdinW: stdinW,
 	}
 }
 
@@ -149,8 +154,8 @@ func (pm *ProcessManager) StartProcess(ctx context.Context, rule *WatchRule) err
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", rule.Run)
 	cmd.Env = buildEnv(rule.Env)
+	cmd.Stdin = pm.stdinR
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Stdin = os.Stdin
 	color := nextColor()
 	capture := newTailBuffer()
 
@@ -324,21 +329,40 @@ func newPrefixWriter(dest *os.File, name, color string) *prefixWriter {
 	return &prefixWriter{dest: dest, tag: tag}
 }
 
+// termMu serializes writes to the terminal across all output sources
+// (child process output, dev server logs, status bar) to prevent
+// interleaving and visual corruption.
+var termMu sync.Mutex
+
 func (w *prefixWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
 	w.buf = append(w.buf, p...)
+
+	// Fast path: no complete lines yet.
+	if bytes.IndexByte(w.buf, '\n') < 0 {
+		return len(p), nil
+	}
+
+	// Batch all complete lines into one write.
+	var out []byte
 	for {
 		idx := bytes.IndexByte(w.buf, '\n')
 		if idx < 0 {
 			break
 		}
-		line := w.buf[:idx+1] // include the newline
+		line := w.buf[:idx]
 		w.buf = w.buf[idx+1:]
-		_, _ = w.dest.Write(w.tag)
-		_, _ = w.dest.Write(line)
+		out = append(out, w.tag...)
+		out = append(out, line...)
+		out = append(out, '\r', '\n')
 	}
+
+	termMu.Lock()
+	_, _ = w.dest.Write(out)
+	termMu.Unlock()
+
 	return len(p), nil
 }
 

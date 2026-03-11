@@ -89,6 +89,27 @@ func (a *DevActions) runRule(rule *WatchRule) {
 	}
 }
 
+// RebuildAll runs every watch rule in topological order and broadcasts a
+// final reload event. It is used by the hotkey system to trigger a full rebuild.
+func (a *DevActions) RebuildAll() {
+	a.logger.Info("full rebuild triggered")
+	order := a.graph.TopologicalOrder()
+	for _, name := range order {
+		var rule *WatchRule
+		for i := range a.cfg.Dev.Watch {
+			if a.cfg.Dev.Watch[i].Name == name {
+				rule = &a.cfg.Dev.Watch[i]
+				break
+			}
+		}
+		if rule == nil {
+			continue
+		}
+		a.runRule(rule)
+	}
+	a.broker.Broadcast(SSEEvent{Type: "reload", Data: "full"})
+}
+
 func (a *DevActions) handleDocker(w http.ResponseWriter, r *http.Request) {
 	// Paths: /__hamr/docker/{name}/restart, /wipe, /logs
 	path := strings.TrimPrefix(r.URL.Path, "/__hamr/docker/")

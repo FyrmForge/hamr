@@ -172,7 +172,7 @@ func TestSSEBroker_Broadcast_FullChannel(t *testing.T) {
 	// Should not block.
 	done := make(chan struct{})
 	go func() {
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			broker.Broadcast(SSEEvent{Type: "reload", Data: "full"})
 		}
 		close(done)

@@ -212,7 +212,7 @@ func TestGraph_ConcurrentWait(t *testing.T) {
 
 	// Both should complete quickly.
 	completed := make(map[string]bool)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		select {
 		case name := <-done:
 			completed[name] = true

@@ -90,7 +90,7 @@ func SetupSharedEnvironment(local bool) {
 		panic(fmt.Sprintf("E2E: failed to connect to database: %v", err))
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		if err := db.Ping(); err == nil {
 			break
 		}
@@ -184,7 +184,7 @@ func startServerContainer(ctx context.Context, dbURL string, network string) (te
 }
 
 func waitForMigrations(db *sql.DB) error {
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		var exists bool
 		err := db.QueryRow(`
 			SELECT EXISTS (

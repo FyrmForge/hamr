@@ -260,7 +260,7 @@ func TestWatcher_Debounce(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Rapidly write to the same file multiple times.
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main // "+string(rune('a'+i))), 0o644))
 		time.Sleep(20 * time.Millisecond)
 	}

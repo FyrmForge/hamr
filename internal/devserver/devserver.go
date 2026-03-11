@@ -88,7 +88,9 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	// Start reverse proxy.
 	var proxySrv *http.Server
+	var statusBar StatusBar
 	defer func() {
+		statusBar.Stop()
 		r.logger.Info("shutting down")
 		if !configReload {
 			broker.Broadcast(SSEEvent{Type: "shutdown"})
@@ -177,15 +179,26 @@ func (r *Runner) Run(ctx context.Context) error {
 	// If no watch rules, just block until shutdown or config reload.
 	if len(r.cfg.Dev.Watch) == 0 {
 		r.logger.Info("no watch rules, running daemons only")
+		r.logger.Info("ready")
+		var hotkeyReader HotkeyReader
+		hotkeyReader.Start(runCtx)
+		defer hotkeyReader.Stop()
+		statusBar.Start()
 		if r.configPath != "" {
 			go r.watchConfigFile(runCtx, configReloadCh)
 		}
-		select {
-		case <-runCtx.Done():
-			return nil
-		case <-configReloadCh:
-			configReload = true
-			return ErrConfigReload
+		for {
+			select {
+			case <-runCtx.Done():
+				return nil
+			case <-configReloadCh:
+				configReload = true
+				return ErrConfigReload
+			case action := <-hotkeyReader.Actions():
+				if r.handleHotkey(action, actions, &statusBar, cancel) {
+					return nil
+				}
+			}
 		}
 	}
 
@@ -200,6 +213,11 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 
 	r.logger.Info("watching for changes")
+	r.logger.Info("ready")
+	var hotkeyReader HotkeyReader
+	hotkeyReader.Start(runCtx)
+	defer hotkeyReader.Stop()
+	statusBar.Start()
 
 	// Watch the config file for changes.
 	if r.configPath != "" {
@@ -305,6 +323,10 @@ func (r *Runner) Run(ctx context.Context) error {
 			r.logger.Info("config changed, reloading")
 			configReload = true
 			return ErrConfigReload
+		case action := <-hotkeyReader.Actions():
+			if r.handleHotkey(action, actions, &statusBar, cancel) {
+				return nil
+			}
 		case evt, ok := <-watcher.Events():
 			if !ok {
 				return nil
@@ -318,6 +340,31 @@ func (r *Runner) Run(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+// handleHotkey processes a hotkey action. Returns true if the server should exit.
+func (r *Runner) handleHotkey(action HotkeyAction, actions *DevActions, sb *StatusBar, cancel context.CancelFunc) bool {
+	switch action {
+	case HotkeyRebuild:
+		r.logger.Info("rebuilding all rules")
+		go actions.RebuildAll()
+	case HotkeyOpenBrowser:
+		if r.cfg.ProxyConfigured {
+			url := "http://" + normalizeHost(r.cfg.Proxy.Listen)
+			r.logger.Info("opening browser", "url", url)
+			openBrowser(url)
+		} else {
+			r.logger.Warn("no proxy configured, cannot open browser")
+		}
+	case HotkeyClearTerminal:
+		clearTerminal()
+		sb.Redraw()
+	case HotkeyQuit:
+		r.logger.Info("quit requested")
+		cancel()
+		return true
+	}
+	return false
 }
 
 func (r *Runner) handleEvent(ctx context.Context, evt FileEvent, graph *Graph, pm *ProcessManager, broker *SSEBroker, errorState *ErrorState) {

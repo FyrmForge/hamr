@@ -154,32 +154,23 @@ When all flags are provided, no interactive prompts are shown.`,
 		}
 
 		// Resolve dependencies (non-fatal).
-		fmt.Println("Running go get ./...")
 		goget := exec.Command("go", "get", "./...")
 		goget.Dir = dir
-		goget.Stdout = os.Stdout
-		goget.Stderr = os.Stderr
-		if err := goget.Run(); err != nil {
+		if err := runWithSpinner("go get ./...", goget); err != nil {
 			warnings = append(warnings, fmt.Sprintf("go get ./... failed: %v", err))
 		}
 
-		fmt.Println("Running go mod tidy...")
 		tidy := exec.Command("go", "mod", "tidy")
 		tidy.Dir = dir
-		tidy.Stdout = os.Stdout
-		tidy.Stderr = os.Stderr
-		if err := tidy.Run(); err != nil {
+		if err := runWithSpinner("go mod tidy", tidy); err != nil {
 			warnings = append(warnings, fmt.Sprintf("go mod tidy failed: %v", err))
 		}
 
 		// Install npm dependencies for Tailwind (non-fatal).
 		if cfg.CSS == "tailwind" {
-			fmt.Println("Running npm install...")
 			npmInstall := exec.Command("npm", "install")
 			npmInstall.Dir = dir
-			npmInstall.Stdout = os.Stdout
-			npmInstall.Stderr = os.Stderr
-			if err := npmInstall.Run(); err != nil {
+			if err := runWithSpinner("npm install", npmInstall); err != nil {
 				warnings = append(warnings, fmt.Sprintf("npm install failed: %v", err))
 			}
 		}
@@ -194,22 +185,8 @@ When all flags are provided, no interactive prompts are shown.`,
 		if !isGitRepo {
 			gitInit := exec.Command("git", "init")
 			gitInit.Dir = dir
-			gitInit.Stdout = os.Stdout
-			gitInit.Stderr = os.Stderr
-			if err := gitInit.Run(); err != nil {
+			if err := runWithSpinner("Initializing git repository", gitInit); err != nil {
 				warnings = append(warnings, fmt.Sprintf("git init failed: %v", err))
-			} else {
-				gitAdd := exec.Command("git", "add", "-A")
-				gitAdd.Dir = dir
-				if err := gitAdd.Run(); err != nil {
-					warnings = append(warnings, fmt.Sprintf("git add failed: %v", err))
-				} else {
-					gitCommit := exec.Command("git", "commit", "-m", "Initial commit from hamr new")
-					gitCommit.Dir = dir
-					if err := gitCommit.Run(); err != nil {
-						warnings = append(warnings, fmt.Sprintf("git commit failed: %v", err))
-					}
-				}
 			}
 		}
 

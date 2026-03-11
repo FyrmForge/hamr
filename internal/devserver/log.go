@@ -4,12 +4,11 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"sync"
 )
 
 // ANSI styles for the [hamr dev] tag.
 const (
-	tagColor = "\033[1;97m" // bold bright white
+	tagColor = "\033[1;36m" // bold cyan
 )
 
 var hamrTag = []byte(tagColor + "[hamr dev]" + colorReset + " ")
@@ -29,13 +28,12 @@ var levelColors = map[slog.Level]string{
 // Errors and warnings get colored level labels.
 type devHandler struct {
 	w     io.Writer
-	mu    *sync.Mutex
 	level slog.Level
 	attrs []slog.Attr
 }
 
 func newDevHandler(w io.Writer, level slog.Level) *devHandler {
-	return &devHandler{w: w, mu: &sync.Mutex{}, level: level}
+	return &devHandler{w: w, level: level}
 }
 
 func (h *devHandler) Enabled(_ context.Context, l slog.Level) bool {
@@ -83,11 +81,11 @@ func (h *devHandler) Handle(_ context.Context, r slog.Record) error {
 		return true
 	})
 
-	buf = append(buf, '\n')
+	buf = append(buf, '\r', '\n')
 
-	h.mu.Lock()
+	termMu.Lock()
 	_, err := h.w.Write(buf)
-	h.mu.Unlock()
+	termMu.Unlock()
 	return err
 }
 
@@ -95,14 +93,14 @@ func (h *devHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	newAttrs := make([]slog.Attr, len(h.attrs)+len(attrs))
 	copy(newAttrs, h.attrs)
 	copy(newAttrs[len(h.attrs):], attrs)
-	return &devHandler{w: h.w, mu: h.mu, level: h.level, attrs: newAttrs}
+	return &devHandler{w: h.w, level: h.level, attrs: newAttrs}
 }
 
 func (h *devHandler) WithGroup(name string) slog.Handler {
 	// Groups not used in the dev server — treat as prefix.
 	newAttrs := make([]slog.Attr, len(h.attrs))
 	copy(newAttrs, h.attrs)
-	return &devHandler{w: h.w, mu: h.mu, level: h.level, attrs: newAttrs}
+	return &devHandler{w: h.w, level: h.level, attrs: newAttrs}
 }
 
 var _ slog.Handler = (*devHandler)(nil)

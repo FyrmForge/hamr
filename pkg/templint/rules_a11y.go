@@ -70,8 +70,7 @@ func collectOpenTags(lines []string, tag string) []openTag {
 	startCol := 0
 	var buf strings.Builder
 
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
+	for i, line := range lines {
 		offset := 0
 		baseCol := 0
 

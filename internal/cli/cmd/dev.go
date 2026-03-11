@@ -10,6 +10,7 @@ import (
 
 	"github.com/FyrmForge/hamr/internal/devserver"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var devCmd = &cobra.Command{
@@ -35,6 +36,14 @@ func runDev(cmd *cobra.Command, _ []string) error {
 	configPath, _ := cmd.Flags().GetString("config")
 	noProxy, _ := cmd.Flags().GetBool("no-proxy")
 	verbose, _ := cmd.Flags().GetBool("verbose")
+
+	// Save terminal state so we can always restore it, even after a panic
+	// (the hotkey reader puts the terminal into raw mode).
+	if fd := int(os.Stdin.Fd()); term.IsTerminal(fd) {
+		if oldState, err := term.GetState(fd); err == nil {
+			defer term.Restore(fd, oldState)
+		}
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

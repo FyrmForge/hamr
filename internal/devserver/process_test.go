@@ -317,7 +317,7 @@ func TestPrefixWriter(t *testing.T) {
 
 		var buf bytes.Buffer
 		_, _ = io.Copy(&buf, r)
-		assert.Contains(t, buf.String(), "[test] hello world\n")
+		assert.Contains(t, buf.String(), "[test] hello world\r\n")
 	})
 
 	t.Run("buffers partial lines", func(t *testing.T) {
@@ -335,7 +335,7 @@ func TestPrefixWriter(t *testing.T) {
 
 		var buf bytes.Buffer
 		_, _ = io.Copy(&buf, r)
-		assert.Contains(t, buf.String(), "[test] partial complete\n")
+		assert.Contains(t, buf.String(), "[test] partial complete\r\n")
 	})
 
 	t.Run("multiple lines in one write", func(t *testing.T) {
@@ -349,8 +349,8 @@ func TestPrefixWriter(t *testing.T) {
 		var buf bytes.Buffer
 		_, _ = io.Copy(&buf, r)
 		output := buf.String()
-		assert.Contains(t, output, "[test] line1\n")
-		assert.Contains(t, output, "[test] line2\n")
+		assert.Contains(t, output, "[test] line1\r\n")
+		assert.Contains(t, output, "[test] line2\r\n")
 	})
 
 	t.Run("preserves ANSI colors", func(t *testing.T) {
