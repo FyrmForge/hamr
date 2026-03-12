@@ -11,8 +11,8 @@
 - [x] give exec perms to db-sh
 - [x] move db-sh to scripts folder and add alias to makefile
 - [x] migrations are embeded even tho were not running at startup
-- [] review ai docs
-- [] do screen captures for marketing
+- [x] review ai docs
+- [x] do screen captures for marketing
 - [] look into hamr cli and package versioning 
      - for cli we dont want to run a mismatching version of hamr against a mismatching project?
      - semntic versioning 
@@ -24,3 +24,8 @@
 - [x] change hamr dev log colour from white to smth else
 - [x] fix the modernice loops in scaffold
   1. for loop can be modernized using range over int [default]
+- [] form.CSRFField templ func should just take in echo context
+- [] implement the hamr ai idea
+- [] implement the validation package idea
+  - dont forget to update scaffolding and docs (user and ai)
+- [] rename bin and verbage from server to site

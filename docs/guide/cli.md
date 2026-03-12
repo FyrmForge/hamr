@@ -6,6 +6,7 @@
 hamr
 ├── new [name]              Scaffold a new project
 ├── dev                     Start dev server with file watching + live reload
+├── capture <url>           Capture a browser screenshot of a page
 ├── sync                    Sync local directory to S3-compatible bucket
 ├── vendor [dep[@version]]  Download/checksum frontend JS deps
 ├── lint
@@ -76,6 +77,41 @@ hamr dev --verbose          # detailed watcher/rebuild logs
 Reads `[proxy]`, `[dev]` sections from `hamr.toml`. Manages Docker Compose deps, file watchers, build commands, long-running processes, and a reverse proxy with SSE-based live reload.
 
 **Guide:** [Dev Server](pkg/dev.md) covers configuration, watch rules, daemons, Docker Compose, and examples.
+
+---
+
+## hamr capture
+
+Capture a browser screenshot of a page for debugging, visual review, or LLM workflows.
+
+```bash
+hamr capture <url> [flags]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--out` | derived from URL | Output PNG path |
+| `--text` | `false` | Also save visible page text to a `.txt` sidecar |
+| `--html` | `false` | Also save page HTML to a `.html` sidecar |
+| `--json` | `false` | Print capture metadata as JSON |
+| `--selector` | — | Capture only the first element matching this CSS selector |
+| `--full-page` | `false` | Capture the full scrollable page instead of only the viewport |
+| `--headless` | `true` | Run Chromium headlessly |
+| `--no-sandbox` | `true` | Launch Chromium with `--no-sandbox` |
+| `--width` | `1440` | Viewport width in pixels |
+| `--height` | `1024` | Viewport height in pixels |
+| `--scale` | `1` | Device scale factor |
+| `--timeout` | `15s` | Timeout for browser operations |
+| `--wait` | `1s` | Extra delay after page load before capture |
+
+```bash
+hamr capture http://localhost:3000
+hamr capture localhost:3000/login --text --html --json
+hamr capture https://example.com --selector '#app' --out artifacts/app.png
+hamr capture https://example.com/docs --full-page --wait 2s
+```
+
+The command always writes a PNG screenshot. `--text` and `--html` add sidecar files with the same basename, which is useful when an LLM needs both the rendered view and the underlying page content.
 
 ---
 

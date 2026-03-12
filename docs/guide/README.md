@@ -10,6 +10,7 @@ Learn how to build full-stack Go applications with HAMR.
 |---------|-------------|
 | [`hamr new`](cli.md#hamr-new) | Scaffold a new project |
 | [`hamr dev`](cli.md#hamr-dev) | Dev server with live reload |
+| [`hamr capture`](cli.md#hamr-capture) | Capture browser screenshots for debugging or LLM use |
 | [`hamr sync`](cli.md#hamr-sync) | Sync directory to S3 |
 | [`hamr lint templ`](cli.md#hamr-lint-templ) | Lint `.templ` files |
 | [`hamr vendor`](cli.md#hamr-vendor) | Vendor frontend JS deps |
