@@ -95,7 +95,14 @@ listen = ":3000"
 	cmd.SetOut(&buf)
 	err := cmd.RunE(cmd, nil)
 	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "no scaffold changes")
+
+	output := buf.String()
+	assert.Contains(t, output, "scaffold upgrade report")
+	assert.Contains(t, output, "v0.1.0")
+	assert.Contains(t, output, "v0.5.0")
+	// Registry has changes since 0.2.0 which fall within 0.1.0 → 0.5.0.
+	assert.NotContains(t, output, "no scaffold changes")
+	assert.Contains(t, output, "report saved to")
 }
 
 func TestUpgradeHumanOutput(t *testing.T) {

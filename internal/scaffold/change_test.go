@@ -95,7 +95,12 @@ func TestChangeIsRelevant(t *testing.T) {
 }
 
 func TestChangesReturnsRegistry(t *testing.T) {
-	// The registry starts empty; this just verifies the accessor works.
 	got := Changes()
-	assert.Empty(t, got)
+	assert.NotEmpty(t, got, "changes registry should contain scaffold change entries")
+	for _, c := range got {
+		assert.NotEmpty(t, c.Title, "change must have a title")
+		assert.NotEmpty(t, c.Since, "change must have a since version")
+		assert.NotEmpty(t, c.Category, "change must have a category")
+		assert.NotEmpty(t, c.AffectedScaffoldFiles, "change must list affected files")
+	}
 }

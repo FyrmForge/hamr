@@ -90,7 +90,7 @@ Not all of these need to exist immediately. The namespace matters first.
   - [x] `--applied` bumps baseline version, works on legacy projects without `[hamr]`
   - [x] Dev builds resolve latest git tag with `-dev` suffix (e.g. `0.5.0-dev`)
   - [x] Pre-release suffixes stripped during version comparison
-  - [x] Change registry is empty — entries added as scaffold evolves
+  - [x] Change registry populated with scaffold changes since v0.1.0
 
   - [x] Tiled capture mode (`--tiles`, `--tile-overlap`)
 
