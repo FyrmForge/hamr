@@ -27,6 +27,8 @@ func TestParseVersion(t *testing.T) {
 		{"non-numeric major", "a.2.3", Version{}, true},
 		{"non-numeric minor", "1.b.3", Version{}, true},
 		{"non-numeric patch", "1.2.c", Version{}, true},
+		{"negative minor", "1.-2.3", Version{}, true},
+		{"negative patch", "0.1.-5", Version{}, true},
 	}
 
 	for _, tt := range tests {

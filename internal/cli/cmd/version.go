@@ -7,15 +7,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const devVersion = "dev"
+
 var (
-	version = "dev"
+	version = devVersion
 	commit  = "none"
 )
 
 func init() {
-	if version == "dev" || commit == "none" {
+	if version == devVersion || commit == "none" {
 		if bi, ok := debug.ReadBuildInfo(); ok {
-			if version == "dev" && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+			if version == devVersion && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
 				version = bi.Main.Version
 			}
 			if commit == "none" {

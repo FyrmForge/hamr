@@ -127,6 +127,7 @@ var versionLineRe = regexp.MustCompile(`(?m)^(\s*version\s*=\s*)"[^"]*"`)
 
 // UpdateVersion reads hamr.toml, replaces the version value under [hamr], and writes back.
 // Uses line-level replacement to preserve comments and formatting.
+// The original file is restored if verification fails.
 func UpdateVersion(path string, newVersion string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -135,36 +136,53 @@ func UpdateVersion(path string, newVersion string) error {
 
 	content := string(data)
 
+	var newContent string
+
 	// Find the [hamr] section and replace the version line within it.
 	hamrIdx := strings.Index(content, "[hamr]")
 	if hamrIdx == -1 {
 		// No [hamr] section — insert one at the top of the file.
 		header := fmt.Sprintf("[hamr]\nversion = %q\n\n", newVersion)
-		return os.WriteFile(path, []byte(header+content), 0o644)
-	}
-
-	// Find the next section header after [hamr] to limit our search.
-	afterHamr := content[hamrIdx:]
-	nextSection := findNextSection(afterHamr)
-
-	hamrSection := afterHamr
-	if nextSection > 0 {
-		hamrSection = afterHamr[:nextSection]
-	}
-
-	replaced := versionLineRe.ReplaceAllString(hamrSection, `${1}"`+newVersion+`"`)
-	if replaced == hamrSection {
-		return fmt.Errorf("could not find version line in [hamr] section")
-	}
-
-	var result string
-	if nextSection > 0 {
-		result = content[:hamrIdx] + replaced + afterHamr[nextSection:]
+		newContent = header + content
 	} else {
-		result = content[:hamrIdx] + replaced
+		// Find the next section header after [hamr] to limit our search.
+		afterHamr := content[hamrIdx:]
+		nextSection := findNextSection(afterHamr)
+
+		hamrSection := afterHamr
+		if nextSection > 0 {
+			hamrSection = afterHamr[:nextSection]
+		}
+
+		replaced := versionLineRe.ReplaceAllString(hamrSection, `${1}"`+newVersion+`"`)
+		if replaced == hamrSection {
+			return fmt.Errorf("could not find version line in [hamr] section")
+		}
+
+		if nextSection > 0 {
+			newContent = content[:hamrIdx] + replaced + afterHamr[nextSection:]
+		} else {
+			newContent = content[:hamrIdx] + replaced
+		}
 	}
 
-	return os.WriteFile(path, []byte(result), 0o644)
+	if err := os.WriteFile(path, []byte(newContent), 0o644); err != nil {
+		return err
+	}
+
+	// Verify the write produced valid TOML with the correct version.
+	// Restore the original file on failure.
+	updated, err := LoadMetadata(path)
+	if err != nil {
+		_ = os.WriteFile(path, data, 0o644)
+		return fmt.Errorf("verify version update: file is no longer valid TOML: %w", err)
+	}
+	if updated.Hamr.Version != newVersion {
+		_ = os.WriteFile(path, data, 0o644)
+		return fmt.Errorf("verify version update: expected %q, got %q", newVersion, updated.Hamr.Version)
+	}
+
+	return nil
 }
 
 // findNextSection returns the offset of the next [section] header after the first line.

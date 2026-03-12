@@ -13,9 +13,9 @@
 - [x] migrations are embeded even tho were not running at startup
 - [x] review ai docs
 - [x] do screen captures for marketing
-- [] look into hamr cli and package versioning 
+- [x] look into hamr cli and package versioning
      - for cli we dont want to run a mismatching version of hamr against a mismatching project?
-     - semntic versioning 
+     - semntic versioning
 - [x] look at removing migrate cmd (binary) and use migrate cli? i think there is one
 - [x] DO NOT make an initial commit
 - [x] add loading spinner to hamr new and dev
@@ -25,7 +25,7 @@
 - [x] fix the modernice loops in scaffold
   1. for loop can be modernized using range over int [default]
 - [] form.CSRFField templ func should just take in echo context
-- [] implement the hamr ai idea
+- [x] implement the hamr ai idea
 - [x] implement the validation package idea
   - dont forget to update scaffolding and docs (user and ai)
 - [] rename bin and verbage from server to site

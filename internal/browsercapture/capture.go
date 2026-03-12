@@ -1,6 +1,7 @@
 package browsercapture
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -35,6 +36,18 @@ const (
 )
 
 var invalidFilenameChars = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
+
+// braveCandidates lists Brave browser binary names and paths to try when no
+// Chromium or Chrome binary is found by go-rod's default lookup.
+var braveCandidates = []string{
+	"brave-browser",
+	"brave-browser-nightly",
+	"brave",
+	"/opt/brave.com/brave/brave-browser",
+	"/opt/brave.com/brave-nightly/brave-browser-nightly",
+	"/usr/bin/brave-browser",
+	"/usr/bin/brave-browser-nightly",
+}
 
 // Options configures a browser capture run.
 type Options struct {
@@ -135,39 +148,16 @@ func PrepareOptions(opts Options) (Options, error) {
 	if opts.OutputPath != "" && opts.OutputDir != "" {
 		return Options{}, fmt.Errorf("only one of output path or output dir may be set")
 	}
-	if opts.ScrollTo != "" && opts.ScrollTo != "top" && opts.ScrollTo != "middle" && opts.ScrollTo != "bottom" {
-		return Options{}, fmt.Errorf("scroll-to must be one of: top, middle, bottom")
+
+	if err := validateScrollOptions(opts); err != nil {
+		return Options{}, err
 	}
-	if opts.ScrollTo != "" && (opts.ScrollX != 0 || opts.ScrollY != 0) {
-		return Options{}, fmt.Errorf("scroll-to cannot be combined with scroll-x or scroll-y")
+
+	prepared, err := prepareTileOptions(opts)
+	if err != nil {
+		return Options{}, err
 	}
-	if opts.ScrollSelector != "" && !hasScrollPositionRequest(opts) {
-		return Options{}, fmt.Errorf("scroll-selector requires scroll-to, scroll-x, or scroll-y")
-	}
-	if opts.FullPage && hasScrollRequest(opts) {
-		return Options{}, fmt.Errorf("scroll options cannot be used with full-page capture")
-	}
-	if opts.Tiles && opts.FullPage {
-		return Options{}, fmt.Errorf("tiles cannot be used with full-page capture")
-	}
-	if opts.Tiles && opts.Selector != "" {
-		return Options{}, fmt.Errorf("tiles cannot be used with selector capture")
-	}
-	if opts.Tiles && hasScrollRequest(opts) {
-		return Options{}, fmt.Errorf("scroll options cannot be used with tiled capture")
-	}
-	if opts.TileOverlap < 0 {
-		return Options{}, fmt.Errorf("tile overlap must be 0 or greater")
-	}
-	if opts.TileOverlap > 0 && !opts.Tiles {
-		return Options{}, fmt.Errorf("tile-overlap requires --tiles")
-	}
-	if opts.Tiles && opts.TileOverlap == 0 {
-		opts.TileOverlap = DefaultTileOverlap
-	}
-	if opts.Tiles && opts.Height-opts.TileOverlap < minTileStep {
-		return Options{}, fmt.Errorf("tile overlap must be less than viewport height minus %d", minTileStep)
-	}
+	opts = prepared
 
 	outputPath, err := normalizeOutputPath(opts.OutputPath, opts.OutputDir, opts.URL, time.Now().UTC())
 	if err != nil {
@@ -175,6 +165,49 @@ func PrepareOptions(opts Options) (Options, error) {
 	}
 	opts.OutputPath = outputPath
 
+	return opts, nil
+}
+
+// validateScrollOptions checks scroll-related option constraints.
+func validateScrollOptions(opts Options) error {
+	if opts.ScrollTo != "" && opts.ScrollTo != "top" && opts.ScrollTo != "middle" && opts.ScrollTo != "bottom" {
+		return fmt.Errorf("scroll-to must be one of: top, middle, bottom")
+	}
+	if opts.ScrollTo != "" && (opts.ScrollX != 0 || opts.ScrollY != 0) {
+		return fmt.Errorf("scroll-to cannot be combined with scroll-x or scroll-y")
+	}
+	if opts.ScrollSelector != "" && !hasScrollPositionRequest(opts) {
+		return fmt.Errorf("scroll-selector requires scroll-to, scroll-x, or scroll-y")
+	}
+	if opts.FullPage && hasScrollRequest(opts) {
+		return fmt.Errorf("scroll options cannot be used with full-page capture")
+	}
+	return nil
+}
+
+// prepareTileOptions checks tile-related option constraints and applies defaults.
+func prepareTileOptions(opts Options) (Options, error) {
+	if opts.Tiles && opts.FullPage {
+		return opts, fmt.Errorf("tiles cannot be used with full-page capture")
+	}
+	if opts.Tiles && opts.Selector != "" {
+		return opts, fmt.Errorf("tiles cannot be used with selector capture")
+	}
+	if opts.Tiles && hasScrollRequest(opts) {
+		return opts, fmt.Errorf("scroll options cannot be used with tiled capture")
+	}
+	if opts.TileOverlap < 0 {
+		return opts, fmt.Errorf("tile overlap must be 0 or greater")
+	}
+	if opts.TileOverlap > 0 && !opts.Tiles {
+		return opts, fmt.Errorf("tile-overlap requires --tiles")
+	}
+	if opts.Tiles && opts.TileOverlap == 0 {
+		opts.TileOverlap = DefaultTileOverlap
+	}
+	if opts.Tiles && opts.Height-opts.TileOverlap < minTileStep {
+		return opts, fmt.Errorf("tile overlap must be less than viewport height minus %d", minTileStep)
+	}
 	return opts, nil
 }
 
@@ -200,7 +233,11 @@ func Capture(opts Options) (Result, error) {
 		ScrollSelector: opts.ScrollSelector,
 	}
 
+	launchCtx, launchCancel := context.WithTimeout(context.Background(), opts.Timeout)
+	defer launchCancel()
+
 	l := launcher.New().
+		Context(launchCtx).
 		Headless(opts.Headless).
 		NoSandbox(opts.NoSandbox).
 		Set("disable-dev-shm-usage").
@@ -460,17 +497,7 @@ func resolveBrowserPath(configured string) (string, error) {
 		return path, nil
 	}
 
-	candidates := []string{
-		"brave-browser",
-		"brave-browser-nightly",
-		"brave",
-		"/opt/brave.com/brave/brave-browser",
-		"/opt/brave.com/brave-nightly/brave-browser-nightly",
-		"/usr/bin/brave-browser",
-		"/usr/bin/brave-browser-nightly",
-	}
-
-	for _, candidate := range candidates {
+	for _, candidate := range braveCandidates {
 		path, err := exec.LookPath(candidate)
 		if err == nil {
 			return path, nil

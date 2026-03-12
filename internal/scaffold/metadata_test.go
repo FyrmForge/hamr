@@ -115,6 +115,12 @@ version = "0.3.2"
 		path := writeTempTOML(t, content)
 		assert.Equal(t, DefaultAIDir, ResolveAIDir(path))
 	})
+
+	t.Run("falls back on unparseable file", func(t *testing.T) {
+		path := writeTempTOML(t, `[hamr
+broken toml here`)
+		assert.Equal(t, DefaultAIDir, ResolveAIDir(path))
+	})
 }
 
 func writeTempTOML(t *testing.T, content string) string {

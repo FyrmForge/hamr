@@ -2,6 +2,7 @@ package scaffold
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/BurntSushi/toml"
@@ -56,10 +57,14 @@ func (m Metadata) AIDir() string {
 }
 
 // ResolveAIDir loads metadata from tomlPath and returns the AI directory.
-// Falls back to DefaultAIDir on any error.
+// Falls back to DefaultAIDir on any error, logging a warning when the file
+// exists but cannot be parsed.
 func ResolveAIDir(tomlPath string) string {
 	meta, err := LoadMetadata(tomlPath)
 	if err != nil {
+		if _, statErr := os.Stat(tomlPath); statErr == nil {
+			slog.Warn("failed to parse hamr.toml, using default AI directory", "path", tomlPath, "error", err)
+		}
 		return DefaultAIDir
 	}
 	return meta.AIDir()

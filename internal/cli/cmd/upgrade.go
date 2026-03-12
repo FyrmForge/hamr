@@ -49,7 +49,7 @@ func runUpgrade(cmd *cobra.Command, _ []string) error {
 	applied, _ := cmd.Flags().GetBool("applied")
 	reportDir, _ := cmd.Flags().GetString("dir")
 
-	if version == "dev" {
+	if version == devVersion {
 		return fmt.Errorf("cannot determine current HAMR version (running dev build)")
 	}
 
@@ -181,8 +181,10 @@ func writeReportFile(dir string, report *scaffold.UpgradeReport) (string, error)
 	return path, nil
 }
 
+var versionFilenameReplacer = strings.NewReplacer(".", "_", "-", "_")
+
 func sanitizeVersionForFilename(v string) string {
-	return strings.NewReplacer(".", "_", "-", "_").Replace(v)
+	return versionFilenameReplacer.Replace(v)
 }
 
 func writeUpgradeLine(w io.Writer, format string, args ...any) error {

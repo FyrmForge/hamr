@@ -25,7 +25,9 @@ type Change struct {
 }
 
 // changes is the registry of all known scaffold changes.
-// Entries are added as the scaffold evolves in future versions.
+// This slice is intentionally empty until the first scaffold-breaking release.
+// When the scaffold evolves, append Change entries here with the version that
+// introduced each change. BuildReport filters them by version range.
 var changes []Change
 
 // Changes returns all registered scaffold changes.
