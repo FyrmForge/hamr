@@ -78,15 +78,27 @@ Purpose:
 - Save artifacts that an LLM can consume directly
 
 Suggested behavior:
+- By default writes a per-capture bundle directory, not a loose file
 - Always writes a `.png`
 - Optional `.txt` sidecar with visible text
 - Optional `.html` sidecar with page HTML
 - Optional JSON metadata to stdout or a file
 
+Suggested default output shape:
+
+```text
+.hamr/captures/<capture-id>/
+  screenshot.png
+  screenshot.txt
+  screenshot.html
+  meta.json
+```
+
 Suggested flags:
 
 ```text
 hamr ai capture <url>
+  --dir .hamr/captures
   --out artifacts/login.png
   --text
   --html
@@ -95,6 +107,10 @@ hamr ai capture <url>
   --full-page
   --width 1440
   --height 1024
+  --scroll-to top|middle|bottom
+  --scroll-x 0
+  --scroll-y 900
+  --scroll-selector ".results-pane"
   --wait 1s
   --headless
 ```
@@ -109,6 +125,61 @@ The combination is strong enough to support:
 - UI bug triage
 - design review
 - agent navigation/debugging
+
+#### Capture modes
+
+`hamr ai capture` should support more than one screenshot mode.
+
+Recommended modes:
+
+- **viewport** — the default. Capture exactly what the browser currently shows.
+- **full-page** — capture the whole scrollable page as one image.
+- **tiled** — capture a series of viewport-sized images from top to bottom.
+
+Why keep all three:
+
+- `viewport` is the most readable and useful for specific UI states
+- `full-page` is useful for overall structure and long-form page review
+- `tiled` is likely the best long-page format for LLMs, because one extremely tall image often makes text too small
+
+Recommended flag shape:
+
+```text
+hamr ai capture <url> --full-page
+hamr ai capture <url> --scroll-to bottom
+hamr ai capture <url> --tiles
+hamr ai capture <url> --tiles --tile-overlap 120
+```
+
+The important product point is that `full-page` should be optional, not the default.
+For LLM workflows, a tiled bundle plus text/HTML sidecars is likely more useful than one huge PNG.
+
+#### Scroll position
+
+For viewport capture, scroll position should be first-class:
+
+- `--scroll-to top|middle|bottom`
+- `--scroll-x <px>`
+- `--scroll-y <px>`
+- `--scroll-selector <css>` for custom scroll containers
+
+This matters because many modern apps do not use the document body as the only scroll surface.
+
+#### Video / GIFs
+
+Do **not** make video capture part of the first version.
+
+Reason:
+- support for MP4/GIF understanding varies a lot across models and clients
+- static images are more reliable across agents
+- frame bundles plus metadata are usually a better LLM artifact than raw video
+
+If motion capture is ever added later, it should probably look like:
+- optional human-facing `recording.mp4`
+- extracted frame images
+- structured metadata with timestamps, URLs, actions, and scroll positions
+
+That keeps the AI-facing part robust even when video support is weak.
 
 ### 2. `hamr ai page <url>`
 
