@@ -205,65 +205,6 @@ func TestRun_unknown(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Field + Check
-// ---------------------------------------------------------------------------
-
-func TestField_passthrough(t *testing.T) {
-	f := validate.Field("email", "")
-	check(t, "name", f.Name, "email")
-	check(t, "msg", f.Message, "")
-}
-
-func TestField_withResult(t *testing.T) {
-	f := validate.Field("email", validate.MsgRequired)
-	check(t, "name", f.Name, "email")
-	check(t, "msg", f.Message, validate.MsgRequired)
-}
-
-func TestField_customMsgOverride(t *testing.T) {
-	f := validate.Field("name", validate.MsgRequired, "please enter your name")
-	check(t, "msg", f.Message, "please enter your name")
-}
-
-func TestField_customMsgNoOverrideOnPass(t *testing.T) {
-	f := validate.Field("name", "", "please enter your name")
-	check(t, "msg", f.Message, "")
-}
-
-func TestCheck_allPass(t *testing.T) {
-	errs := validate.Check(
-		validate.Field("email", ""),
-		validate.Field("name", ""),
-	)
-	if errs != nil {
-		t.Errorf("Check: expected nil, got %v", errs)
-	}
-}
-
-func TestCheck_someErrors(t *testing.T) {
-	errs := validate.Check(
-		validate.Field("email", validate.MsgRequired),
-		validate.Field("name", ""),
-		validate.Field("age", validate.MsgIntRange),
-	)
-	if errs == nil {
-		t.Fatal("Check: expected errors, got nil")
-	}
-	if len(errs) != 2 {
-		t.Fatalf("Check: expected 2 errors, got %d", len(errs))
-	}
-	check(t, "email", errs["email"], validate.MsgRequired)
-	check(t, "age", errs["age"], validate.MsgIntRange)
-}
-
-func TestCheck_noFields(t *testing.T) {
-	errs := validate.Check()
-	if errs != nil {
-		t.Errorf("Check: expected nil for no fields, got %v", errs)
-	}
-}
-
-// ---------------------------------------------------------------------------
 // *Msg variants
 // ---------------------------------------------------------------------------
 

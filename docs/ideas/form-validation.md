@@ -41,7 +41,7 @@ Separate binding from validation, define rules once, and eliminate per-field HTM
 ### Core Design Decision
 
 - **Echo's `c.Bind()` handles struct population** — type conversion, reflection, `form:` tags, all built-in
-- **The validate package handles validation only** — stays decoupled from Echo for the core validators
+- **The validate package handles validation only** — core validators stay pure functions, `Form` type adds Echo integration
 - **No custom reflection** in the validate package
 
 Handler flow:
@@ -51,6 +51,10 @@ var f RegisterForm
 c.Bind(&f)           // Echo handles types, reflection, all of it
 errs := f.Validate() // our validation runs on the populated struct
 ```
+
+## Breaking Changes
+
+The old `Field`, `FieldResult`, and `Check` helpers are removed. The new `Form` API replaces them entirely. The `Field` name is reused for the new field definition function.
 
 ## The `validate.Form` Type
 
@@ -62,24 +66,60 @@ type Form struct {
     renderer     FieldRenderer
     generalError string
     trim         bool
+    shortCircuit bool
 }
 
 type fieldDef struct {
-    name  string
-    rules []func(string) string
-    msg   string // for FMsg override
+    name     string
+    rules    []Rule
+    ctxRules []CtxRule
+    msg      string        // for FieldMsg override
+    renderer FieldRenderer // per-field override
 }
 
 type FieldRenderer func(c echo.Context, field, errMsg string) error
 ```
 
-### `Rule` as Type Alias
+### `Rule` and `CtxRule` Type Aliases
 
 ```go
-type Rule = func(string) string   // alias, not named type
+type Rule = func(string) string              // alias, not named type
+type CtxRule = func(echo.Context, string) string  // context-aware rule
 ```
 
-Using a type alias (not a named type) means existing validators like `validate.Required` work directly as rules with zero adaptation — no casting required.
+Using type aliases (not named types) means existing validators like `validate.Required` work directly as rules with zero adaptation — no casting required.
+
+## `FieldBuilder` — Chainable Field Definition
+
+`Field()` and `FieldMsg()` return a `FieldBuilder` that satisfies `FormOption`. This enables chaining for per-field configuration:
+
+```go
+type FieldBuilder struct {
+    def fieldDef
+}
+
+// Field defines a field with rules that use default error messages.
+func Field(name string, rules ...Rule) FieldBuilder
+
+// FieldMsg defines a field where any rule failure produces the given message.
+func FieldMsg(name, msg string, rules ...Rule) FieldBuilder
+
+// WithRenderer sets a custom renderer for this field only.
+// Falls back to the form-level WithOOBRenderer if not set.
+func (fb FieldBuilder) WithRenderer(fn FieldRenderer) FieldBuilder
+
+// WithCtx adds context-aware rules to the field.
+func (fb FieldBuilder) WithCtx(rules ...CtxRule) FieldBuilder
+```
+
+`FieldBuilder` implements `FormOption`, so it works directly in `NewForm`:
+
+```go
+validate.NewForm(
+    validate.Field("name", validate.Required),                              // no custom renderer
+    validate.Field("password", validate.Required).WithRenderer(pwRenderer), // custom renderer
+)
+```
 
 ## Constructor with `FormOption` Interface
 
@@ -95,6 +135,7 @@ type formConfig struct {
     renderer     FieldRenderer
     generalError string
     trim         bool
+    shortCircuit bool
 }
 
 func NewForm(opts ...FormOption) Form {
@@ -107,6 +148,7 @@ func NewForm(opts ...FormOption) Form {
         renderer:     cfg.renderer,
         generalError: cfg.generalError,
         trim:         cfg.trim,
+        shortCircuit: cfg.shortCircuit,
     }
 }
 ```
@@ -116,67 +158,40 @@ func NewForm(opts ...FormOption) Form {
 | Option | Purpose |
 |---|---|
 | `WithOOBRenderer(fn)` | Renderer for `ValidationHandler` — how to render per-field errors as OOB HTML |
-| `WithGeneralError(msg)` | Added to error map under key `""` (empty string) when any field fails validation |
+| `WithGeneralError(msg)` | Added to error map under key `"general"` when any field fails validation |
 | `WithTrim(bool)` | Auto-trim whitespace from form values before validating |
+| `WithShortCircuit(bool)` | Stop validating after the first field that fails (default: false — validate all fields) |
 
-Concrete option implementations:
+### Short-Circuit Behavior
 
-```go
-type oobRendererOption struct{ fn FieldRenderer }
-func (o oobRendererOption) apply(c *formConfig) { c.renderer = o.fn }
-func WithOOBRenderer(fn FieldRenderer) FormOption { return oobRendererOption{fn} }
+Two levels of short-circuiting:
 
-type generalErrorOption struct{ msg string }
-func (o generalErrorOption) apply(c *formConfig) { c.generalError = o.msg }
-func WithGeneralError(msg string) FormOption { return generalErrorOption{msg} }
+- **Per-field (always on):** Rules for a single field stop at the first failure. `Field("email", Required, Email)` won't check `Email` if `Required` fails. One error per field.
+- **Per-form (configurable):** `WithShortCircuit(true)` stops after the first field with an error. Default is `false` — validate all fields and return all errors.
 
-type trimOption struct{ on bool }
-func (o trimOption) apply(c *formConfig) { c.trim = o.on }
-func WithTrim(on bool) FormOption { return trimOption{on} }
-
-type fieldOption struct{ def fieldDef }
-func (o fieldOption) apply(c *formConfig) { c.fields = append(c.fields, o.def) }
-
-func F(name string, rules ...func(string) string) FormOption {
-    return fieldOption{fieldDef{name: name, rules: rules}}
-}
-
-func FMsg(name, msg string, rules ...func(string) string) FormOption {
-    return fieldOption{fieldDef{name: name, rules: rules, msg: msg}}
-}
-```
-
-### Field Definitions: `F` and `FMsg`
-
-```go
-// Default messages from each rule
-validate.F("email", validate.Required, validate.Email)
-
-// One message for any failure on the field
-validate.FMsg("email", "Email is invalid", validate.Required, validate.Email)
-```
+The return type is always `map[string]string` — per-field short-circuit means at most one error per field name.
 
 ## Error Message Customization — Three Levels
 
 **Level 1 — Default messages** from each rule:
 
 ```go
-validate.F("email", validate.Required, validate.Email)
+validate.Field("email", validate.Required, validate.Email)
 // Required failure -> "This field is required"
 // Email failure -> "Invalid email address"
 ```
 
-**Level 2 — Field-level override** (`FMsg`): one message for any failure:
+**Level 2 — Field-level override** (`FieldMsg`): one message for any failure:
 
 ```go
-validate.FMsg("email", "Email is invalid", validate.Required, validate.Email)
+validate.FieldMsg("email", "Email is invalid", validate.Required, validate.Email)
 // Any failure -> "Email is invalid"
 ```
 
 **Level 3 — Per-rule override** (`WithMsg`): override a specific rule's message:
 
 ```go
-validate.F("email",
+validate.Field("email",
     validate.Required,
     validate.WithMsg(validate.Email, "Please enter a valid email"),
 )
@@ -193,6 +208,27 @@ func WithMsg(rule func(string) string, msg string) func(string) string {
         return ""
     }
 }
+```
+
+## `RunRules` — Standalone Rule Chain
+
+For quick one-off validation without a `Form`:
+
+```go
+func RunRules(value string, rules ...Rule) string {
+    for _, r := range rules {
+        if msg := r(value); msg != "" {
+            return msg
+        }
+    }
+    return ""
+}
+```
+
+Usage:
+
+```go
+errMsg := validate.RunRules(email, validate.Required, validate.Email)
 ```
 
 ## Handler Pattern — Rules in Constructor
@@ -215,20 +251,20 @@ func NewHandler(authService *service.AuthService, sm *auth.SessionManager) *hand
             validate.WithOOBRenderer(form.OOBValidator),
             validate.WithGeneralError("Please fix the errors below and try again."),
             validate.WithTrim(true),
-            validate.F("name", validate.Required, validate.MinLen(2)),
-            validate.F("email",
+            validate.Field("name", validate.Required, validate.MinLen(2)),
+            validate.Field("email",
                 validate.Required,
                 validate.WithMsg(validate.Email, "Please enter a valid email"),
             ),
-            validate.FMsg("password", "Password does not meet requirements",
+            validate.FieldMsg("password", "Password does not meet requirements",
                 validate.Required, validate.PasswordStrength,
             ),
-            validate.F("website", validate.EmptyOr(validate.URL)),
-            validate.F("role", validate.Required, validate.In("user", "admin", "editor")),
+            validate.Field("website", validate.EmptyOr(validate.URL)),
+            validate.Field("role", validate.Required, validate.In("user", "admin", "editor")),
         ),
         LoginFormRules: validate.NewForm(
-            validate.F("email", validate.Required, validate.Email),
-            validate.F("password", validate.Required),
+            validate.Field("email", validate.Required, validate.Email),
+            validate.Field("password", validate.Required),
         ),
     }
 }
@@ -251,7 +287,7 @@ authGroup.POST("/login/validate/:field", h.LoginFormRules.ValidationHandler("fie
 
 ## Full Form Validation
 
-`Form.Validate(c)` loops over field definitions, calls `c.FormValue(field)` for each, runs rules with short-circuit. Returns `map[string]string` (field name to error message) or `nil`.
+`Form.Validate(c)` loops over field definitions, calls `c.FormValue(field)` for each, runs rules with per-field short-circuit. Returns `map[string]string` (field name to error message) or `nil`.
 
 ```go
 func (h *handler) Register(c echo.Context) error {
@@ -282,12 +318,23 @@ func (h *handler) Register(c echo.Context) error {
 
 1. Reads `:field` param
 2. Gets `c.FormValue(field)`
-3. Runs that field's rules
-4. Calls the OOB renderer set via `WithOOBRenderer`
+3. Runs that field's rules (including `CtxRule`s)
+4. Calls the field's renderer (or falls back to form-level `WithOOBRenderer`)
 
 No switch statement. No handler code needed per field.
 
 HTMX per-field validation sends only the single field value (not the whole form). The handler validates just that one field.
+
+### Per-Field Custom Renderer
+
+A field can override the form-level OOB renderer. Useful for fields like passwords that need a custom error component (e.g. a requirements checklist):
+
+```go
+validate.Field("password", validate.Required, validate.PasswordStrength).
+    WithRenderer(form.PasswordRequirementsRenderer)
+```
+
+The renderer signature is the same: `func(c echo.Context, field, errMsg string) error`. The field renderer is checked first; if nil, the form-level renderer is used.
 
 ### OOB Renderer
 
@@ -322,7 +369,26 @@ The existing HTMX trigger pattern handles error clearing automatically:
 2. User corrects -> `input` fires (because `data-has-error="true"` matches) -> after 300ms -> passes -> OOB swap with empty span, `data-has-error="false"`
 3. Once `data-has-error="false"`, input trigger stops firing on keystrokes
 
-## Generic `Rules[T]` — Typed Field Validation
+## Context-Aware Rules (`WithCtx`)
+
+For rules that need the Echo context (e.g. checking other form values, request headers):
+
+```go
+validate.Field("password_confirm",
+    validate.Required,
+).WithCtx(func(c echo.Context, value string) string {
+    if value != c.FormValue("password") {
+        return "Passwords do not match"
+    }
+    return ""
+})
+```
+
+Context-aware rules run after standard rules (and only if all standard rules pass). They follow the same per-field short-circuit behavior.
+
+**Important boundary**: `CtxRule` has access to `echo.Context` but should still be used for pure validation logic (comparing fields, checking headers). Anything needing DB queries or async operations belongs in the handler after validation.
+
+## Generic `Rules[T]` — Typed Field Validation (Phase 3)
 
 For fields that are already typed (after `c.Bind`), generic rules handle non-string types:
 
@@ -340,6 +406,20 @@ validate.Rules("age", f.Age, validate.IntBetween(13, 120)) // T = int
 validate.Rules("agree", f.Agree, validate.MustBeTrue)      // T = bool
 ```
 
+### Generic `EmptyOr[T]` (Phase 3)
+
+For typed validators, a generic `EmptyOr` checks the zero value:
+
+```go
+func EmptyOrTyped[T comparable](rule func(T) string) func(T) string {
+    return func(v T) string {
+        var zero T
+        if v == zero { return "" }
+        return rule(v)
+    }
+}
+```
+
 ### Mixing String and Typed Validation
 
 For forms with mixed types, merge both error maps:
@@ -352,7 +432,7 @@ func (h *handler) CreateProfile(c echo.Context) error {
     // String validation via Form
     errs := h.ProfileFormRules.Validate(c)
 
-    // Typed validation via Rules
+    // Typed validation via generic Rules
     typedErrs := validate.Check(
         validate.Rules("age", f.Age, validate.IntBetween(13, 120)),
         validate.Rules("score", f.Score, validate.FloatBetween(0.0, 100.0)),
@@ -380,18 +460,19 @@ func (h *handler) CreateProfile(c echo.Context) error {
 
 - `Required`, `Email`, `Phone`, `URL`, `PasswordStrength`
 
-### New Curried Constructors
+### Curried Constructors (Phase 1)
 
 | Constructor | Returns |
 |---|---|
 | `MinLen(n)` | `func(string) string` |
 | `MaxLen(n)` | `func(string) string` |
 | `In(vals...)` | `func(string) string` |
-| `EmptyOr(rule)` | `func(string) string` — empty string is valid, validates if provided |
 | `AgeMin(n)` | `func(string) string` |
 | `AgeMax(n)` | `func(string) string` |
 
-### New Typed Validators
+`EmptyOr` already exists as a curried constructor and works directly as a rule composer.
+
+### Typed Validators (Phase 3)
 
 | Type | Validator | Signature |
 |---|---|---|
@@ -402,7 +483,7 @@ func (h *handler) CreateProfile(c echo.Context) error {
 | `time.Time` | `Before(t)` | `func(time.Time) string` |
 | `time.Time` | `Between(min, max)` | `func(time.Time) string` |
 
-### String-Based Date Validators (for the `Form` path)
+### String-Based Date Validators (Phase 3)
 
 - `DateFormat(layout)` — validates string parses with layout
 - `DateAfter(layout, ref)` — parses then checks after ref
@@ -410,34 +491,25 @@ func (h *handler) CreateProfile(c echo.Context) error {
 
 ## Custom Validators
 
-Since `Rules[T any]` accepts `...func(T) string`, any custom function works:
+Since rules are just `func(string) string`, any custom function works:
 
 ```go
-// Inline
-validate.Rules("starts_at", f.StartsAt, func(t time.Time) string {
-    if t.Before(time.Now()) {
-        return "Must be in the future"
-    }
-    return ""
-})
-
-// Curried reusable constructor
-func WithinDays(days int) func(time.Time) string {
-    return func(t time.Time) string {
-        now := time.Now()
-        if t.Before(now) || t.After(now.AddDate(0, 0, days)) {
-            return fmt.Sprintf("Must be within the next %d days", days)
-        }
-        return ""
-    }
-}
-
-// Custom string validator for F()
+// Inline custom rule
 func noSpaces(value string) string {
     if strings.Contains(value, " ") { return "Cannot contain spaces" }
     return ""
 }
-validate.F("username", validate.Required, noSpaces)
+validate.Field("username", validate.Required, noSpaces)
+
+// Curried reusable constructor
+func Matches(pattern *regexp.Regexp, msg string) func(string) string {
+    return func(value string) string {
+        if !pattern.MatchString(value) {
+            return msg
+        }
+        return ""
+    }
+}
 ```
 
 ## Dependency Injection via Constructor Closures
@@ -448,9 +520,9 @@ Rules are defined in the constructor, so they close over the handler's dependenc
 func NewHandler(cfg Config, authService *service.AuthService, sm *auth.SessionManager) *handler {
     return &handler{
         RegisterFormRules: validate.NewForm(
-            validate.F("role", validate.Required, validate.In(cfg.AllowedRoles...)),
-            validate.F("bio", validate.MaxLen(cfg.MaxBioLength)),
-            validate.F("invite_code", validate.Required, func(value string) string {
+            validate.Field("role", validate.Required, validate.In(cfg.AllowedRoles...)),
+            validate.Field("bio", validate.MaxLen(cfg.MaxBioLength)),
+            validate.Field("invite_code", validate.Required, func(value string) string {
                 if !authService.ValidInviteCode(value) {
                     return "Invalid invite code"
                 }
@@ -503,7 +575,7 @@ func NewHandler(bookingService *service.BookingService) *handler {
             validate.WithOOBRenderer(form.OOBValidator),
             validate.WithGeneralError("Please fix the errors below."),
             validate.WithTrim(true),
-            validate.F("title", validate.Required, validate.MinLen(3), validate.MaxLen(200)),
+            validate.Field("title", validate.Required, validate.MinLen(3), validate.MaxLen(200)),
         ),
     }
 }
@@ -544,31 +616,26 @@ func (h *handler) Create(c echo.Context) error {
 }
 ```
 
-## Backward Compatibility
+## Implementation Phases
 
-Everything existing stays unchanged:
-
-- All existing validators (`Required`, `Email`, `Phone`, `URL`, `PasswordStrength`, `MinLength`, `MaxLength`, `OneOf`, `IntRange`, `MinAge`, `MaxAge`)
-- `Field`, `Check`, `FieldResult` types/functions
-- Template components (`FieldError`, `FieldErrorOOB`)
-- HTMX trigger pattern (`blur` + `input[data-has-error]`)
-- `*Msg` variants of all validators
-
-## File Organization
-
-All new files live in the existing `pkg/validate` package alongside the current code:
+### Phase 1 — Core Form API
 
 | File | Contents |
 |---|---|
-| `pkg/validate/form.go` | `Form` type, `NewForm`, `FormOption`, `F`, `FMsg`, `Validate`, `ValidationHandler`, options |
-| `pkg/validate/rules.go` | `Rules[T]`, `RulesMsg[T]`, `RunRules[T]`, `WithMsg`, `WithCtx` |
-| `pkg/validate/constructors.go` | Curried validators: `MinLen`, `MaxLen`, `In`, `IntBetween`, `AgeMin`, `AgeMax`, `FloatBetween`, `MustBeTrue`, `After`, `Before`, `Between`, `DateFormat`, `DateAfter`, `DateBefore`, `EmptyOr` |
-| `pkg/validate/validate.go` | Untouched — existing validators stay as-is |
-| `pkg/validate/messages.go` | Untouched — existing error message constants stay as-is |
+| `pkg/validate/form.go` | `Form` type, `NewForm`, `FormOption`, `FieldBuilder`, `Field`, `FieldMsg`, `Validate`, `ValidationHandler`, all options (`WithOOBRenderer`, `WithGeneralError`, `WithTrim`, `WithShortCircuit`), `FieldRenderer` |
+| `pkg/validate/rules.go` | `Rule` type alias, `CtxRule` type alias, `WithMsg`, `RunRules` |
+| `pkg/validate/constructors.go` | Curried validators: `MinLen`, `MaxLen`, `In`, `AgeMin`, `AgeMax` |
 
-## Open Questions
+Also removes old `Field`, `FieldResult`, `Check` from `validate.go`.
 
-- Should `WithCtx` (context-aware rules that receive `echo.Context`) be included in the first version, or deferred?
-- Should `Form.Validate(c)` return early on first field error, or always validate all fields?
-- Should there be a `Form.ValidateMap(values map[string]string)` for testing without an Echo context?
-- Should `EmptyOr` compose with typed validators, or only string validators?
+### Phase 2 — Typed Validators (future)
+
+| File | Contents |
+|---|---|
+| `pkg/validate/constructors.go` | `IntBetween`, `FloatBetween`, `MustBeTrue`, `After`, `Before`, `Between`, `DateFormat`, `DateAfter`, `DateBefore` |
+
+### Phase 3 — Generic Rules (future)
+
+| File | Contents |
+|---|---|
+| `pkg/validate/rules.go` | `Rules[T]`, `RulesMsg[T]`, generic `RunRules[T]`, `EmptyOrTyped[T]`, `Check` |

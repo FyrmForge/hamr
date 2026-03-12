@@ -1,6 +1,6 @@
 # Forms & Validation
 
-HAMR uses simple function-based validators rather than struct-tag validation — this keeps validation explicit, testable, and easy to follow in handlers. This guide covers form handling, validators, CSRF protection, flash messages, and HTMX field validation.
+HAMR uses simple function-based validators rather than struct-tag validation — this keeps validation explicit, testable, and easy to follow in handlers. The `validate.Form` API lets you define field rules once and reuse them for both full-form validation and HTMX per-field validation.
 
 **Package references:** [Validate](pkg/validate.md), [Middleware](pkg/middleware.md) (flash, CSRF sections)
 
@@ -8,31 +8,38 @@ HAMR uses simple function-based validators rather than struct-tag validation —
 
 ## Form Handling Pattern
 
-The pattern is: read form values, validate each one, respond with errors or proceed.
+The recommended pattern uses `validate.Form` — define rules once in the handler constructor, then validate in your handler:
 
 ```go
-func (h *Handler) CreateUser(c echo.Context) error {
-    name  := c.FormValue("name")
-    email := c.FormValue("email")
-    password := c.FormValue("password")
+type handler struct {
+    RegisterFormRules validate.Form
+}
 
-    errors := map[string]string{}
-    if msg := validate.Required(name); msg != "" {
-        errors["name"] = msg
+func NewHandler() *handler {
+    return &handler{
+        RegisterFormRules: validate.NewForm(
+            validate.WithOOBRenderer(form.OOBValidator),
+            validate.WithGeneralError("Please fix the errors below."),
+            validate.WithTrim(true),
+            validate.Field("name", validate.Required, validate.MinLen(2)),
+            validate.Field("email", validate.Required, validate.Email),
+            validate.FieldMsg("password", "Password does not meet requirements",
+                validate.Required, validate.PasswordStrength,
+            ),
+        ),
     }
-    if msg := validate.Email(email); msg != "" {
-        errors["email"] = msg
-    }
-    if msg := validate.PasswordStrength(password); msg != "" {
-        errors["password"] = msg
-    }
+}
 
-    if len(errors) > 0 {
-        return respond.ValidationError(c, errors)
+func (h *handler) Register(c echo.Context) error {
+    var f RegisterForm
+    c.Bind(&f)
+
+    if errs := h.RegisterFormRules.Validate(c); errs != nil {
+        return respond.HTML(c, http.StatusUnprocessableEntity, registerForm(c, f, errs))
     }
 
     // ... create user
-    return respond.HTML(c, http.StatusOK, templates.Success())
+    return respond.Redirect(c, "/login")
 }
 ```
 
@@ -57,14 +64,24 @@ validate.MinAge("1990-01-15", 18)    // YYYY-MM-DD, minimum age
 validate.PasswordStrength(password)  // checks all requirements
 ```
 
+### Curried Constructors
+
+Curried versions return `func(string) string` and work directly as `Form` rules:
+
+```go
+validate.MinLen(3)                   // func(string) string
+validate.MaxLen(100)                 // func(string) string
+validate.In("admin", "user")        // func(string) string
+validate.AgeMin(18)                  // func(string) string
+validate.AgeMax(120)                 // func(string) string
+```
+
 ### Optional Fields
 
 All validators reject empty strings by default. For optional fields that must be valid when provided, wrap with `EmptyOr`:
 
 ```go
-if msg := validate.EmptyOr(validate.Email)(""); msg != "" {
-    errors["email"] = msg // not reached — empty passes
-}
+validate.Field("website", validate.EmptyOr(validate.URL))
 ```
 
 ### Custom Messages
@@ -78,18 +95,182 @@ validate.MinLengthMsg(password, 8, "Password must be at least 8 characters")
 
 ### Custom Validators
 
-Register project-specific validators:
+Any `func(string) string` works as a rule:
 
 ```go
-validate.Register("username", func(v string) string {
-    if strings.Contains(v, " ") {
-        return "Username cannot contain spaces"
+func noSpaces(value string) string {
+    if strings.Contains(value, " ") {
+        return "Cannot contain spaces"
     }
     return ""
-})
+}
+validate.Field("username", validate.Required, noSpaces)
+```
 
+Or register project-specific validators by name:
+
+```go
+validate.Register("username", noSpaces)
 msg := validate.Run("username", input)
 ```
+
+---
+
+## Form API
+
+### Defining Rules
+
+Rules are defined once using `validate.NewForm` and attached to the handler:
+
+```go
+type handler struct {
+    ContactFormRules validate.Form
+}
+
+func NewHandler() *handler {
+    return &handler{
+        ContactFormRules: validate.NewForm(
+            validate.WithOOBRenderer(form.OOBValidator),
+            validate.WithTrim(true),
+            validate.Field("name", validate.Required, validate.MinLen(2)),
+            validate.Field("email", validate.Required, validate.Email),
+            validate.Field("message", validate.Required, validate.MaxLen(1000)),
+        ),
+    }
+}
+```
+
+### Field Definitions
+
+```go
+// Default messages from each rule
+validate.Field("email", validate.Required, validate.Email)
+
+// One message for any failure on the field
+validate.FieldMsg("email", "Email is invalid", validate.Required, validate.Email)
+```
+
+### Error Message Customization — Three Levels
+
+**Level 1 — Default messages** from each rule:
+
+```go
+validate.Field("email", validate.Required, validate.Email)
+// Required failure -> "This field is required"
+// Email failure -> "Invalid email address"
+```
+
+**Level 2 — Field-level override** (`FieldMsg`): one message for any failure:
+
+```go
+validate.FieldMsg("email", "Email is invalid", validate.Required, validate.Email)
+// Any failure -> "Email is invalid"
+```
+
+**Level 3 — Per-rule override** (`WithMsg`): override a specific rule's message:
+
+```go
+validate.Field("email",
+    validate.Required,
+    validate.WithMsg(validate.Email, "Please enter a valid email"),
+)
+```
+
+### Form Options
+
+| Option | Purpose |
+|---|---|
+| `WithOOBRenderer(fn)` | Renderer for `ValidationHandler` — how to render per-field errors as OOB HTML |
+| `WithGeneralError(msg)` | Added to error map under key `"general"` when any field fails |
+| `WithTrim(bool)` | Auto-trim whitespace before validating |
+| `WithShortCircuit(bool)` | Stop after first field error (default: false — validate all fields) |
+
+### Full Form Validation
+
+```go
+errs := h.ContactFormRules.Validate(c)  // map[string]string or nil
+```
+
+Per-field rules always short-circuit: `Field("email", Required, Email)` won't check `Email` if `Required` fails. Per-form short-circuit is off by default — all fields are validated.
+
+### RunRules — Standalone Rule Chain
+
+For quick one-off validation outside a `Form`:
+
+```go
+errMsg := validate.RunRules(email, validate.Required, validate.Email)
+```
+
+---
+
+## Context-Aware Rules
+
+For rules that need the Echo context (e.g. cross-field comparisons):
+
+```go
+validate.Field("password_confirm", validate.Required).
+    WithCtx(func(c echo.Context, value string) string {
+        if value != c.FormValue("password") {
+            return "Passwords do not match"
+        }
+        return ""
+    })
+```
+
+Context-aware rules run after standard rules and only if all standard rules pass.
+
+---
+
+## HTMX Per-Field Validation
+
+The `Form` API eliminates per-field validation handlers entirely. Register one route:
+
+```go
+authGroup.POST("/register/validate/:field", h.RegisterFormRules.ValidationHandler("field"))
+```
+
+`ValidationHandler` automatically reads the field param, gets the form value, runs that field's rules, and calls the OOB renderer. Unknown fields are silently ignored.
+
+### OOB Renderer
+
+Define once in form helpers:
+
+```go
+func OOBValidator(c echo.Context, field, errMsg string) error {
+    status := http.StatusOK
+    if errMsg != "" {
+        status = http.StatusUnprocessableEntity
+    }
+    return respond.HTML(c, status, FieldErrorOOB(field, errMsg))
+}
+```
+
+### Per-Field Custom Renderer
+
+A field can override the form-level renderer (e.g. for password requirement checklists):
+
+```go
+validate.Field("password", validate.Required, validate.PasswordStrength).
+    WithRenderer(form.PasswordRequirementsRenderer)
+```
+
+### Error Clear Flow
+
+The HTMX trigger pattern handles error clearing automatically:
+
+```html
+<input
+    name="email"
+    hx-post="/register/validate/email"
+    hx-trigger="blur, input[this.closest('div').querySelector('[data-has-error=true]')] delay:300ms"
+    hx-swap="none"
+/>
+@form.FieldError("email", form.GetError(errs, "email"))
+```
+
+1. User types bad email, leaves field -> `blur` fires -> OOB swap with `data-has-error="true"`
+2. User corrects -> `input` fires (because `data-has-error="true"` matches) -> after 300ms -> passes -> OOB swap with empty span, `data-has-error="false"`
+3. Once `data-has-error="false"`, input trigger stops firing on keystrokes
 
 ---
 
@@ -165,32 +346,6 @@ The cookie is cleared after reading — flash messages appear exactly once.
 
 ---
 
-## HTMX Field Validation
-
-For inline field validation with HTMX, create a validation endpoint that returns individual field errors:
-
-```html
-<input
-    name="email"
-    hx-post="/validate/email"
-    hx-trigger="blur"
-    hx-target="#email-error"
-/>
-<span id="email-error"></span>
-```
-
-```go
-func (h *Handler) ValidateEmail(c echo.Context) error {
-    email := c.FormValue("email")
-    if msg := validate.Email(email); msg != "" {
-        return respond.HTML(c, http.StatusOK, templates.FieldError(msg))
-    }
-    return respond.HTML(c, http.StatusOK, templates.FieldError(""))
-}
-```
-
----
-
 ## Password Strength
 
 For UI display, get individual requirement statuses:
@@ -201,6 +356,25 @@ for _, r := range reqs {
     fmt.Printf("%s: %v\n", r.Description, r.Met)
 }
 ```
+
+---
+
+## Dependency Injection via Constructor Closures
+
+Rules defined in the constructor close over handler dependencies:
+
+```go
+func NewHandler(cfg Config) *handler {
+    return &handler{
+        FormRules: validate.NewForm(
+            validate.Field("role", validate.Required, validate.In(cfg.AllowedRoles...)),
+            validate.Field("bio", validate.MaxLen(cfg.MaxBioLength)),
+        ),
+    }
+}
+```
+
+**Important boundary**: Rules are `func(string) string` — no `context.Context`. Anything needing DB queries or request-scoped context belongs in the handler after validation.
 
 ---
 

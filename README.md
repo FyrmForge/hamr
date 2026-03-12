@@ -62,6 +62,7 @@ HAMR is two things:
 | --------------------------- | ------------------------------------------------------------------- |
 | `hamr new <name>`           | Scaffold a new project with interactive options                     |
 | `hamr dev`                  | File watching, builds, process management, and live-reload proxy    |
+| `hamr ai capture <url>`     | Capture a browser screenshot bundle, plus HTML/text/metadata        |
 | `hamr vendor`               | Download and checksum frontend JS dependencies (htmx, alpine, etc) |
 | `hamr sync`                 | Sync a local directory to an S3-compatible bucket                   |
 | `hamr rename module <path>` | Rename the Go module and update all import paths                    |

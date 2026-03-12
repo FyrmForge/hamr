@@ -23,6 +23,7 @@
   Generated projects define a Store interface in their internal/repo/repo.go;
   it is not part of the hamr framework itself.
 - **hamr dev**: Dev server with file watching, auto-rebuild, and live reload.
+- **hamr ai capture**: Browser screenshot capture with HTML/text/metadata sidecars.
 - **hamr locale gen**: Code generator for type-safe i18n accessors.
 - **respond.Redirect**: HTMX-aware redirect that sets HX-Redirect for HTMX
   requests and falls back to HTTP 303.
@@ -73,15 +74,22 @@ HTTP response helpers for HTMX-first applications.
 
 ### validate
 Pure-function validators returning "" on success or error message string.
-- `Required(value)`, `Email(value)`, `Phone(value)`, `URL(value)`
-- `MinLength(value, min)`, `MaxLength(value, max)`, `OneOf(value, options...)`
+- Core: `Required`, `Email`, `Phone`, `URL`, `PasswordStrength`
+- Multi-arg: `MinLength(value, min)`, `MaxLength(value, max)`, `OneOf(value, options...)`
 - `IntRange(value, min, max)`, `MinAge(birthDate, minAge)`, `MaxAge(birthDate, maxAge)`
-- `PasswordStrength(password)`, `CheckPasswordRequirements(password) []PasswordRequirement`
+- `CheckPasswordRequirements(password) []PasswordRequirement`
 - `NormalizeURL(value)` — prepends "https://" when missing
 - `EmptyOr(fn)` — wraps a validator so empty values pass
 - Every validator has a `*Msg` variant for custom messages
 - `Register(name, fn)`, `Run(name, value)` — custom validator registry
-- `Field(name, result, msg...)`, `Check(fields...) map[string]string` — collect errors
+- Curried constructors (return `Rule`): `MinLen(n)`, `MaxLen(n)`, `In(vals...)`, `AgeMin(n)`, `AgeMax(n)`
+- `type Rule = func(string) string`, `type CtxRule = func(echo.Context, string) string`
+- `WithMsg(rule, msg)` — wraps rule with custom message
+- `RunRules(value, rules...)` — runs rules in order, returns first error
+- Form API: `NewForm(opts...) Form`, `Form.Validate(c) map[string]string`, `Form.ValidationHandler(paramName) echo.HandlerFunc`
+- Field defs: `Field(name, rules...)`, `FieldMsg(name, msg, rules...)` — return `FieldBuilder`
+- `FieldBuilder.WithRenderer(fn)`, `FieldBuilder.WithCtx(rules...)`
+- Options: `WithOOBRenderer(fn)`, `WithGeneralError(msg)`, `WithTrim(bool)`, `WithShortCircuit(bool)`
 
 ### htmx
 Request detection and response header helpers for HTMX.

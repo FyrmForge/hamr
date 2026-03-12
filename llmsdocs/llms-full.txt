@@ -22,6 +22,7 @@
   Generated projects define a Store interface in their internal/repo/repo.go;
   it is not part of the hamr framework itself.
 - **hamr dev**: Dev server with file watching, auto-rebuild, and live reload.
+- **hamr ai capture**: Browser screenshot capture with HTML/text/metadata sidecars.
 - **hamr locale gen**: Code generator for type-safe i18n accessors.
 - **respond.Redirect**: HTMX-aware redirect that sets HX-Redirect for HTMX
   requests and falls back to HTTP 303.
@@ -271,7 +272,8 @@ type PagedResponse[T any] struct {
 ### validate
 
 > Package validate provides pure-function validators that return "" on success
-> or a human-readable error message string on failure.
+> or a human-readable error message string on failure. The Form API lets you
+> define field rules once and reuse them for full-form and HTMX per-field validation.
 
 #### Constants
 
@@ -292,17 +294,16 @@ const (
 )
 ```
 
-#### Types
+#### Type Aliases and Types
 
 ```go
+type Rule = func(string) string                          // alias — existing validators satisfy it
+type CtxRule = func(echo.Context, string) string          // context-aware rule
+type FieldRenderer func(c echo.Context, field, errMsg string) error
+
 type PasswordRequirement struct {
     Description string
     Met         bool
-}
-
-type FieldResult struct {
-    Name    string
-    Message string
 }
 ```
 
@@ -339,6 +340,25 @@ func IntRange(value int, min, max int) string
 func IntRangeMsg(value, min, max int, msg string) string
 ```
 
+#### Curried Constructors
+
+Return `func(string) string` for use as Form rules:
+
+```go
+func MinLen(n int) Rule
+func MaxLen(n int) Rule
+func In(options ...string) Rule
+func AgeMin(minAge int) Rule
+func AgeMax(maxAge int) Rule
+```
+
+#### Rule Helpers
+
+```go
+func WithMsg(rule Rule, msg string) Rule       // wraps rule to override error message
+func RunRules(value string, rules ...Rule) string  // runs rules in order, returns first error
+```
+
 #### Date/Age Validators
 
 ```go
@@ -369,12 +389,56 @@ func Register(name string, fn func(string) string)
 func Run(name, value string) string  // returns MsgValidatorNotFound if not registered
 ```
 
-#### Field + Check Helpers
+#### Form API
+
+Define field rules once, use for both full-form and HTMX per-field validation:
 
 ```go
-func Field(name, result string, msg ...string) FieldResult
-func Check(fields ...FieldResult) map[string]string  // returns nil when all pass
+type FormOption interface{ apply(*formConfig) }
+
+func NewForm(opts ...FormOption) Form
+func WithOOBRenderer(fn FieldRenderer) FormOption
+func WithGeneralError(msg string) FormOption
+func WithTrim(on bool) FormOption
+func WithShortCircuit(on bool) FormOption
 ```
+
+Field definitions return FieldBuilder (satisfies FormOption):
+
+```go
+func Field(name string, rules ...Rule) FieldBuilder
+func FieldMsg(name, msg string, rules ...Rule) FieldBuilder
+func (fb FieldBuilder) WithRenderer(fn FieldRenderer) FieldBuilder
+func (fb FieldBuilder) WithCtx(rules ...CtxRule) FieldBuilder
+```
+
+Form methods:
+
+```go
+func (f Form) Validate(c echo.Context) map[string]string          // nil when all pass
+func (f Form) ValidationHandler(paramName string) echo.HandlerFunc // HTMX per-field endpoint
+```
+
+Usage pattern:
+
+```go
+formRules := validate.NewForm(
+    validate.WithOOBRenderer(form.OOBValidator),
+    validate.WithTrim(true),
+    validate.Field("name", validate.Required, validate.MinLen(2)),
+    validate.Field("email", validate.Required, validate.Email),
+    validate.FieldMsg("password", "Password too weak", validate.Required, validate.PasswordStrength),
+)
+
+// Full form validation
+errs := formRules.Validate(c)  // map[string]string or nil
+
+// HTMX per-field (one route for all fields)
+group.POST("/validate/:field", formRules.ValidationHandler("field"))
+```
+
+Short-circuit: per-field always on (first rule failure stops). Per-form configurable
+via WithShortCircuit (default off — validates all fields).
 
 ---
 

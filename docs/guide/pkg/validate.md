@@ -1,8 +1,8 @@
-# Validate — Pure-Function Validators
+# Validate — Pure-Function Validators & Form API
 
 `hamr/pkg/validate` provides pure-function validators that return `""` on success or a
-human-readable error message on failure. No struct tags, no reflection. Zero framework
-dependencies.
+human-readable error message on failure. The `Form` API lets you define field rules once
+and reuse them for both full-form validation and HTMX per-field validation.
 
 ## Quick Start
 
@@ -16,14 +16,8 @@ Every validator is a plain function: `func(value) string`. Empty string means va
 Non-empty string is the error message. This makes validators composable, testable, and
 easy to use in handlers.
 
-```go
-if msg := validate.Required(name); msg != "" {
-    errors["name"] = msg
-}
-if msg := validate.Email(email); msg != "" {
-    errors["email"] = msg
-}
-```
+The `Form` type collects field definitions and provides `Validate(c)` for full-form
+validation and `ValidationHandler(paramName)` for automatic HTMX per-field endpoints.
 
 ## Built-in Validators
 
@@ -37,6 +31,18 @@ validate.URL(value)                  // valid absolute URL
 validate.MinLength(value, 3)         // at least 3 runes
 validate.MaxLength(value, 100)       // at most 100 runes
 validate.OneOf(value, "a", "b", "c") // allowed values
+```
+
+### Curried constructors
+
+Curried versions return `func(string) string` and work directly as `Form` rules:
+
+```go
+validate.MinLen(3)                   // func(string) string
+validate.MaxLen(100)                 // func(string) string
+validate.In("admin", "user")        // func(string) string
+validate.AgeMin(18)                  // func(string) string
+validate.AgeMax(120)                 // func(string) string
 ```
 
 ### Numeric validators
@@ -69,18 +75,8 @@ for _, r := range reqs {
 
 ## Empty-Input Behavior
 
-All validators (except `Required`) now **reject empty strings by default**. This means
-an empty value will fail `Email`, `Phone`, `URL`, etc. If a field is optional but must
-be valid when provided, wrap the validator with `EmptyOr`:
-
-```go
-// Optional email — blank is OK, but non-blank must be valid.
-if msg := validate.EmptyOr(validate.Email)(""); msg != "" {
-    errors["email"] = msg // not reached — empty passes
-}
-```
-
-`EmptyOr` treats whitespace-only strings as empty:
+All validators (except `Required`) reject empty strings by default. If a field is optional
+but must be valid when provided, wrap the validator with `EmptyOr`:
 
 ```go
 validate.EmptyOr(validate.Email)("")      // "" (pass)
@@ -97,6 +93,23 @@ Every validator has a `*Msg` variant that accepts a custom error message:
 validate.RequiredMsg(name, "Please enter your name")
 validate.EmailMsg(email, "That doesn't look like an email")
 validate.MinLengthMsg(password, 8, "Password must be at least 8 characters")
+```
+
+## Rule Message Override
+
+`WithMsg` wraps a rule to replace its error message:
+
+```go
+validate.WithMsg(validate.Email, "Please enter a valid email")
+```
+
+## RunRules — Standalone Rule Chain
+
+Execute rules in order, returning the first error message:
+
+```go
+errMsg := validate.RunRules(email, validate.Required, validate.Email)
+// Returns "" if all pass, or first error message
 ```
 
 ## Default Messages
@@ -140,30 +153,97 @@ validate.NormalizeURL("https://foo.com")   // "https://foo.com" (unchanged)
 validate.NormalizeURL("")                  // ""
 ```
 
-## Handler Pattern
+## Form API
+
+### Defining a Form
 
 ```go
-func (h *Handler) CreateUser(c echo.Context) error {
-    name  := c.FormValue("name")
-    email := c.FormValue("email")
-
-    errors := map[string]string{}
-    if msg := validate.Required(name); msg != "" {
-        errors["name"] = msg
-    }
-    if msg := validate.Email(email); msg != "" {
-        errors["email"] = msg
-    }
-    if len(errors) > 0 {
-        return respond.ValidationError(c, errors)
-    }
-    // ... create user
-}
+formRules := validate.NewForm(
+    validate.WithOOBRenderer(form.OOBValidator),
+    validate.WithGeneralError("Please fix the errors below."),
+    validate.WithTrim(true),
+    validate.Field("name", validate.Required, validate.MinLen(2)),
+    validate.Field("email", validate.Required, validate.Email),
+    validate.FieldMsg("password", "Password does not meet requirements",
+        validate.Required, validate.PasswordStrength,
+    ),
+)
 ```
+
+### Form Options
+
+| Option | Purpose |
+|---|---|
+| `WithOOBRenderer(fn)` | Default renderer for `ValidationHandler` |
+| `WithGeneralError(msg)` | Added under `"general"` key when any field fails |
+| `WithTrim(bool)` | Auto-trim whitespace before validating |
+| `WithShortCircuit(bool)` | Stop after first field error (default: false) |
+
+### Field Definitions
+
+```go
+// Default messages from each rule
+validate.Field("email", validate.Required, validate.Email)
+
+// One message for any failure
+validate.FieldMsg("email", "Email is invalid", validate.Required, validate.Email)
+
+// Per-rule message override
+validate.Field("email",
+    validate.Required,
+    validate.WithMsg(validate.Email, "Please enter a valid email"),
+)
+```
+
+### Per-Field Custom Renderer
+
+```go
+validate.Field("password", validate.Required).WithRenderer(customRenderer)
+```
+
+### Context-Aware Rules
+
+```go
+validate.Field("password_confirm", validate.Required).
+    WithCtx(func(c echo.Context, value string) string {
+        if value != c.FormValue("password") {
+            return "Passwords do not match"
+        }
+        return ""
+    })
+```
+
+### Full Form Validation
+
+```go
+errs := formRules.Validate(c)  // map[string]string or nil
+```
+
+### HTMX Per-Field Validation
+
+```go
+// One route handles all fields:
+group.POST("/register/validate/:field", h.RegisterFormRules.ValidationHandler("field"))
+```
+
+Unknown fields return an empty/no-error response.
+
+### Short-Circuit Behavior
+
+- **Per-field (always on):** Rules for a single field stop at first failure.
+- **Per-form (configurable):** `WithShortCircuit(true)` stops after first field error. Default is off.
 
 ## API Reference
 
 ```go
+// Type aliases
+type Rule = func(string) string
+type CtxRule = func(echo.Context, string) string
+
+// Rule helpers
+func WithMsg(rule Rule, msg string) Rule
+func RunRules(value string, rules ...Rule) string
+
 // Higher-order helpers
 func EmptyOr(fn func(string) string) func(string) string
 
@@ -175,6 +255,13 @@ func URL(value string) string
 func MinLength(value string, min int) string
 func MaxLength(value string, max int) string
 func OneOf(value string, options ...string) string
+
+// Curried constructors (return func(string) string)
+func MinLen(n int) Rule
+func MaxLen(n int) Rule
+func In(options ...string) Rule
+func AgeMin(minAge int) Rule
+func AgeMax(maxAge int) Rule
 
 // Numeric
 func IntRange(value int, min, max int) string
@@ -206,4 +293,22 @@ func NormalizeURL(value string) string
 // Custom registry
 func Register(name string, fn func(string) string)
 func Run(name, value string) string
+
+// Form API
+type FieldRenderer func(c echo.Context, field, errMsg string) error
+type FormOption interface{ apply(*formConfig) }
+
+func NewForm(opts ...FormOption) Form
+func WithOOBRenderer(fn FieldRenderer) FormOption
+func WithGeneralError(msg string) FormOption
+func WithTrim(on bool) FormOption
+func WithShortCircuit(on bool) FormOption
+
+func Field(name string, rules ...Rule) FieldBuilder
+func FieldMsg(name, msg string, rules ...Rule) FieldBuilder
+func (fb FieldBuilder) WithRenderer(fn FieldRenderer) FieldBuilder
+func (fb FieldBuilder) WithCtx(rules ...CtxRule) FieldBuilder
+
+func (f Form) Validate(c echo.Context) map[string]string
+func (f Form) ValidationHandler(paramName string) echo.HandlerFunc
 ```
