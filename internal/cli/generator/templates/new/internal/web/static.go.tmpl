@@ -1,8 +1,6 @@
 package web
 
 import (
-	"log/slog"
-
 	"github.com/FyrmForge/hamr/pkg/server"
 
 	"{{.Module}}/internal/web/handler/about"
@@ -10,7 +8,7 @@ import (
 
 // RegisterStaticPages registers handlers marked for static generation.
 // These handlers must not depend on database or session state.
-func RegisterStaticPages(srv *server.Server, log *slog.Logger) {
-	h := about.NewHandler(log)
+func RegisterStaticPages(srv *server.Server) {
+	h := about.NewHandler()
 	srv.StaticPage("/about", h.About)
 }

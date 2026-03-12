@@ -121,6 +121,94 @@ func TestPrepareOptionsRejectsScrollSelectorWithoutPosition(t *testing.T) {
 	assert.ErrorContains(t, err, "scroll-selector requires")
 }
 
+func TestPrepareOptionsRejectsTilesWithFullPage(t *testing.T) {
+	_, err := PrepareOptions(Options{
+		URL:       "https://example.com",
+		Tiles:     true,
+		FullPage:  true,
+		Headless:  true,
+		NoSandbox: true,
+	})
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "tiles cannot be used with full-page capture")
+}
+
+func TestPrepareOptionsRejectsTilesWithSelector(t *testing.T) {
+	_, err := PrepareOptions(Options{
+		URL:       "https://example.com",
+		Tiles:     true,
+		Selector:  "#app",
+		Headless:  true,
+		NoSandbox: true,
+	})
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "tiles cannot be used with selector capture")
+}
+
+func TestPrepareOptionsRejectsTilesWithScroll(t *testing.T) {
+	_, err := PrepareOptions(Options{
+		URL:       "https://example.com",
+		Tiles:     true,
+		ScrollTo:  "bottom",
+		Headless:  true,
+		NoSandbox: true,
+	})
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "scroll options cannot be used with tiled capture")
+}
+
+func TestPrepareOptionsValidatesTileOverlap(t *testing.T) {
+	_, err := PrepareOptions(Options{
+		URL:         "https://example.com",
+		TileOverlap: -10,
+		Headless:    true,
+		NoSandbox:   true,
+	})
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "tile overlap must be 0 or greater")
+}
+
+func TestPrepareOptionsRejectsTileOverlapExceedingHeight(t *testing.T) {
+	_, err := PrepareOptions(Options{
+		URL:         "https://example.com",
+		Tiles:       true,
+		TileOverlap: 1000,
+		Headless:    true,
+		NoSandbox:   true,
+	})
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "tile overlap must be less than viewport height minus")
+}
+
+func TestPrepareOptionsRejectsTileOverlapWithoutTiles(t *testing.T) {
+	_, err := PrepareOptions(Options{
+		URL:         "https://example.com",
+		TileOverlap: 200,
+		Headless:    true,
+		NoSandbox:   true,
+	})
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "tile-overlap requires --tiles")
+}
+
+func TestPrepareOptionsDefaultsTileOverlap(t *testing.T) {
+	opts, err := PrepareOptions(Options{
+		URL:       "https://example.com",
+		Tiles:     true,
+		Headless:  true,
+		NoSandbox: true,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, DefaultTileOverlap, opts.TileOverlap)
+}
+
 func TestNormalizeURL(t *testing.T) {
 	assert.Equal(t, "http://example.com/app", normalizeURL("example.com/app"))
 	assert.Equal(t, "https://example.com/app", normalizeURL("https://example.com/app"))

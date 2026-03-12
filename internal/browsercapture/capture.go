@@ -26,6 +26,12 @@ const (
 	defaultCaptureRootDir  = ".hamr/ai/captures"
 	defaultScreenshotName  = "screenshot.png"
 	defaultMetaName        = "meta.json"
+
+	// DefaultTileOverlap is the default pixel overlap between adjacent tiles.
+	DefaultTileOverlap = 120
+
+	// minTileStep is the minimum pixels advanced per tile to prevent abuse.
+	minTileStep = 50
 )
 
 var invalidFilenameChars = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
@@ -40,10 +46,12 @@ type Options struct {
 	CaptureHTML    bool
 	CaptureText    bool
 	FullPage       bool
+	Tiles          bool
 	Headless       bool
 	NoSandbox      bool
 	Width          int
 	Height         int
+	TileOverlap    int
 	Scale          float64
 	ScrollX        int
 	ScrollY        int
@@ -72,6 +80,10 @@ type Result struct {
 	ScrollX        int       `json:"scroll_x"`
 	ScrollY        int       `json:"scroll_y"`
 	ScrollSelector string    `json:"scroll_selector,omitempty"`
+	TilePaths      []string  `json:"tile_paths,omitempty"`
+	TileCount      int       `json:"tile_count,omitempty"`
+	TileOverlap    int       `json:"tile_overlap,omitempty"`
+	TotalHeight    int       `json:"total_height,omitempty"`
 }
 
 // PrepareOptions normalizes capture options and fills defaults.
@@ -134,6 +146,27 @@ func PrepareOptions(opts Options) (Options, error) {
 	}
 	if opts.FullPage && hasScrollRequest(opts) {
 		return Options{}, fmt.Errorf("scroll options cannot be used with full-page capture")
+	}
+	if opts.Tiles && opts.FullPage {
+		return Options{}, fmt.Errorf("tiles cannot be used with full-page capture")
+	}
+	if opts.Tiles && opts.Selector != "" {
+		return Options{}, fmt.Errorf("tiles cannot be used with selector capture")
+	}
+	if opts.Tiles && hasScrollRequest(opts) {
+		return Options{}, fmt.Errorf("scroll options cannot be used with tiled capture")
+	}
+	if opts.TileOverlap < 0 {
+		return Options{}, fmt.Errorf("tile overlap must be 0 or greater")
+	}
+	if opts.TileOverlap > 0 && !opts.Tiles {
+		return Options{}, fmt.Errorf("tile-overlap requires --tiles")
+	}
+	if opts.Tiles && opts.TileOverlap == 0 {
+		opts.TileOverlap = DefaultTileOverlap
+	}
+	if opts.Tiles && opts.Height-opts.TileOverlap < minTileStep {
+		return Options{}, fmt.Errorf("tile overlap must be less than viewport height minus %d", minTileStep)
 	}
 
 	outputPath, err := normalizeOutputPath(opts.OutputPath, opts.OutputDir, opts.URL, time.Now().UTC())
@@ -232,12 +265,34 @@ func Capture(opts Options) (Result, error) {
 		}
 	}
 
-	screenshot, err := captureScreenshot(page, opts)
-	if err != nil {
-		return Result{}, err
-	}
-	if err := writeFile(opts.OutputPath, screenshot); err != nil {
-		return Result{}, fmt.Errorf("write screenshot: %w", err)
+	if opts.Tiles {
+		tiles, totalHeight, err := captureTiles(page, opts)
+		if err != nil {
+			return Result{}, err
+		}
+		bundleDir := filepath.Dir(opts.OutputPath)
+		for i, data := range tiles {
+			tileName := fmt.Sprintf("tile_%03d.png", i+1)
+			tilePath := filepath.Join(bundleDir, tileName)
+			if err := writeFile(tilePath, data); err != nil {
+				return Result{}, fmt.Errorf("write tile %d: %w", i+1, err)
+			}
+			result.TilePaths = append(result.TilePaths, tilePath)
+		}
+		result.TileCount = len(tiles)
+		result.TileOverlap = opts.TileOverlap
+		result.TotalHeight = totalHeight
+		if len(result.TilePaths) > 0 {
+			result.ScreenshotPath = result.TilePaths[0]
+		}
+	} else {
+		screenshot, err := captureScreenshot(page, opts)
+		if err != nil {
+			return Result{}, err
+		}
+		if err := writeFile(opts.OutputPath, screenshot); err != nil {
+			return Result{}, fmt.Errorf("write screenshot: %w", err)
+		}
 	}
 
 	if opts.CaptureHTML {
@@ -268,6 +323,36 @@ func Capture(opts Options) (Result, error) {
 	}
 
 	return result, nil
+}
+
+func captureTiles(page *rod.Page, opts Options) ([][]byte, int, error) {
+	_, maxY, err := scrollBounds(page, opts.Timeout)
+	if err != nil {
+		return nil, 0, fmt.Errorf("read page scroll bounds: %w", err)
+	}
+
+	totalHeight := maxY + opts.Height
+	step := opts.Height - opts.TileOverlap
+	if step <= 0 {
+		return nil, 0, fmt.Errorf("tile step must be positive (height=%d, overlap=%d)", opts.Height, opts.TileOverlap)
+	}
+
+	var tiles [][]byte
+
+	for y := 0; y <= maxY; y += step {
+		if _, err := page.Timeout(opts.Timeout).Eval(`(y) => { window.scrollTo(0, y); }`, y); err != nil {
+			return nil, 0, fmt.Errorf("scroll to y=%d: %w", y, err)
+		}
+		time.Sleep(defaultWaitAfterScroll)
+
+		data, err := page.Timeout(opts.Timeout).Screenshot(false, nil)
+		if err != nil {
+			return nil, 0, fmt.Errorf("capture tile at y=%d: %w", y, err)
+		}
+		tiles = append(tiles, data)
+	}
+
+	return tiles, totalHeight, nil
 }
 
 func captureScreenshot(page *rod.Page, opts Options) ([]byte, error) {

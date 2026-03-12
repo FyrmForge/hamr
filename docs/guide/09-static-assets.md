@@ -67,11 +67,11 @@ Pre-render pages whose output never changes between requests (about, terms, priv
 
 ```go
 // internal/web/static.go
-func RegisterStaticPages(srv *server.Server, log *slog.Logger) {
-    aboutHandler := about.NewHandler(log)
+func RegisterStaticPages(srv *server.Server) {
+    aboutHandler := about.NewHandler()
     srv.StaticPage("/about", aboutHandler.About)
 
-    termsHandler := terms.NewHandler(log)
+    termsHandler := terms.NewHandler()
     srv.StaticPage("/terms", termsHandler.Terms)
 }
 ```

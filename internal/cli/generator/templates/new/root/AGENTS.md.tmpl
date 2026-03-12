@@ -68,7 +68,6 @@ One handler package per domain: `internal/web/handler/<name>/`
 package things
 
 import (
-    "log/slog"
     "net/http"
 
     "github.com/FyrmForge/hamr/pkg/respond"
@@ -79,11 +78,10 @@ import (
 
 type Handler struct {
     store repo.Store
-    log   *slog.Logger
 }
 
-func NewHandler(store repo.Store, log *slog.Logger) *Handler {
-    return &Handler{store: store, log: log}
+func NewHandler(store repo.Store) *Handler {
+    return &Handler{store: store}
 }
 
 // GET /things
@@ -173,14 +171,12 @@ type CreateForm struct {
 
 type Handler struct {
     store          repo.Store
-    log            *slog.Logger
     CreateFormRules validate.Form
 }
 
-func NewHandler(store repo.Store, log *slog.Logger) *Handler {
+func NewHandler(store repo.Store) *Handler {
     return &Handler{
         store: store,
-        log:   log,
         CreateFormRules: validate.NewForm(
             validate.WithOOBRenderer(form.OOBValidator),
             validate.WithGeneralError("Please fix the errors below."),

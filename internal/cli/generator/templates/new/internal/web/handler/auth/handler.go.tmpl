@@ -2,11 +2,11 @@ package auth
 
 import (
 	"errors"
-	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/FyrmForge/hamr/pkg/auth"
+	"github.com/FyrmForge/hamr/pkg/logging"
 	"github.com/FyrmForge/hamr/pkg/middleware"
 	"github.com/FyrmForge/hamr/pkg/respond"
 	"github.com/FyrmForge/hamr/pkg/validate"
@@ -41,18 +41,16 @@ type RegisterForm struct {
 type handler struct {
 	authService    *service.AuthService
 	sessionManager *auth.SessionManager
-	log            *slog.Logger
 
 	LoginFormRules    validate.Form
 	RegisterFormRules validate.Form
 }
 
 // NewHandler creates a new auth handler.
-func NewHandler(authService *service.AuthService, sm *auth.SessionManager, log *slog.Logger) *handler {
+func NewHandler(authService *service.AuthService, sm *auth.SessionManager) *handler {
 	return &handler{
 		authService:    authService,
 		sessionManager: sm,
-		log:            log,
 		LoginFormRules: validate.NewForm(
 			validate.WithOOBRenderer(form.OOBValidator),
 			validate.Field("email", validate.Required, validate.Email),
@@ -85,9 +83,11 @@ func (h *handler) Login(c echo.Context) error {
 		return respond.HTML(c, http.StatusUnprocessableEntity, loginForm(c, f, errs))
 	}
 
+	log := logging.FromContext(c.Request().Context())
+
 	user, err := h.authService.Authenticate(c.Request().Context(), f.Email, f.Password)
 	if err != nil {
-		h.log.Warn("login failed", "email", f.Email, "error", err)
+		log.Warn("login failed", "email", f.Email, "error", err)
 		return respond.HTML(c, http.StatusUnauthorized, loginForm(c, f, map[string]string{
 			"general": "Invalid email or password",
 		}))
@@ -95,7 +95,7 @@ func (h *handler) Login(c echo.Context) error {
 
 	session, err := h.sessionManager.CreateSession(c.Request().Context(), user.ID, nil)
 	if err != nil {
-		h.log.Error("create session failed", "error", err)
+		log.Error("create session failed", "error", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "session error")
 	}
 
@@ -120,9 +120,11 @@ func (h *handler) Register(c echo.Context) error {
 		return respond.HTML(c, http.StatusUnprocessableEntity, registerForm(c, f, errs))
 	}
 
+	log := logging.FromContext(c.Request().Context())
+
 	user, err := h.authService.Register(c.Request().Context(), f.Email, f.Password, f.Name)
 	if err != nil {
-		h.log.Warn("registration failed", "email", f.Email, "error", err)
+		log.Warn("registration failed", "email", f.Email, "error", err)
 		if errors.Is(err, service.ErrEmailTaken) {
 			return respond.HTML(c, http.StatusUnprocessableEntity, registerForm(c, f, map[string]string{
 				"email": "An account with this email already exists",
@@ -135,7 +137,7 @@ func (h *handler) Register(c echo.Context) error {
 
 	session, err := h.sessionManager.CreateSession(c.Request().Context(), user.ID, nil)
 	if err != nil {
-		h.log.Error("create session failed", "error", err)
+		log.Error("create session failed", "error", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "session error")
 	}
 

@@ -92,9 +92,9 @@ Not all of these need to exist immediately. The namespace matters first.
   - [x] Pre-release suffixes stripped during version comparison
   - [x] Change registry is empty — entries added as scaffold evolves
 
-### Not implemented
+  - [x] Tiled capture mode (`--tiles`, `--tile-overlap`)
 
-- [ ] Tiled capture mode (`--tiles`)
+### Not implemented
 - [ ] `hamr ai page <url>` — structured page bundle
 - [ ] `hamr ai routes` — machine-readable route map
 - [ ] `hamr ai forms <url>` — form extraction from rendered pages

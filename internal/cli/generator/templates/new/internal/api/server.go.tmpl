@@ -1,8 +1,6 @@
 package api
 
 import (
-	"log/slog"
-
 	"github.com/FyrmForge/hamr/pkg/middleware"
 	"github.com/FyrmForge/hamr/pkg/server"
 
@@ -15,7 +13,6 @@ import (
 
 // Deps holds the dependencies for API route registration.
 type Deps struct {
-	Log   *slog.Logger
 	Store repo.Store
 {{- if .IncludeStripe}}
 	WebhookSecret string
@@ -31,7 +28,7 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 	api.GET("/health", healthHandler.Health)
 {{- if .IncludeStripe}}
 
-	stripeHandler := stripehandler.NewHandler(deps.WebhookSecret, deps.Log)
+	stripeHandler := stripehandler.NewHandler(deps.WebhookSecret)
 	api.POST("/webhooks/stripe", stripeHandler.HandleWebhook)
 {{- end}}
 }

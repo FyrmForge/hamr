@@ -4,7 +4,6 @@ import (
 {{- if .IncludeAuth}}
 	"context"
 {{- end}}
-	"log/slog"
 
 	"github.com/FyrmForge/hamr/pkg/middleware"
 	"github.com/FyrmForge/hamr/pkg/server"
@@ -34,7 +33,6 @@ import (
 
 // Deps holds the dependencies for route registration.
 type Deps struct {
-	Log            *slog.Logger
 	Store          repo.Store
 	BaseURL        string
 	StaticBaseURL  string
@@ -61,7 +59,7 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 	e := srv.Echo()
 
 	// Error handler.
-	errorHandler := errors.NewHandler(deps.Log)
+	errorHandler := errors.NewHandler()
 	e.HTTPErrorHandler = errorHandler.Handle
 
 	// Health check — no session middleware.
@@ -108,15 +106,15 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 	site.Use(middleware.OptionalAuth(authCfg))
 {{- end}}
 
-	homeHandler := home.NewHandler(deps.Log)
+	homeHandler := home.NewHandler()
 	site.GET("/", homeHandler.Index)
 
-	aboutHandler := about.NewHandler(deps.Log)
+	aboutHandler := about.NewHandler()
 	site.GET("/about", aboutHandler.About)
 {{- if .IncludeAuth}}
 
 	// Auth routes.
-	authHandler := authhandler.NewHandler(deps.AuthService, deps.SessionManager, deps.Log)
+	authHandler := authhandler.NewHandler(deps.AuthService, deps.SessionManager)
 
 	guest := site.Group("")
 	guest.Use(middleware.RequireNotAuth(authCfg))

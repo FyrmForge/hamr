@@ -1758,6 +1758,49 @@ type BucketEnsurer interface {
 
 ## CLI Commands
 
+### hamr ai capture
+
+> Browser screenshot capture with HTML/text/metadata sidecars.
+
+Launches a browser, navigates to the target URL, and saves a PNG screenshot.
+Optional sidecars: visible page text (.txt), page HTML (.html), JSON metadata.
+
+```text
+hamr ai capture <url> [flags]
+```
+
+Flags:
+- `--out <path>` — output PNG path; if omitted a per-capture folder is created
+- `--dir <path>` — root directory for per-capture folders (default: `.hamr/ai/captures`)
+- `--browser <path>` — browser binary path (auto-detects Chromium/Chrome/Brave)
+- `--text` — save visible page text alongside the screenshot
+- `--html` — save page HTML alongside the screenshot
+- `--json` — print capture metadata as JSON
+- `--selector <css>` — capture only the first element matching a CSS selector
+- `--full-page` — capture the full scrollable page as one image
+- `--tiles` — capture viewport-sized tiles from top to bottom (mutually exclusive with `--full-page` and `--selector`)
+- `--tile-overlap <px>` — pixels of overlap between tiles (default: 120 when `--tiles` is set)
+- `--width <px>` — viewport width in pixels (default: 1440)
+- `--height <px>` — viewport height in pixels (default: 1024)
+- `--scale <factor>` — device scale factor (default: 1)
+- `--scroll-to <preset>` — scroll before capture: top, middle, or bottom
+- `--scroll-x <px>` — horizontal scroll offset before capture
+- `--scroll-y <px>` — vertical scroll offset before capture
+- `--scroll-selector <css>` — CSS selector for a scroll container
+- `--headless` — run browser in headless mode (default: true)
+- `--no-sandbox` — launch with --no-sandbox (default: true)
+- `--timeout <duration>` — timeout for page operations (default: 15s)
+- `--wait <duration>` — extra delay after page load (default: 1s)
+
+Capture modes:
+- **viewport** (default) — captures exactly what the browser shows
+- **full-page** (`--full-page`) — captures the entire scrollable page as one image
+- **tiled** (`--tiles`) — captures viewport-sized screenshots top-to-bottom with configurable overlap; produces multiple PNGs (tile_001.png, tile_002.png, ...) ideal for LLM consumption of long pages
+
+Tile output: when `--tiles` is used, individual tile PNGs are written to the
+bundle directory. The meta.json includes `tile_paths`, `tile_count`,
+`tile_overlap`, and `total_height` fields.
+
 ### hamr ai upgrade
 
 > Machine-readable scaffold upgrade report comparing the project's baseline

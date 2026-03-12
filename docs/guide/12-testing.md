@@ -28,7 +28,7 @@ func TestHomeHandler(t *testing.T) {
     c := e.NewContext(req, rec)
 
     // mockRepo implements the same interface your real repo does
-    h := NewHandler(mockRepo, slog.Default())
+    h := NewHandler(mockRepo)
     err := h.Home(c)
 
     require.NoError(t, err)

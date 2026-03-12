@@ -9,15 +9,15 @@ middleware — bypassing the handler chain entirely.
 
 ```go
 // internal/web/static.go — register pages for generation
-func RegisterStaticPages(srv *server.Server, log *slog.Logger) {
-    h := about.NewHandler(log)
+func RegisterStaticPages(srv *server.Server) {
+    h := about.NewHandler()
     srv.StaticPage("/about", h.About)
 }
 ```
 
 ```go
 // cmd/server/main.go — generate before DB setup
-web.RegisterStaticPages(srv, log)
+web.RegisterStaticPages(srv)
 if *generateFlag {
     if err := srv.GenerateStatic("generated"); err != nil {
         log.Fatal(err)
@@ -74,18 +74,18 @@ committed to git. CI verifies they're up to date.
 
 ### Registration API
 
-Register static pages separately from dynamic routes. Static handlers should only depend
-on a logger — no database, sessions, or request-specific state:
+Register static pages separately from dynamic routes. Static handlers should have no
+dependencies — no database, sessions, or request-specific state:
 
 ```go
 // internal/web/static.go
 package web
 
-func RegisterStaticPages(srv *server.Server, log *slog.Logger) {
-    h := about.NewHandler(log)
+func RegisterStaticPages(srv *server.Server) {
+    h := about.NewHandler()
     srv.StaticPage("/about", h.About)
 
-    t := terms.NewHandler(log)
+    t := terms.NewHandler()
     srv.StaticPage("/terms", t.Terms)
     srv.StaticPage("/terms/privacy", t.Privacy)
 }
@@ -98,7 +98,7 @@ intercepts GET requests before the handler chain:
 
 ```go
 // internal/web/server.go — in RegisterRoutes
-aboutHandler := about.NewHandler(deps.Log)
+aboutHandler := about.NewHandler()
 site.GET("/about", aboutHandler.About)
 ```
 
@@ -110,7 +110,7 @@ srv, _ := server.New(
     server.WithGeneratedDir("generated"),
 )
 
-web.RegisterStaticPages(srv, log)
+web.RegisterStaticPages(srv)
 if *generateFlag {
     srv.GenerateStatic("generated")
     return

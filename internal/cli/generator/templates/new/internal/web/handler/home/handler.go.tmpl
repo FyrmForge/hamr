@@ -1,7 +1,6 @@
 package home
 
 import (
-	"log/slog"
 	"net/http"
 
 	"github.com/FyrmForge/hamr/pkg/respond"
@@ -9,13 +8,11 @@ import (
 )
 
 // Handler handles home page requests.
-type handler struct {
-	log *slog.Logger
-}
+type handler struct{}
 
 // NewHandler creates a new home handler.
-func NewHandler(log *slog.Logger) *handler {
-	return &handler{log: log}
+func NewHandler() *handler {
+	return &handler{}
 }
 
 // GET /

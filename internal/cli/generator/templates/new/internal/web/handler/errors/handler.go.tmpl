@@ -1,23 +1,21 @@
 package errors
 
 import (
-	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/labstack/echo/v4"
 
 	"github.com/FyrmForge/hamr/pkg/htmx"
+	"github.com/FyrmForge/hamr/pkg/logging"
 )
 
 // Handler handles HTTP errors.
-type handler struct {
-	log *slog.Logger
-}
+type handler struct{}
 
 // NewHandler creates a new error handler.
-func NewHandler(log *slog.Logger) *handler {
-	return &handler{log: log}
+func NewHandler() *handler {
+	return &handler{}
 }
 
 // Handle is an echo.HTTPErrorHandler that returns JSON or HTML errors.
@@ -39,7 +37,7 @@ func (h *handler) Handle(err error, c echo.Context) {
 	}
 
 	if code >= 500 {
-		h.log.Error("server error", "error", err, "status", code)
+		logging.FromContext(c.Request().Context()).Error("server error", "error", err, "status", code)
 	}
 
 	if htmx.IsHTMX(c.Request()) || strings.Contains(c.Request().Header.Get("Accept"), "text/html") {

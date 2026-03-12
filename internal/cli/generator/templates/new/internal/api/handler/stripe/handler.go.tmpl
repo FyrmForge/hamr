@@ -3,12 +3,13 @@ package stripe
 import (
 	"context"
 	"io"
-	"log/slog"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
 	"github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/webhook"
+
+	"github.com/FyrmForge/hamr/pkg/logging"
 )
 
 // maxBodyBytes limits the size of the incoming webhook payload.
@@ -16,15 +17,13 @@ const maxBodyBytes = 65536
 
 type handler struct {
 	webhookSecret string
-	log           *slog.Logger
 	handlers      map[string]func(ctx context.Context, event stripe.Event) error
 }
 
 // NewHandler creates a new Stripe webhook handler.
-func NewHandler(webhookSecret string, log *slog.Logger) *handler {
+func NewHandler(webhookSecret string) *handler {
 	h := &handler{
 		webhookSecret: webhookSecret,
-		log:           log,
 	}
 	h.handlers = map[string]func(ctx context.Context, event stripe.Event) error{
 		"checkout.session.completed": h.handleCheckoutSessionCompleted,
@@ -41,27 +40,28 @@ func (h *handler) HandleWebhook(c echo.Context) error {
 
 	payload, err := io.ReadAll(r.Body)
 	if err != nil {
-		h.log.Error("failed to read webhook body", "error", err)
+		logging.FromContext(r.Context()).Error("failed to read webhook body", "error", err)
 		return c.NoContent(http.StatusBadRequest)
 	}
 
 	sig := r.Header.Get("Stripe-Signature")
 	event, err := webhook.ConstructEvent(payload, sig, h.webhookSecret)
 	if err != nil {
-		h.log.Error("failed to verify webhook signature", "error", err)
+		logging.FromContext(r.Context()).Error("failed to verify webhook signature", "error", err)
 		return c.NoContent(http.StatusBadRequest)
 	}
 
 	ctx := r.Context()
+	log := logging.FromContext(ctx)
 
 	fn, ok := h.handlers[string(event.Type)]
 	if !ok {
-		h.log.Info("unhandled stripe event", "type", event.Type)
+		log.Info("unhandled stripe event", "type", event.Type)
 		return c.NoContent(http.StatusOK)
 	}
 
 	if err := fn(ctx, event); err != nil {
-		h.log.Error("stripe event handler failed", "type", event.Type, "error", err)
+		log.Error("stripe event handler failed", "type", event.Type, "error", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
@@ -69,11 +69,11 @@ func (h *handler) HandleWebhook(c echo.Context) error {
 }
 
 func (h *handler) handleCheckoutSessionCompleted(ctx context.Context, event stripe.Event) error {
-	h.log.Info("checkout session completed", "eventID", event.ID)
+	logging.FromContext(ctx).Info("checkout session completed", "eventID", event.ID)
 	return nil
 }
 
 func (h *handler) handleInvoicePaymentFailed(ctx context.Context, event stripe.Event) error {
-	h.log.Info("invoice payment failed", "eventID", event.ID)
+	logging.FromContext(ctx).Info("invoice payment failed", "eventID", event.ID)
 	return nil
 }

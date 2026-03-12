@@ -28,6 +28,8 @@ func newCaptureTestCmd() *cobra.Command {
 	cmd.Flags().Int("scroll-x", 0, "scroll x")
 	cmd.Flags().Int("scroll-y", 0, "scroll y")
 	cmd.Flags().String("scroll-selector", "", "scroll selector")
+	cmd.Flags().Bool("tiles", false, "tiles")
+	cmd.Flags().Int("tile-overlap", 0, "tile overlap")
 	cmd.Flags().Duration("timeout", 15*time.Second, "timeout")
 	cmd.Flags().Duration("wait", time.Second, "wait")
 	return cmd
@@ -87,4 +89,16 @@ func TestCaptureOptionsFromFlagsWithOutputDirAndScrollPreset(t *testing.T) {
 	assert.False(t, jsonOutput)
 	assert.Equal(t, ".hamr/captures", opts.OutputDir)
 	assert.Equal(t, "bottom", opts.ScrollTo)
+}
+
+func TestCaptureOptionsFromFlagsWithTiles(t *testing.T) {
+	cmd := newCaptureTestCmd()
+	require.NoError(t, cmd.Flags().Set("tiles", "true"))
+	require.NoError(t, cmd.Flags().Set("tile-overlap", "200"))
+
+	opts, _, err := captureOptionsFromFlags(cmd, "localhost:3000")
+	require.NoError(t, err)
+
+	assert.True(t, opts.Tiles)
+	assert.Equal(t, 200, opts.TileOverlap)
 }

@@ -112,7 +112,7 @@ func main() {
 {{- end}}
 
 	// Static page generation — no heavy deps needed.
-	web.RegisterStaticPages(srv, log)
+	web.RegisterStaticPages(srv)
 	if *generateFlag {
 		if err := srv.GenerateStatic("generated"); err != nil {
 			log.Error("generate static pages failed", "error", err)
@@ -221,7 +221,6 @@ func main() {
 {{- end}}
 
 	api.RegisterRoutes(srv, &api.Deps{
-		Log:   log,
 		Store: store,
 {{- if .IncludeStripe}}
 		WebhookSecret: envStripeWebhookSecret,
@@ -229,7 +228,6 @@ func main() {
 	})
 
 	web.RegisterRoutes(srv, &web.Deps{
-		Log:           log,
 		Store:         store,
 		BaseURL:       baseOrigin,
 		StaticBaseURL: envStaticBaseURL,

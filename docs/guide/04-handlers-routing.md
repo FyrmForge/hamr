@@ -78,14 +78,15 @@ Handlers are methods on a struct that holds dependencies:
 
 ```go
 type Handler struct {
-    repo   *UserRepo
-    log    *slog.Logger
+    repo *UserRepo
 }
 
-func NewHandler(repo *UserRepo, log *slog.Logger) *Handler {
-    return &Handler{repo: repo, log: log}
+func NewHandler(repo *UserRepo) *Handler {
+    return &Handler{repo: repo}
 }
 ```
+
+Use `logging.FromContext(c.Request().Context())` for request-scoped logging instead of storing a logger on the struct.
 
 ### HTML Response
 

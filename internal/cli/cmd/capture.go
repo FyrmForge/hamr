@@ -26,7 +26,9 @@ Examples:
   hamr ai capture localhost:3000/login --text --html --json
   hamr ai capture https://example.com --selector '#app' --dir .hamr/captures
   hamr ai capture https://example.com/pricing --scroll-to middle --width 1280 --height 720
-  hamr ai capture https://example.com/dashboard --scroll-selector '.results-pane' --scroll-to bottom`,
+  hamr ai capture https://example.com/dashboard --scroll-selector '.results-pane' --scroll-to bottom
+  hamr ai capture https://example.com/docs --tiles
+  hamr ai capture https://example.com/docs --tiles --tile-overlap 200`,
 	Args: cobra.ExactArgs(1),
 	RunE: runCapture,
 }
@@ -49,6 +51,8 @@ func init() {
 	captureCmd.Flags().Int("scroll-x", 0, "horizontal scroll offset in pixels before capture")
 	captureCmd.Flags().Int("scroll-y", 0, "vertical scroll offset in pixels before capture")
 	captureCmd.Flags().String("scroll-selector", "", "CSS selector for a scroll container; defaults to the window")
+	captureCmd.Flags().Bool("tiles", false, "capture viewport-sized tiles from top to bottom")
+	captureCmd.Flags().Int("tile-overlap", 0, "pixels of overlap between tiles (default 120 when --tiles is set)")
 	captureCmd.Flags().Duration("timeout", 15*time.Second, "timeout for page operations")
 	captureCmd.Flags().Duration("wait", time.Second, "extra delay after page load before capture")
 }
@@ -102,6 +106,11 @@ func runCapture(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	}
+	if result.TileCount > 0 {
+		if err := writeCaptureLine(out, "tiles: %d (overlap %dpx, total height %dpx)\n", result.TileCount, result.TileOverlap, result.TotalHeight); err != nil {
+			return err
+		}
+	}
 	if result.ScrollX != 0 || result.ScrollY != 0 {
 		if err := writeCaptureLine(out, "scroll position: x=%d y=%d\n", result.ScrollX, result.ScrollY); err != nil {
 			return err
@@ -134,6 +143,8 @@ func captureOptionsFromFlags(cmd *cobra.Command, rawURL string) (browsercapture.
 	jsonOutput, _ := cmd.Flags().GetBool("json")
 	selector, _ := cmd.Flags().GetString("selector")
 	fullPage, _ := cmd.Flags().GetBool("full-page")
+	tiles, _ := cmd.Flags().GetBool("tiles")
+	tileOverlap, _ := cmd.Flags().GetInt("tile-overlap")
 	headless, _ := cmd.Flags().GetBool("headless")
 	noSandbox, _ := cmd.Flags().GetBool("no-sandbox")
 	width, _ := cmd.Flags().GetInt("width")
@@ -155,11 +166,13 @@ func captureOptionsFromFlags(cmd *cobra.Command, rawURL string) (browsercapture.
 		CaptureHTML:    captureHTML,
 		CaptureText:    captureText,
 		FullPage:       fullPage,
+		Tiles:          tiles,
 		Headless:       headless,
 		NoSandbox:      noSandbox,
 		Width:          width,
 		Height:         height,
 		Scale:          scale,
+		TileOverlap:    tileOverlap,
 		ScrollTo:       scrollTo,
 		ScrollX:        scrollX,
 		ScrollY:        scrollY,

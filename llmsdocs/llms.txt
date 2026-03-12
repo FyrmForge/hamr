@@ -24,6 +24,9 @@
   it is not part of the hamr framework itself.
 - **hamr dev**: Dev server with file watching, auto-rebuild, and live reload.
 - **hamr ai capture**: Browser screenshot capture with HTML/text/metadata sidecars.
+  Supports viewport, full-page, and tiled (`--tiles`) capture modes. Tiled mode
+  produces viewport-sized PNGs from top to bottom with configurable overlap
+  (`--tile-overlap`), ideal for LLM consumption of long pages.
 - **hamr ai upgrade**: Machine-readable scaffold upgrade report comparing project version to current HAMR.
 - **.hamr/ai/**: Playground directory for all AI command artifacts (captures, upgrade reports). Gitignored. Configurable via `[ai] dir` in hamr.toml.
 - **hamr locale gen**: Code generator for type-safe i18n accessors.
