@@ -6,25 +6,25 @@ import (
 	"{{.Module}}/internal/web/components/form"
 )
 
-templ registerPage(c echo.Context, name, email string, errors map[string]string) {
+templ registerPage(c echo.Context, f RegisterForm, errors map[string]string) {
 	@components.Layout(c, "Register") {
 {{- if eq .CSS "tailwind"}}
 		<div class="max-w-md mx-auto mt-16 bg-slate-800 border border-slate-700 rounded-lg p-8">
 			<h2 class="text-2xl font-bold text-slate-100 mb-6 text-center">Register</h2>
-			@registerForm(c, name, email, errors)
+			@registerForm(c, f, errors)
 		</div>
 {{- else}}
 		<div class="container">
 			<div class="auth-card">
 				<h2 class="text-center">Register</h2>
-				@registerForm(c, name, email, errors)
+				@registerForm(c, f, errors)
 			</div>
 		</div>
 {{- end}}
 	}
 }
 
-templ registerForm(c echo.Context, name, email string, errors map[string]string) {
+templ registerForm(c echo.Context, f RegisterForm, errors map[string]string) {
 	<form
 		id="register-form"
 		hx-post="/register"
@@ -52,7 +52,7 @@ templ registerForm(c echo.Context, name, email string, errors map[string]string)
 				type="text"
 				id="name"
 				name="name"
-				value={ name }
+				value={ f.Name }
 				class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
 				hx-post="/register/validate/name"
 				hx-trigger="blur, input[this.closest('div').querySelector('[data-has-error=true]')] delay:300ms"
@@ -66,7 +66,7 @@ templ registerForm(c echo.Context, name, email string, errors map[string]string)
 				type="email"
 				id="email"
 				name="email"
-				value={ email }
+				value={ f.Email }
 				class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
 				hx-post="/register/validate/email"
 				hx-trigger="blur, input[this.closest('div').querySelector('[data-has-error=true]')] delay:300ms"
@@ -96,7 +96,7 @@ templ registerForm(c echo.Context, name, email string, errors map[string]string)
 				type="text"
 				id="name"
 				name="name"
-				value={ name }
+				value={ f.Name }
 				hx-post="/register/validate/name"
 				hx-trigger="blur, input[this.closest('.form-group').querySelector('[data-has-error=true]')] delay:300ms"
 				hx-swap="none"
@@ -109,7 +109,7 @@ templ registerForm(c echo.Context, name, email string, errors map[string]string)
 				type="email"
 				id="email"
 				name="email"
-				value={ email }
+				value={ f.Email }
 				hx-post="/register/validate/email"
 				hx-trigger="blur, input[this.closest('.form-group').querySelector('[data-has-error=true]')] delay:300ms"
 				hx-swap="none"

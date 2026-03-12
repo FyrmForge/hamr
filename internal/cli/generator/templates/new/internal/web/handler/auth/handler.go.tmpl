@@ -16,11 +16,35 @@ import (
 	"{{.Module}}/internal/web/components/form"
 )
 
-// Handler handles authentication requests.
+// ---------------------------------------------------------------------------
+// Form structs
+// ---------------------------------------------------------------------------
+
+// LoginForm holds the login form values.
+type LoginForm struct {
+	Email    string `form:"email"`
+	Password string `form:"password"`
+}
+
+// RegisterForm holds the registration form values.
+type RegisterForm struct {
+	Name     string `form:"name"`
+	Email    string `form:"email"`
+	Password string `form:"password"`
+}
+
+// ---------------------------------------------------------------------------
+// Handler
+// ---------------------------------------------------------------------------
+
+// handler handles authentication requests.
 type handler struct {
 	authService    *service.AuthService
 	sessionManager *auth.SessionManager
 	log            *slog.Logger
+
+	LoginFormRules    validate.Form
+	RegisterFormRules validate.Form
 }
 
 // NewHandler creates a new auth handler.
@@ -29,40 +53,44 @@ func NewHandler(authService *service.AuthService, sm *auth.SessionManager, log *
 		authService:    authService,
 		sessionManager: sm,
 		log:            log,
+		LoginFormRules: validate.NewForm(
+			validate.WithOOBRenderer(form.OOBValidator),
+			validate.Field("email", validate.Required, validate.Email),
+			validate.Field("password", validate.Required),
+		),
+		RegisterFormRules: validate.NewForm(
+			validate.WithOOBRenderer(form.OOBValidator),
+			validate.WithGeneralError("Please fix the errors below and try again."),
+			validate.Field("name", validate.Required),
+			validate.Field("email", validate.Required, validate.Email),
+			validate.Field("password", validate.Required, validate.PasswordStrength),
+		),
 	}
 }
 
 // GET /login
 func (h *handler) LoginPage(c echo.Context) error {
-	return respond.HTML(c, http.StatusOK, loginPage(c, "", nil))
+	return respond.HTML(c, http.StatusOK, loginPage(c, LoginForm{}, nil))
 }
 
 // POST /login
 func (h *handler) Login(c echo.Context) error {
-	email := strings.ToLower(c.FormValue("email"))
-	password := c.FormValue("password")
+	var f LoginForm
+	if err := c.Bind(&f); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid form data")
+	}
+	f.Email = strings.ToLower(f.Email)
 
-	fieldErrors := make(map[string]string)
-
-	if msg := validate.Required(email); msg != "" {
-		fieldErrors["email"] = msg
-	} else if msg := validate.Email(email); msg != "" {
-		fieldErrors["email"] = msg
+	if errs := h.LoginFormRules.Validate(c); errs != nil {
+		return respond.HTML(c, http.StatusUnprocessableEntity, loginForm(c, f, errs))
 	}
 
-	if msg := validate.Required(password); msg != "" {
-		fieldErrors["password"] = msg
-	}
-
-	if len(fieldErrors) > 0 {
-		return respond.HTML(c, http.StatusUnprocessableEntity, loginForm(c, email, fieldErrors))
-	}
-
-	user, err := h.authService.Authenticate(c.Request().Context(), email, password)
+	user, err := h.authService.Authenticate(c.Request().Context(), f.Email, f.Password)
 	if err != nil {
-		h.log.Warn("login failed", "email", email, "error", err)
-		fieldErrors["general"] = "Invalid email or password"
-		return respond.HTML(c, http.StatusUnauthorized, loginForm(c, email, fieldErrors))
+		h.log.Warn("login failed", "email", f.Email, "error", err)
+		return respond.HTML(c, http.StatusUnauthorized, loginForm(c, f, map[string]string{
+			"general": "Invalid email or password",
+		}))
 	}
 
 	session, err := h.sessionManager.CreateSession(c.Request().Context(), user.ID, nil)
@@ -75,66 +103,34 @@ func (h *handler) Login(c echo.Context) error {
 	return respond.Redirect(c, "/")
 }
 
-// POST /login/validate/:field
-func (h *handler) ValidateLoginField(c echo.Context) error {
-	field := c.Param("field")
-	value := c.FormValue(field)
-	var errMsg string
-
-	switch field {
-	case "email":
-		if msg := validate.Required(value); msg != "" {
-			errMsg = msg
-		} else if msg := validate.Email(value); msg != "" {
-			errMsg = msg
-		}
-	case "password":
-		if msg := validate.Required(value); msg != "" {
-			errMsg = msg
-		}
-	}
-
-	status := http.StatusOK
-	if errMsg != "" {
-		status = http.StatusUnprocessableEntity
-	}
-	return respond.HTML(c, status, form.FieldErrorOOB(field, errMsg))
-}
-
 // GET /register
 func (h *handler) RegisterPage(c echo.Context) error {
-	return respond.HTML(c, http.StatusOK, registerPage(c, "", "", nil))
+	return respond.HTML(c, http.StatusOK, registerPage(c, RegisterForm{}, nil))
 }
 
 // POST /register
 func (h *handler) Register(c echo.Context) error {
-	name := c.FormValue("name")
-	email := strings.ToLower(c.FormValue("email"))
-	password := c.FormValue("password")
+	var f RegisterForm
+	if err := c.Bind(&f); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid form data")
+	}
+	f.Email = strings.ToLower(f.Email)
 
-	fieldErrors := make(map[string]string)
-	if msg := validate.Required(name); msg != "" {
-		fieldErrors["name"] = msg
-	}
-	if msg := validate.Email(email); msg != "" {
-		fieldErrors["email"] = msg
-	}
-	if msg := validate.PasswordStrength(password); msg != "" {
-		fieldErrors["password"] = msg
-	}
-	if len(fieldErrors) > 0 {
-		return respond.HTML(c, http.StatusUnprocessableEntity, registerForm(c, name, email, fieldErrors))
+	if errs := h.RegisterFormRules.Validate(c); errs != nil {
+		return respond.HTML(c, http.StatusUnprocessableEntity, registerForm(c, f, errs))
 	}
 
-	user, err := h.authService.Register(c.Request().Context(), email, password, name)
+	user, err := h.authService.Register(c.Request().Context(), f.Email, f.Password, f.Name)
 	if err != nil {
-		h.log.Warn("registration failed", "email", email, "error", err)
+		h.log.Warn("registration failed", "email", f.Email, "error", err)
 		if errors.Is(err, service.ErrEmailTaken) {
-			fieldErrors["email"] = "An account with this email already exists"
-		} else {
-			fieldErrors["general"] = "Registration failed. Please try again."
+			return respond.HTML(c, http.StatusUnprocessableEntity, registerForm(c, f, map[string]string{
+				"email": "An account with this email already exists",
+			}))
 		}
-		return respond.HTML(c, http.StatusUnprocessableEntity, registerForm(c, name, email, fieldErrors))
+		return respond.HTML(c, http.StatusUnprocessableEntity, registerForm(c, f, map[string]string{
+			"general": "Registration failed. Please try again.",
+		}))
 	}
 
 	session, err := h.sessionManager.CreateSession(c.Request().Context(), user.ID, nil)
@@ -146,32 +142,6 @@ func (h *handler) Register(c echo.Context) error {
 	h.setSessionCookie(c, session)
 	middleware.SetFlash(c, "Welcome! Your account has been created.", middleware.FlashSuccess)
 	return respond.Redirect(c, "/")
-}
-
-// POST /register/validate/:field
-func (h *handler) ValidateRegisterField(c echo.Context) error {
-	field := c.Param("field")
-	value := c.FormValue(field)
-	var errMsg string
-
-	switch field {
-	case "name":
-		errMsg = validate.Required(value)
-	case "email":
-		if msg := validate.Required(value); msg != "" {
-			errMsg = msg
-		} else if msg := validate.Email(value); msg != "" {
-			errMsg = msg
-		}
-	case "password":
-		errMsg = validate.PasswordStrength(value)
-	}
-
-	status := http.StatusOK
-	if errMsg != "" {
-		status = http.StatusUnprocessableEntity
-	}
-	return respond.HTML(c, status, form.FieldErrorOOB(field, errMsg))
 }
 
 // POST /logout

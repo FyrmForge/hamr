@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/FyrmForge/hamr/internal/browsercapture"
@@ -67,31 +68,55 @@ func runCapture(cmd *cobra.Command, args []string) error {
 		return enc.Encode(result)
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "capture saved to %s\n", result.CaptureDir)
-	fmt.Fprintf(cmd.OutOrStdout(), "screenshot saved to %s\n", result.ScreenshotPath)
+	out := cmd.OutOrStdout()
+	if err := writeCaptureLine(out, "capture saved to %s\n", result.CaptureDir); err != nil {
+		return err
+	}
+	if err := writeCaptureLine(out, "screenshot saved to %s\n", result.ScreenshotPath); err != nil {
+		return err
+	}
 	if result.TextPath != "" {
-		fmt.Fprintf(cmd.OutOrStdout(), "text saved to %s\n", result.TextPath)
+		if err := writeCaptureLine(out, "text saved to %s\n", result.TextPath); err != nil {
+			return err
+		}
 	}
 	if result.HTMLPath != "" {
-		fmt.Fprintf(cmd.OutOrStdout(), "html saved to %s\n", result.HTMLPath)
+		if err := writeCaptureLine(out, "html saved to %s\n", result.HTMLPath); err != nil {
+			return err
+		}
 	}
 	if result.MetaPath != "" {
-		fmt.Fprintf(cmd.OutOrStdout(), "meta saved to %s\n", result.MetaPath)
+		if err := writeCaptureLine(out, "meta saved to %s\n", result.MetaPath); err != nil {
+			return err
+		}
 	}
 	if result.Title != "" {
-		fmt.Fprintf(cmd.OutOrStdout(), "title: %s\n", result.Title)
+		if err := writeCaptureLine(out, "title: %s\n", result.Title); err != nil {
+			return err
+		}
 	}
 	if result.FinalURL != "" && result.FinalURL != result.RequestedURL {
-		fmt.Fprintf(cmd.OutOrStdout(), "final url: %s\n", result.FinalURL)
+		if err := writeCaptureLine(out, "final url: %s\n", result.FinalURL); err != nil {
+			return err
+		}
 	}
 	if result.ScrollX != 0 || result.ScrollY != 0 {
-		fmt.Fprintf(cmd.OutOrStdout(), "scroll position: x=%d y=%d\n", result.ScrollX, result.ScrollY)
+		if err := writeCaptureLine(out, "scroll position: x=%d y=%d\n", result.ScrollX, result.ScrollY); err != nil {
+			return err
+		}
 	}
 	if result.ScrollSelector != "" {
-		fmt.Fprintf(cmd.OutOrStdout(), "scroll target: %s\n", result.ScrollSelector)
+		if err := writeCaptureLine(out, "scroll target: %s\n", result.ScrollSelector); err != nil {
+			return err
+		}
 	}
 
 	return nil
+}
+
+func writeCaptureLine(w io.Writer, format string, args ...any) error {
+	_, err := fmt.Fprintf(w, format, args...)
+	return err
 }
 
 func captureOptionsFromFlags(cmd *cobra.Command, rawURL string) (browsercapture.Options, bool, error) {

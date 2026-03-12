@@ -122,10 +122,10 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 	guest.Use(middleware.RequireNotAuth(authCfg))
 	guest.GET("/login", authHandler.LoginPage)
 	guest.POST("/login", authHandler.Login)
-	guest.POST("/login/validate/:field", authHandler.ValidateLoginField)
+	guest.POST("/login/validate/:field", authHandler.LoginFormRules.ValidationHandler("field"))
 	guest.GET("/register", authHandler.RegisterPage)
 	guest.POST("/register", authHandler.Register)
-	guest.POST("/register/validate/:field", authHandler.ValidateRegisterField)
+	guest.POST("/register/validate/:field", authHandler.RegisterFormRules.ValidationHandler("field"))
 
 	authenticated := site.Group("")
 	authenticated.Use(middleware.RequireAuth(authCfg))

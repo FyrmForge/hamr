@@ -6,7 +6,8 @@
 hamr
 ├── new [name]              Scaffold a new project
 ├── dev                     Start dev server with file watching + live reload
-├── capture <url>           Capture a browser screenshot of a page
+├── ai
+│   └── capture <url>       Capture a browser screenshot of a page
 ├── sync                    Sync local directory to S3-compatible bucket
 ├── vendor [dep[@version]]  Download/checksum frontend JS deps
 ├── lint
@@ -80,17 +81,19 @@ Reads `[proxy]`, `[dev]` sections from `hamr.toml`. Manages Docker Compose deps,
 
 ---
 
-## hamr capture
+## hamr ai capture
 
 Capture a browser screenshot of a page for debugging, visual review, or LLM workflows.
 
 ```bash
-hamr capture <url> [flags]
+hamr ai capture <url> [flags]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--out` | derived from URL | Output PNG path |
+| `--out` | — | Output PNG path |
+| `--dir` | `.hamr/captures` | Root directory for per-capture folders |
+| `--browser` | auto-detect | Browser binary path |
 | `--text` | `false` | Also save visible page text to a `.txt` sidecar |
 | `--html` | `false` | Also save page HTML to a `.html` sidecar |
 | `--json` | `false` | Print capture metadata as JSON |
@@ -101,17 +104,23 @@ hamr capture <url> [flags]
 | `--width` | `1440` | Viewport width in pixels |
 | `--height` | `1024` | Viewport height in pixels |
 | `--scale` | `1` | Device scale factor |
+| `--scroll-to` | — | Scroll to `top`, `middle`, or `bottom` before capture |
+| `--scroll-x` | `0` | Horizontal scroll offset in pixels |
+| `--scroll-y` | `0` | Vertical scroll offset in pixels |
+| `--scroll-selector` | — | CSS selector for a scroll container; defaults to the window |
 | `--timeout` | `15s` | Timeout for browser operations |
 | `--wait` | `1s` | Extra delay after page load before capture |
 
 ```bash
-hamr capture http://localhost:3000
-hamr capture localhost:3000/login --text --html --json
-hamr capture https://example.com --selector '#app' --out artifacts/app.png
-hamr capture https://example.com/docs --full-page --wait 2s
+hamr ai capture http://localhost:3000
+hamr ai capture localhost:3000/login --text --html --json
+hamr ai capture https://example.com --selector '#app' --dir .hamr/captures
+hamr ai capture https://example.com/docs --full-page --wait 2s
+hamr ai capture https://example.com/pricing --scroll-to middle --width 1280 --height 720
+hamr ai capture https://example.com/dashboard --scroll-selector '.results-pane' --scroll-to bottom
 ```
 
-The command always writes a PNG screenshot. `--text` and `--html` add sidecar files with the same basename, which is useful when an LLM needs both the rendered view and the underlying page content.
+By default the command creates a per-capture folder under `.hamr/captures/` and writes `screenshot.png`, optional `screenshot.txt` / `screenshot.html`, plus `meta.json`. `--out` lets you force a specific PNG path instead.
 
 ---
 

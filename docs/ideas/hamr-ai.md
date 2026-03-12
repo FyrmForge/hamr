@@ -67,9 +67,33 @@ hamr ai
 
 Not all of these need to exist immediately. The namespace matters first.
 
+## Current Status
+
+Status in the current worktree:
+
+- [x] `hamr ai` namespace exists
+- [x] `hamr ai capture <url>` is implemented
+- [x] Per-capture bundle directories are implemented
+- [x] Bundle artifacts include `screenshot.png`, optional `screenshot.txt` / `screenshot.html`, and `meta.json`
+- [x] Browser override / detection is implemented
+- [x] Viewport sizing via `--width`, `--height`, and `--scale` is implemented
+- [x] Full-page capture via `--full-page` is implemented
+- [x] Window scroll controls via `--scroll-to`, `--scroll-x`, and `--scroll-y` are implemented
+- [x] Scroll-container targeting via `--scroll-selector` is implemented
+- [ ] Tiled capture is not implemented yet
+- [ ] `hamr ai page` is not implemented yet
+- [ ] `hamr ai routes` is not implemented yet
+- [ ] `hamr ai forms` is not implemented yet
+- [ ] `hamr ai context` is not implemented yet
+- [ ] `hamr ai export llms.txt` is not implemented yet
+- [ ] `hamr ai validate llms.txt` is not implemented yet
+- [ ] `hamr ai upgrade` is not implemented yet
+
 ## MVP
 
 ### 1. `hamr ai capture <url>`
+
+Current status: implemented in the current worktree.
 
 This should be the first command.
 
@@ -545,12 +569,12 @@ These are tempting, but likely too broad for the first version:
 ## Recommendation
 
 Start with:
-1. `hamr ai capture <url>`
-2. `hamr ai page <url>`
-3. `hamr ai routes`
-4. `hamr ai context --format llms-txt`
-5. `hamr ai export llms.txt`
-6. `hamr ai upgrade`
+1. `[x]` `hamr ai capture <url>`
+2. `[ ]` `hamr ai page <url>`
+3. `[ ]` `hamr ai routes`
+4. `[ ]` `hamr ai context --format llms-txt`
+5. `[ ]` `hamr ai export llms.txt`
+6. `[ ]` `hamr ai upgrade`
 
 That gives us:
 - rendered UI capture

@@ -41,7 +41,7 @@ This project uses the HAMR framework (`github.com/FyrmForge/hamr`). Key packages
 
 - `hamr/pkg/server` — Echo wrapper with functional options
 - `hamr/pkg/respond` — Content-negotiated responses (HTML/JSON)
-- `hamr/pkg/validate` — Validation helpers (return "" or error string)
+- `hamr/pkg/validate` — Validators + Form API (define rules once, validate full form & per-field)
 - `hamr/pkg/middleware` — Auth, CSRF, flash, rate limiting, etc.
 - `hamr/pkg/db` — Database connection with retry + migrations
 - `hamr/pkg/config` — Environment variable helpers
@@ -93,14 +93,11 @@ func (h *Handler) List(c echo.Context) error {
 
 // POST /things
 func (h *Handler) Create(c echo.Context) error {
-    name := c.FormValue("name")
+    var f CreateForm
+    c.Bind(&f)
 
-    errs := make(map[string]string)
-    if msg := validate.Required(name); msg != "" {
-        errs["name"] = msg
-    }
-    if len(errs) > 0 {
-        return respond.HTML(c, http.StatusUnprocessableEntity, createForm(c, name, errs))
+    if errs := h.CreateFormRules.Validate(c); errs != nil {
+        return respond.HTML(c, http.StatusUnprocessableEntity, createForm(c, f, errs))
     }
 
     // Save to database...
@@ -147,16 +144,13 @@ validate.Phone(value)             // "Invalid phone number"
 validate.OneOf(value, "a", "b")   // "Must be one of: a, b"
 ```
 
-Custom validators:
+Curried constructors return `func(string) string` for use as Form rules:
 
 ```go
-validate.Register("slug", func(v string) string {
-    if !regexp.MustCompile(`^[a-z0-9-]+$`).MatchString(v) {
-        return "Must contain only lowercase letters, numbers, and hyphens"
-    }
-    return ""
-})
-msg := validate.Run("slug", value)
+validate.MinLen(3)               // func(string) string
+validate.MaxLen(100)             // func(string) string
+validate.In("admin", "user")    // func(string) string
+validate.AgeMin(18)              // func(string) string
 ```
 
 ### Two-Level Validation
@@ -166,12 +160,117 @@ msg := validate.Run("slug", value)
 
 Never validate in the repo/store layer.
 
+### Form API — Define Rules Once
+
+Define form structs with `form:` tags and validation rules in the handler
+constructor. Use `c.Bind()` to populate the struct, then `Validate(c)` to check:
+
+```go
+type CreateForm struct {
+    Name  string `form:"name"`
+    Email string `form:"email"`
+}
+
+type Handler struct {
+    store          repo.Store
+    log            *slog.Logger
+    CreateFormRules validate.Form
+}
+
+func NewHandler(store repo.Store, log *slog.Logger) *Handler {
+    return &Handler{
+        store: store,
+        log:   log,
+        CreateFormRules: validate.NewForm(
+            validate.WithOOBRenderer(form.OOBValidator),
+            validate.WithGeneralError("Please fix the errors below."),
+            validate.WithTrim(true),
+            validate.Field("name", validate.Required, validate.MinLen(2)),
+            validate.Field("email", validate.Required, validate.Email),
+        ),
+    }
+}
+
+// POST /things
+func (h *Handler) Create(c echo.Context) error {
+    var f CreateForm
+    c.Bind(&f)
+
+    if errs := h.CreateFormRules.Validate(c); errs != nil {
+        return respond.HTML(c, http.StatusUnprocessableEntity, createForm(c, f, errs))
+    }
+
+    // Save to database...
+    middleware.SetFlash(c, "Created successfully!", middleware.FlashSuccess)
+    return respond.Redirect(c, "/things")
+}
+```
+
+Field definitions support three levels of error messages:
+
+```go
+// Level 1 — Default messages from each rule
+validate.Field("email", validate.Required, validate.Email)
+
+// Level 2 — One message for any failure on the field
+validate.FieldMsg("email", "Email is invalid", validate.Required, validate.Email)
+
+// Level 3 — Per-rule message override
+validate.Field("email",
+    validate.Required,
+    validate.WithMsg(validate.Email, "Please enter a valid email"),
+)
+```
+
+Context-aware rules for cross-field validation:
+
+```go
+validate.Field("password_confirm", validate.Required).
+    WithCtx(func(c echo.Context, value string) string {
+        if value != c.FormValue("password") {
+            return "Passwords do not match"
+        }
+        return ""
+    })
+```
+
+### HTMX Per-Field Validation
+
+Register one route — `ValidationHandler` handles all fields automatically:
+
+```go
+// In server.go route registration:
+group.POST("/things/validate/:field", h.CreateFormRules.ValidationHandler("field"))
+```
+
+No need for manual switch statements. Unknown fields return an empty response.
+
+The `form.OOBValidator` helper renders OOB error swaps:
+
+```go
+func OOBValidator(c echo.Context, field, errMsg string) error {
+    status := http.StatusOK
+    if errMsg != "" {
+        status = http.StatusUnprocessableEntity
+    }
+    return respond.HTML(c, status, FieldErrorOOB(field, errMsg))
+}
+```
+
+A field can override the form-level renderer (e.g. password requirements checklist):
+
+```go
+validate.Field("password", validate.Required, validate.PasswordStrength).
+    WithRenderer(form.PasswordRequirementsRenderer)
+```
+
 ### Form Template Pattern
 
-Separate the **page** (wraps layout) from the **form** (what HTMX swaps):
+Separate the **page** (wraps layout) from the **form** (what HTMX swaps).
+Pass the form struct and errors map:
 
 ```
-templ createForm(c echo.Context, name string, errors map[string]string) {
+templ createForm(c echo.Context, f CreateForm, errors map[string]string) {
     <form
         id="create-form"
         hx-post="/things"
@@ -183,7 +282,7 @@ templ createForm(c echo.Context, name string, errors map[string]string) {
         @form.CSRFField(c.Get("csrf").(string))
         <div class="form-group">
             <label for="name">Name</label>
-            <input type="text" id="name" name="name" value={ name }
+            <input type="text" id="name" name="name" value={ f.Name }
                 hx-post="/things/validate/name"
                 hx-trigger="blur, input[this.closest('.form-group').querySelector('[data-has-error=true]')] delay:300ms"
                 hx-swap="none"/>
@@ -201,33 +300,12 @@ Key HTMX attributes:
 - `hx-swap="none"` on inputs — Field validation uses OOB swaps, no explicit target
 - `hx-trigger` — Validate on blur; re-validate on input only if an error is showing
 
-### Inline Validation Endpoint
-
-```go
-// POST /things/validate/:field
-func (h *Handler) ValidateField(c echo.Context) error {
-    field := c.Param("field")
-    value := c.FormValue(field)
-    var errMsg string
-
-    switch field {
-    case "name":
-        errMsg = validate.Required(value)
-    }
-
-    status := http.StatusOK
-    if errMsg != "" {
-        status = http.StatusUnprocessableEntity
-    }
-    return respond.HTML(c, status, form.FieldErrorOOB(field, errMsg))
-}
-```
-
 ### Field Error Components
 
 - `form.FieldError(field, err)` — Renders inline; always present in DOM for OOB targeting
 - `form.FieldErrorOOB(field, err)` — Same but with `hx-swap-oob="true"` for blur validation
 - `form.GetError(errors, field)` — Safe map lookup, returns `""` if nil or missing
+- `form.OOBValidator(c, field, errMsg)` — Default OOB renderer for `ValidationHandler`
 
 ### CSRF Token
 
