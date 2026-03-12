@@ -23,7 +23,7 @@ const (
 	defaultTimeout         = 15 * time.Second
 	defaultWaitAfterLoad   = time.Second
 	defaultWaitAfterScroll = 150 * time.Millisecond
-	defaultCaptureRootDir  = ".hamr/captures"
+	defaultCaptureRootDir  = ".hamr/ai/captures"
 	defaultScreenshotName  = "screenshot.png"
 	defaultMetaName        = "meta.json"
 )

@@ -23,6 +23,7 @@ func newUpgradeTestCmd() *cobra.Command {
 	cmd.Flags().String("from", "", "from version")
 	cmd.Flags().Bool("relevant-only", false, "relevant only")
 	cmd.Flags().Bool("applied", false, "mark as applied")
+	cmd.Flags().String("dir", "", "report dir")
 	return cmd
 }
 
@@ -128,6 +129,7 @@ auth = "session"
 	assert.Contains(t, output, "v0.3.2")
 	assert.Contains(t, output, "v0.5.0")
 	assert.Contains(t, output, "no scaffold changes")
+	assert.Contains(t, output, "report saved to")
 }
 
 func TestUpgradeJSONOutput(t *testing.T) {
@@ -150,17 +152,22 @@ database = "postgres"
 
 	cmd := newUpgradeTestCmd()
 	require.NoError(t, cmd.Flags().Set("json", "true"))
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
 
 	err := cmd.RunE(cmd, nil)
 	require.NoError(t, err)
 
+	// Stdout should be pure JSON (no "report saved to" mixed in).
 	var report scaffold.UpgradeReport
-	require.NoError(t, json.Unmarshal(buf.Bytes(), &report))
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &report))
 	assert.Equal(t, "0.3.2", report.Project.BaseVersion)
 	assert.Equal(t, "0.5.0", report.Project.CurrentVersion)
 	assert.NotNil(t, report.Changes)
+
+	// "report saved to" goes to stderr in JSON mode.
+	assert.Contains(t, stderr.String(), "report saved to")
 }
 
 func TestUpgradeApplied(t *testing.T) {

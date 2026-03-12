@@ -25,6 +25,7 @@
 - **hamr dev**: Dev server with file watching, auto-rebuild, and live reload.
 - **hamr ai capture**: Browser screenshot capture with HTML/text/metadata sidecars.
 - **hamr ai upgrade**: Machine-readable scaffold upgrade report comparing project version to current HAMR.
+- **.hamr/ai/**: Playground directory for all AI command artifacts (captures, upgrade reports). Gitignored. Configurable via `[ai] dir` in hamr.toml.
 - **hamr locale gen**: Code generator for type-safe i18n accessors.
 - **respond.Redirect**: HTMX-aware redirect that sets HX-Redirect for HTMX
   requests and falls back to HTTP 303.

@@ -26,6 +26,6 @@
   1. for loop can be modernized using range over int [default]
 - [] form.CSRFField templ func should just take in echo context
 - [] implement the hamr ai idea
-- [] implement the validation package idea
+- [x] implement the validation package idea
   - dont forget to update scaffolding and docs (user and ai)
 - [] rename bin and verbage from server to site

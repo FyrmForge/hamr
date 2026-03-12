@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path/filepath"
 	"time"
 
 	"github.com/FyrmForge/hamr/internal/browsercapture"
+	"github.com/FyrmForge/hamr/internal/scaffold"
 	"github.com/spf13/cobra"
 )
 
@@ -30,8 +32,8 @@ Examples:
 }
 
 func init() {
-	captureCmd.Flags().String("out", "", "output PNG path; if omitted a per-capture folder is created under .hamr/captures")
-	captureCmd.Flags().String("dir", "", "root directory for per-capture folders (defaults to .hamr/captures)")
+	captureCmd.Flags().String("out", "", "output PNG path; if omitted a per-capture folder is created under .hamr/ai/captures")
+	captureCmd.Flags().String("dir", "", "root directory for per-capture folders (defaults to .hamr/ai/captures)")
 	captureCmd.Flags().String("browser", "", "browser binary path to launch (auto-detects Chromium/Chrome/Brave by default)")
 	captureCmd.Flags().Bool("text", false, "also save visible page text alongside the screenshot")
 	captureCmd.Flags().Bool("html", false, "also save page HTML alongside the screenshot")
@@ -122,6 +124,10 @@ func writeCaptureLine(w io.Writer, format string, args ...any) error {
 func captureOptionsFromFlags(cmd *cobra.Command, rawURL string) (browsercapture.Options, bool, error) {
 	outPath, _ := cmd.Flags().GetString("out")
 	outDir, _ := cmd.Flags().GetString("dir")
+	if outPath == "" && outDir == "" {
+		aiDir := scaffold.ResolveAIDir("hamr.toml")
+		outDir = filepath.Join(aiDir, "captures")
+	}
 	browserPath, _ := cmd.Flags().GetString("browser")
 	captureText, _ := cmd.Flags().GetBool("text")
 	captureHTML, _ := cmd.Flags().GetBool("html")

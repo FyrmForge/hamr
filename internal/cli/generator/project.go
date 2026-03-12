@@ -134,6 +134,11 @@ func GenerateProject(dir string, cfg *ProjectConfig) error {
 		}
 	}
 
+	// Create the .hamr/ai/ playground directory for AI command artifacts.
+	if err := os.MkdirAll(filepath.Join(dir, ".hamr", "ai"), 0o755); err != nil {
+		return fmt.Errorf("create .hamr/ai directory: %w", err)
+	}
+
 	// Copy framework reference docs (not templates, raw embedded files).
 	if err := copyRawFile(llmsdocs.LLMsTxt, filepath.Join(dir, "docs", "llms.txt")); err != nil {
 		return fmt.Errorf("copy llms.txt: %w", err)

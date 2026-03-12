@@ -13,6 +13,9 @@ stripe = {{.IncludeStripe}}
 locale = {{.IncludeLocale}}
 storage = "{{.StorageBackend}}"
 
+[ai]
+# dir = ".hamr/ai"
+
 [proxy]
 listen = ":3000"
 target = ":8080"

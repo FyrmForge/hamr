@@ -4,6 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/FyrmForge/hamr/internal/scaffold"
 	"github.com/spf13/cobra"
@@ -34,6 +38,7 @@ func init() {
 	upgradeCmd.Flags().String("from", "", "override the base version to diff from")
 	upgradeCmd.Flags().Bool("relevant-only", false, "only show changes relevant to project options")
 	upgradeCmd.Flags().Bool("applied", false, "update project baseline to current HAMR version")
+	upgradeCmd.Flags().String("dir", "", "directory to save the upgrade report (defaults to .hamr/ai/upgrades)")
 }
 
 func runUpgrade(cmd *cobra.Command, _ []string) error {
@@ -42,6 +47,7 @@ func runUpgrade(cmd *cobra.Command, _ []string) error {
 	fromVersion, _ := cmd.Flags().GetString("from")
 	relevantOnly, _ := cmd.Flags().GetBool("relevant-only")
 	applied, _ := cmd.Flags().GetBool("applied")
+	reportDir, _ := cmd.Flags().GetString("dir")
 
 	if version == "dev" {
 		return fmt.Errorf("cannot determine current HAMR version (running dev build)")
@@ -76,13 +82,30 @@ func runUpgrade(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	// Save report to disk.
+	if reportDir == "" {
+		aiDir := scaffold.ResolveAIDir("hamr.toml")
+		reportDir = filepath.Join(aiDir, "upgrades")
+	}
+	reportPath, err := writeReportFile(reportDir, report)
+	if err != nil {
+		return fmt.Errorf("save report: %w", err)
+	}
+
 	if jsonOutput {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
-		return enc.Encode(report)
+		if err := enc.Encode(report); err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(cmd.ErrOrStderr(), "report saved to %s\n", reportPath)
+		return err
 	}
 
-	return writeHumanReport(cmd.OutOrStdout(), report)
+	if err := writeHumanReport(cmd.OutOrStdout(), report); err != nil {
+		return err
+	}
+	return writeUpgradeLine(cmd.OutOrStdout(), "report saved to %s\n", reportPath)
 }
 
 func writeHumanReport(w io.Writer, report *scaffold.UpgradeReport) error {
@@ -133,6 +156,33 @@ func writeHumanReport(w io.Writer, report *scaffold.UpgradeReport) error {
 	}
 
 	return nil
+}
+
+func writeReportFile(dir string, report *scaffold.UpgradeReport) (string, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+
+	base := sanitizeVersionForFilename(report.Project.BaseVersion)
+	current := sanitizeVersionForFilename(report.Project.CurrentVersion)
+	ts := time.Now().UTC().Format("20060102T150405Z")
+	name := fmt.Sprintf("upgrade_%s_to_%s_%s.json", base, current, ts)
+	path := filepath.Join(dir, name)
+
+	data, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	data = append(data, '\n')
+
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func sanitizeVersionForFilename(v string) string {
+	return strings.NewReplacer(".", "_", "-", "_").Replace(v)
 }
 
 func writeUpgradeLine(w io.Writer, format string, args ...any) error {

@@ -69,25 +69,38 @@ Not all of these need to exist immediately. The namespace matters first.
 
 ## Current Status
 
-Status in the current worktree:
+### Implemented
 
+- [x] `.hamr/ai/` playground directory — unified gitignored directory for all AI command artifacts, configurable via `[ai] dir` in hamr.toml
 - [x] `hamr ai` namespace exists
-- [x] `hamr ai capture <url>` is implemented
-- [x] Per-capture bundle directories are implemented
-- [x] Bundle artifacts include `screenshot.png`, optional `screenshot.txt` / `screenshot.html`, and `meta.json`
-- [x] Browser override / detection is implemented
-- [x] Viewport sizing via `--width`, `--height`, and `--scale` is implemented
-- [x] Full-page capture via `--full-page` is implemented
-- [x] Window scroll controls via `--scroll-to`, `--scroll-x`, and `--scroll-y` are implemented
-- [x] Scroll-container targeting via `--scroll-selector` is implemented
-- [ ] Tiled capture is not implemented yet
-- [ ] `hamr ai page` is not implemented yet
-- [ ] `hamr ai routes` is not implemented yet
-- [ ] `hamr ai forms` is not implemented yet
-- [ ] `hamr ai context` is not implemented yet
-- [ ] `hamr ai export llms.txt` is not implemented yet
-- [ ] `hamr ai validate llms.txt` is not implemented yet
-- [x] `hamr ai upgrade` is implemented
+- [x] `hamr ai capture <url>` — browser screenshot capture (default output: `.hamr/ai/captures/`)
+  - [x] Per-capture bundle directories (screenshot.png, screenshot.txt, screenshot.html, meta.json)
+  - [x] Browser override / auto-detection
+  - [x] Viewport sizing (`--width`, `--height`, `--scale`)
+  - [x] Full-page capture (`--full-page`)
+  - [x] Window scroll controls (`--scroll-to`, `--scroll-x`, `--scroll-y`)
+  - [x] Scroll-container targeting (`--scroll-selector`)
+  - [x] Element selector capture (`--selector`)
+  - [x] JSON metadata output (`--json`)
+- [x] `hamr ai upgrade` — scaffold upgrade report (reports saved to `.hamr/ai/upgrades/`)
+  - [x] `internal/scaffold` package (semver, metadata, change registry, report builder)
+  - [x] `[hamr]` and `[options]` sections emitted in scaffolded `hamr.toml`
+  - [x] `[ai]` section in hamr.toml for configuring the playground directory
+  - [x] Flags: `--json`, `--category`, `--from`, `--relevant-only`, `--applied`, `--dir`
+  - [x] `--applied` bumps baseline version, works on legacy projects without `[hamr]`
+  - [x] Dev builds resolve latest git tag with `-dev` suffix (e.g. `0.5.0-dev`)
+  - [x] Pre-release suffixes stripped during version comparison
+  - [x] Change registry is empty — entries added as scaffold evolves
+
+### Not implemented
+
+- [ ] Tiled capture mode (`--tiles`)
+- [ ] `hamr ai page <url>` — structured page bundle
+- [ ] `hamr ai routes` — machine-readable route map
+- [ ] `hamr ai forms <url>` — form extraction from rendered pages
+- [ ] `hamr ai context` — compact project context bundle
+- [ ] `hamr ai export llms.txt` — generate/refresh llms.txt from project state
+- [ ] `hamr ai validate llms.txt` — check AI context files for drift
 
 ## MVP
 
@@ -574,7 +587,7 @@ Start with:
 3. `[ ]` `hamr ai routes`
 4. `[ ]` `hamr ai context --format llms-txt`
 5. `[ ]` `hamr ai export llms.txt`
-6. `[ ]` `hamr ai upgrade`
+6. `[x]` `hamr ai upgrade`
 
 That gives us:
 - rendered UI capture

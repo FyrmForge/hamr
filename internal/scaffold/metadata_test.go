@@ -81,6 +81,42 @@ broken`)
 	})
 }
 
+func TestAIDir(t *testing.T) {
+	t.Run("returns configured dir", func(t *testing.T) {
+		meta := Metadata{AI: AIConfig{Dir: "custom/ai"}}
+		assert.Equal(t, "custom/ai", meta.AIDir())
+	})
+
+	t.Run("returns default when empty", func(t *testing.T) {
+		meta := Metadata{}
+		assert.Equal(t, DefaultAIDir, meta.AIDir())
+	})
+}
+
+func TestResolveAIDir(t *testing.T) {
+	t.Run("reads from toml", func(t *testing.T) {
+		content := `
+[ai]
+dir = "my/ai/dir"
+`
+		path := writeTempTOML(t, content)
+		assert.Equal(t, "my/ai/dir", ResolveAIDir(path))
+	})
+
+	t.Run("falls back on missing file", func(t *testing.T) {
+		assert.Equal(t, DefaultAIDir, ResolveAIDir("/nonexistent/hamr.toml"))
+	})
+
+	t.Run("falls back when no ai section", func(t *testing.T) {
+		content := `
+[hamr]
+version = "0.3.2"
+`
+		path := writeTempTOML(t, content)
+		assert.Equal(t, DefaultAIDir, ResolveAIDir(path))
+	})
+}
+
 func writeTempTOML(t *testing.T, content string) string {
 	t.Helper()
 	dir := t.TempDir()

@@ -7,10 +7,19 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// Metadata represents the [hamr] and [options] sections of hamr.toml.
+// DefaultAIDir is the default directory for AI command artifacts.
+const DefaultAIDir = ".hamr/ai"
+
+// AIConfig holds the [ai] section of hamr.toml.
+type AIConfig struct {
+	Dir string `toml:"dir"`
+}
+
+// Metadata represents the [hamr], [options], and [ai] sections of hamr.toml.
 type Metadata struct {
 	Hamr    HamrSection `toml:"hamr"`
 	Options Options     `toml:"options"`
+	AI      AIConfig    `toml:"ai"`
 }
 
 // HamrSection holds the HAMR scaffold tracking fields.
@@ -36,6 +45,24 @@ type Options struct {
 // When false, the project was scaffolded before metadata tracking was added.
 func (m Metadata) HasHamrSection() bool {
 	return m.Hamr.Version != ""
+}
+
+// AIDir returns the configured AI directory, falling back to DefaultAIDir.
+func (m Metadata) AIDir() string {
+	if m.AI.Dir != "" {
+		return m.AI.Dir
+	}
+	return DefaultAIDir
+}
+
+// ResolveAIDir loads metadata from tomlPath and returns the AI directory.
+// Falls back to DefaultAIDir on any error.
+func ResolveAIDir(tomlPath string) string {
+	meta, err := LoadMetadata(tomlPath)
+	if err != nil {
+		return DefaultAIDir
+	}
+	return meta.AIDir()
 }
 
 // LoadMetadata reads hamr.toml and decodes the [hamr] and [options] sections.

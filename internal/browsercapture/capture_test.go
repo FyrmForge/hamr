@@ -152,5 +152,5 @@ func TestNormalizeOutputPathDefaultsToCaptureRoot(t *testing.T) {
 	path, err := normalizeOutputPath("", "", "https://example.com/team/42", now)
 	require.NoError(t, err)
 
-	assert.True(t, strings.HasSuffix(path, filepath.Join(".hamr", "captures", "example.com_team_42_20260311T123456Z", defaultScreenshotName)))
+	assert.True(t, strings.HasSuffix(path, filepath.Join(".hamr", "ai", "captures", "example.com_team_42_20260311T123456Z", defaultScreenshotName)))
 }
