@@ -230,6 +230,73 @@ func PasswordStrengthMsg(password, msg string) string {
 }
 
 // ---------------------------------------------------------------------------
+// Individual character-class validators
+// ---------------------------------------------------------------------------
+
+// HasUpper returns "" if value contains at least one uppercase letter, or
+// MsgHasUpper.
+func HasUpper(value string) string {
+	return HasUpperMsg(value, MsgHasUpper)
+}
+
+// HasUpperMsg is like HasUpper with a custom message.
+func HasUpperMsg(value, msg string) string {
+	for _, r := range value {
+		if unicode.IsUpper(r) {
+			return ""
+		}
+	}
+	return msg
+}
+
+// HasLower returns "" if value contains at least one lowercase letter, or
+// MsgHasLower.
+func HasLower(value string) string {
+	return HasLowerMsg(value, MsgHasLower)
+}
+
+// HasLowerMsg is like HasLower with a custom message.
+func HasLowerMsg(value, msg string) string {
+	for _, r := range value {
+		if unicode.IsLower(r) {
+			return ""
+		}
+	}
+	return msg
+}
+
+// HasDigit returns "" if value contains at least one digit, or MsgHasDigit.
+func HasDigit(value string) string {
+	return HasDigitMsg(value, MsgHasDigit)
+}
+
+// HasDigitMsg is like HasDigit with a custom message.
+func HasDigitMsg(value, msg string) string {
+	for _, r := range value {
+		if unicode.IsDigit(r) {
+			return ""
+		}
+	}
+	return msg
+}
+
+// HasSpecial returns "" if value contains at least one special character
+// (punctuation or symbol), or MsgHasSpecial.
+func HasSpecial(value string) string {
+	return HasSpecialMsg(value, MsgHasSpecial)
+}
+
+// HasSpecialMsg is like HasSpecial with a custom message.
+func HasSpecialMsg(value, msg string) string {
+	for _, r := range value {
+		if unicode.IsPunct(r) || unicode.IsSymbol(r) {
+			return ""
+		}
+	}
+	return msg
+}
+
+// ---------------------------------------------------------------------------
 // URL normalisation
 // ---------------------------------------------------------------------------
 

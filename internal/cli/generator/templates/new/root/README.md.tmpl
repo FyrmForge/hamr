@@ -31,7 +31,7 @@ The server starts at [http://localhost:3000](http://localhost:3000) (proxied fro
 
 ```bash
 hamr dev            # Run dev server (live reload)
-make build          # Build binary to bin/server
+make build          # Build binary to bin/site
 make test           # Run tests
 make lint           # Run golangci-lint
 make templint       # Lint .templ files
@@ -65,7 +65,7 @@ make e2e-run T=Test # Run specific test
 ## Project Structure
 
 ```
-cmd/server/              Application entry point
+cmd/site/              Application entry point
 {{- if not .MigrateAtStartup}}
 cmd/migrate/             {{- if eq .DBConnector "sqlx"}} Standalone migration runner{{- else}} GORM auto-migration runner{{- end}}
 {{- end}}

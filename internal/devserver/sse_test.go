@@ -191,7 +191,7 @@ func TestSSEBroker_ConfigEvent(t *testing.T) {
 		{Name: "templ", Watch: StringOrSlice{"**/*.templ"}, Cmd: "templ generate", Reload: ReloadFull},
 	}
 	daemons := []Daemon{
-		{Name: "server", Cmd: "go run ./cmd/server"},
+		{Name: "server", Cmd: "go run ./cmd/site"},
 	}
 	broker := NewSSEBroker(rules, daemons, nil)
 	srv := httptest.NewServer(broker.Handler())
@@ -209,7 +209,7 @@ func TestSSEBroker_ConfigEvent(t *testing.T) {
 	assert.Contains(t, events[1].data, `"templ"`)
 	assert.Contains(t, events[1].data, `"server"`)
 	assert.Contains(t, events[1].data, `"templ generate"`)
-	assert.Contains(t, events[1].data, `"go run ./cmd/server"`)
+	assert.Contains(t, events[1].data, `"go run ./cmd/site"`)
 }
 
 func TestSSEBroker_ClientCount(t *testing.T) {

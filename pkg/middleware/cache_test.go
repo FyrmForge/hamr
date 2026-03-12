@@ -89,3 +89,80 @@ func TestCacheControl_disableCaching(t *testing.T) {
 		})
 	}
 }
+
+func TestCacheControlWithConfig_customExtensions(t *testing.T) {
+	cfg := middleware.CacheConfig{
+		ImmutableExtensions: []string{".avif"},
+		StaticExtensions:    []string{".xml"},
+	}
+
+	tests := []struct {
+		path string
+		want string
+	}{
+		{"/img/photo.avif", "public, max-age=31536000, immutable"},
+		{"/feed.xml", "public, max-age=86400"},
+		{"/static/logo.png", ""},  // .png not in custom immutable list
+		{"/static/app.css", ""},   // .css not in custom static list
+		{"/dashboard", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+
+			handler := middleware.CacheControlWithConfig(cfg)(func(c echo.Context) error {
+				return c.String(http.StatusOK, "ok")
+			})
+
+			err := handler(c)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, rec.Header().Get("Cache-Control"))
+		})
+	}
+}
+
+func TestCacheControlWithConfig_customDurations(t *testing.T) {
+	cfg := middleware.CacheConfig{
+		ImmutableMaxAge: 3600,
+		StaticMaxAge:    600,
+	}
+
+	e := echo.New()
+
+	// Immutable asset with custom duration.
+	req := httptest.NewRequest(http.MethodGet, "/img/logo.png", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	handler := middleware.CacheControlWithConfig(cfg)(func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	})
+	require.NoError(t, handler(c))
+	assert.Equal(t, "public, max-age=3600, immutable", rec.Header().Get("Cache-Control"))
+
+	// Static asset with custom duration.
+	req = httptest.NewRequest(http.MethodGet, "/static/app.css", nil)
+	rec = httptest.NewRecorder()
+	c = e.NewContext(req, rec)
+	require.NoError(t, handler(c))
+	assert.Equal(t, "public, max-age=600", rec.Header().Get("Cache-Control"))
+}
+
+func TestCacheControlWithConfig_disableCaching(t *testing.T) {
+	cfg := middleware.CacheConfig{DisableCaching: true}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/static/app.css", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := middleware.CacheControlWithConfig(cfg)(func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	})
+
+	require.NoError(t, handler(c))
+	assert.Equal(t, "no-cache, no-store, must-revalidate", rec.Header().Get("Cache-Control"))
+}

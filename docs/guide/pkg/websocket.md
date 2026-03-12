@@ -26,6 +26,14 @@ hub := websocket.NewHub(
 e.GET("/ws", hub.Handler())
 ```
 
+### With custom send buffer
+
+```go
+hub := websocket.NewHub(
+    websocket.WithSendBufferSize(512),  // default: 256
+)
+```
+
 ### With auth integration
 
 ```go
@@ -187,6 +195,7 @@ func WithSubjectIDFunc(fn func(r *http.Request) string) HubOption
 func WithOnMessage(fn func(*Client, []byte)) HubOption
 func WithAcceptOptions(opts *ws.AcceptOptions) HubOption
 func WithLogger(l *slog.Logger) HubOption
+func WithSendBufferSize(n int) HubOption
 
 // Messaging
 func (h *Hub) SendToSession(sessionID string, msg []byte)

@@ -1,7 +1,7 @@
 # Middleware — Auth, RBAC, Flash, Rate Limiting & More
 
 `hamr/pkg/middleware` provides a comprehensive set of Echo middleware for authentication,
-authorization, flash messages, rate limiting, request tracing, caching, audit logging,
+authorization, flash messages, rate limiting, caching, audit logging,
 CSRF, CORS, and security headers.
 
 ## Quick Start
@@ -16,7 +16,7 @@ All middleware is group-agnostic — none hardcode path skips. The generated pro
 each middleware to the appropriate route group:
 
 ```
-Global  (all routes)  → recovery, request ID, logging, audit
+Global  (all routes)  → recovery, logging (scaffolded), audit
 Site    (/)           → sessions, CSRF, flash, cache, secure headers
 API     (/api/)       → CORS, rate limit, bearer auth
 ```
@@ -167,19 +167,6 @@ Wire the PG store cleanup into the janitor:
 pgStore.Cleanup(ctx, time.Minute) // removes expired windows
 ```
 
-## Request ID
-
-Generates or propagates a UUID request ID, attaches a structured logger to the context,
-and logs request completion.
-
-```go
-e.Use(middleware.RequestID())
-```
-
-Uses `X-Request-ID` from the incoming request or generates a new UUID v4. Logs method,
-path, status, duration, client IP, and request ID. Excludes `/static` paths from
-logging.
-
 ## Cache Control
 
 ```go
@@ -194,19 +181,49 @@ siteGroup.Use(middleware.CacheControl(true))
 | Static | .css, .js | `public, max-age=86400` |
 | Other | everything else | (no header set) |
 
+### Custom cache config
+
+Use `CacheControlWithConfig` to customise extension lists and durations:
+
+```go
+siteGroup.Use(middleware.CacheControlWithConfig(middleware.CacheConfig{
+    ImmutableExtensions: []string{".webp", ".avif", ".png"},
+    ImmutableMaxAge:     604800,  // 1 week
+    StaticExtensions:    []string{".css", ".js", ".xml"},
+    StaticMaxAge:        3600,    // 1 hour
+}))
+```
+
+`CacheConfig` fields:
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `ImmutableExtensions` | `DefaultImmutableExtensions` | File extensions cached as immutable |
+| `ImmutableMaxAge` | `31536000` (1 year) | Max-age in seconds for immutable assets |
+| `StaticExtensions` | `DefaultStaticExtensions` | File extensions with shorter TTL |
+| `StaticMaxAge` | `86400` (1 day) | Max-age in seconds for static assets |
+| `DisableCaching` | `false` | Set no-cache directives on every response |
+
 ## Security Headers
 
 ```go
 siteGroup.Use(middleware.Secure())
-// or with custom CSP:
+// or with custom config:
 siteGroup.Use(middleware.SecureWithConfig(middleware.SecureConfig{
     ContentSecurityPolicy: "default-src 'self'; script-src 'self' 'unsafe-inline'",
+    XFrameOptions:         "SAMEORIGIN",
 }))
 ```
 
-Default headers: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
-`Referrer-Policy: strict-origin-when-cross-origin`, `X-XSS-Protection: 0`,
-`Content-Security-Policy: default-src 'self'`.
+`SecureConfig` fields (zero-value = use default):
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `ContentSecurityPolicy` | `"default-src 'self'"` | Content-Security-Policy header |
+| `XFrameOptions` | `"DENY"` | X-Frame-Options header |
+| `ReferrerPolicy` | `"strict-origin-when-cross-origin"` | Referrer-Policy header |
+| `XSSProtection` | `"0"` | X-XSS-Protection header |
+| `ContentTypeNosniff` | `"nosniff"` | X-Content-Type-Options header |
 
 ## CSRF Protection
 
@@ -368,11 +385,9 @@ func RateLimitWithConfig(cfg RateLimitConfig) echo.MiddlewareFunc
 func NewMemoryStore(opts ...MemoryStoreOption) *MemoryStore
 func NewPGStore(db DB) *PGStore
 
-// Request ID
-func RequestID() echo.MiddlewareFunc
-
 // Cache
 func CacheControl(disableCaching bool) echo.MiddlewareFunc
+func CacheControlWithConfig(cfg CacheConfig) echo.MiddlewareFunc
 
 // Security
 func Secure() echo.MiddlewareFunc

@@ -82,8 +82,8 @@ jobs:
 
       - name: Generate static pages
         run: |
-          go build -o bin/server ./cmd/server
-          ./bin/server --generate
+          go build -o bin/site ./cmd/site
+          ./bin/site --generate
 
       # - name: Run migrations
       #   env:

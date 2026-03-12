@@ -15,6 +15,10 @@ const (
 	MsgIntRange        = "Value out of range"
 	MsgMinAge          = "Does not meet minimum age requirement"
 	MsgMaxAge          = "Exceeds maximum age"
-	MsgPasswordWeak    = "Password is too weak"
+	MsgPasswordWeak      = "Password is too weak"
+	MsgHasUpper          = "Must contain an uppercase letter"
+	MsgHasLower          = "Must contain a lowercase letter"
+	MsgHasDigit          = "Must contain a digit"
+	MsgHasSpecial        = "Must contain a special character"
 	MsgValidatorNotFound = "Unknown validator"
 )

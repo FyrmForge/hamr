@@ -27,7 +27,7 @@ css-build: check-node-modules
 
 VERSION := $(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
 
-## build: Build the server binary
+## build: Build the site binary
 build: check-templ{{- if eq .CSS "tailwind"}} check-node-modules{{- end}}
 	templ generate
 {{- if .IncludeLocale}}
@@ -36,12 +36,12 @@ build: check-templ{{- if eq .CSS "tailwind"}} check-node-modules{{- end}}
 {{- if eq .CSS "tailwind"}}
 	npm run css:build
 {{- end}}
-	go build -ldflags "-X main.version=$(VERSION)" -o bin/server ./cmd/server
+	go build -ldflags "-X main.version=$(VERSION)" -o bin/site ./cmd/site
 	$(MAKE) generate
 
 ## generate: Generate static pages
 generate:
-	./bin/server --generate
+	./bin/site --generate
 
 ## test: Run all tests
 test: check-templ

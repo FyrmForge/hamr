@@ -146,7 +146,7 @@ func startServerContainer(ctx context.Context, dbURL string, network string) (te
 	req := testcontainers.ContainerRequest{
 		FromDockerfile: testcontainers.FromDockerfile{
 			Context:    projectRoot,
-			Dockerfile: "cmd/server/Dockerfile",
+			Dockerfile: "cmd/site/Dockerfile",
 			KeepImage:  true,
 		},
 		ExposedPorts: []string{"8080/tcp"},

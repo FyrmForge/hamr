@@ -21,7 +21,7 @@ make e2e-local      # Run E2E tests locally
 ## Project Structure
 
 ```
-cmd/server/              Application entry point (env config loaded here)
+cmd/site/              Application entry point (env config loaded here)
 internal/db/             Database connection + embedded migrations
 internal/repo/           Data access layer (Store interface + PostgreSQL impl)
 internal/web/            HTTP layer
@@ -140,6 +140,15 @@ validate.PasswordStrength(value)  // Checks upper, lower, digit, special, length
 validate.URL(value)               // "Invalid URL"
 validate.Phone(value)             // "Invalid phone number"
 validate.OneOf(value, "a", "b")   // "Must be one of: a, b"
+```
+
+Character-class validators (composable password rules):
+
+```go
+validate.HasUpper(value)    // contains uppercase letter
+validate.HasLower(value)    // contains lowercase letter
+validate.HasDigit(value)    // contains digit
+validate.HasSpecial(value)  // contains special character
 ```
 
 Curried constructors return `func(string) string` for use as Form rules:
@@ -275,7 +284,7 @@ templ createForm(c echo.Context, f CreateForm, errors map[string]string) {
         method="POST"
         action="/things"
     >
-        @form.CSRFField(c.Get("csrf").(string))
+        @form.CSRFField(c)
         <div class="form-group">
             <label for="name">Name</label>
             <input type="text" id="name" name="name" value={ f.Name }
@@ -306,9 +315,9 @@ Key HTMX attributes:
 ### CSRF Token
 
 The CSRF middleware stores the token in `c.Get("csrf")`. Pass `echo.Context`
-to templ components and use `form.CSRFField(c.Get("csrf").(string))`.
-The `htmx:configRequest` listener in `layout.templ` automatically attaches it
-to HTMX requests via the `X-CSRF-Token` header.
+to templ components and use `@form.CSRFField(c)` — the component extracts the
+token internally. The `htmx:configRequest` listener in `layout.templ`
+automatically attaches it to HTMX requests via the `X-CSRF-Token` header.
 
 ### Flash Messages
 

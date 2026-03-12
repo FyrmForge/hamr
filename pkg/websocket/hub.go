@@ -42,6 +42,12 @@ func WithLogger(l *slog.Logger) HubOption {
 	return func(h *Hub) { h.logger = l }
 }
 
+// WithSendBufferSize sets the per-client send channel buffer size.
+// Default: 256. Values <= 0 are treated as the default.
+func WithSendBufferSize(n int) HubOption {
+	return func(h *Hub) { h.sendBufferSize = n }
+}
+
 // Hub manages WebSocket clients with session, subject, and room routing.
 // It uses a pure mutex design with no background event-loop goroutine.
 type Hub struct {
@@ -50,11 +56,12 @@ type Hub struct {
 	subjects map[string]map[*Client]bool // subjectID → clients (1:many)
 	rooms    map[string]map[*Client]bool // room → clients (many:many)
 
-	sessionIDFunc func(r *http.Request) string
-	subjectIDFunc func(r *http.Request) string
-	onMessage     func(*Client, []byte)
-	acceptOpts    *ws.AcceptOptions
-	logger        *slog.Logger
+	sessionIDFunc  func(r *http.Request) string
+	subjectIDFunc  func(r *http.Request) string
+	onMessage      func(*Client, []byte)
+	acceptOpts     *ws.AcceptOptions
+	logger         *slog.Logger
+	sendBufferSize int
 
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -81,6 +88,9 @@ func NewHub(opts ...HubOption) *Hub {
 	if h.logger == nil {
 		h.logger = slog.Default()
 	}
+	if h.sendBufferSize <= 0 {
+		h.sendBufferSize = sendBufferSize
+	}
 	return h
 }
 
@@ -105,7 +115,7 @@ func (h *Hub) Handler() echo.HandlerFunc {
 			Meta:      make(map[string]any),
 			hub:       h,
 			conn:      conn,
-			send:      make(chan []byte, sendBufferSize),
+			send:      make(chan []byte, h.sendBufferSize),
 		}
 
 		h.register(client)

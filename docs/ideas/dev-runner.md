@@ -46,7 +46,7 @@ blocking = true
 name = "go"
 pattern = ["**/*.go", "go.mod", "go.sum"]
 ignore = ["**/*_test.go"]
-command = "go build -o ./tmp/app ./cmd/server"
+command = "go build -o ./tmp/app ./cmd/site"
 blocking = true
 # after build, manage the app process
 run = "./tmp/app"         # start/restart this process after command succeeds
@@ -85,7 +85,7 @@ Watchers can declare dependencies to enforce ordering:
 name = "go"
 depends = ["templ"]       # wait for templ generation before Go build
 pattern = ["**/*.go"]
-command = "go build -o ./tmp/app ./cmd/server"
+command = "go build -o ./tmp/app ./cmd/site"
 run = "./tmp/app"
 ```
 

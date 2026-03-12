@@ -146,13 +146,13 @@ hamr new myapp --storage s3 --static-s3 --module github.com/user/myapp
 
 **Local storage** (`--storage local`):
 - `STORAGE_PATH` env var in `.env` / `.env.example`
-- `storage.NewLocalStorage(envStoragePath)` in `cmd/server/main.go`
+- `storage.NewLocalStorage(envStoragePath)` in `cmd/site/main.go`
 - `FileStorage` wired into `web.Deps`
 
 **S3 storage** (`--storage s3`):
 - S3 env vars (`S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`) in `.env`
 - MinIO service in `docker/docker-compose.yaml` (ports 9000 + 9001 console)
-- `storage.NewS3Storage(...)` in `cmd/server/main.go`
+- `storage.NewS3Storage(...)` in `cmd/site/main.go`
 - `FileStorage` wired into `web.Deps`
 
 **S3 static asset sync** (`--static-s3`, only with `--storage s3`):

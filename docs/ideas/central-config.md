@@ -33,7 +33,7 @@ blocking = true
 name = "go"
 pattern = ["**/*.go", "go.mod"]
 depends = ["templ"]
-command = "go build -o ./tmp/app ./cmd/server"
+command = "go build -o ./tmp/app ./cmd/site"
 run = "./tmp/app"
 env = { PORT = "8080" }
 

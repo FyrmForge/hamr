@@ -79,7 +79,7 @@ func RegisterStaticPages(srv *server.Server) {
 ### Generate at Build Time
 
 ```go
-// cmd/server/main.go
+// cmd/site/main.go
 // var generateFlag = flag.Bool("generate", false, "generate static pages and exit")
 
 web.RegisterStaticPages(srv, log)
@@ -93,7 +93,7 @@ if *generateFlag {
 
 ```bash
 make build    # includes: make generate
-make generate # standalone: ./bin/server --generate
+make generate # standalone: ./bin/site --generate
 ```
 
 ### Runtime Serving
@@ -161,7 +161,7 @@ STATIC_BASE_URL=https://cdn.example.com/static
 ### Deployment Flow
 
 1. Build static assets (Tailwind, etc.)
-2. Generate static pages: `./bin/server --generate`
+2. Generate static pages: `./bin/site --generate`
 3. Sync to S3: `hamr sync --dir static --bucket myapp-static`
 4. Sync generated pages: `hamr sync --dir generated --bucket myapp-static`
 5. Set `STATIC_BASE_URL` to your CDN URL

@@ -1,9 +1,9 @@
 package api
 
 import (
-	"github.com/FyrmForge/hamr/pkg/middleware"
 	"github.com/FyrmForge/hamr/pkg/server"
 
+	"{{.Module}}/internal/middleware"
 	"{{.Module}}/internal/repo"
 	"{{.Module}}/internal/api/handler/health"
 {{- if .IncludeStripe}}
@@ -22,7 +22,7 @@ type Deps struct {
 // RegisterRoutes registers all API route handlers on the server.
 func RegisterRoutes(srv *server.Server, deps *Deps) {
 	api := srv.Echo().Group("/api")
-	api.Use(middleware.RequestID())
+	api.Use(middleware.Logging())
 
 	healthHandler := health.NewHandler(deps.Store)
 	api.GET("/health", healthHandler.Health)

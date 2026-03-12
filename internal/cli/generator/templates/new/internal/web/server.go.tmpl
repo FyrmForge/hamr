@@ -5,7 +5,7 @@ import (
 	"context"
 {{- end}}
 
-	"github.com/FyrmForge/hamr/pkg/middleware"
+	hamrmw "github.com/FyrmForge/hamr/pkg/middleware"
 	"github.com/FyrmForge/hamr/pkg/server"
 {{- if .IncludeSessions}}
 	"github.com/FyrmForge/hamr/pkg/auth"
@@ -20,6 +20,7 @@ import (
 	"github.com/FyrmForge/hamr/pkg/websocket"
 {{- end}}
 
+	"{{.Module}}/internal/middleware"
 	"{{.Module}}/internal/repo"
 {{- if .IncludeAuth}}
 	"{{.Module}}/internal/service"
@@ -79,23 +80,23 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 
 	// Site routes.
 	site := e.Group("")
-	site.Use(middleware.RequestID())
-	site.Use(middleware.SecureWithConfig(middleware.SecureConfig{
+	site.Use(middleware.Logging())
+	site.Use(hamrmw.SecureWithConfig(hamrmw.SecureConfig{
 		ContentSecurityPolicy: csp,
 	}))
 {{- if .IncludeSessions}}
-	site.Use(middleware.FlashWithConfig(middleware.FlashConfig{Secure: !deps.DevMode}))
-	site.Use(middleware.CSRFWithConfig(middleware.CSRFConfig{Secure: !deps.DevMode}))
+	site.Use(hamrmw.FlashWithConfig(hamrmw.FlashConfig{Secure: !deps.DevMode}))
+	site.Use(hamrmw.CSRFWithConfig(hamrmw.CSRFConfig{Secure: !deps.DevMode}))
 {{- end}}
 {{- if .IncludeLocale}}
-	site.Use(middleware.LocaleFromPreference(middleware.LocaleConfig{
+	site.Use(hamrmw.LocaleFromPreference(hamrmw.LocaleConfig{
 		Bundle:       deps.LocaleBundle,
 		CookieSecure: !deps.DevMode,
 	}))
 {{- end}}
 {{- if .IncludeAuth}}
 
-	authCfg := middleware.AuthConfig{
+	authCfg := hamrmw.AuthConfig{
 		SessionManager: deps.SessionManager,
 		SubjectLoader: func(reqCtx context.Context, id string) (any, error) {
 			return deps.Store.GetUserByID(reqCtx, id)
@@ -103,7 +104,7 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 		LoginRedirect: "/login",
 		HomeRedirect:  "/",
 	}
-	site.Use(middleware.OptionalAuth(authCfg))
+	site.Use(hamrmw.OptionalAuth(authCfg))
 {{- end}}
 
 	homeHandler := home.NewHandler()
@@ -117,7 +118,7 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 	authHandler := authhandler.NewHandler(deps.AuthService, deps.SessionManager)
 
 	guest := site.Group("")
-	guest.Use(middleware.RequireNotAuth(authCfg))
+	guest.Use(hamrmw.RequireNotAuth(authCfg))
 	guest.GET("/login", authHandler.LoginPage)
 	guest.POST("/login", authHandler.Login)
 	guest.POST("/login/validate/:field", authHandler.LoginFormRules.ValidationHandler("field"))
@@ -126,7 +127,7 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 	guest.POST("/register/validate/:field", authHandler.RegisterFormRules.ValidationHandler("field"))
 
 	authenticated := site.Group("")
-	authenticated.Use(middleware.RequireAuth(authCfg))
+	authenticated.Use(hamrmw.RequireAuth(authCfg))
 	authenticated.POST("/logout", authHandler.Logout)
 {{- end}}
 }

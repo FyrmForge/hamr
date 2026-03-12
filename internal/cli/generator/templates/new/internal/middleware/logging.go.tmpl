@@ -14,9 +14,9 @@ import (
 // HeaderRequestID is the HTTP header used to propagate request IDs.
 const HeaderRequestID = "X-Request-ID"
 
-// RequestID generates or propagates a request ID, attaches a structured logger
+// Logging generates or propagates a request ID, attaches a structured logger
 // to the request context, and logs request completion.
-func RequestID() echo.MiddlewareFunc {
+func Logging() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			reqID := c.Request().Header.Get(HeaderRequestID)

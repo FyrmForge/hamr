@@ -171,9 +171,9 @@ func ReadExistingGoMod(dir string) (module, goVersion string, err error) {
 
 func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 	files := []templateFile{
-		// cmd/server
-		{"templates/new/cmd/server/main.go.tmpl", "cmd/server/main.go"},
-		{"templates/new/cmd/server/Dockerfile.tmpl", "cmd/server/Dockerfile"},
+		// cmd/site
+		{"templates/new/cmd/site/main.go.tmpl", "cmd/site/main.go"},
+		{"templates/new/cmd/site/Dockerfile.tmpl", "cmd/site/Dockerfile"},
 
 		// internal/repo
 		{"templates/new/internal/repo/repo.go.tmpl", "internal/repo/repo.go"},
@@ -192,6 +192,9 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 		{"templates/new/internal/web/handler/about/about.templ.tmpl", "internal/web/handler/about/about.templ"},
 		{"templates/new/internal/web/handler/health/handler.go.tmpl", "internal/web/handler/health/handler.go"},
 		{"templates/new/internal/web/handler/errors/handler.go.tmpl", "internal/web/handler/errors/handler.go"},
+
+		// internal/middleware
+		{"templates/new/internal/middleware/logging.go.tmpl", "internal/middleware/logging.go"},
 
 		// internal/web/components
 		{"templates/new/internal/web/components/layout.templ.tmpl", "internal/web/components/layout.templ"},

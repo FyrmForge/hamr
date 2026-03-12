@@ -545,7 +545,7 @@ The templ component receives the form struct and errors map:
 ```templ
 templ registerForm(c echo.Context, f RegisterForm, errs map[string]string) {
     <form id="register-form" hx-post="/register" hx-swap="outerHTML" ...>
-        @form.CSRFField(c.Get("csrf").(string))
+        @form.CSRFField(c)
         <input name="name" value={ f.Name } />
         @form.FieldError("name", form.GetError(errs, "name"))
         // ... more fields

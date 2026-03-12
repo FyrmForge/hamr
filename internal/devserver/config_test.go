@@ -23,7 +23,7 @@ func TestLoadConfig_Minimal(t *testing.T) {
 [[dev.watch]]
 name = "go"
 watch = "**/*.go"
-cmd = "go build ./cmd/server"
+cmd = "go build ./cmd/site"
 `)
 
 	cfg, err := LoadConfig(path)
@@ -48,7 +48,7 @@ func TestLoadConfig_ProxyDefaults(t *testing.T) {
 [[dev.watch]]
 name = "go"
 watch = "**/*.go"
-cmd = "go build ./cmd/server"
+cmd = "go build ./cmd/site"
 `)
 
 	cfg, err := LoadConfig(path)
@@ -80,7 +80,7 @@ reload = "full"
 name = "go"
 watch = ["**/*.go"]
 ignore = ["*_test.go"]
-cmd = "go build -o ./tmp/app ./cmd/server"
+cmd = "go build -o ./tmp/app ./cmd/site"
 run = "./tmp/app"
 depends = ["templ"]
 debounce = "300ms"
@@ -273,7 +273,7 @@ cmd = "npx tailwindcss --watch"
 [[dev.watch]]
 name = "go"
 watch = "**/*.go"
-cmd = "go build ./cmd/server"
+cmd = "go build ./cmd/site"
 `)
 	cfg, err := LoadConfig(path)
 	require.NoError(t, err)
@@ -546,7 +546,7 @@ env = ["COMPOSE_PROJECT_NAME=myapp"]
 [[dev.watch]]
 name = "go"
 watch = "**/*.go"
-cmd = "go build ./cmd/server"
+cmd = "go build ./cmd/site"
 `)
 	cfg, err := LoadConfig(path)
 	require.NoError(t, err)

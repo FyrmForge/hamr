@@ -33,7 +33,7 @@ templ registerForm(c echo.Context, f RegisterForm, errors map[string]string) {
 		method="POST"
 		action="/register"
 	>
-		@form.CSRFField(c.Get("csrf").(string))
+		@form.CSRFField(c)
 		if form.GetError(errors, "general") != "" {
 {{- if eq .CSS "tailwind"}}
 			<div class="mb-4 px-4 py-3 rounded-md border bg-red-900/50 border-red-700 text-red-300 text-sm">

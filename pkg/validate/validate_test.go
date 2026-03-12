@@ -161,6 +161,58 @@ func TestCheckPasswordRequirements(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// HasUpper / HasLower / HasDigit / HasSpecial
+// ---------------------------------------------------------------------------
+
+func TestHasUpper(t *testing.T) {
+	check(t, "has-upper", validate.HasUpper("helloA"), "")
+	check(t, "no-upper", validate.HasUpper("hello"), validate.MsgHasUpper)
+	check(t, "empty", validate.HasUpper(""), validate.MsgHasUpper)
+	check(t, "digits-only", validate.HasUpper("12345"), validate.MsgHasUpper)
+}
+
+func TestHasUpperMsg(t *testing.T) {
+	check(t, "custom", validate.HasUpperMsg("abc", "need upper"), "need upper")
+	check(t, "custom-pass", validate.HasUpperMsg("Abc", "need upper"), "")
+}
+
+func TestHasLower(t *testing.T) {
+	check(t, "has-lower", validate.HasLower("HELLOa"), "")
+	check(t, "no-lower", validate.HasLower("HELLO"), validate.MsgHasLower)
+	check(t, "empty", validate.HasLower(""), validate.MsgHasLower)
+	check(t, "digits-only", validate.HasLower("12345"), validate.MsgHasLower)
+}
+
+func TestHasLowerMsg(t *testing.T) {
+	check(t, "custom", validate.HasLowerMsg("ABC", "need lower"), "need lower")
+	check(t, "custom-pass", validate.HasLowerMsg("ABc", "need lower"), "")
+}
+
+func TestHasDigit(t *testing.T) {
+	check(t, "has-digit", validate.HasDigit("abc1"), "")
+	check(t, "no-digit", validate.HasDigit("abc"), validate.MsgHasDigit)
+	check(t, "empty", validate.HasDigit(""), validate.MsgHasDigit)
+	check(t, "only-digit", validate.HasDigit("5"), "")
+}
+
+func TestHasDigitMsg(t *testing.T) {
+	check(t, "custom", validate.HasDigitMsg("abc", "need digit"), "need digit")
+	check(t, "custom-pass", validate.HasDigitMsg("ab1", "need digit"), "")
+}
+
+func TestHasSpecial(t *testing.T) {
+	check(t, "has-special", validate.HasSpecial("abc!"), "")
+	check(t, "no-special", validate.HasSpecial("abc123"), validate.MsgHasSpecial)
+	check(t, "empty", validate.HasSpecial(""), validate.MsgHasSpecial)
+	check(t, "symbol", validate.HasSpecial("abc$"), "")
+}
+
+func TestHasSpecialMsg(t *testing.T) {
+	check(t, "custom", validate.HasSpecialMsg("abc", "need special"), "need special")
+	check(t, "custom-pass", validate.HasSpecialMsg("a@b", "need special"), "")
+}
+
+// ---------------------------------------------------------------------------
 // NormalizeURL
 // ---------------------------------------------------------------------------
 
@@ -217,4 +269,8 @@ func TestCustomMessages(t *testing.T) {
 	check(t, "OneOfMsg", validate.OneOfMsg("x", "custom", "a", "b"), "custom")
 	check(t, "IntRangeMsg", validate.IntRangeMsg(0, 1, 10, "custom"), "custom")
 	check(t, "PasswordStrengthMsg", validate.PasswordStrengthMsg("weak", "custom"), "custom")
+	check(t, "HasUpperMsg", validate.HasUpperMsg("abc", "custom"), "custom")
+	check(t, "HasLowerMsg", validate.HasLowerMsg("ABC", "custom"), "custom")
+	check(t, "HasDigitMsg", validate.HasDigitMsg("abc", "custom"), "custom")
+	check(t, "HasSpecialMsg", validate.HasSpecialMsg("abc", "custom"), "custom")
 }

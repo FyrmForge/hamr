@@ -24,24 +24,24 @@ RUN go mod download
 
 COPY . .
 RUN templ generate
-RUN go build -ldflags "-s -w" -o /bin/server ./cmd/server
+RUN go build -ldflags "-s -w" -o /bin/site ./cmd/site
 # -s -w strips debug info and DWARF symbols to reduce binary size
 
 # Generate static pages
-RUN /bin/server --generate
+RUN /bin/site --generate
 
 # Runtime stage
 FROM alpine:3.20
 
 RUN apk --no-cache add ca-certificates tzdata
-COPY --from=builder /bin/server /bin/server
+COPY --from=builder /bin/site /bin/site
 COPY --from=builder /app/generated /app/generated
 COPY --from=builder /app/static /app/static
 COPY --from=builder /app/migrations /app/migrations
 
 WORKDIR /app
 EXPOSE 8080
-CMD ["/bin/server"]
+CMD ["/bin/site"]
 ```
 
 ### Key Points
@@ -164,7 +164,7 @@ go build -o bin/migrate ./cmd/migrate
 ./bin/migrate
 
 # Then start the server
-./bin/server
+./bin/site
 ```
 
 In Kubernetes or Docker, run migrations as an init container (a container that runs before the main application starts) or a pre-deploy job.

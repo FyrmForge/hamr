@@ -83,7 +83,7 @@ hamr new myapp --static-s3        # sync static assets to S3 bucket
 S3 scaffolding generates:
 - S3 env vars in `.env`
 - MinIO service in `docker/docker-compose.yaml`
-- Storage initialization in `cmd/server/main.go`
+- Storage initialization in `cmd/site/main.go`
 
 ---
 

@@ -48,7 +48,7 @@ Organize routes into groups with shared middleware:
 
 ```go
 // Global middleware (all routes)
-srv.Echo().Use(middleware.RequestID())
+srv.Echo().Use(middleware.Logging())
 
 // Site routes — sessions, CSRF, flash
 site := srv.Group("", middleware.Flash(), middleware.CSRF())
@@ -65,7 +65,7 @@ api.POST("/users", userHandler.Create)
 ### Typical Middleware Layout
 
 ```
-Global  (all routes)  → recovery, request ID, logging, audit
+Global  (all routes)  → recovery, logging (scaffolded), audit
 Site    (/)           → sessions, CSRF, flash, cache, secure headers
 API     (/api/)       → CORS, rate limit, bearer auth
 ```

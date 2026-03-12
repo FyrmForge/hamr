@@ -97,9 +97,10 @@ func TestBuildProjectFileList_coreFiles(t *testing.T) {
 	}
 
 	coreFiles := []string{
-		"cmd/server/main.go",
-		"cmd/server/Dockerfile",
+		"cmd/site/main.go",
+		"cmd/site/Dockerfile",
 		"internal/db/db.go",
+		"internal/middleware/logging.go",
 		"internal/repo/repo.go",
 		"internal/repo/postgres/store.go",
 		"internal/web/server.go",
@@ -197,7 +198,7 @@ func TestBuildProjectFileList_storageLocal(t *testing.T) {
 	}
 
 	// Core files should be present, no syncstatic (sync is now hamr CLI subcommand).
-	assert.True(t, dests["cmd/server/main.go"])
+	assert.True(t, dests["cmd/site/main.go"])
 }
 
 func TestBuildProjectFileList_storageS3(t *testing.T) {
@@ -216,7 +217,7 @@ func TestBuildProjectFileList_storageS3(t *testing.T) {
 	}
 
 	// S3 storage should not generate syncstatic (sync is now hamr CLI subcommand).
-	assert.True(t, dests["cmd/server/main.go"])
+	assert.True(t, dests["cmd/site/main.go"])
 }
 
 func TestBuildProjectFileList_e2e(t *testing.T) {
@@ -266,11 +267,16 @@ func TestGenerateProject_createsFiles(t *testing.T) {
 	require.NoError(t, GenerateProject(dir, cfg))
 
 	// Spot-check key files exist and contain expected content.
-	assertFileExists(t, dir, "cmd/server/main.go")
+	assertFileExists(t, dir, "cmd/site/main.go")
+	assertFileExists(t, dir, "internal/middleware/logging.go")
 	assertFileExists(t, dir, "internal/web/server.go")
 	assertFileExists(t, dir, "go.mod")
 	assertFileExists(t, dir, ".gitignore")
 	assertFileExists(t, dir, "scripts/db-shell.sh")
+
+	// Logging middleware contains expected function.
+	loggingGo := readFile(t, dir, "internal/middleware/logging.go")
+	assert.Contains(t, loggingGo, "func Logging()")
 
 	// Framework reference docs (raw-copied, not templated).
 	assertFileExists(t, dir, "docs/llms.txt")
@@ -286,7 +292,7 @@ func TestGenerateProject_createsFiles(t *testing.T) {
 	assert.Contains(t, readme, "make migrate")
 
 	// Check main.go has correct imports and env config pattern.
-	mainGo := readFile(t, dir, "cmd/server/main.go")
+	mainGo := readFile(t, dir, "cmd/site/main.go")
 	assert.Contains(t, mainGo, "github.com/FyrmForge/hamr/pkg/config")
 	assert.Contains(t, mainGo, "github.com/FyrmForge/hamr/pkg/server")
 	assert.Contains(t, mainGo, "envPort")
@@ -323,14 +329,14 @@ func TestGenerateProject_withAuth(t *testing.T) {
 	assert.Contains(t, upSQL, "CREATE TABLE users")
 
 	// Check main.go includes auth imports.
-	mainGo := readFile(t, dir, "cmd/server/main.go")
+	mainGo := readFile(t, dir, "cmd/site/main.go")
 	assert.Contains(t, mainGo, "github.com/FyrmForge/hamr/pkg/auth")
 	assert.Contains(t, mainGo, "github.com/test/authproj/internal/service")
 
 	// Check server.go includes auth routes.
 	serverGo := readFile(t, dir, "internal/web/server.go")
 	assert.Contains(t, serverGo, "authhandler")
-	assert.Contains(t, serverGo, "RequireNotAuth")
+	assert.Contains(t, serverGo, "hamrmw.RequireNotAuth")
 }
 
 func TestGenerateProject_noSessions(t *testing.T) {
@@ -347,7 +353,7 @@ func TestGenerateProject_noSessions(t *testing.T) {
 	require.NoError(t, GenerateProject(dir, cfg))
 
 	// main.go should not have auth/session imports.
-	mainGo := readFile(t, dir, "cmd/server/main.go")
+	mainGo := readFile(t, dir, "cmd/site/main.go")
 	assert.NotContains(t, mainGo, "pkg/auth")
 	assert.NotContains(t, mainGo, "sessionManager")
 
@@ -454,7 +460,7 @@ func TestGenerateProject_configHasCorrectDBURL(t *testing.T) {
 
 	require.NoError(t, GenerateProject(dir, cfg))
 
-	mainGo := readFile(t, dir, "cmd/server/main.go")
+	mainGo := readFile(t, dir, "cmd/site/main.go")
 	assert.Contains(t, mainGo, "cfgproj?sslmode=disable")
 }
 
@@ -490,7 +496,7 @@ func TestGenerateProject_inPlace(t *testing.T) {
 
 	require.NoError(t, GenerateProject(dir, cfg))
 
-	assertFileExists(t, dir, "cmd/server/main.go")
+	assertFileExists(t, dir, "cmd/site/main.go")
 	assertFileExists(t, dir, "go.mod")
 	assertFileExists(t, dir, "internal/web/server.go")
 }
@@ -518,7 +524,7 @@ func TestGenerateProject_inPlace_skipsExistingGoMod(t *testing.T) {
 	assert.Equal(t, strings.TrimSpace(existingGoMod), gomod)
 
 	// Other files should still be created.
-	assertFileExists(t, dir, "cmd/server/main.go")
+	assertFileExists(t, dir, "cmd/site/main.go")
 	assertFileExists(t, dir, "internal/web/server.go")
 }
 
@@ -581,7 +587,7 @@ func TestGenerateProject_s3Storage(t *testing.T) {
 	assert.NotContains(t, envFile, "STORAGE_PATH")
 
 	// main.go should have S3 env vars and use S3 storage init.
-	mainGo := readFile(t, dir, "cmd/server/main.go")
+	mainGo := readFile(t, dir, "cmd/site/main.go")
 	assert.Contains(t, mainGo, "envS3Endpoint")
 	assert.Contains(t, mainGo, "envS3Bucket")
 	assert.Contains(t, mainGo, "envStaticBaseURL")
@@ -627,7 +633,7 @@ func TestGenerateProject_localStorage(t *testing.T) {
 	assert.NotContains(t, envFile, "S3_ENDPOINT")
 
 	// main.go should have local storage env vars.
-	mainGo := readFile(t, dir, "cmd/server/main.go")
+	mainGo := readFile(t, dir, "cmd/site/main.go")
 	assert.Contains(t, mainGo, "envStoragePath")
 	assert.NotContains(t, mainGo, "envS3Endpoint")
 	assert.Contains(t, mainGo, "NewLocalStorage")
@@ -835,7 +841,7 @@ func TestGenerateProject_stripe(t *testing.T) {
 	assert.Contains(t, serverGo, "/webhooks/stripe")
 
 	// main.go has webhook secret env var.
-	mainGo := readFile(t, dir, "cmd/server/main.go")
+	mainGo := readFile(t, dir, "cmd/site/main.go")
 	assert.Contains(t, mainGo, "envStripeWebhookSecret")
 	assert.Contains(t, mainGo, "STRIPE_WEBHOOK_SECRET")
 
@@ -863,7 +869,7 @@ func TestGenerateProject_noStripe(t *testing.T) {
 	assert.NotContains(t, serverGo, "stripehandler")
 	assert.NotContains(t, serverGo, "WebhookSecret")
 
-	mainGo := readFile(t, dir, "cmd/server/main.go")
+	mainGo := readFile(t, dir, "cmd/site/main.go")
 	assert.NotContains(t, mainGo, "envStripeWebhookSecret")
 
 	envFile := readFile(t, dir, ".env.example")
@@ -993,7 +999,7 @@ func TestGenerateProject_gorm(t *testing.T) {
 	assert.NotContains(t, migrateGo, "db.Migrate(")
 
 	// Server main.go uses GORM connection with retry.
-	mainGo := readFile(t, dir, "cmd/server/main.go")
+	mainGo := readFile(t, dir, "cmd/site/main.go")
 	assert.Contains(t, mainGo, "appdb.ConnectContext")
 	assert.NotContains(t, mainGo, "appdb.AutoMigrate") // Not MigrateAtStartup
 
@@ -1041,7 +1047,7 @@ func TestGenerateProject_migrateAtStartup(t *testing.T) {
 	assertFileNotExists(t, dir, "cmd/migrate/main.go")
 
 	// Server main.go should run migrations at startup.
-	mainGo := readFile(t, dir, "cmd/server/main.go")
+	mainGo := readFile(t, dir, "cmd/site/main.go")
 	assert.Contains(t, mainGo, "db.Migrate(database, appdb.MigrateConfig())")
 	assert.Contains(t, mainGo, "migrations completed")
 
@@ -1079,7 +1085,7 @@ func TestGenerateProject_gormMigrateAtStartup(t *testing.T) {
 	assertFileNotExists(t, dir, "cmd/migrate/main.go")
 
 	// Server main.go should auto-migrate at startup.
-	mainGo := readFile(t, dir, "cmd/server/main.go")
+	mainGo := readFile(t, dir, "cmd/site/main.go")
 	assert.Contains(t, mainGo, "appdb.AutoMigrate(database)")
 	assert.Contains(t, mainGo, "auto-migration completed")
 	assert.Contains(t, mainGo, "appdb.ConnectContext")
@@ -1113,7 +1119,7 @@ func TestGenerateProject_gormNoMigrateAtStartup(t *testing.T) {
 	assert.Contains(t, migrateGo, "appdb.Connect")
 
 	// Server main.go should NOT have auto-migrate.
-	mainGo := readFile(t, dir, "cmd/server/main.go")
+	mainGo := readFile(t, dir, "cmd/site/main.go")
 	assert.NotContains(t, mainGo, "appdb.AutoMigrate")
 
 	// Makefile should have migrate target but NOT migrate-down/status/create (GORM).
@@ -1201,8 +1207,8 @@ func TestGenerateProject_locale(t *testing.T) {
 	hamrToml := readFile(t, dir, "hamr.toml")
 	assert.Contains(t, hamrToml, "[locale]")
 
-	// cmd/server/main.go contains locale setup.
-	mainGo := readFile(t, dir, "cmd/server/main.go")
+	// cmd/site/main.go contains locale setup.
+	mainGo := readFile(t, dir, "cmd/site/main.go")
 	assert.Contains(t, mainGo, "i18n.NewBundle")
 	assert.Contains(t, mainGo, "ptr.To(true)")
 
@@ -1236,7 +1242,7 @@ func TestGenerateProject_noLocale(t *testing.T) {
 	hamrToml := readFile(t, dir, "hamr.toml")
 	assert.NotContains(t, hamrToml, "[locale]")
 
-	mainGo := readFile(t, dir, "cmd/server/main.go")
+	mainGo := readFile(t, dir, "cmd/site/main.go")
 	assert.NotContains(t, mainGo, "i18n.NewBundle")
 	assert.NotContains(t, mainGo, "LocaleBundle")
 

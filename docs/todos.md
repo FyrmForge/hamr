@@ -1,5 +1,4 @@
-- [] Need to assess various packages in hamr and assess which need to be expanded with options 
-     - e.g. middleware.RequestId should be configurable
+- [x] Need to assess various packages in hamr and assess which need to be expanded with options
 - [] hamr convert or smth like that
      - so we need to be able to point the cli at a folder full of picutre type assets and have it convert all of them to good formats and multiple sizes
 - [] metrics and dashboards option 
@@ -24,8 +23,9 @@
 - [x] change hamr dev log colour from white to smth else
 - [x] fix the modernice loops in scaffold
   1. for loop can be modernized using range over int [default]
-- [] form.CSRFField templ func should just take in echo context
+- [x] form.CSRFField templ func should just take in echo context
+- [x] move RequestID middleware from framework to scaffold as Logging
 - [x] implement the hamr ai idea
 - [x] implement the validation package idea
   - dont forget to update scaffolding and docs (user and ai)
-- [] rename bin and verbage from server to site
+- [x] rename bin and verbage from server to site

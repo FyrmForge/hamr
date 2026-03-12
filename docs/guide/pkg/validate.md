@@ -58,10 +58,32 @@ validate.MinAge("1990-01-15", 18)  // YYYY-MM-DD, at least 18 years old
 validate.MaxAge("1990-01-15", 65)  // at most 65 years old
 ```
 
+### Character-class validators
+
+Individual checks for composable password rules:
+
+```go
+validate.HasUpper(value)    // contains uppercase letter
+validate.HasLower(value)    // contains lowercase letter
+validate.HasDigit(value)    // contains digit
+validate.HasSpecial(value)  // contains special character (punctuation/symbol)
+```
+
+Compose them with `Field()` for custom password policies:
+
+```go
+// Relaxed: just length + digit
+validate.Field("password", validate.Required, validate.MinLen(12), validate.HasDigit)
+
+// Strict (equivalent to PasswordStrength):
+validate.Field("password", validate.Required, validate.MinLen(8),
+    validate.HasUpper, validate.HasLower, validate.HasDigit, validate.HasSpecial)
+```
+
 ### Password strength
 
 ```go
-validate.PasswordStrength(password)  // checks all requirements
+validate.PasswordStrength(password)  // checks all requirements (8+ chars, upper, lower, digit, special)
 ```
 
 For UI display, get individual requirement statuses:
@@ -129,6 +151,10 @@ All default messages are exported constants in `messages.go`:
 | `MsgMinAge` | "Does not meet minimum age requirement" |
 | `MsgMaxAge` | "Exceeds maximum age" |
 | `MsgPasswordWeak` | "Password is too weak" |
+| `MsgHasUpper` | "Must contain an uppercase letter" |
+| `MsgHasLower` | "Must contain a lowercase letter" |
+| `MsgHasDigit` | "Must contain a digit" |
+| `MsgHasSpecial` | "Must contain a special character" |
 
 ## Custom Validator Registry
 
@@ -270,6 +296,12 @@ func IntRange(value int, min, max int) string
 func MinAge(birthDate string, minAge int) string
 func MaxAge(birthDate string, maxAge int) string
 
+// Character-class validators
+func HasUpper(value string) string
+func HasLower(value string) string
+func HasDigit(value string) string
+func HasSpecial(value string) string
+
 // Password
 func PasswordStrength(password string) string
 func CheckPasswordRequirements(password string) []PasswordRequirement
@@ -286,6 +318,10 @@ func IntRangeMsg(value, min, max int, msg string) string
 func MinAgeMsg(birthDate string, minAge int, msg string) string
 func MaxAgeMsg(birthDate string, maxAge int, msg string) string
 func PasswordStrengthMsg(password, msg string) string
+func HasUpperMsg(value, msg string) string
+func HasLowerMsg(value, msg string) string
+func HasDigitMsg(value, msg string) string
+func HasSpecialMsg(value, msg string) string
 
 // URL normalization
 func NormalizeURL(value string) string

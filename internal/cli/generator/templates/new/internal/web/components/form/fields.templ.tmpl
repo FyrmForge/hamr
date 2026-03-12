@@ -1,6 +1,10 @@
 package form
 
-import "strconv"
+import (
+	"strconv"
+
+	"github.com/labstack/echo/v4"
+)
 
 // FieldError renders a validation error for a form field.
 // Always renders the element so it can be targeted by OOB swaps.
@@ -30,6 +34,6 @@ templ FieldErrorOOB(field string, err string) {
 }
 
 // CSRFField renders a hidden CSRF token input.
-templ CSRFField(token string) {
-	<input type="hidden" name="csrf_token" value={ token }/>
+templ CSRFField(c echo.Context) {
+	<input type="hidden" name="csrf_token" value={ c.Get("csrf").(string) }/>
 }

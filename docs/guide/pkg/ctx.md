@@ -66,7 +66,7 @@ The package ships with keys used by the middleware package:
 | `SubjectIDKey` | `string` | Auth / TrustedSubject middleware |
 | `SubjectKey` | `any` | Auth middleware (loaded subject) |
 | `SessionKey` | `any` | Auth middleware (session) |
-| `RequestIDKey` | `string` | RequestID middleware |
+| `RequestIDKey` | `string` | Logging middleware (scaffolded) |
 | `FlashKey` | `any` | Flash middleware |
 
 ## API Reference

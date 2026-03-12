@@ -87,6 +87,7 @@ Pure-function validators returning "" on success or error message string.
 - `EmptyOr(fn)` — wraps a validator so empty values pass
 - Every validator has a `*Msg` variant for custom messages
 - `Register(name, fn)`, `Run(name, value)` — custom validator registry
+- Character-class: `HasUpper`, `HasLower`, `HasDigit`, `HasSpecial` (composable password rules)
 - Curried constructors (return `Rule`): `MinLen(n)`, `MaxLen(n)`, `In(vals...)`, `AgeMin(n)`, `AgeMax(n)`
 - `type Rule = func(string) string`, `type CtxRule = func(echo.Context, string) string`
 - `WithMsg(rule, msg)` — wraps rule with custom message
@@ -120,14 +121,13 @@ HTTP middleware for auth, CSRF, CORS, flash, security, RBAC, audit, rate limitin
 - CSRF: `CSRF()`, `CSRFWithConfig(cfg)`
 - CORS: `CORS()`, `CORSWithConfig(cfg)`
 - Flash: `Flash()`, `FlashWithConfig(cfg)`, `SetFlash(c, message, flashType)`, `GetFlash(c)`
-- Security: `Secure()`, `SecureWithConfig(cfg)`, `CacheControl(disableCaching)`
+- Security: `Secure()`, `SecureWithConfig(cfg)` (expanded `SecureConfig` with all header fields), `CacheControl(disableCaching)`, `CacheControlWithConfig(cfg)`
 - RBAC: `RequireRoles(checker, roles...)`, `RequireActive(checker)`
 - Audit: `Audit(logger)`, `AuditWithConfig(cfg)`
 - Rate Limit: `RateLimit(store)`, `RateLimitWithConfig(cfg)`,
   `NewMemoryStore(opts...)`, `NewPGStore(db)`
 - Locale: `LocaleFromPath(cfg)`, `LocaleFromPreference(cfg)`,
   `GetLocale(c)`, `GetDirection(c)`
-- Request: `RequestID()`
 
 ### ptr
 Generic pointer helpers.
@@ -215,6 +215,7 @@ Image/video upload, processing, serving on top of storage.
 ### websocket
 WebSocket hub with session, subject, and room routing.
 - `NewHub(opts...) *Hub`, `Hub.Handler() echo.HandlerFunc`, `Hub.Close()`
+- Hub options: `WithSessionIDFunc`, `WithSubjectIDFunc`, `WithOnMessage`, `WithAcceptOptions`, `WithLogger`, `WithSendBufferSize(n)`
 - Sending: `SendToSession`, `SendToSubject`, `SendToRoom`, `SendToRoomExcept`, `Broadcast`
 - Rooms: `JoinRoom`, `LeaveRoom`
 - Events: `NewEvent`, `NewHTMLEvent`, `NewOuterHTMLEvent`, `NewTriggerEvent`

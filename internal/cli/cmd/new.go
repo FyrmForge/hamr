@@ -18,7 +18,7 @@ var newCmd = &cobra.Command{
 	Long: `Create a new HAMR project with all the scaffolding needed to start building.
 
 Creates a complete project directory with:
-  cmd/server/          - Application entry point and Dockerfile
+  cmd/site/            - Application entry point and Dockerfile
   internal/            - Config, DB, repo, web layers
   static/              - CSS, JS, images
   docker/              - Docker Compose for PostgreSQL

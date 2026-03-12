@@ -71,7 +71,7 @@ debounce = 100
 name = "go"
 watch = ["**/*.go", "**/*.templ"]
 ignore = ["*_templ.go", "*_test.go"]
-cmd = "go build -o ./bin/app ./cmd/server"
+cmd = "go build -o ./bin/app ./cmd/site"
 run = "./bin/app"
 depends = ["templ"]
 reload = "full"
@@ -254,7 +254,7 @@ debounce = 100
 name = "go"
 watch = ["**/*.go", "**/*.templ"]
 ignore = ["*_templ.go", "*_test.go"]
-cmd = "go build -o ./bin/app ./cmd/server"
+cmd = "go build -o ./bin/app ./cmd/site"
 run = "./bin/app"
 depends = ["templ"]
 reload = "full"
@@ -289,7 +289,7 @@ reload = "css"
 name = "go"
 watch = ["**/*.go", "**/*.templ"]
 ignore = ["*_templ.go", "*_test.go"]
-cmd = "go build -o ./bin/app ./cmd/server"
+cmd = "go build -o ./bin/app ./cmd/site"
 run = "./bin/app"
 depends = ["templ"]
 reload = "full"
@@ -321,9 +321,9 @@ reload = "full"
 # Web server — proxied with live reload
 [[dev.watch]]
 name = "web"
-watch = ["internal/web/**/*.go", "cmd/server/*.go"]
-cmd = "go build -o bin/server ./cmd/server"
-run = "./bin/server"
+watch = ["internal/web/**/*.go", "cmd/site/*.go"]
+cmd = "go build -o bin/site ./cmd/site"
+run = "./bin/site"
 depends = ["templ"]
 reload = "full"
 
@@ -372,7 +372,7 @@ target = ":8080"
 [[dev.watch]]
 name = "go"
 watch = "**/*.go"
-cmd = "go build -o ./bin/app ./cmd/server"
+cmd = "go build -o ./bin/app ./cmd/site"
 run = "./bin/app"
 reload = "full"
 
@@ -407,7 +407,7 @@ cmd = "hamr sync --watch --bucket myapp-static"
 [[dev.watch]]
 name = "go"
 watch = "**/*.go"
-cmd = "go build -o ./bin/app ./cmd/server"
+cmd = "go build -o ./bin/app ./cmd/site"
 run = "./bin/app"
 reload = "full"
 
@@ -442,7 +442,7 @@ services = ["mailhog", "minio"]
 [[dev.watch]]
 name = "go"
 watch = "**/*.go"
-cmd = "go build -o ./bin/app ./cmd/server"
+cmd = "go build -o ./bin/app ./cmd/site"
 run = "./bin/app"
 reload = "full"
 ```

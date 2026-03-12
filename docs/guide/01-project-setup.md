@@ -42,7 +42,7 @@ A freshly scaffolded project looks like this:
 ```
 myapp/
 ├── cmd/
-│   └── server/
+│   └── site/
 │       └── main.go           # Application entrypoint
 ├── internal/
 │   └── web/
@@ -67,7 +67,7 @@ myapp/
 
 ### Key conventions
 
-- **`cmd/server/main.go`** — Bootstraps config, database, server, and starts listening. All setup in one file.
+- **`cmd/site/main.go`** — Bootstraps config, database, server, and starts listening. All setup in one file.
 - **`internal/web/server.go`** — Registers routes and middleware on the server. Receives a `Deps` struct with shared dependencies (DB, logger, storage, etc.). See [Handlers & Routing](04-handlers-routing.md) for details.
 - **`internal/web/handler/`** — One subfolder per domain (home, auth, dashboard). Each has a `handler.go` with an `Handler` struct and a `templates/` folder with templ components.
 - **`migrations/`** — Numbered SQL files (`001_create_users.up.sql`, `001_create_users.down.sql`).
@@ -93,7 +93,7 @@ cmd = "templ generate"
 name = "go"
 watch = ["**/*.go", "**/*.templ"]
 ignore = ["*_templ.go", "*_test.go"]
-cmd = "go build -o ./bin/app ./cmd/server"
+cmd = "go build -o ./bin/app ./cmd/site"
 run = "./bin/app"
 depends = ["templ"]
 reload = "full"
@@ -137,11 +137,11 @@ Every generated project includes a Makefile with standard targets:
 
 | Target | Description |
 |--------|-------------|
-| `make build` | Compile the server binary (runs templ generate + static generation) |
+| `make build` | Compile the site binary (runs templ generate + static generation) |
 | `make test` | Run all tests |
 | `make vet` | Vet all packages |
 | `make lint` | Run golangci-lint |
-| `make generate` | Generate static pages (`./bin/server --generate`) |
+| `make generate` | Generate static pages (`./bin/site --generate`) |
 | `make migrate` | Run database migrations |
 
 Always use `make` targets — never run `go build` or `go test` directly against individual packages.

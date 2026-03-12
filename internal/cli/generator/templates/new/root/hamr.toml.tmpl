@@ -58,7 +58,7 @@ debounce = 200
 name = "site"
 watch = ["**/*.go", "**/*.templ"]
 ignore = ["*_templ.go", "*_test.go"]
-cmd = "go build -o ./bin/app ./cmd/server"
+cmd = "go build -o ./bin/app ./cmd/site"
 run = "./bin/app"
 depends = ["templ"{{- if .IncludeLocale}}, "locale"{{- end}}]
 reload = "full"
@@ -71,9 +71,9 @@ reload = "full"
 # Multi service example
 # [[dev.watch]]
 # name = "site"
-# watch = ["internal/**/*.go", "cmd/server/*.go", "**/*.templ"]
+# watch = ["internal/**/*.go", "cmd/site/*.go", "**/*.templ"]
 # ignore = ["*_templ.go", "*_test.go", "internal/api/**"]
-# cmd = "go build -o ./bin/app ./cmd/server"
+# cmd = "go build -o ./bin/app ./cmd/site"
 # run = "./bin/app"
 # depends = ["templ"]
 # reload = "full"

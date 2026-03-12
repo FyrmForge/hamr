@@ -267,6 +267,30 @@ func TestHub_WithOnMessage(t *testing.T) {
 	}
 }
 
+func TestHub_WithSendBufferSize_default(t *testing.T) {
+	hub := NewHub()
+	defer hub.Close()
+	assert.Equal(t, sendBufferSize, hub.sendBufferSize)
+}
+
+func TestHub_WithSendBufferSize_custom(t *testing.T) {
+	hub := NewHub(WithSendBufferSize(512))
+	defer hub.Close()
+	assert.Equal(t, 512, hub.sendBufferSize)
+}
+
+func TestHub_WithSendBufferSize_zeroUsesDefault(t *testing.T) {
+	hub := NewHub(WithSendBufferSize(0))
+	defer hub.Close()
+	assert.Equal(t, sendBufferSize, hub.sendBufferSize)
+}
+
+func TestHub_WithSendBufferSize_negativeUsesDefault(t *testing.T) {
+	hub := NewHub(WithSendBufferSize(-10))
+	defer hub.Close()
+	assert.Equal(t, sendBufferSize, hub.sendBufferSize)
+}
+
 func TestHub_sendBufferFull_dropsMessage(t *testing.T) {
 	hub := NewHub(WithLogger(slog.Default()))
 	defer hub.Close()

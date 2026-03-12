@@ -16,7 +16,7 @@ func RegisterStaticPages(srv *server.Server) {
 ```
 
 ```go
-// cmd/server/main.go — generate before DB setup
+// cmd/site/main.go — generate before DB setup
 web.RegisterStaticPages(srv)
 if *generateFlag {
     if err := srv.GenerateStatic("generated"); err != nil {
@@ -29,7 +29,7 @@ if *generateFlag {
 ```bash
 # Build and generate
 make build    # includes: make generate
-make generate # standalone: ./bin/server --generate
+make generate # standalone: ./bin/site --generate
 ```
 
 ## Design
@@ -120,15 +120,15 @@ if *generateFlag {
 ### Makefile integration
 
 ```makefile
-## build: Build the server binary
+## build: Build the site binary
 build: check-templ
     templ generate
-    go build -ldflags "..." -o bin/server ./cmd/server
+    go build -ldflags "..." -o bin/site ./cmd/site
     $(MAKE) generate
 
 ## generate: Generate static pages
 generate:
-    ./bin/server --generate
+    ./bin/site --generate
 ```
 
 ### CI verification
@@ -138,8 +138,8 @@ CI builds the binary, generates pages, and verifies they match what's committed:
 ```yaml
 - name: Generate static pages
   run: |
-    go build -o bin/server ./cmd/server
-    ./bin/server --generate
+    go build -o bin/site ./cmd/site
+    ./bin/site --generate
 
 - name: Verify generated static pages are committed
   run: |

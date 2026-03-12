@@ -292,6 +292,10 @@ const (
     MsgMinAge            = "Does not meet minimum age requirement"
     MsgMaxAge            = "Exceeds maximum age"
     MsgPasswordWeak      = "Password is too weak"
+    MsgHasUpper          = "Must contain an uppercase letter"
+    MsgHasLower          = "Must contain a lowercase letter"
+    MsgHasDigit          = "Must contain a digit"
+    MsgHasSpecial        = "Must contain a special character"
     MsgValidatorNotFound = "Unknown validator"
 )
 ```
@@ -368,6 +372,24 @@ func MinAge(birthDate string, minAge int) string      // birthDate: YYYY-MM-DD
 func MinAgeMsg(birthDate string, minAge int, msg string) string
 func MaxAge(birthDate string, maxAge int) string
 func MaxAgeMsg(birthDate string, maxAge int, msg string) string
+```
+
+#### Character-Class Validators
+
+Individual checks for composable password rules:
+
+```go
+func HasUpper(value string) string       // "Must contain an uppercase letter"
+func HasUpperMsg(value, msg string) string
+
+func HasLower(value string) string       // "Must contain a lowercase letter"
+func HasLowerMsg(value, msg string) string
+
+func HasDigit(value string) string       // "Must contain a digit"
+func HasDigitMsg(value, msg string) string
+
+func HasSpecial(value string) string     // "Must contain a special character"
+func HasSpecialMsg(value, msg string) string
 ```
 
 #### Password Strength
@@ -694,34 +716,42 @@ func SetFlash(c echo.Context, message string, flashType FlashType)
 func GetFlash(c echo.Context) *FlashMessage  // nil if none
 ```
 
-#### Request ID
-
-```go
-const HeaderRequestID = "X-Request-ID"
-
-func RequestID() echo.MiddlewareFunc
-```
-Generates or propagates a request ID, attaches a structured logger, and
-logs request completion.
-
 #### Cache Control
 
 ```go
+type CacheConfig struct {
+    ImmutableExtensions []string  // default: DefaultImmutableExtensions
+    ImmutableMaxAge     int       // seconds, default: 31536000 (1 year)
+    StaticExtensions    []string  // default: DefaultStaticExtensions
+    StaticMaxAge        int       // seconds, default: 86400 (1 day)
+    DisableCaching      bool
+}
+
+var DefaultImmutableExtensions = []string{".webp", ".jpg", ".jpeg", ".png", ".gif", ".svg", ".ico", ".woff2", ".woff", ".ttf", ".eot"}
+var DefaultStaticExtensions    = []string{".css", ".js"}
+
 func CacheControl(disableCaching bool) echo.MiddlewareFunc
+func CacheControlWithConfig(cfg CacheConfig) echo.MiddlewareFunc
 ```
-Sets Cache-Control headers based on asset type. When disableCaching is true,
-every response gets no-cache directives.
+`CacheControl` delegates to `CacheControlWithConfig`. Sets Cache-Control headers
+based on asset type. When DisableCaching is true, every response gets no-cache directives.
 
 #### Security Headers
 
 ```go
 type SecureConfig struct {
-    ContentSecurityPolicy string
+    ContentSecurityPolicy string  // default: "default-src 'self'"
+    XFrameOptions         string  // default: "DENY"
+    ReferrerPolicy        string  // default: "strict-origin-when-cross-origin"
+    XSSProtection         string  // default: "0"
+    ContentTypeNosniff    string  // default: "nosniff"
 }
 
 func Secure() echo.MiddlewareFunc
 func SecureWithConfig(cfg SecureConfig) echo.MiddlewareFunc
 ```
+Zero-value fields use defaults. Backwards-compatible — existing code that only sets
+`ContentSecurityPolicy` continues to work unchanged.
 
 #### RBAC
 
@@ -1691,6 +1721,7 @@ func WithSubjectIDFunc(fn func(r *http.Request) string) HubOption
 func WithOnMessage(fn func(*Client, []byte)) HubOption       // nil = server-push-only
 func WithAcceptOptions(opts *ws.AcceptOptions) HubOption
 func WithLogger(l *slog.Logger) HubOption
+func WithSendBufferSize(n int) HubOption                     // default: 256, <=0 uses default
 ```
 
 #### Hub Sending

@@ -68,7 +68,6 @@ github.com/FyrmForge/hamr/
 │   │   ├── rbac.go                     # RequireRoles, RequireActive (callback-based)
 │   │   ├── flash.go                    # Cookie-based one-time flash messages
 │   │   ├── ratelimit.go               # Token bucket rate limiter
-│   │   ├── requestid.go               # UUID request tracing + structured logging
 │   │   ├── cache.go                    # Per-asset-type cache headers
 │   │   ├── audit.go                    # Mutation audit logging (AuditLogger interface)
 │   │   ├── csrf.go                     # CSRF config helper for Echo
@@ -105,7 +104,7 @@ github.com/FyrmForge/hamr/
 │       │   ├── generator.go           # Project generation orchestrator
 │       │   └── files.go               # Template execution + file writing
 │       └── templates/                  # Embedded text/template files
-│           ├── cmd/server/
+│           ├── cmd/site/
 │           ├── internal/
 │           ├── static/
 │           ├── docs/
@@ -260,7 +259,8 @@ Response headers:
 - PG store uses an `UNLOGGED` table (`_rate_limits`) with `ON CONFLICT ... DO UPDATE` for atomic increment + window expiry; periodic cleanup via janitor task
 - Migration ships with the middleware package (auto-created when PG store is used)
 
-### 17. `pkg/middleware/requestid.go`
+### 17. `internal/middleware/logging.go` (scaffolded)
+- Moved from framework to scaffold — users own and edit this middleware directly
 - Generates UUID or uses `X-Request-ID` header
 - Adds to slog context with client IP
 - Logs request method, status, duration
@@ -309,7 +309,7 @@ Response headers:
   - Security headers: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `X-XSS-Protection: 0` (rely on CSP), `Content-Security-Policy: default-src 'self'` (overridable)
 - **Route group convention** (generated in project's `web/server.go`, not hardcoded in framework):
   ```
-  Global  (all routes) → recovery, request ID, logging, audit
+  Global  (all routes) → recovery, logging (scaffolded), audit
   Site    (/)          → sessions, CSRF, flash, cache, secure headers
   API     (/api/)      → CORS, rate limit, bearer auth (when added)
   ```
@@ -464,7 +464,7 @@ type ServiceConfig struct {
 ### 33. Generated Project Structure
 ```
 <project>/
-├── cmd/server/
+├── cmd/site/
 │   ├── main.go                 # Bootstrap: env config, db, migrate, services, server
 │   └── Dockerfile
 ├── cmd/syncstatic/             # (if s3-watcher) Watches static/ and syncs to S3
@@ -669,7 +669,7 @@ All files use `//go:build e2e` build tag — excluded from normal `go test ./...
 **`e2e-go/testcontainers_setup.go`** — Fully containerized infrastructure:
 - Creates isolated Docker network per test run (timestamped name)
 - PostgreSQL container (`postgres:18-alpine`) with network alias `postgres`
-- App server container (built from project's `cmd/server/Dockerfile`)
+- App server container (built from project's `cmd/site/Dockerfile`)
 - Waits for health check: `wait.ForHTTP("/health").WithStartupTimeout(60s)`
 - Waits for migrations: polls `information_schema.tables` until expected tables exist
 - Seeds test data: `//go:embed testdata/seed_e2e.sql`
@@ -937,7 +937,7 @@ After each sprint:
 After Sprint 6 (CLI complete):
 - Run `go run ./cmd/hamr new testproject --module github.com/test/testproject`
 - Verify generated project compiles: `cd testproject && go build ./...`
-- Verify generated project runs: `go run ./cmd/server`
+- Verify generated project runs: `go run ./cmd/site`
 - Verify templ generates: `templ generate`
 - Verify all docs exist (adr/, features/, ai-guides/, AGENTS.md, CLAUDE.md)
 - Verify Makefile targets work

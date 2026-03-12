@@ -49,9 +49,9 @@ Subsequent calls to `FromContext(ctx)` return a logger with those attributes att
 
 ## Integration with Middleware
 
-The `RequestID` middleware automatically stores a logger with `request_id` and
-`client_ip` in the request context. Handlers and services that use
-`logging.FromContext(ctx)` get those attributes for free.
+The scaffolded `Logging` middleware (`internal/middleware/logging.go`) automatically
+stores a logger with `request_id` and `client_ip` in the request context. Handlers
+and services that use `logging.FromContext(ctx)` get those attributes for free.
 
 ```go
 func (h *Handler) GetUser(c echo.Context) error {
