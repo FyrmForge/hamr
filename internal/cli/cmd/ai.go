@@ -15,4 +15,5 @@ and future agent-facing workflows.`,
 
 func init() {
 	aiCmd.AddCommand(captureCmd)
+	aiCmd.AddCommand(upgradeCmd)
 }

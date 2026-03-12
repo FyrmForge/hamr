@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/FyrmForge/hamr/internal/cli/generator"
 	"github.com/spf13/cobra"
@@ -138,6 +140,9 @@ When all flags are provided, no interactive prompts are shown.`,
 			}
 		}
 
+		cfg.HamrVersion = normalizeHamrVersion(version)
+		cfg.ScaffoldedAt = time.Now().Format("2006-01-02")
+
 		if err := cfg.Validate(); err != nil {
 			return err
 		}
@@ -233,6 +238,32 @@ func applyWizardResult(cmd *cobra.Command, name string, res *wizardResult, cfg *
 	if res.StorageBackend == "s3" {
 		cfg.StaticS3 = res.StaticS3 == "yes"
 	}
+}
+
+// normalizeHamrVersion returns a clean semver string for embedding in hamr.toml.
+// Released builds pass through as-is. Dev builds resolve the latest git tag and
+// append "-dev" (e.g. "0.5.0-dev"). Falls back to "0.0.0-dev" when no tag exists.
+func normalizeHamrVersion(v string) string {
+	v = strings.TrimPrefix(v, "v")
+	if v != "dev" && v != "" {
+		return v
+	}
+	// Dev build — resolve latest tag from git.
+	tag := latestGitTag()
+	if tag != "" {
+		return tag + "-dev"
+	}
+	return "0.0.0-dev"
+}
+
+// latestGitTag returns the most recent semver tag (without "v" prefix), or ""
+// if no tags exist or git is unavailable.
+func latestGitTag() string {
+	out, err := exec.Command("git", "describe", "--tags", "--abbrev=0").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimPrefix(strings.TrimSpace(string(out)), "v")
 }
 
 func init() {

@@ -87,7 +87,7 @@ Status in the current worktree:
 - [ ] `hamr ai context` is not implemented yet
 - [ ] `hamr ai export llms.txt` is not implemented yet
 - [ ] `hamr ai validate llms.txt` is not implemented yet
-- [ ] `hamr ai upgrade` is not implemented yet
+- [x] `hamr ai upgrade` is implemented
 
 ## MVP
 

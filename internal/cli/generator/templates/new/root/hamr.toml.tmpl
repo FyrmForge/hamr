@@ -1,3 +1,18 @@
+[hamr]
+version = "{{.HamrVersion}}"
+scaffolded_at = "{{.ScaffoldedAt}}"
+
+[options]
+database = "{{.Database}}"
+db_connector = "{{.DBConnector}}"
+auth = "{{if .IncludeAuth}}session{{else}}none{{end}}"
+css = "{{.CSS}}"
+websockets = {{.IncludeWS}}
+e2e = {{.IncludeE2E}}
+stripe = {{.IncludeStripe}}
+locale = {{.IncludeLocale}}
+storage = "{{.StorageBackend}}"
+
 [proxy]
 listen = ":3000"
 target = ":8080"

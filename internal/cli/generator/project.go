@@ -31,6 +31,8 @@ type ProjectConfig struct {
 	IncludeStripe    bool
 	IncludeLocale    bool
 	DefaultLocale    string // default: "en"
+	HamrVersion      string // HAMR version at scaffold time
+	ScaffoldedAt     string // date the project was scaffolded (YYYY-MM-DD)
 }
 
 // Validate checks that the ProjectConfig has all required fields and valid values.
