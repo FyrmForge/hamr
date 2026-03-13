@@ -117,9 +117,10 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 	requireNotAuth := hamrmw.RequireNotAuth(authCfg)
 	requireAuth := hamrmw.RequireAuth(authCfg)
 
-	site.GET("/login", authHandler.LoginPage, requireNotAuth)
-	site.POST("/login", authHandler.Login, requireNotAuth)
-	site.POST("/login/validate/:field", authHandler.LoginFormRules.ValidationHandler("field"), requireNotAuth)
+	site.GET("/login", authHandler.LoginPage)
+	site.POST("/login", authHandler.Login)
+	site.POST("/login/validate/:field", authHandler.LoginFormRules.ValidationHandler("field"))
+
 	site.GET("/register", authHandler.RegisterPage, requireNotAuth)
 	site.POST("/register", authHandler.Register, requireNotAuth)
 	site.POST("/register/validate/:field", authHandler.RegisterFormRules.ValidationHandler("field"), requireNotAuth)

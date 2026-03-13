@@ -106,7 +106,10 @@ func runUpgrade(cmd *cobra.Command, _ []string) error {
 	if err := writeHumanReport(cmd.OutOrStdout(), report); err != nil {
 		return err
 	}
-	return writeUpgradeLine(cmd.OutOrStdout(), "report saved to %s\n", reportPath)
+	if err := writeUpgradeLine(cmd.OutOrStdout(), "report saved to %s\n", reportPath); err != nil {
+		return err
+	}
+	return writeUpgradeLine(cmd.OutOrStdout(), "don't forget to bump version in hamr.toml if you have upgraded (hamr ai upgrade --applied)\n")
 }
 
 func writeHumanReport(w io.Writer, report *scaffold.DiffReport) error {
