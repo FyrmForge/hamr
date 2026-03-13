@@ -281,6 +281,13 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 		)
 	}
 
+	// pgAdmin server config.
+	if cfg.IncludePgAdmin {
+		files = append(files,
+			templateFile{"templates/new/docker/pgadmin-servers.json.tmpl", "docker/pgadmin/servers.json"},
+		)
+	}
+
 	// E2E files.
 	if cfg.IncludeE2E {
 		files = append(files,

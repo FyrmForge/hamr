@@ -797,11 +797,17 @@ func TestGenerateProject_pgAdmin(t *testing.T) {
 
 	require.NoError(t, GenerateProject(dir, cfg))
 
-	// docker-compose should have pgAdmin service and volume.
+	// docker-compose should have pgAdmin service, volume, and server config mount.
 	compose := readFile(t, dir, "docker/docker-compose.yaml")
 	assert.Contains(t, compose, "pgadmin:")
 	assert.Contains(t, compose, "pgadmin_data:")
 	assert.Contains(t, compose, "dpage/pgadmin4:latest")
+	assert.Contains(t, compose, "pgadmin/servers.json:/pgadmin4/servers.json:ro")
+
+	// pgAdmin servers.json should exist with correct host.
+	serversJSON := readFile(t, dir, "docker/pgadmin/servers.json")
+	assert.Contains(t, serversJSON, `"Host": "postgres"`)
+	assert.Contains(t, serversJSON, `"Port": 5432`)
 
 	// .env.example should have pgAdmin env vars.
 	envFile := readFile(t, dir, ".env.example")
