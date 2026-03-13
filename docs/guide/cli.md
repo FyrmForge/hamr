@@ -7,7 +7,8 @@ hamr
 ├── new [name]              Scaffold a new project
 ├── dev                     Start dev server with file watching + live reload
 ├── ai
-│   └── capture <url>       Capture a browser screenshot of a page
+│   ├── capture <url>       Capture a browser screenshot of a page
+│   └── upgrade             Show scaffold changes between versions via git diff
 ├── sync                    Sync local directory to S3-compatible bucket
 ├── vendor [dep[@version]]  Download/checksum frontend JS deps
 ├── lint
@@ -121,6 +122,34 @@ hamr ai capture https://example.com/dashboard --scroll-selector '.results-pane' 
 ```
 
 By default the command creates a per-capture folder under `.hamr/captures/` and writes `screenshot.png`, optional `screenshot.txt` / `screenshot.html`, plus `meta.json`. `--out` lets you force a specific PNG path instead.
+
+---
+
+## hamr ai upgrade
+
+Show scaffold changes between the project's baseline version and the current HAMR version by diffing the actual HAMR repository between version tags.
+
+```bash
+hamr ai upgrade [flags]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--json` | `false` | Output as JSON |
+| `--from` | — | Override the base version to diff from |
+| `--applied` | `false` | Update project baseline to current HAMR version |
+| `--dir` | `.hamr/ai/upgrades` | Directory to save the upgrade report |
+
+```bash
+hamr ai upgrade                    # diff between project version and current HAMR
+hamr ai upgrade --json             # structured JSON output
+hamr ai upgrade --from 0.1.0      # override the base version
+hamr ai upgrade --applied          # bump [hamr] version in hamr.toml
+```
+
+The command clones the HAMR repository (bare, partial clone for speed) and runs `git diff` between the two version tags. The output includes a unified diff and stat summary covering all changes — scaffold templates, packages, and configuration.
+
+Reports are saved to `.hamr/ai/upgrades/` as JSON files. An LLM agent can consume the structured output to present changes conversationally and guide the developer through what to adopt.
 
 ---
 

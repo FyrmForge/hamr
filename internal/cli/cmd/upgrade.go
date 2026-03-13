@@ -13,19 +13,21 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// gitDiffFunc is the function used to produce a diff report.
+// Package-level var so tests can substitute a mock.
+var gitDiffFunc = scaffold.GitDiff
+
 var upgradeCmd = &cobra.Command{
 	Use:   "upgrade",
 	Short: "Show scaffold changes between project version and current HAMR",
 	Long: `Compare the project's scaffold baseline version to the current HAMR version
-and produce a report of what has changed.
+by diffing the actual HAMR repository between version tags.
 
-The report includes categorized changes with relevance annotations based on
-the project's scaffold options.
+The report includes a unified diff and stat summary of all changes.
 
 Examples:
   hamr ai upgrade
   hamr ai upgrade --json
-  hamr ai upgrade --category structural --relevant-only
   hamr ai upgrade --from 0.1.0
   hamr ai upgrade --applied`,
 	Args: cobra.NoArgs,
@@ -34,18 +36,14 @@ Examples:
 
 func init() {
 	upgradeCmd.Flags().Bool("json", false, "output as JSON")
-	upgradeCmd.Flags().String("category", "", "filter to a specific category")
 	upgradeCmd.Flags().String("from", "", "override the base version to diff from")
-	upgradeCmd.Flags().Bool("relevant-only", false, "only show changes relevant to project options")
 	upgradeCmd.Flags().Bool("applied", false, "update project baseline to current HAMR version")
 	upgradeCmd.Flags().String("dir", "", "directory to save the upgrade report (defaults to .hamr/ai/upgrades)")
 }
 
 func runUpgrade(cmd *cobra.Command, _ []string) error {
 	jsonOutput, _ := cmd.Flags().GetBool("json")
-	category, _ := cmd.Flags().GetString("category")
 	fromVersion, _ := cmd.Flags().GetString("from")
-	relevantOnly, _ := cmd.Flags().GetBool("relevant-only")
 	applied, _ := cmd.Flags().GetBool("applied")
 	reportDir, _ := cmd.Flags().GetString("dir")
 
@@ -71,16 +69,19 @@ func runUpgrade(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("no [hamr] section in hamr.toml; use --from to specify a base version")
 	}
 
-	filters := scaffold.ReportFilters{
-		Category:     scaffold.Category(category),
-		FromVersion:  fromVersion,
-		RelevantOnly: relevantOnly,
+	baseVersion := meta.Hamr.Version
+	if fromVersion != "" {
+		baseVersion = fromVersion
 	}
 
-	report, err := scaffold.BuildReport(meta, version, scaffold.Changes(), filters)
+	report, err := gitDiffFunc(cmd.Context(), scaffold.HamrRepoURL, baseVersion, version)
 	if err != nil {
 		return err
 	}
+
+	// Populate project metadata from hamr.toml.
+	report.Project.ScaffoldedAt = meta.Hamr.ScaffoldedAt
+	report.Project.Options = meta.Options
 
 	// Save report to disk.
 	if reportDir == "" {
@@ -108,7 +109,7 @@ func runUpgrade(cmd *cobra.Command, _ []string) error {
 	return writeUpgradeLine(cmd.OutOrStdout(), "report saved to %s\n", reportPath)
 }
 
-func writeHumanReport(w io.Writer, report *scaffold.UpgradeReport) error {
+func writeHumanReport(w io.Writer, report *scaffold.DiffReport) error {
 	if _, err := fmt.Fprintf(w, "scaffold upgrade report\n"); err != nil {
 		return err
 	}
@@ -124,41 +125,26 @@ func writeHumanReport(w io.Writer, report *scaffold.UpgradeReport) error {
 		return err
 	}
 
-	if len(report.Changes) == 0 {
-		_, err := fmt.Fprintf(w, "\nno scaffold changes between v%s and v%s\n",
+	if report.Diff == "" {
+		_, err := fmt.Fprintf(w, "\nno changes between v%s and v%s\n",
 			report.Project.BaseVersion, report.Project.CurrentVersion)
 		return err
 	}
 
-	if _, err := fmt.Fprintln(w); err != nil {
-		return err
-	}
-
-	for i, c := range report.Changes {
-		relevance := ""
-		if !c.Relevant {
-			relevance = " (not relevant)"
-		}
-		if _, err := fmt.Fprintf(w, "%d. [%s] %s (since v%s)%s\n",
-			i+1, c.Category, c.Title, c.Since, relevance); err != nil {
+	if report.DiffStat != "" {
+		if _, err := fmt.Fprintf(w, "\n--- summary ---\n%s\n", report.DiffStat); err != nil {
 			return err
 		}
-		if c.Summary != "" {
-			if _, err := fmt.Fprintf(w, "   %s\n", c.Summary); err != nil {
-				return err
-			}
-		}
-		if !c.Relevant && c.RelevanceReason != "" {
-			if _, err := fmt.Fprintf(w, "   reason: %s\n", c.RelevanceReason); err != nil {
-				return err
-			}
-		}
+	}
+
+	if _, err := fmt.Fprintf(w, "\n--- diff ---\n%s\n", report.Diff); err != nil {
+		return err
 	}
 
 	return nil
 }
 
-func writeReportFile(dir string, report *scaffold.UpgradeReport) (string, error) {
+func writeReportFile(dir string, report *scaffold.DiffReport) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}

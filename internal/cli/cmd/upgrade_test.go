@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -19,12 +20,37 @@ func newUpgradeTestCmd() *cobra.Command {
 		RunE: runUpgrade,
 	}
 	cmd.Flags().Bool("json", false, "output as JSON")
-	cmd.Flags().String("category", "", "filter category")
 	cmd.Flags().String("from", "", "from version")
-	cmd.Flags().Bool("relevant-only", false, "relevant only")
 	cmd.Flags().Bool("applied", false, "mark as applied")
 	cmd.Flags().String("dir", "", "report dir")
 	return cmd
+}
+
+// mockGitDiff returns a canned DiffReport for testing.
+func mockGitDiff(_ context.Context, _, base, current string) (*scaffold.DiffReport, error) {
+	if base == current {
+		return &scaffold.DiffReport{
+			Project: scaffold.DiffProjectInfo{
+				BaseVersion:    base,
+				CurrentVersion: current,
+			},
+		}, nil
+	}
+	return &scaffold.DiffReport{
+		Project: scaffold.DiffProjectInfo{
+			BaseVersion:    base,
+			CurrentVersion: current,
+		},
+		Diff:     "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new",
+		DiffStat: " file.txt | 2 +-\n 1 file changed, 1 insertion(+), 1 deletion(-)",
+	}, nil
+}
+
+func withMockGitDiff(t *testing.T) {
+	t.Helper()
+	old := gitDiffFunc
+	gitDiffFunc = mockGitDiff
+	t.Cleanup(func() { gitDiffFunc = old })
 }
 
 func TestUpgradeDevVersion(t *testing.T) {
@@ -75,6 +101,8 @@ listen = ":3000"
 }
 
 func TestUpgradeMissingHamrSectionWithFrom(t *testing.T) {
+	withMockGitDiff(t)
+
 	old := version
 	version = "0.5.0"
 	defer func() { version = old }()
@@ -100,12 +128,13 @@ listen = ":3000"
 	assert.Contains(t, output, "scaffold upgrade report")
 	assert.Contains(t, output, "v0.1.0")
 	assert.Contains(t, output, "v0.5.0")
-	// Registry has changes since 0.2.0 which fall within 0.1.0 → 0.5.0.
-	assert.NotContains(t, output, "no scaffold changes")
+	assert.Contains(t, output, "--- diff ---")
 	assert.Contains(t, output, "report saved to")
 }
 
 func TestUpgradeHumanOutput(t *testing.T) {
+	withMockGitDiff(t)
+
 	old := version
 	version = "0.5.0"
 	defer func() { version = old }()
@@ -135,11 +164,45 @@ auth = "session"
 	assert.Contains(t, output, "scaffold upgrade report")
 	assert.Contains(t, output, "v0.3.2")
 	assert.Contains(t, output, "v0.5.0")
-	assert.Contains(t, output, "no scaffold changes")
+	assert.Contains(t, output, "--- summary ---")
+	assert.Contains(t, output, "--- diff ---")
 	assert.Contains(t, output, "report saved to")
 }
 
+func TestUpgradeHumanOutputNoDiff(t *testing.T) {
+	withMockGitDiff(t)
+
+	old := version
+	version = "0.3.2"
+	defer func() { version = old }()
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "hamr.toml"), []byte(`[hamr]
+version = "0.3.2"
+scaffolded_at = "2026-03-11"
+
+[options]
+database = "postgres"
+`), 0o644))
+
+	origDir, _ := os.Getwd()
+	defer func() { _ = os.Chdir(origDir) }() //nolint:errcheck
+	_ = os.Chdir(dir)
+
+	cmd := newUpgradeTestCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := cmd.RunE(cmd, nil)
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, "no changes between")
+}
+
 func TestUpgradeJSONOutput(t *testing.T) {
+	withMockGitDiff(t)
+
 	old := version
 	version = "0.5.0"
 	defer func() { version = old }()
@@ -167,11 +230,11 @@ database = "postgres"
 	require.NoError(t, err)
 
 	// Stdout should be pure JSON (no "report saved to" mixed in).
-	var report scaffold.UpgradeReport
+	var report scaffold.DiffReport
 	require.NoError(t, json.Unmarshal(stdout.Bytes(), &report))
 	assert.Equal(t, "0.3.2", report.Project.BaseVersion)
 	assert.Equal(t, "0.5.0", report.Project.CurrentVersion)
-	assert.NotNil(t, report.Changes)
+	assert.NotEmpty(t, report.Diff)
 
 	// "report saved to" goes to stderr in JSON mode.
 	assert.Contains(t, stderr.String(), "report saved to")

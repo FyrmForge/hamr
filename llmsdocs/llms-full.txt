@@ -23,7 +23,7 @@
   it is not part of the hamr framework itself.
 - **hamr dev**: Dev server with file watching, auto-rebuild, and live reload.
 - **hamr ai capture**: Browser screenshot capture with HTML/text/metadata sidecars.
-- **hamr ai upgrade**: Machine-readable scaffold upgrade report comparing project version to current HAMR.
+- **hamr ai upgrade**: Git-based scaffold upgrade report. Clones the HAMR repo and diffs between version tags to produce a unified diff and stat summary of all changes between the project's baseline and current HAMR.
 - **.hamr/ai/**: Playground directory for all AI command artifacts (captures, upgrade reports). Gitignored. Configurable via `[ai] dir` in hamr.toml.
 - **hamr locale gen**: Code generator for type-safe i18n accessors.
 - **respond.Redirect**: HTMX-aware redirect that sets HX-Redirect for HTMX
@@ -1843,12 +1843,12 @@ bundle directory. The meta.json includes `tile_paths`, `tile_count`,
 
 ### hamr ai upgrade
 
-> Machine-readable scaffold upgrade report comparing the project's baseline
+> Git-based scaffold upgrade report comparing the project's baseline
 > version to the current HAMR version.
 
 Reads `[hamr]` and `[options]` sections from `hamr.toml` to determine the
-project's scaffold baseline and options. Produces a categorized change report
-annotated with relevance based on the project's options.
+project's scaffold baseline and options. Clones the HAMR repo (bare, partial
+clone) and diffs between version tags to produce a unified diff and stat summary.
 
 ```text
 hamr ai upgrade [flags]
@@ -1856,9 +1856,7 @@ hamr ai upgrade [flags]
 
 Flags:
 - `--json` — output as structured JSON
-- `--category <cat>` — filter to a specific category (structural, package_update, new_package, new_option, pattern, config)
 - `--from <version>` — override the base version to diff from (instead of reading hamr.toml)
-- `--relevant-only` — only show changes relevant to the project's options
 - `--applied` — update `[hamr] version` in hamr.toml to the current HAMR version
 - `--dir <path>` — directory to save the upgrade report (defaults to `.hamr/ai/upgrades/`)
 
