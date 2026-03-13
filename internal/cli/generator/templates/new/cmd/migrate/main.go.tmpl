@@ -31,7 +31,7 @@ import (
 {{- end}}
 )
 
-var envDatabaseURL = config.GetEnvOrDefault("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/{{.Name}}?sslmode=disable")
+var envDatabaseURL = config.GetEnvOrDefault("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/{{.Name | lower}}?sslmode=disable")
 {{- if eq .DBConnector "sqlx"}}
 
 const usage = `Usage: migrate <command> [args]

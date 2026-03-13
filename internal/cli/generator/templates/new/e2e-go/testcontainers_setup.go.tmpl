@@ -60,7 +60,7 @@ func SetupSharedEnvironment(local bool) {
 	// Start PostgreSQL container.
 	pgContainer, err := tcpostgres.Run(ctx,
 		"postgres:18-alpine",
-		tcpostgres.WithDatabase("{{.Name}}_e2e"),
+		tcpostgres.WithDatabase("{{.Name | lower}}_e2e"),
 		tcpostgres.WithUsername("postgres"),
 		tcpostgres.WithPassword("postgres"),
 		testcontainers.CustomizeRequest(testcontainers.GenericContainerRequest{
@@ -98,7 +98,7 @@ func SetupSharedEnvironment(local bool) {
 	}
 
 	// Database URL for the server container (uses network alias).
-	containerDBURL := "postgres://postgres:postgres@postgres:5432/{{.Name}}_e2e?sslmode=disable"
+	containerDBURL := "postgres://postgres:postgres@postgres:5432/{{.Name | lower}}_e2e?sslmode=disable"
 
 	// Build and start the server container.
 	serverContainer, srvURL := startServerContainer(ctx, containerDBURL, networkName)
@@ -224,7 +224,7 @@ func setupLocalEnvironment() *TestEnvironment {
 	}
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		dbURL = "postgres://postgres:postgres@localhost:5432/{{.Name}}?sslmode=disable"
+		dbURL = "postgres://postgres:postgres@localhost:5432/{{.Name | lower}}?sslmode=disable"
 	}
 
 	fmt.Printf("E2E: using local server at %s\n", srvURL)

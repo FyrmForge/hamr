@@ -8,7 +8,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: postgres
+      POSTGRES_DB: {{.Name | lower}}
     volumes:
       - pg_data:/var/lib/postgresql/data
     restart: unless-stopped
@@ -29,6 +29,7 @@ services:
     volumes:
       - pgadmin_data:/var/lib/pgadmin
       - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
+      - ./pgadmin/pgpass:/pgadmin4/pgpass:ro
     restart: unless-stopped
     depends_on:
       postgres:

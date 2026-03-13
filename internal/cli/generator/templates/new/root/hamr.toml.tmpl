@@ -67,7 +67,7 @@ reload = "full"
 # Sync generated static pages to S3 (uncomment to enable)
 # [[dev.daemon]]
 # name = "sync-generated"
-# cmd = "hamr sync --dir generated --watch --bucket {{.Name}}-static"
+# cmd = "hamr sync --dir generated --watch --bucket {{.Name | lower}}-static"
 
 # Multi service example
 # [[dev.watch]]

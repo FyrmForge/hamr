@@ -443,7 +443,7 @@ func TestGenerateProject_dockerCompose(t *testing.T) {
 
 	compose := readFile(t, dir, "docker/docker-compose.yaml")
 	assert.Contains(t, compose, "postgres:")
-	assert.Contains(t, compose, "POSTGRES_DB: postgres")
+	assert.Contains(t, compose, "POSTGRES_DB: dcproj")
 	assert.Contains(t, compose, "pg_data:")
 }
 
@@ -803,11 +803,17 @@ func TestGenerateProject_pgAdmin(t *testing.T) {
 	assert.Contains(t, compose, "pgadmin_data:")
 	assert.Contains(t, compose, "dpage/pgadmin4:latest")
 	assert.Contains(t, compose, "pgadmin/servers.json:/pgadmin4/servers.json:ro")
+	assert.Contains(t, compose, "pgadmin/pgpass:/pgadmin4/pgpass:ro")
 
-	// pgAdmin servers.json should exist with correct host.
+	// pgAdmin servers.json should exist with correct host and passfile.
 	serversJSON := readFile(t, dir, "docker/pgadmin/servers.json")
 	assert.Contains(t, serversJSON, `"Host": "postgres"`)
 	assert.Contains(t, serversJSON, `"Port": 5432`)
+	assert.Contains(t, serversJSON, `"PassFile": "/pgadmin4/pgpass"`)
+
+	// pgAdmin pgpass file should exist.
+	pgpass := readFile(t, dir, "docker/pgadmin/pgpass")
+	assert.Contains(t, pgpass, "postgres:5432:*:postgres:postgres")
 
 	// .env.example should have pgAdmin env vars.
 	envFile := readFile(t, dir, ".env.example")

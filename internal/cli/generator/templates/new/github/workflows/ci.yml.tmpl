@@ -27,11 +27,11 @@ jobs:
     #     env:
     #       POSTGRES_USER: postgres
     #       POSTGRES_PASSWORD: postgres
-    #       POSTGRES_DB: {{.Name}}
+    #       POSTGRES_DB: {{.Name | lower}}
     #     ports:
     #       - 5432:5432
     #     options: >-
-    #       --health-cmd "pg_isready -U postgres -d {{.Name}}"
+    #       --health-cmd "pg_isready -U postgres -d {{.Name | lower}}"
     #       --health-interval 10s
     #       --health-timeout 5s
     #       --health-retries 5
@@ -87,7 +87,7 @@ jobs:
 
       # - name: Run migrations
       #   env:
-      #     DATABASE_URL: postgres://postgres:postgres@localhost:5432/{{.Name}}?sslmode=disable
+      #     DATABASE_URL: postgres://postgres:postgres@localhost:5432/{{.Name | lower}}?sslmode=disable
       #   run: make migrate
 
       - name: Verify generated static pages are committed

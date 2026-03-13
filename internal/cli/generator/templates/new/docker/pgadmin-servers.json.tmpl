@@ -6,8 +6,9 @@
       "Host": "postgres",
       "Port": 5432,
       "Username": "postgres",
-      "MaintenanceDB": "postgres",
-      "SSLMode": "prefer"
+      "MaintenanceDB": "{{.Name | lower}}",
+      "SSLMode": "prefer",
+      "PassFile": "/pgadmin4/pgpass"
     }
   }
 }

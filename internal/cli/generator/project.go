@@ -285,6 +285,7 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 	if cfg.IncludePgAdmin {
 		files = append(files,
 			templateFile{"templates/new/docker/pgadmin-servers.json.tmpl", "docker/pgadmin/servers.json"},
+			templateFile{"templates/new/docker/pgadmin-pgpass.tmpl", "docker/pgadmin/pgpass"},
 		)
 	}
 
