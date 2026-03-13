@@ -64,9 +64,12 @@ api.POST("/users", userHandler.Create)
 
 ### Typical Middleware Layout
 
+Infrastructure middleware is applied at the group level:
+
 ```
-Group-level (infrastructure)  → sessions, CSRF, flash, cache, secure headers, CORS, rate limit
-Per-route   (auth/RBAC)       → RequireAuth, RequireNotAuth, Auth, RequireRoles, RequireActive
+Global  (all routes)  → recovery, logging (scaffolded), audit
+Site    (/)           → sessions, CSRF, flash, cache, secure headers
+API     (/api/)       → CORS, rate limit, bearer auth
 ```
 
 Auth and RBAC middleware is applied per-route so every route's access requirements are visible at its definition site:

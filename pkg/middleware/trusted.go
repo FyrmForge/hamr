@@ -15,7 +15,8 @@ const headerSubjectID = "X-Subject-ID"
 // forwards the authenticated subject's identity. It should only be used on
 // internal networks, never exposed publicly.
 //
-//	e.Use(middleware.TrustedSubject())
+//	trusted := middleware.TrustedSubject()
+//	api.GET("/billing", billingHandler.Get, trusted)
 func TrustedSubject() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {

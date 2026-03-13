@@ -235,7 +235,10 @@ site.GET("/settings", settingsHandler.Index, requireAuth, requireActive)
 When your app runs behind an API gateway (e.g., nginx, Traefik) that has already authenticated the request and forwards the subject ID:
 
 ```go
-internalGroup.Use(middleware.TrustedSubject())
+trusted := middleware.TrustedSubject()
+
+api.GET("/billing", billingHandler.Get, trusted)
+api.POST("/billing", billingHandler.Create, trusted)
 ```
 
 Reads `X-Subject-ID` header. Same `GetSubjectID(c)` API as session-based auth.

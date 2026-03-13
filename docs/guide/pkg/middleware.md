@@ -12,13 +12,19 @@ import "github.com/FyrmForge/hamr/pkg/middleware"
 
 ## Design
 
-All middleware is group-agnostic — none hardcode path skips. Infrastructure middleware
-(sessions, CSRF, flash, secure headers) is applied at the group level. Auth and RBAC
-middleware is applied per-route for explicit, visible access control.
+All middleware is group-agnostic — none hardcode path skips. The generated project wires
+infrastructure middleware to the appropriate route group:
 
 ```
-Group-level (infrastructure)  → sessions, CSRF, flash, cache, secure headers, CORS, rate limit
-Per-route   (auth/RBAC)       → RequireAuth, RequireNotAuth, Auth, RequireRoles, RequireActive
+Global  (all routes)  → recovery, logging (scaffolded), audit
+Site    (/)           → sessions, CSRF, flash, cache, secure headers
+API     (/api/)       → CORS, rate limit, bearer auth
+```
+
+Auth and RBAC middleware is applied per-route for explicit, visible access control:
+
+```
+Per-route  → RequireAuth, RequireNotAuth, Auth, RequireRoles, RequireActive
 ```
 
 ## Authentication
@@ -64,7 +70,10 @@ user := middleware.GetSubject(c).(*models.User)
 For services behind a gateway that forwards the authenticated subject ID:
 
 ```go
-internalGroup.Use(middleware.TrustedSubject())
+trusted := middleware.TrustedSubject()
+
+api.GET("/billing", billingHandler.Get, trusted)
+api.POST("/billing", billingHandler.Create, trusted)
 ```
 
 Reads `X-Subject-ID` header and sets it in context. Same `GetSubjectID(c)` API as

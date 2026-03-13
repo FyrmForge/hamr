@@ -26,7 +26,6 @@ import (
 	"{{.Module}}/internal/service"
 	authhandler "{{.Module}}/internal/web/handler/auth"
 {{- end}}
-	"{{.Module}}/internal/web/handler/about"
 	"{{.Module}}/internal/web/handler/errors"
 	"{{.Module}}/internal/web/handler/health"
 	"{{.Module}}/internal/web/handler/home"
@@ -109,9 +108,6 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 
 	homeHandler := home.NewHandler()
 	site.GET("/", homeHandler.Index)
-
-	aboutHandler := about.NewHandler()
-	site.GET("/about", aboutHandler.About)
 {{- if .IncludeAuth}}
 
 	// Auth routes.
