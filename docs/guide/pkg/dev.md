@@ -71,8 +71,8 @@ debounce = 100
 name = "go"
 watch = ["**/*.go", "**/*.templ"]
 ignore = ["*_templ.go", "*_test.go"]
-cmd = "go build -o ./bin/app ./cmd/site"
-run = "./bin/app"
+cmd = "go build -o ./bin/site ./cmd/site && ./bin/site --generate"
+run = "./bin/site"
 depends = ["templ"]
 reload = "full"
 ```
@@ -212,6 +212,16 @@ When a build command fails, hamr:
 3. Continues watching for changes
 4. Automatically reloads when the error is fixed
 
+### Config Errors
+
+When `hamr.toml` has a syntax or validation error (at startup or after editing):
+1. Logs the error to the terminal
+2. Watches the config file for changes
+3. Automatically retries when the file is saved
+
+This means you can start `hamr dev` with a broken config, fix it in your editor, and
+the dev server picks it up without needing to restart.
+
 ### Backend Down
 
 When the proxied backend is not responding (during initial build or after a crash):
@@ -254,8 +264,8 @@ debounce = 100
 name = "go"
 watch = ["**/*.go", "**/*.templ"]
 ignore = ["*_templ.go", "*_test.go"]
-cmd = "go build -o ./bin/app ./cmd/site"
-run = "./bin/app"
+cmd = "go build -o ./bin/site ./cmd/site && ./bin/site --generate"
+run = "./bin/site"
 depends = ["templ"]
 reload = "full"
 ```
@@ -289,8 +299,8 @@ reload = "css"
 name = "go"
 watch = ["**/*.go", "**/*.templ"]
 ignore = ["*_templ.go", "*_test.go"]
-cmd = "go build -o ./bin/app ./cmd/site"
-run = "./bin/app"
+cmd = "go build -o ./bin/site ./cmd/site && ./bin/site --generate"
+run = "./bin/site"
 depends = ["templ"]
 reload = "full"
 ```
@@ -372,8 +382,8 @@ target = ":8080"
 [[dev.watch]]
 name = "go"
 watch = "**/*.go"
-cmd = "go build -o ./bin/app ./cmd/site"
-run = "./bin/app"
+cmd = "go build -o ./bin/site ./cmd/site && ./bin/site --generate"
+run = "./bin/site"
 reload = "full"
 
 [[dev.watch]]
@@ -407,8 +417,8 @@ cmd = "hamr sync --watch --bucket myapp-static"
 [[dev.watch]]
 name = "go"
 watch = "**/*.go"
-cmd = "go build -o ./bin/app ./cmd/site"
-run = "./bin/app"
+cmd = "go build -o ./bin/site ./cmd/site && ./bin/site --generate"
+run = "./bin/site"
 reload = "full"
 
 [[dev.watch]]
@@ -442,8 +452,8 @@ services = ["mailhog", "minio"]
 [[dev.watch]]
 name = "go"
 watch = "**/*.go"
-cmd = "go build -o ./bin/app ./cmd/site"
-run = "./bin/app"
+cmd = "go build -o ./bin/site ./cmd/site && ./bin/site --generate"
+run = "./bin/site"
 reload = "full"
 ```
 

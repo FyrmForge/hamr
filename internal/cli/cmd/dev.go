@@ -51,7 +51,13 @@ func runDev(cmd *cobra.Command, _ []string) error {
 	for {
 		cfg, err := devserver.LoadConfig(configPath)
 		if err != nil {
-			return fmt.Errorf("load config: %w", err)
+			fmt.Printf("%s config error: %v\n", devserver.HamrDevTag(), err)
+			fmt.Printf("%s waiting for config fix...\n", devserver.HamrDevTag())
+			if waitErr := devserver.WaitForConfigChange(ctx, configPath); waitErr != nil {
+				return waitErr
+			}
+			fmt.Printf("\n%s--- config changed, retrying ---\n", devserver.HamrDevTag())
+			continue
 		}
 
 		runner := devserver.NewRunner(cfg,

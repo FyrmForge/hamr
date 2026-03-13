@@ -92,8 +92,8 @@ cmd = "templ generate"
 name = "go"
 watch = ["**/*.go", "**/*.templ"]
 ignore = ["*_templ.go", "*_test.go"]
-cmd = "go build -o ./bin/app ./cmd/site"
-run = "./bin/app"
+cmd = "go build -o ./bin/site ./cmd/site && ./bin/site --generate"
+run = "./bin/site"
 depends = ["templ"]
 reload = "full"
 ```

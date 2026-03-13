@@ -58,8 +58,8 @@ debounce = 200
 name = "site"
 watch = ["**/*.go", "**/*.templ"]
 ignore = ["*_templ.go", "*_test.go"]
-cmd = "go build -o ./bin/app ./cmd/site"
-run = "./bin/app"
+cmd = "go build -o ./bin/static-gen ./cmd/static-gen && ./bin/static-gen --generate"
+run = "./bin/site"
 depends = ["templ"{{- if .IncludeLocale}}, "locale"{{- end}}]
 reload = "full"
 
@@ -73,8 +73,8 @@ reload = "full"
 # name = "site"
 # watch = ["internal/**/*.go", "cmd/site/*.go", "**/*.templ"]
 # ignore = ["*_templ.go", "*_test.go", "internal/api/**"]
-# cmd = "go build -o ./bin/app ./cmd/site"
-# run = "./bin/app"
+# cmd = "go build -o ./bin/site ./cmd/site && ./bin/site --generate"
+# run = "./bin/site"
 # depends = ["templ"]
 # reload = "full"
  

@@ -57,7 +57,7 @@ listen = ":3000"
 [[dev.watch]]
 name = "site"
 watch = "**/*.go"
-cmd = "go build -o ./bin/app ./cmd/site"
+cmd = "go build -o ./bin/site ./cmd/site"
 `
 		path := writeTempTOML(t, content)
 
