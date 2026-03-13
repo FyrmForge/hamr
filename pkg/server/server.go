@@ -79,9 +79,6 @@ func New(opts ...Option) (*Server, error) {
 
 	// Production defaults — applied in order.
 	e.Use(echoMw.Recover())
-	if s.generatedDir != "" {
-		e.Use(generatedMiddleware(s.generatedDir))
-	}
 	e.Use(echoMw.BodyLimit(s.maxBodySize))
 	e.Use(echoMw.ContextTimeoutWithConfig(echoMw.ContextTimeoutConfig{
 		Timeout: s.timeout,

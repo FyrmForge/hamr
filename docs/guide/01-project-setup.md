@@ -46,8 +46,7 @@ myapp/
 │       └── main.go           # Application entrypoint
 ├── internal/
 │   └── web/
-│       ├── server.go         # Route registration and deps
-│       ├── static.go         # Static page registration (if applicable)
+│       ├── server.go         # Route registration, deps, and static pages
 │       └── handler/          # Route handlers by domain
 │           └── home/
 │               ├── handler.go

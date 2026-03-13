@@ -2,13 +2,13 @@
 
 `hamr/pkg/server` supports build-time static page generation for routes whose output never
 changes between requests (marketing pages, about, terms, etc.). Eligible pages are
-pre-rendered into `generated/`, committed to git, and served directly at runtime via
-middleware — bypassing the handler chain entirely.
+pre-rendered into `generated/` and committed to git. At runtime, `StaticPage` routes
+serve the generated file when available, falling back to the handler otherwise.
 
 ## Quick Start
 
 ```go
-// internal/web/static.go — register pages for generation
+// internal/web/server.go — register pages for generation and serving
 func RegisterStaticPages(srv *server.Server) {
     h := about.NewHandler()
     srv.StaticPage("/about", h.About)
@@ -49,8 +49,9 @@ Bad candidates: home page with user greeting, dashboard, forms.
 
 ### How it works
 
-1. **Registration**: `StaticPage(path, handler)` stores the path+handler for generation.
-   It does NOT register a route — routes are registered separately for runtime fallback.
+1. **Registration**: `StaticPage(path, handler)` stores the path+handler for generation
+   and registers a GET route. The route serves the pre-rendered file from the generated
+   directory when available, falling back to the handler otherwise.
 
 2. **Generation**: `GenerateStatic(dir)` wipes the output directory first to remove stale
    files from previous runs (e.g. pages that were renamed or removed), then renders each
@@ -59,12 +60,9 @@ Bad candidates: home page with user greeting, dashboard, forms.
    - `/about` → `generated/about/index.html`
    - `/terms/privacy` → `generated/terms/privacy/index.html`
 
-3. **Serving**: `WithGeneratedDir("generated")` adds middleware that checks for a matching
-   file on disk before the handler chain. GET requests with a matching file are served
-   directly; everything else falls through.
-
-4. **Fallback**: Routes are also registered normally via `site.GET(...)`. If the generated
-   file is missing, the full handler chain runs as usual.
+3. **Serving**: `WithGeneratedDir("generated")` tells the server where to find pre-rendered
+   files. Routes registered via `StaticPage` check this directory first and serve the file
+   if it exists; otherwise the handler runs normally.
 
 ### Generated files are committed
 
@@ -75,11 +73,11 @@ committed to git. CI verifies they're up to date.
 
 ### Registration API
 
-Register static pages separately from dynamic routes. Static handlers should have no
-dependencies — no database, sessions, or request-specific state:
+Each `StaticPage` call registers both the generation entry and a GET route. Static
+handlers should have no dependencies — no database, sessions, or request-specific state:
 
 ```go
-// internal/web/static.go
+// internal/web/server.go
 package web
 
 func RegisterStaticPages(srv *server.Server) {
@@ -90,17 +88,6 @@ func RegisterStaticPages(srv *server.Server) {
     srv.StaticPage("/terms", t.Terms)
     srv.StaticPage("/terms/privacy", t.Privacy)
 }
-```
-
-### Runtime fallback routes
-
-Register the same handlers as normal routes for fallback. The generated middleware
-intercepts GET requests before the handler chain:
-
-```go
-// internal/web/server.go — in RegisterRoutes
-aboutHandler := about.NewHandler()
-site.GET("/about", aboutHandler.About)
 ```
 
 ### Server setup
@@ -165,12 +152,12 @@ The server always serves from local disk. A CDN in front handles caching if conf
 ## API Reference
 
 ```go
-// Registration — stores path+handler for generation (does not register a route).
+// Registration — stores path+handler for generation and registers a GET route.
 func (s *Server) StaticPage(path string, handler echo.HandlerFunc)
 
 // Generation — renders all registered static pages to files in dir.
 func (s *Server) GenerateStatic(dir string) error
 
-// Option — enables the generated file serving middleware.
+// Option — sets the directory for pre-rendered static page files.
 func WithGeneratedDir(dir string) Option
 ```

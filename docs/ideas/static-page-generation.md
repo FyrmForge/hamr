@@ -14,7 +14,7 @@ A build-time system that renders eligible pages/resources into static files, whi
   1. Scans registered routes for ones marked as static-eligible
   2. Renders each to its output (HTML, JSON, etc.)
   3. Writes the output to a `static/generated/` directory (or configurable path)
-  4. At runtime, a middleware serves these paths directly from disk, bypassing the normal handler chain
+  4. At runtime, `StaticPage` routes serve these paths directly from disk, falling back to the handler otherwise
 
 - Route-level opt-in via a marker, e.g.:
   ```go

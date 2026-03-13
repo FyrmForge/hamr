@@ -56,7 +56,6 @@ var changes = []Change{
 			"internal/api/server.go",
 			"internal/api/handler/stripe/handler.go",
 			"internal/web/server.go",
-			"internal/web/static.go",
 			"internal/web/handler/about/handler.go",
 			"internal/web/handler/auth/handler.go",
 			"internal/web/handler/errors/handler.go",

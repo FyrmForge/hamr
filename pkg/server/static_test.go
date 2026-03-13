@@ -106,7 +106,21 @@ func TestGenerateStatic_removesStaleFiles(t *testing.T) {
 	assert.True(t, os.IsNotExist(err), "stale file should have been removed")
 }
 
-func TestGeneratedMiddleware_servesFile(t *testing.T) {
+func TestStaticPage_registersRoute(t *testing.T) {
+	srv, err := server.New(server.WithDevMode(true))
+	require.NoError(t, err)
+
+	srv.StaticPage("/about", staticHandler("<h1>About</h1>"))
+
+	req := httptest.NewRequest(http.MethodGet, "/about", nil)
+	rec := httptest.NewRecorder()
+	srv.Echo().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "<h1>About</h1>")
+}
+
+func TestStaticPage_servesGeneratedFile(t *testing.T) {
 	dir := t.TempDir()
 
 	// Pre-create a generated file.
@@ -117,8 +131,8 @@ func TestGeneratedMiddleware_servesFile(t *testing.T) {
 	srv, err := server.New(server.WithDevMode(true), server.WithGeneratedDir(dir))
 	require.NoError(t, err)
 
-	// Register a fallback handler that should NOT be reached.
-	srv.GET("/about", func(c echo.Context) error {
+	// Handler should NOT be called — generated file takes priority.
+	srv.StaticPage("/about", func(c echo.Context) error {
 		return c.String(http.StatusOK, "dynamic fallback")
 	})
 
@@ -130,25 +144,39 @@ func TestGeneratedMiddleware_servesFile(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "<h1>Static About</h1>")
 }
 
-func TestGeneratedMiddleware_fallsThrough(t *testing.T) {
-	dir := t.TempDir() // Empty — no generated files.
+func TestStaticPage_fallsBackToHandler(t *testing.T) {
+	t.Run("no generated dir", func(t *testing.T) {
+		srv, err := server.New(server.WithDevMode(true))
+		require.NoError(t, err)
 
-	srv, err := server.New(server.WithDevMode(true), server.WithGeneratedDir(dir))
-	require.NoError(t, err)
+		srv.StaticPage("/about", staticHandler("dynamic"))
 
-	srv.GET("/about", func(c echo.Context) error {
-		return c.String(http.StatusOK, "dynamic")
+		req := httptest.NewRequest(http.MethodGet, "/about", nil)
+		rec := httptest.NewRecorder()
+		srv.Echo().ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, rec.Body.String(), "dynamic")
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/about", nil)
-	rec := httptest.NewRecorder()
-	srv.Echo().ServeHTTP(rec, req)
+	t.Run("generated dir set but file absent", func(t *testing.T) {
+		dir := t.TempDir() // Empty — no generated files.
 
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "dynamic", rec.Body.String())
+		srv, err := server.New(server.WithDevMode(true), server.WithGeneratedDir(dir))
+		require.NoError(t, err)
+
+		srv.StaticPage("/about", staticHandler("dynamic"))
+
+		req := httptest.NewRequest(http.MethodGet, "/about", nil)
+		rec := httptest.NewRecorder()
+		srv.Echo().ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, rec.Body.String(), "dynamic")
+	})
 }
 
-func TestGeneratedMiddleware_GETOnly(t *testing.T) {
+func TestStaticPage_GETOnly(t *testing.T) {
 	dir := t.TempDir()
 
 	// Pre-create a generated file for /about.
@@ -159,18 +187,16 @@ func TestGeneratedMiddleware_GETOnly(t *testing.T) {
 	srv, err := server.New(server.WithDevMode(true), server.WithGeneratedDir(dir))
 	require.NoError(t, err)
 
-	srv.POST("/about", func(c echo.Context) error {
-		return c.String(http.StatusOK, "post handler")
-	})
+	srv.StaticPage("/about", staticHandler("static"))
 
+	// POST to /about should 405, not serve the static file.
 	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete} {
 		t.Run(method, func(t *testing.T) {
 			req := httptest.NewRequest(method, "/about", nil)
 			rec := httptest.NewRecorder()
 			srv.Echo().ServeHTTP(rec, req)
 
-			// Should NOT serve the static file for non-GET methods.
-			assert.NotContains(t, rec.Body.String(), "static")
+			assert.NotEqual(t, http.StatusOK, rec.Code)
 		})
 	}
 }

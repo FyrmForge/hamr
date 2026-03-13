@@ -66,7 +66,7 @@ Pre-render pages whose output never changes between requests (about, terms, priv
 ### Register Static Pages
 
 ```go
-// internal/web/static.go
+// internal/web/server.go
 func RegisterStaticPages(srv *server.Server) {
     aboutHandler := about.NewHandler()
     srv.StaticPage("/about", aboutHandler.About)
@@ -104,7 +104,7 @@ srv, _ := server.New(
 )
 ```
 
-`WithGeneratedDir` adds middleware that serves matching files directly, bypassing the handler chain. Routes are also registered normally as fallback.
+`WithGeneratedDir` tells the server where to find pre-rendered files. Routes registered via `StaticPage` serve the generated file when available, falling back to the handler otherwise.
 
 ### What Counts as Static-Eligible
 

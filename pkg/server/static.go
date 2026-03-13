@@ -17,11 +17,22 @@ type staticRoute struct {
 	handler echo.HandlerFunc
 }
 
-// StaticPage registers a handler for build-time static generation.
-// It stores the path+handler for GenerateStatic but does NOT register a route.
-// The route should be registered separately via site.GET for runtime fallback.
+// StaticPage registers a handler for both build-time static generation and
+// runtime serving. It stores the path+handler for GenerateStatic and registers
+// a GET route that serves the pre-rendered file from the generated directory
+// (if configured and the file exists), falling back to the handler otherwise.
 func (s *Server) StaticPage(path string, handler echo.HandlerFunc) {
 	s.staticPages = append(s.staticPages, staticRoute{path: path, handler: handler})
+
+	s.echo.GET(path, func(c echo.Context) error {
+		if s.generatedDir != "" {
+			file := staticPathToFile(s.generatedDir, path)
+			if _, err := os.Stat(file); err == nil {
+				return c.File(file)
+			}
+		}
+		return handler(c)
+	})
 }
 
 // GenerateStatic renders all registered static pages to files in dir.
@@ -66,20 +77,3 @@ func staticPathToFile(dir, urlPath string) string {
 	return filepath.Join(dir, p, "index.html")
 }
 
-// generatedMiddleware serves pre-rendered static pages from dir.
-// Only intercepts GET requests where dir/<path>/index.html exists on disk.
-func generatedMiddleware(dir string) echo.MiddlewareFunc {
-	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			if c.Request().Method != http.MethodGet {
-				return next(c)
-			}
-
-			file := staticPathToFile(dir, c.Request().URL.Path)
-			if _, err := os.Stat(file); err != nil {
-				return next(c)
-			}
-			return c.File(file)
-		}
-	}
-}
