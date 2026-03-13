@@ -12,13 +12,13 @@ import "github.com/FyrmForge/hamr/pkg/middleware"
 
 ## Design
 
-All middleware is group-agnostic — none hardcode path skips. The generated project wires
-each middleware to the appropriate route group:
+All middleware is group-agnostic — none hardcode path skips. Infrastructure middleware
+(sessions, CSRF, flash, secure headers) is applied at the group level. Auth and RBAC
+middleware is applied per-route for explicit, visible access control.
 
 ```
-Global  (all routes)  → recovery, logging (scaffolded), audit
-Site    (/)           → sessions, CSRF, flash, cache, secure headers
-API     (/api/)       → CORS, rate limit, bearer auth
+Group-level (infrastructure)  → sessions, CSRF, flash, cache, secure headers, CORS, rate limit
+Per-route   (auth/RBAC)       → RequireAuth, RequireNotAuth, Auth, RequireRoles, RequireActive
 ```
 
 ## Authentication
@@ -36,20 +36,20 @@ cfg := middleware.AuthConfig{
 }
 ```
 
-Four middleware variants:
+Four middleware variants, applied per-route (except `OptionalAuth` which stays on the group):
 
 ```go
-// Require valid session — returns 401 on failure
-siteGroup.Use(middleware.Auth(cfg))
+// Per-route — returns 401 on failure (API)
+site.GET("/api/profile", profileHandler.Get, middleware.Auth(cfg))
 
-// Require valid session — redirects to login on failure
-siteGroup.Use(middleware.RequireAuth(cfg))
+// Per-route — redirects to login on failure (browser)
+site.GET("/dashboard", dashHandler.Index, middleware.RequireAuth(cfg))
 
-// Populate context if logged in, never block
-siteGroup.Use(middleware.OptionalAuth(cfg))
+// Group-level — populates context if logged in, never blocks
+site.Use(middleware.OptionalAuth(cfg))
 
-// Redirect already-authenticated users to home
-loginGroup.Use(middleware.RequireNotAuth(cfg))
+// Per-route — redirects authenticated users away (login/register pages)
+site.GET("/login", authHandler.LoginPage, middleware.RequireNotAuth(cfg))
 ```
 
 `SubjectLoader` is optional — if nil, only `SubjectIDKey` is set in context. Projects
@@ -79,20 +79,30 @@ subj := middleware.GetSubject(c)    // any, only with session-based auth
 
 ## Authorization (RBAC)
 
+RBAC middleware is applied per-route alongside auth middleware:
+
 ```go
-adminGroup.Use(middleware.RequireRoles(
+requireAuth := middleware.RequireAuth(cfg)
+requireAdmin := middleware.RequireRoles(
     func(subject any, roles []string) bool {
-        user := subject.(*models.User)
-        return slices.Contains(roles, user.Role)
+        return slices.Contains(roles, subject.(*models.User).Role)
     },
     "admin", "superadmin",
-))
+)
 
-activeGroup.Use(middleware.RequireActive(
+adminRoutes := []echo.MiddlewareFunc{requireAuth, requireAdmin}
+
+site.GET("/admin", adminHandler.Dashboard, adminRoutes...)
+site.GET("/admin/users", adminHandler.Users, adminRoutes...)
+
+// Active check
+requireActive := middleware.RequireActive(
     func(subject any) bool {
         return subject.(*models.User).IsActive
     },
-))
+)
+
+site.GET("/settings", settingsHandler.Index, requireAuth, requireActive)
 ```
 
 Returns 401 if no subject, 403 if the check fails.

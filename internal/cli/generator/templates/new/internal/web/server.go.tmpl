@@ -117,17 +117,16 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 	// Auth routes.
 	authHandler := authhandler.NewHandler(deps.AuthService, deps.SessionManager)
 
-	guest := site.Group("")
-	guest.Use(hamrmw.RequireNotAuth(authCfg))
-	guest.GET("/login", authHandler.LoginPage)
-	guest.POST("/login", authHandler.Login)
-	guest.POST("/login/validate/:field", authHandler.LoginFormRules.ValidationHandler("field"))
-	guest.GET("/register", authHandler.RegisterPage)
-	guest.POST("/register", authHandler.Register)
-	guest.POST("/register/validate/:field", authHandler.RegisterFormRules.ValidationHandler("field"))
+	requireNotAuth := hamrmw.RequireNotAuth(authCfg)
+	requireAuth := hamrmw.RequireAuth(authCfg)
 
-	authenticated := site.Group("")
-	authenticated.Use(hamrmw.RequireAuth(authCfg))
-	authenticated.POST("/logout", authHandler.Logout)
+	site.GET("/login", authHandler.LoginPage, requireNotAuth)
+	site.POST("/login", authHandler.Login, requireNotAuth)
+	site.POST("/login/validate/:field", authHandler.LoginFormRules.ValidationHandler("field"), requireNotAuth)
+	site.GET("/register", authHandler.RegisterPage, requireNotAuth)
+	site.POST("/register", authHandler.Register, requireNotAuth)
+	site.POST("/register/validate/:field", authHandler.RegisterFormRules.ValidationHandler("field"), requireNotAuth)
+
+	site.POST("/logout", authHandler.Logout, requireAuth)
 {{- end}}
 }

@@ -631,25 +631,31 @@ type AuthConfig struct {
 
 #### Auth Middleware
 
+Auth middleware (except `OptionalAuth`) is applied per-route as variadic args, not via
+group `.Use()`. This makes each route's access requirements visible at its definition site.
+
 ```go
 func Auth(cfg AuthConfig) echo.MiddlewareFunc
 ```
 Requires a valid session. Returns 401 on failure.
+Usage: `site.GET("/api/profile", handler.Get, middleware.Auth(cfg))`
 
 ```go
 func RequireAuth(cfg AuthConfig) echo.MiddlewareFunc
 ```
 Requires a valid session. Redirects to login page on failure.
+Usage: `site.GET("/dashboard", handler.Index, middleware.RequireAuth(cfg))`
 
 ```go
 func OptionalAuth(cfg AuthConfig) echo.MiddlewareFunc
 ```
-Populates context if user is logged in, never blocks.
+Populates context if user is logged in, never blocks. Applied at the group level: `site.Use(middleware.OptionalAuth(cfg))`
 
 ```go
 func RequireNotAuth(cfg AuthConfig) echo.MiddlewareFunc
 ```
 Redirects already-authenticated users to the home page.
+Usage: `site.GET("/login", handler.LoginPage, middleware.RequireNotAuth(cfg))`
 
 #### Subject Helpers
 
@@ -754,6 +760,9 @@ Zero-value fields use defaults. Backwards-compatible — existing code that only
 `ContentSecurityPolicy` continues to work unchanged.
 
 #### RBAC
+
+RBAC middleware is applied per-route alongside auth middleware:
+`site.GET("/admin", handler.Dashboard, requireAuth, requireAdmin)`
 
 ```go
 type RoleChecker func(subject any, roles []string) bool

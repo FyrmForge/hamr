@@ -81,6 +81,31 @@ func TestGenerateStatic_pathMapping(t *testing.T) {
 	}
 }
 
+func TestGenerateStatic_removesStaleFiles(t *testing.T) {
+	srv, err := server.New(server.WithDevMode(true))
+	require.NoError(t, err)
+
+	srv.StaticPage("/about", staticHandler("<h1>About</h1>"))
+
+	dir := t.TempDir()
+
+	// Seed a stale file from a previous generation run.
+	oldDir := filepath.Join(dir, "old-page")
+	require.NoError(t, os.MkdirAll(oldDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(oldDir, "index.html"), []byte("stale"), 0o644))
+
+	err = srv.GenerateStatic(dir)
+	require.NoError(t, err)
+
+	// The newly registered page should exist.
+	_, err = os.Stat(filepath.Join(dir, "about", "index.html"))
+	assert.NoError(t, err)
+
+	// The stale file should be gone.
+	_, err = os.Stat(filepath.Join(oldDir, "index.html"))
+	assert.True(t, os.IsNotExist(err), "stale file should have been removed")
+}
+
 func TestGeneratedMiddleware_servesFile(t *testing.T) {
 	dir := t.TempDir()
 

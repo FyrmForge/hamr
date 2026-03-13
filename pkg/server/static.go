@@ -26,7 +26,12 @@ func (s *Server) StaticPage(path string, handler echo.HandlerFunc) {
 
 // GenerateStatic renders all registered static pages to files in dir.
 // Path mapping: "/" → dir/index.html, "/about" → dir/about/index.html.
+// The output directory is wiped first so that stale files from previous
+// runs (e.g. pages that were removed or renamed) do not linger.
 func (s *Server) GenerateStatic(dir string) error {
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("clean %s: %w", dir, err)
+	}
 	for _, sr := range s.staticPages {
 		req := httptest.NewRequest(http.MethodGet, sr.path, nil)
 		rec := httptest.NewRecorder()

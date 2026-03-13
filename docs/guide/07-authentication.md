@@ -96,18 +96,20 @@ cfg := middleware.AuthConfig{
 
 ### Four Variants
 
+Auth and RBAC middleware is applied per-route so every route's access requirements are visible at its definition site. Infrastructure middleware (sessions, CSRF, flash, secure headers) stays on the group.
+
 ```go
-// Require valid session — returns 401 on failure
-protectedGroup.Use(middleware.Auth(cfg))
+// Per-route — returns 401 on failure (API)
+site.GET("/api/profile", profileHandler.Get, middleware.Auth(cfg))
 
-// Require valid session — redirects to login page on failure
-siteGroup.Use(middleware.RequireAuth(cfg))
+// Per-route — redirects to login on failure (browser)
+site.GET("/dashboard", dashHandler.Index, middleware.RequireAuth(cfg))
 
-// Populate context if logged in, never block
-publicGroup.Use(middleware.OptionalAuth(cfg))
+// Group-level — populates context if logged in, never blocks
+site.Use(middleware.OptionalAuth(cfg))
 
-// Redirect already-authenticated users away (login/register pages)
-loginGroup.Use(middleware.RequireNotAuth(cfg))
+// Per-route — redirects authenticated users away (login/register pages)
+site.GET("/login", authHandler.LoginPage, middleware.RequireNotAuth(cfg))
 ```
 
 ### Reading Auth State in Handlers
@@ -197,26 +199,33 @@ func (h *Handler) Register(c echo.Context) error {
 
 ## Authorization (RBAC)
 
-After authentication, restrict access by role:
+After authentication, restrict access by role. Define middleware slices and pass them per-route:
 
 ```go
-adminGroup.Use(middleware.RequireRoles(
+requireAuth := middleware.RequireAuth(cfg)
+requireAdmin := middleware.RequireRoles(
     func(subject any, roles []string) bool {
-        user := subject.(*models.User)
-        return slices.Contains(roles, user.Role)
+        return slices.Contains(roles, subject.(*models.User).Role)
     },
     "admin", "superadmin",
-))
+)
+
+adminRoutes := []echo.MiddlewareFunc{requireAuth, requireAdmin}
+
+site.GET("/admin", adminHandler.Dashboard, adminRoutes...)
+site.GET("/admin/users", adminHandler.Users, adminRoutes...)
 ```
 
 Check active status:
 
 ```go
-activeGroup.Use(middleware.RequireActive(
+requireActive := middleware.RequireActive(
     func(subject any) bool {
         return subject.(*models.User).IsActive
     },
-))
+)
+
+site.GET("/settings", settingsHandler.Index, requireAuth, requireActive)
 ```
 
 ---

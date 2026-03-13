@@ -52,8 +52,9 @@ Bad candidates: home page with user greeting, dashboard, forms.
 1. **Registration**: `StaticPage(path, handler)` stores the path+handler for generation.
    It does NOT register a route — routes are registered separately for runtime fallback.
 
-2. **Generation**: `GenerateStatic(dir)` renders each registered handler using synthetic
-   HTTP requests, writing output to files:
+2. **Generation**: `GenerateStatic(dir)` wipes the output directory first to remove stale
+   files from previous runs (e.g. pages that were renamed or removed), then renders each
+   registered handler using synthetic HTTP requests, writing output to files:
    - `/` → `generated/index.html`
    - `/about` → `generated/about/index.html`
    - `/terms/privacy` → `generated/terms/privacy/index.html`

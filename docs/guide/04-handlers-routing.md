@@ -65,9 +65,17 @@ api.POST("/users", userHandler.Create)
 ### Typical Middleware Layout
 
 ```
-Global  (all routes)  → recovery, logging (scaffolded), audit
-Site    (/)           → sessions, CSRF, flash, cache, secure headers
-API     (/api/)       → CORS, rate limit, bearer auth
+Group-level (infrastructure)  → sessions, CSRF, flash, cache, secure headers, CORS, rate limit
+Per-route   (auth/RBAC)       → RequireAuth, RequireNotAuth, Auth, RequireRoles, RequireActive
+```
+
+Auth and RBAC middleware is applied per-route so every route's access requirements are visible at its definition site:
+
+```go
+// Auth middleware — applied per-route, not per-group
+requireAuth := middleware.RequireAuth(cfg)
+site.GET("/dashboard", dashHandler.Index, requireAuth)
+site.POST("/logout", authHandler.Logout, requireAuth)
 ```
 
 ---
