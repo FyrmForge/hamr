@@ -43,7 +43,7 @@ cmd = "npm run css"
 
 [[dev.daemon]]
 name = "sync-static"
-cmd = "hamr sync --watch --bucket {{.Name}}-static"
+cmd = "hamr sync --watch --bucket {{.Name | lower}}-static"
 {{- end}}
 {{- if .IncludeLocale}}
 
