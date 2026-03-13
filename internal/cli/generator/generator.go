@@ -22,7 +22,9 @@ func renderFromFS(fsys embed.FS, tmplPath, destPath string, data any) error {
 		return fmt.Errorf("read template %s: %w", tmplPath, err)
 	}
 
-	tmpl, err := template.New(filepath.Base(tmplPath)).Parse(string(content))
+	tmpl, err := template.New(filepath.Base(tmplPath)).Funcs(template.FuncMap{
+		"lower": strings.ToLower,
+	}).Parse(string(content))
 	if err != nil {
 		return fmt.Errorf("parse template %s: %w", tmplPath, err)
 	}

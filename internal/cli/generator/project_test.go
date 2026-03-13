@@ -443,7 +443,7 @@ func TestGenerateProject_dockerCompose(t *testing.T) {
 
 	compose := readFile(t, dir, "docker/docker-compose.yaml")
 	assert.Contains(t, compose, "postgres:")
-	assert.Contains(t, compose, "POSTGRES_DB: dcproj")
+	assert.Contains(t, compose, "POSTGRES_DB: postgres")
 	assert.Contains(t, compose, "pg_data:")
 }
 
@@ -781,6 +781,63 @@ func TestGenerateProject_s3WithoutStaticS3(t *testing.T) {
 	// .env.example should NOT have S3_STATIC_BUCKET.
 	envFile := readFile(t, dir, ".env.example")
 	assert.NotContains(t, envFile, "S3_STATIC_BUCKET")
+}
+
+func TestGenerateProject_pgAdmin(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "pgadminproj")
+
+	cfg := &ProjectConfig{
+		Name:           "pgadminproj",
+		Module:         "github.com/test/pgadminproj",
+		CSS:            "plain",
+		Database:       "postgres",
+		GoVersion:      "1.25.0",
+		IncludePgAdmin: true,
+	}
+
+	require.NoError(t, GenerateProject(dir, cfg))
+
+	// docker-compose should have pgAdmin service and volume.
+	compose := readFile(t, dir, "docker/docker-compose.yaml")
+	assert.Contains(t, compose, "pgadmin:")
+	assert.Contains(t, compose, "pgadmin_data:")
+	assert.Contains(t, compose, "dpage/pgadmin4:latest")
+
+	// .env.example should have pgAdmin env vars.
+	envFile := readFile(t, dir, ".env.example")
+	assert.Contains(t, envFile, "PGADMIN_EMAIL")
+	assert.Contains(t, envFile, "PGADMIN_PASSWORD")
+
+	// hamr.toml should have pgadmin = true.
+	hamrToml := readFile(t, dir, "hamr.toml")
+	assert.Contains(t, hamrToml, "pgadmin = true")
+}
+
+func TestGenerateProject_noPgAdmin(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "nopgadminproj")
+
+	cfg := &ProjectConfig{
+		Name:      "nopgadminproj",
+		Module:    "github.com/test/nopgadminproj",
+		CSS:       "plain",
+		Database:  "postgres",
+		GoVersion: "1.25.0",
+	}
+
+	require.NoError(t, GenerateProject(dir, cfg))
+
+	// docker-compose should NOT have pgAdmin.
+	compose := readFile(t, dir, "docker/docker-compose.yaml")
+	assert.NotContains(t, compose, "pgadmin:")
+	assert.NotContains(t, compose, "pgadmin_data:")
+
+	// .env.example should NOT have pgAdmin env vars.
+	envFile := readFile(t, dir, ".env.example")
+	assert.NotContains(t, envFile, "PGADMIN_EMAIL")
+
+	// hamr.toml should have pgadmin = false.
+	hamrToml := readFile(t, dir, "hamr.toml")
+	assert.Contains(t, hamrToml, "pgadmin = false")
 }
 
 func TestBuildProjectFileList_stripe(t *testing.T) {

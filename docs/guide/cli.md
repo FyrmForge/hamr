@@ -42,6 +42,7 @@ When called without flags, an interactive wizard asks for each option. When all 
 | `--database` | `postgres` | Database type |
 | `--location` | `subfolder` | Project location: `subfolder` or `current` |
 | `--static-s3` | `false` | Sync static assets to a dedicated S3 bucket |
+| `--pgadmin` | `false` | Include pgAdmin in Docker Compose |
 | `--stripe` | `false` | Include Stripe webhook handler |
 
 ```bash

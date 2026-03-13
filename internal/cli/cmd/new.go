@@ -238,6 +238,9 @@ func applyWizardResult(cmd *cobra.Command, name string, res *wizardResult, cfg *
 	if res.StorageBackend == "s3" {
 		cfg.StaticS3 = res.StaticS3 == "yes"
 	}
+	if res.Database == "postgres" {
+		cfg.IncludePgAdmin = res.PgAdmin == "yes"
+	}
 }
 
 // normalizeHamrVersion returns a clean semver string for embedding in hamr.toml.
@@ -277,6 +280,7 @@ func init() {
 	newCmd.Flags().Bool("migrate-startup", false, "run migrations at server startup instead of separate command")
 	newCmd.Flags().String("location", "subfolder", "project location: \"subfolder\" or \"current\"")
 	newCmd.Flags().Bool("static-s3", false, "sync static assets to a dedicated S3 bucket")
+	newCmd.Flags().Bool("pgadmin", false, "include pgAdmin in Docker Compose")
 	newCmd.Flags().Bool("stripe", false, "include Stripe webhook handler")
 	newCmd.Flags().Bool("locale", false, "include localisation (i18n) support")
 }

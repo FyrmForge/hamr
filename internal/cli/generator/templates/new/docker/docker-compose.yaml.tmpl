@@ -17,6 +17,22 @@ services:
       interval: 2s
       timeout: 3s
       retries: 5
+{{- if .IncludePgAdmin}}
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    ports:
+      - "5050:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+{{- end}}
 {{- if eq .StorageBackend "s3"}}
 
   minio:
@@ -40,6 +56,9 @@ services:
 
 volumes:
   pg_data:
+{{- if .IncludePgAdmin}}
+  pgadmin_data:
+{{- end}}
 {{- if eq .StorageBackend "s3"}}
   minio_data:
 {{- end}}

@@ -1882,6 +1882,7 @@ e2e = false
 stripe = false
 locale = false
 storage = "local"
+pgadmin = false
 
 [ai]
 # dir = ".hamr/ai"

@@ -26,6 +26,7 @@ type ProjectConfig struct {
 	IncludeStorage   bool   // true when StorageBackend != ""
 	StorageBackend   string // "" | "local" | "s3"
 	StaticS3         bool   // sync static/ to a dedicated S3 bucket
+	IncludePgAdmin   bool   // include pgAdmin in Docker Compose
 	IncludeWS        bool
 	IncludeE2E       bool
 	IncludeStripe    bool
