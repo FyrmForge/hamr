@@ -23,6 +23,11 @@
   Generated projects define a Store interface in their internal/repo/repo.go;
   it is not part of the hamr framework itself.
 - **hamr dev**: Dev server with file watching, auto-rebuild, and live reload.
+  Mirrors its recent output to a rolling log file (default
+  `.hamr/dev_logs.txt`, 200 lines) for LLM consumption. The file contains
+  `[hamr dev]` messages plus watched command/daemon stdout-stderr with terminal
+  escapes stripped. Configure via `log_file` and `log_file_max_lines` in
+  `[dev]`; set `log_file = "none"` to disable.
 - **hamr ai capture**: Browser screenshot capture with HTML/text/metadata sidecars.
   Supports viewport, full-page, and tiled (`--tiles`) capture modes. Tiled mode
   produces viewport-sized PNGs from top to bottom with configurable overlap

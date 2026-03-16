@@ -429,6 +429,19 @@ cmd = "echo watch"
 			wantErr: "duplicate name",
 		},
 		{
+			name: "negative log file max lines",
+			toml: `
+[dev]
+log_file_max_lines = -1
+
+[[dev.watch]]
+name = "go"
+watch = "*.go"
+cmd = "echo"
+`,
+			wantErr: "log_file_max_lines must be greater than 0",
+		},
+		{
 			name: "invalid proxy listen port",
 			toml: `
 [proxy]

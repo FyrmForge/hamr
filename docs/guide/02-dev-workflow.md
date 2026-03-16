@@ -136,6 +136,20 @@ The injected live reload script adds a small widget (bottom-left corner) showing
 
 ---
 
+## File Logging
+
+`hamr dev` automatically mirrors its recent output to a rolling log file (default: `.hamr/dev_logs.txt`, 200 lines max). The file contains `[hamr dev]` messages plus stdout/stderr from watched commands and daemons, with terminal escape sequences stripped so LLM tools can read it directly.
+
+Configure in `hamr.toml`:
+
+```toml
+[dev]
+log_file = ".hamr/dev_logs.txt"      # path (set "none" to disable)
+log_file_max_lines = 200             # rolling window size
+```
+
+---
+
 ## Common Configurations
 
 ### With Tailwind CSS

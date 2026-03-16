@@ -161,6 +161,23 @@ keep_running = true
 | `keep_running` | bool | `false` | Don't `docker compose down` when hamr stops |
 | `env` | list | — | Extra environment variables |
 
+## File Logging
+
+By default, `hamr dev` mirrors its recent output to a rolling log file at `.hamr/dev_logs.txt`. The file contains `[hamr dev]` infrastructure messages plus stdout/stderr from watched commands and daemons, with terminal escape sequences stripped. This is designed for LLM consumption: an AI assistant can read the file to understand what happened during the dev session without scraping the terminal.
+
+```toml
+[dev]
+log_file = ".hamr/dev_logs.txt"     # default path (set to "none" to disable)
+log_file_max_lines = 200            # max lines before old entries are pruned
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `log_file` | string | `".hamr/dev_logs.txt"` | Path to the rolling log file. Set to `"none"` to disable. |
+| `log_file_max_lines` | int | `200` | Maximum number of lines kept in the file. |
+
+The `.hamr/` directory is created automatically and is included in the generated `.gitignore`.
+
 ## Lifecycle
 
 ```

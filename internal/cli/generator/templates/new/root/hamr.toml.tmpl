@@ -22,6 +22,10 @@ listen = ":3000"
 target = ":8080"
 inject_reload = true
 
+[dev]
+# log_file = ".hamr/dev_logs.txt"   # rolling dev log for LLM consumption (default)
+# log_file_max_lines = 200           # max lines kept (default)
+
 [[dev.docker_compose]]
 name = "deps"
 file = "docker/docker-compose.yaml"

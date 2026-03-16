@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -71,12 +72,30 @@ func NewRunner(cfg *Config, opts ...Option) *Runner {
 // Run starts the dev server and blocks until ctx is cancelled.
 func (r *Runner) Run(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
+
+	// Set up rolling file logger for LLM-readable dev logs.
+	var fileLog *rollingFileWriter
+	if r.cfg.Dev.LogFile != "" && r.cfg.Dev.LogFile != "none" {
+		var err error
+		fileLog, err = newRollingFileWriter(r.cfg.Dev.LogFile, r.cfg.Dev.LogFileMaxLines)
+		if err != nil {
+			r.logger.Error("failed to create dev log file", "path", r.cfg.Dev.LogFile, "err", err)
+		}
+	}
+	if fileLog != nil {
+		defer func() { _ = fileLog.Close() }()
+		r.logger = newDevLogger(io.MultiWriter(os.Stderr, fileLog), r.verbose)
+	}
+
 	graph := NewGraph(r.cfg.Dev.Watch)
 	pm := NewProcessManager(r.logger)
 	broker := NewSSEBroker(r.cfg.Dev.Watch, r.cfg.Dev.Daemons, r.cfg.Dev.DockerCompose)
 	errorState := NewErrorState()
 	logBuf := NewLogBuffer(1000)
 	pm.SetLogOutput(logBuf, broker)
+	if fileLog != nil {
+		pm.SetFileLog(fileLog)
+	}
 	pm.OnProcessExit = func(rule string, err error, output string) {
 		errorState.Set(rule, output)
 		broker.Broadcast(buildErrorEvent(rule, output))

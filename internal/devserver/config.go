@@ -22,9 +22,11 @@ type Config struct {
 
 // DevConfig holds the [dev] table with watch rules and daemons.
 type DevConfig struct {
-	Watch         []WatchRule      `toml:"watch"`
-	Daemons       []Daemon         `toml:"daemon"`
-	DockerCompose []DockerCompose  `toml:"docker_compose"`
+	Watch           []WatchRule     `toml:"watch"`
+	Daemons         []Daemon        `toml:"daemon"`
+	DockerCompose   []DockerCompose `toml:"docker_compose"`
+	LogFile         string          `toml:"log_file"`
+	LogFileMaxLines int             `toml:"log_file_max_lines"`
 }
 
 // DockerCompose declares a docker compose file that hamr ensures is running.
@@ -184,6 +186,13 @@ func applyDefaults(cfg *Config) {
 		}
 	}
 
+	if cfg.Dev.LogFile == "" {
+		cfg.Dev.LogFile = ".hamr/dev_logs.txt"
+	}
+	if cfg.Dev.LogFileMaxLines == 0 {
+		cfg.Dev.LogFileMaxLines = 200
+	}
+
 	for i := range cfg.Dev.Watch {
 		if cfg.Dev.Watch[i].Debounce.Duration == 0 {
 			cfg.Dev.Watch[i].Debounce.Duration = 100 * time.Millisecond
@@ -194,6 +203,9 @@ func applyDefaults(cfg *Config) {
 func validate(cfg *Config) error {
 	if len(cfg.Dev.Watch) == 0 && len(cfg.Dev.Daemons) == 0 && len(cfg.Dev.DockerCompose) == 0 {
 		return fmt.Errorf("no watch rules, daemons, or docker compose entries defined in [dev]")
+	}
+	if cfg.Dev.LogFileMaxLines < 0 {
+		return fmt.Errorf("[dev] log_file_max_lines must be greater than 0")
 	}
 
 	names := make(map[string]bool, len(cfg.Dev.Watch)+len(cfg.Dev.Daemons)+len(cfg.Dev.DockerCompose))

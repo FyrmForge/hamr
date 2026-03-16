@@ -22,6 +22,11 @@
   Generated projects define a Store interface in their internal/repo/repo.go;
   it is not part of the hamr framework itself.
 - **hamr dev**: Dev server with file watching, auto-rebuild, and live reload.
+  Mirrors its recent output to a rolling log file (default
+  `.hamr/dev_logs.txt`, 200 lines) for LLM consumption. The file contains
+  `[hamr dev]` messages plus watched command/daemon stdout-stderr with terminal
+  escapes stripped. Configure via `log_file` and `log_file_max_lines` in
+  `[dev]`; set `log_file = "none"` to disable.
 - **hamr ai capture**: Browser screenshot capture with HTML/text/metadata sidecars.
 - **hamr ai upgrade**: Git-based scaffold upgrade report. Clones the HAMR repo and diffs between version tags to produce a unified diff and stat summary of all changes between the project's baseline and current HAMR.
 - **.hamr/ai/**: Playground directory for all AI command artifacts (captures, upgrade reports). Gitignored. Configurable via `[ai] dir` in hamr.toml.

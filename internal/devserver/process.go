@@ -91,14 +91,20 @@ type ProcessManager struct {
 	OnProcessExit func(rule string, err error, output string)
 	logBuf        *LogBuffer
 	logBroker     *SSEBroker
-	stdinR        *os.File // read end of pipe, given to child processes
-	stdinW        *os.File // write end, kept open to prevent EOF
+	fileLog       io.Writer // rolling file logger (nil if disabled)
+	stdinR        *os.File  // read end of pipe, given to child processes
+	stdinW        *os.File  // write end, kept open to prevent EOF
 }
 
 // SetLogOutput enables streaming process output to a LogBuffer and SSE broker.
 func (pm *ProcessManager) SetLogOutput(buf *LogBuffer, broker *SSEBroker) {
 	pm.logBuf = buf
 	pm.logBroker = broker
+}
+
+// SetFileLog enables writing prefixed process output to a rolling file logger.
+func (pm *ProcessManager) SetFileLog(w io.Writer) {
+	pm.fileLog = w
 }
 
 // NewProcessManager creates a new process manager.
@@ -123,14 +129,15 @@ func (pm *ProcessManager) RunCommand(ctx context.Context, rule *WatchRule) (stri
 	color := nextColor()
 	capture := newTailBuffer()
 
+	stdoutDest, stderrDest := pm.prefixDests()
 	var lw *logWriter
 	if pm.logBuf != nil {
 		lw = newLogWriter(rule.Name, color, pm.logBuf, pm.logBroker)
-		cmd.Stdout = io.MultiWriter(newPrefixWriter(os.Stdout, rule.Name, color), capture, lw)
-		cmd.Stderr = io.MultiWriter(newPrefixWriter(os.Stderr, rule.Name, color), capture, lw)
+		cmd.Stdout = io.MultiWriter(newPrefixWriter(stdoutDest, rule.Name, color), capture, lw)
+		cmd.Stderr = io.MultiWriter(newPrefixWriter(stderrDest, rule.Name, color), capture, lw)
 	} else {
-		cmd.Stdout = io.MultiWriter(newPrefixWriter(os.Stdout, rule.Name, color), capture)
-		cmd.Stderr = io.MultiWriter(newPrefixWriter(os.Stderr, rule.Name, color), capture)
+		cmd.Stdout = io.MultiWriter(newPrefixWriter(stdoutDest, rule.Name, color), capture)
+		cmd.Stderr = io.MultiWriter(newPrefixWriter(stderrDest, rule.Name, color), capture)
 	}
 
 	if err := cmd.Run(); err != nil {
@@ -159,14 +166,15 @@ func (pm *ProcessManager) StartProcess(ctx context.Context, rule *WatchRule) err
 	color := nextColor()
 	capture := newTailBuffer()
 
+	stdoutDest, stderrDest := pm.prefixDests()
 	var lw *logWriter
 	if pm.logBuf != nil {
 		lw = newLogWriter(rule.Name, color, pm.logBuf, pm.logBroker)
-		cmd.Stdout = io.MultiWriter(newPrefixWriter(os.Stdout, rule.Name, color), capture, lw)
-		cmd.Stderr = io.MultiWriter(newPrefixWriter(os.Stderr, rule.Name, color), capture, lw)
+		cmd.Stdout = io.MultiWriter(newPrefixWriter(stdoutDest, rule.Name, color), capture, lw)
+		cmd.Stderr = io.MultiWriter(newPrefixWriter(stderrDest, rule.Name, color), capture, lw)
 	} else {
-		cmd.Stdout = io.MultiWriter(newPrefixWriter(os.Stdout, rule.Name, color), capture)
-		cmd.Stderr = io.MultiWriter(newPrefixWriter(os.Stderr, rule.Name, color), capture)
+		cmd.Stdout = io.MultiWriter(newPrefixWriter(stdoutDest, rule.Name, color), capture)
+		cmd.Stderr = io.MultiWriter(newPrefixWriter(stderrDest, rule.Name, color), capture)
 	}
 
 	if err := cmd.Start(); err != nil {
@@ -293,11 +301,20 @@ func buildEnv(ruleEnv []string) []string {
 	return result
 }
 
+// prefixDests returns the stdout and stderr destinations for prefixWriters,
+// wrapping with the file logger if configured.
+func (pm *ProcessManager) prefixDests() (stdout, stderr io.Writer) {
+	if pm.fileLog != nil {
+		return io.MultiWriter(os.Stdout, pm.fileLog), io.MultiWriter(os.Stderr, pm.fileLog)
+	}
+	return os.Stdout, os.Stderr
+}
+
 // prefixWriter implements io.Writer, prepending a colored tag to each line
 // while passing through the raw bytes (preserving ANSI colors from child
 // processes).
 type prefixWriter struct {
-	dest   *os.File
+	dest   io.Writer
 	tag    []byte // e.g. "\033[36m[templ]\033[0m "
 	buf    []byte
 	mu     sync.Mutex
@@ -324,7 +341,7 @@ func nextColor() string {
 	return c
 }
 
-func newPrefixWriter(dest *os.File, name, color string) *prefixWriter {
+func newPrefixWriter(dest io.Writer, name, color string) *prefixWriter {
 	tag := []byte(color + "[" + name + "]" + colorReset + " ")
 	return &prefixWriter{dest: dest, tag: tag}
 }

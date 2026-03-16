@@ -79,6 +79,8 @@ hamr dev --verbose          # detailed watcher/rebuild logs
 
 Reads `[proxy]`, `[dev]` sections from `hamr.toml`. Manages Docker Compose deps, file watchers, build commands, long-running processes, and a reverse proxy with SSE-based live reload.
 
+By default, `hamr dev` also mirrors its recent log stream to `.hamr/dev_logs.txt` (rolling window, 200 lines, escape sequences stripped) for LLM consumption. This includes `[hamr dev]` messages plus stdout/stderr from watched commands and daemons. Configure via `log_file` and `log_file_max_lines` in `[dev]`.
+
 **Guide:** [Dev Server](pkg/dev.md) covers configuration, watch rules, daemons, Docker Compose, and examples.
 
 ---
