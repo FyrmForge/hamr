@@ -3,6 +3,7 @@ package async_test
 import (
 	"context"
 	"errors"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -246,6 +247,25 @@ func TestGroup_panicRecovery(t *testing.T) {
 	g.Close() // must not deadlock
 }
 
+func TestGroup_zeroValue(t *testing.T) {
+	var (
+		g   async.Group
+		ran atomic.Bool
+	)
+
+	g.Go(func() { ran.Store(true) })
+	g.Close()
+
+	assert.True(t, ran.Load())
+}
+
+func TestGroup_zeroValue_panicRecovery(t *testing.T) {
+	var g async.Group
+
+	g.Go(func() { panic("group-panic") })
+	g.Close() // must not deadlock
+}
+
 func TestGroup_goAfterClose(t *testing.T) {
 	var ran atomic.Bool
 	g := async.NewGroup()
@@ -276,6 +296,214 @@ func TestGroup_concurrentGo(t *testing.T) {
 	called.Wait() // all Go calls have returned
 	g.Close()
 	assert.Equal(t, int32(20), counter.Load())
+}
+
+// ---------------------------------------------------------------------------
+// Group — metrics
+// ---------------------------------------------------------------------------
+
+// metricsSpy captures GroupMetrics calls for test assertions.
+type metricsSpy struct {
+	mu          sync.Mutex
+	blocked     int
+	dispatched  []time.Duration // blocked durations
+	completed   []time.Duration // job durations
+	panicked    []time.Duration // job durations
+	blockedCh   chan struct{}
+	blockedOnce sync.Once
+}
+
+func (s *metricsSpy) Blocked() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.blocked++
+	if s.blockedCh != nil {
+		s.blockedOnce.Do(func() { close(s.blockedCh) })
+	}
+}
+
+func (s *metricsSpy) Dispatched(blocked time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dispatched = append(s.dispatched, blocked)
+}
+
+func (s *metricsSpy) Completed(d time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.completed = append(s.completed, d)
+}
+
+func (s *metricsSpy) Panicked(d time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.panicked = append(s.panicked, d)
+}
+
+func TestGroup_withMetrics(t *testing.T) {
+	spy := &metricsSpy{}
+	g := async.NewGroup(async.WithMetrics(spy))
+	g.Go(func() { time.Sleep(5 * time.Millisecond) })
+	g.Close()
+
+	spy.mu.Lock()
+	defer spy.mu.Unlock()
+	assert.Equal(t, 0, spy.blocked, "no semaphore means no blocking")
+	require.Len(t, spy.dispatched, 1)
+	assert.Equal(t, time.Duration(0), spy.dispatched[0], "no semaphore means zero blocked duration")
+	require.Len(t, spy.completed, 1)
+	assert.GreaterOrEqual(t, spy.completed[0], 5*time.Millisecond)
+	assert.Len(t, spy.panicked, 0)
+}
+
+func TestGroup_withMetrics_blockedOnlyWhenContended(t *testing.T) {
+	spy := &metricsSpy{blockedCh: make(chan struct{})}
+	job1Running := make(chan struct{})
+	release := make(chan struct{})
+
+	g := async.NewGroup(async.WithLimit(1), async.WithMetrics(spy))
+
+	// First job: holds the slot until released.
+	g.Go(func() {
+		close(job1Running)
+		<-release
+	})
+	<-job1Running // wait for job 1 to be running
+
+	// Second Go() will block on the semaphore (TryAcquire fails, Acquire blocks).
+	goDone := make(chan struct{})
+	go func() {
+		g.Go(func() {})
+		close(goDone)
+	}()
+
+	// Release job 1 so job 2 can proceed.
+	close(release)
+	select {
+	case <-spy.blockedCh:
+	case <-time.After(time.Second):
+		t.Fatal("expected Blocked callback after semaphore contention")
+	}
+	select {
+	case <-goDone:
+	case <-time.After(time.Second):
+		t.Fatal("second Go did not return")
+	}
+	g.Close()
+
+	spy.mu.Lock()
+	defer spy.mu.Unlock()
+	assert.Equal(t, 1, spy.blocked, "only second job should block")
+	require.Len(t, spy.dispatched, 2)
+	assert.Equal(t, time.Duration(0), spy.dispatched[0], "first job not blocked")
+	assert.Greater(t, spy.dispatched[1], time.Duration(0), "second job was blocked")
+}
+
+func TestGroup_withMetrics_panicCountsAsPanicked(t *testing.T) {
+	spy := &metricsSpy{}
+	g := async.NewGroup(async.WithMetrics(spy))
+	g.Go(func() { panic("boom") })
+	g.Close()
+
+	spy.mu.Lock()
+	defer spy.mu.Unlock()
+	require.Len(t, spy.dispatched, 1)
+	assert.Len(t, spy.completed, 0, "panic should not count as completed")
+	require.Len(t, spy.panicked, 1)
+}
+
+func TestGroup_withMetrics_goexitCountsAsCompleted(t *testing.T) {
+	spy := &metricsSpy{}
+	g := async.NewGroup(async.WithMetrics(spy))
+	g.Go(func() { runtime.Goexit() })
+	g.Close()
+
+	spy.mu.Lock()
+	defer spy.mu.Unlock()
+	require.Len(t, spy.dispatched, 1)
+	require.Len(t, spy.completed, 1)
+	assert.Len(t, spy.panicked, 0, "Goexit should not count as a panic")
+}
+
+func TestGroup_withMetrics_noSemaphore(t *testing.T) {
+	spy := &metricsSpy{}
+	g := async.NewGroup(async.WithMetrics(spy))
+	for range 3 {
+		g.Go(func() {})
+	}
+	g.Close()
+
+	spy.mu.Lock()
+	defer spy.mu.Unlock()
+	assert.Equal(t, 0, spy.blocked, "no semaphore means Blocked never fires")
+	require.Len(t, spy.dispatched, 3)
+	for i, d := range spy.dispatched {
+		assert.Equal(t, time.Duration(0), d, "dispatched[%d] should have zero blocked duration", i)
+	}
+}
+
+func TestGroup_withMetrics_goAfterClose(t *testing.T) {
+	spy := &metricsSpy{}
+	g := async.NewGroup(async.WithMetrics(spy))
+	g.Close()
+
+	g.Go(func() { t.Fatal("should not run") })
+
+	spy.mu.Lock()
+	defer spy.mu.Unlock()
+	assert.Equal(t, 0, spy.blocked, "no callbacks for post-Close Go")
+	assert.Len(t, spy.dispatched, 0, "no callbacks for post-Close Go")
+	assert.Len(t, spy.completed, 0, "no callbacks for post-Close Go")
+	assert.Len(t, spy.panicked, 0, "no callbacks for post-Close Go")
+}
+
+func TestGroup_withMetrics_goAfterCloseWithLimit(t *testing.T) {
+	spy := &metricsSpy{}
+	g := async.NewGroup(async.WithLimit(1), async.WithMetrics(spy))
+	g.Close()
+
+	g.Go(func() { t.Fatal("should not run") })
+
+	spy.mu.Lock()
+	defer spy.mu.Unlock()
+	assert.Equal(t, 0, spy.blocked, "no callbacks for post-Close Go")
+	assert.Len(t, spy.dispatched, 0, "no callbacks for post-Close Go")
+}
+
+func TestGroup_withMetrics_concurrent(t *testing.T) {
+	const n = 50
+	spy := &metricsSpy{}
+	g := async.NewGroup(async.WithLimit(5), async.WithMetrics(spy))
+
+	var starter, called sync.WaitGroup
+	starter.Add(n)
+	called.Add(n)
+	for range n {
+		go func() {
+			starter.Done()
+			starter.Wait()
+			g.Go(func() { time.Sleep(time.Millisecond) })
+			called.Done()
+		}()
+	}
+	called.Wait()
+	g.Close()
+
+	spy.mu.Lock()
+	defer spy.mu.Unlock()
+	require.Len(t, spy.dispatched, n, "every job should be dispatched")
+	assert.Equal(t, n, len(spy.completed)+len(spy.panicked), "every dispatched job must complete or panic")
+	assert.Equal(t, n, len(spy.completed), "no panics expected")
+}
+
+func TestGroup_withNilMetrics_usesNoop(t *testing.T) {
+	var ran atomic.Bool
+
+	g := async.NewGroup(async.WithMetrics(nil))
+	g.Go(func() { ran.Store(true) })
+	g.Close()
+
+	assert.True(t, ran.Load())
 }
 
 func TestGroup_withLimit(t *testing.T) {

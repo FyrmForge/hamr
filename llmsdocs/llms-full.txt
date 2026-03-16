@@ -993,6 +993,18 @@ func (g *Group) Close()          // waits for all in-flight goroutines
 
 func WithGroupLogger(l *slog.Logger) GroupOption
 func WithLimit(n int) GroupOption  // caps concurrent goroutines (clamped to >= 1)
+func WithMetrics(m GroupMetrics) GroupOption
+
+// Warning: callbacks run synchronously on the Group hot path and during worker
+// teardown. Implementations must not block, do slow I/O, or panic.
+// Every Dispatched is followed by exactly one Completed or Panicked.
+// No callbacks fire for calls to Go after Close.
+type GroupMetrics interface {
+    Blocked()                            // semaphore contention occurred (fired after the wait completes)
+    Dispatched(blocked time.Duration)    // job accepted; worker goroutine about to spawn (blocked=0 if no wait)
+    Completed(duration time.Duration)    // job finished without panic recovery
+    Panicked(duration time.Duration)     // job finished via panic recovery
+}
 ```
 
 ---

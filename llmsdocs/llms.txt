@@ -151,7 +151,9 @@ Concurrency primitives with panic recovery.
 - `Map[T,R](ctx, items, fn) ([]R, error)` — concurrent map
 - `Fire(fn)` — fire-and-forget goroutine
 - `NewGroup(opts...) *Group`, `Go(fn)`, `Close()` — managed goroutine pool
-- Options: `WithGroupLogger`, `WithLimit(n)`
+- Options: `WithGroupLogger`, `WithLimit(n)`, `WithMetrics(m GroupMetrics)`
+- `GroupMetrics` interface — lifecycle callbacks (Blocked, Dispatched, Completed, Panicked)
+- Warning: `GroupMetrics` callbacks are synchronous on the hot path; they must not block, do slow I/O, or panic.
 
 ### templint
 Static linter for .templ files.

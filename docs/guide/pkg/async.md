@@ -1,7 +1,7 @@
 # Async — Concurrency Helpers
 
 `hamr/pkg/async` provides concurrent execution primitives with panic recovery and
-fire-and-forget goroutine management. Zero dependencies beyond the standard library.
+fire-and-forget goroutine management.
 
 ## Quick Start
 
@@ -183,6 +183,41 @@ g.Close()
 g := async.NewGroup(async.WithGroupLogger(myLogger))
 ```
 
+#### Metrics
+
+`GroupMetrics` is an interface that receives lifecycle callbacks from `Group.Go`.
+Provide an implementation backed by your metrics system (Prometheus, OpenTelemetry,
+etc.) to get pool-level observability.
+
+Warning: callbacks run synchronously on the `Group` hot path and during worker
+teardown. Implementations must be concurrency-safe, must not block, must not
+perform slow I/O, and must not panic. A bad implementation can stall `Go()`,
+delay or deadlock `Close()`, and hold semaphore slots longer than expected.
+
+```go
+type GroupMetrics interface {
+    Blocked()                            // semaphore contention occurred (fired after the wait completes)
+    Dispatched(blocked time.Duration)    // job accepted; worker goroutine about to spawn (blocked=0 if no wait)
+    Completed(duration time.Duration)    // job finished without panic recovery
+    Panicked(duration time.Duration)     // job finished via panic recovery
+}
+```
+
+Every `Dispatched` call is followed by exactly one `Completed` or `Panicked`.
+`Blocked` fires at most once per `Dispatched`, immediately before it.
+No callbacks fire for calls to `Go` after `Close` (true no-op).
+
+Pass it via `WithMetrics`:
+
+```go
+g := async.NewGroup(
+    async.WithLimit(10),
+    async.WithMetrics(myMetrics),
+)
+```
+
+When no `GroupMetrics` is provided, all callbacks are no-ops.
+
 #### Behavior after Close
 
 Calling `Go` after `Close` is a no-op — the function is silently dropped.
@@ -222,4 +257,13 @@ func (g *Group) Close()
 // Options
 func WithLimit(n int) GroupOption
 func WithGroupLogger(l *slog.Logger) GroupOption
+func WithMetrics(m GroupMetrics) GroupOption
+
+// Metrics observer
+type GroupMetrics interface {
+    Blocked()
+    Dispatched(blocked time.Duration)
+    Completed(duration time.Duration)
+    Panicked(duration time.Duration)
+}
 ```
