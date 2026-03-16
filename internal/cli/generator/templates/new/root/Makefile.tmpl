@@ -2,7 +2,8 @@
 
 ## install: Install development dependencies
 install:
-	go install github.com/a-h/templ/cmd/templ@latest
+	go install github.com/FyrmForge/hamr/cmd/hamr
+	go install github.com/a-h/templ/cmd/templ
 {{- if eq .CSS "tailwind"}}
 	npm install
 {{- end}}

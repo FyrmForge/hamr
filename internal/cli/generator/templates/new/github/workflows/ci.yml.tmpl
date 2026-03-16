@@ -45,8 +45,8 @@ jobs:
       - name: Download Go modules
         run: go mod download
 
-      - name: Install templ
-        run: go install github.com/a-h/templ/cmd/templ@latest
+      - name: Install deps
+        run: make install
 
       - name: Generate templ files
         run: templ generate
@@ -64,9 +64,6 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-
-      - name: Install npm dependencies
-        run: npm ci
 
       - name: Build CSS
         run: npm run css:build

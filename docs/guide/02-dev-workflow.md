@@ -131,7 +131,7 @@ The injected live reload script adds a small widget (bottom-left corner) showing
 - **Watch rules** — status dots (idle/building/error) with manual trigger buttons
 - **Daemons** — running status with command info
 - **Docker containers** — per-service health with restart/wipe controls
-- **Logs toggle** — opens a terminal-style log window with Hamr and Docker tabs
+- **Logs toggle** — opens a terminal-style log window with Hamr and Docker tabs (Docker logs are colour-coded per container, errors highlighted in red)
 - **Build errors** — full-page error overlay when a build fails, auto-clears on fix
 
 ---

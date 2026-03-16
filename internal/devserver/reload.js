@@ -53,6 +53,24 @@
         "94": "#93C5FD", "95": "#D8B4FE", "96": "#A5F3FC", "97": "#FFFFFF"
     };
 
+    // --- Docker log colors ---
+
+    var DOCKER_CONTAINER_COLORS = [
+        "#67E8F9", "#FCD34D", "#C084FC", "#4ADE80",
+        "#60A5FA", "#F97316", "#FB7185", "#A78BFA"
+    ];
+    var dockerColorMap = {};
+    var dockerColorIdx = 0;
+    var DOCKER_ERROR_RE = /\b(error|err|fatal|panic|exception|crit)\b/i;
+
+    function getContainerColor(name) {
+        if (!dockerColorMap[name]) {
+            dockerColorMap[name] = DOCKER_CONTAINER_COLORS[dockerColorIdx % DOCKER_CONTAINER_COLORS.length];
+            dockerColorIdx++;
+        }
+        return dockerColorMap[name];
+    }
+
     function ansiToHtml(s) {
         var result = "";
         var open = false;
@@ -682,6 +700,8 @@
         var dockerBody = logOverlay.querySelector(".hl-docker-body");
         if (!dockerBody) return;
         dockerBody.textContent = "Loading...";
+        dockerColorMap = {};
+        dockerColorIdx = 0;
 
         // Fetch logs from all compose entries and concat.
         var pending = config.docker_compose.length;
@@ -709,7 +729,34 @@
         var dockerBody = logOverlay.querySelector(".hl-docker-body");
         if (!dockerBody) return;
         var combined = outputs.join("");
-        dockerBody.innerHTML = ansiToHtml(combined) || '<span style="color:#6B7280">No docker logs available</span>';
+        if (!combined) {
+            dockerBody.innerHTML = '<span style="color:#6B7280">No docker logs available</span>';
+            return;
+        }
+        var lines = combined.split("\n");
+        var html = "";
+        for (var i = 0; i < lines.length; i++) {
+            var raw = lines[i];
+            if (!raw) continue;
+            var pipeIdx = raw.indexOf(" | ");
+            if (pipeIdx > 0) {
+                var name = raw.substring(0, pipeIdx).replace(/\s+$/, "");
+                var msg = raw.substring(pipeIdx + 3);
+                var color = getContainerColor(name);
+                var isErr = DOCKER_ERROR_RE.test(msg);
+                var lineStyle = isErr ? ' style="color:#FCA5A5;background:rgba(239,68,68,0.15)"' : "";
+                html += '<div class="hl-line"' + lineStyle + '>'
+                    + '<span style="color:' + color + ';font-weight:bold">' + esc(name) + '</span>'
+                    + ' <span style="color:#6B7280">|</span> '
+                    + ansiToHtml(msg)
+                    + '</div>';
+            } else {
+                var isErr = DOCKER_ERROR_RE.test(raw);
+                var lineStyle = isErr ? ' style="color:#FCA5A5;background:rgba(239,68,68,0.15)"' : "";
+                html += '<div class="hl-line"' + lineStyle + '>' + ansiToHtml(raw) + '</div>';
+            }
+        }
+        dockerBody.innerHTML = html;
         dockerBody.scrollTop = dockerBody.scrollHeight;
     }
 

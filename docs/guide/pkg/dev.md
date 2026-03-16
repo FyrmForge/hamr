@@ -215,7 +215,7 @@ The injected script adds a small widget (bottom-left corner) that opens a panel 
 A terminal-style log window at the bottom of the screen with two tabs:
 
 - **Hamr** — live output from all watch rules, builds, and daemons
-- **Docker** — aggregated `docker compose logs` output
+- **Docker** — aggregated `docker compose logs` output, colour-coded by container name (error lines highlighted in red)
 
 The visible line count is adjustable and persists across page loads.
 
