@@ -15,6 +15,12 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.10
+          args: --help
+
       - run: make build
 
       - run: make lint
