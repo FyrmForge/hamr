@@ -15,12 +15,10 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - run: go build ./...
+      - run: make build
 
-      - run: go vet ./...
+      - run: make lint
 
-      - uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.10
+      - run: make test
 
-      - run: go test ./...
+      - run: make vet

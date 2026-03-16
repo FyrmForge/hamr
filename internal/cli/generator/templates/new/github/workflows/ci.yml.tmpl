@@ -44,12 +44,19 @@ jobs:
 
       - name: Download Go modules
         run: go mod download
+{{- if eq .CSS "tailwind"}}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+{{- end}}
 
       - name: Install deps
         run: make install
 
-      - name: Generate templ files
-        run: templ generate
+      - name: Build
+        run: make build
 
       - name: Verify generated templ files are committed
         run: |
@@ -60,17 +67,6 @@ jobs:
           fi
 {{- if eq .CSS "tailwind"}}
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: npm
-
-      - name: Install Node dependencies
-        run: npm ci
-
-      - name: Build CSS
-        run: npm run css:build
-
       - name: Verify compiled CSS is committed
         run: |
           if ! git diff --quiet -- 'static/css/output.css'; then
@@ -80,16 +76,6 @@ jobs:
           fi
 {{- end}}
 
-      - name: Generate static pages
-        run: |
-          go build -o bin/site ./cmd/site
-          ./bin/site --generate
-
-      # - name: Run migrations
-      #   env:
-      #     DATABASE_URL: postgres://postgres:postgres@localhost:5432/{{.Name | lower}}?sslmode=disable
-      #   run: make migrate
-
       - name: Verify generated static pages are committed
         run: |
           if ! git diff --quiet -- 'generated/'; then
@@ -98,11 +84,16 @@ jobs:
             exit 1
           fi
 
+      # - name: Run migrations
+      #   env:
+      #     DATABASE_URL: postgres://postgres:postgres@localhost:5432/{{.Name | lower}}?sslmode=disable
+      #   run: make migrate
+
       - name: Run tests
-        run: go test -v -race ./...
+        run: make test
 
       - name: Lint
         uses: golangci/golangci-lint-action@v9
 
       - name: Lint templ files
-        run: go run github.com/FyrmForge/hamr/cmd/hamr@latest lint templ
+        run: make templint

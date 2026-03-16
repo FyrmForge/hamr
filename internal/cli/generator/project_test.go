@@ -681,7 +681,9 @@ func TestGenerateProject_ciWorkflow(t *testing.T) {
 
 	ci := readFile(t, dir, ".github/workflows/ci.yml")
 	assert.Contains(t, ci, `go-version: "1.25.0"`)
-	assert.Contains(t, ci, "templ generate")
+	assert.Contains(t, ci, "make build")
+	assert.Contains(t, ci, "make test")
+	assert.Contains(t, ci, "make templint")
 	assert.Contains(t, ci, "templ files are out of date")
 	assert.Contains(t, ci, "golangci-lint-action")
 	assert.Contains(t, ci, "# - name: Run migrations")
@@ -719,8 +721,9 @@ func TestGenerateProject_ciWorkflowTailwind(t *testing.T) {
 	ci := readFile(t, dir, ".github/workflows/ci.yml")
 	assert.Contains(t, ci, `go-version: "1.24.0"`)
 	assert.Contains(t, ci, "setup-node")
-	assert.Contains(t, ci, "npm ci")
-	assert.Contains(t, ci, "npm run css:build")
+	assert.Contains(t, ci, "make build")
+	assert.Contains(t, ci, "make test")
+	assert.Contains(t, ci, "make templint")
 }
 
 func TestGenerateProject_staticS3(t *testing.T) {

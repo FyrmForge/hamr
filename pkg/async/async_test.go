@@ -357,38 +357,21 @@ func TestGroup_withMetrics(t *testing.T) {
 }
 
 func TestGroup_withMetrics_blockedOnlyWhenContended(t *testing.T) {
-	spy := &metricsSpy{blockedCh: make(chan struct{})}
+	spy := &metricsSpy{}
 	job1Running := make(chan struct{})
-	release := make(chan struct{})
 
 	g := async.NewGroup(async.WithLimit(1), async.WithMetrics(spy))
 
-	// First job: holds the slot until released.
+	// First job: signals it's running, then holds the semaphore slot.
 	g.Go(func() {
 		close(job1Running)
-		<-release
+		time.Sleep(100 * time.Millisecond)
 	})
-	<-job1Running // wait for job 1 to be running
+	<-job1Running // job1 is running and holds the slot
 
-	// Second Go() will block on the semaphore (TryAcquire fails, Acquire blocks).
-	goDone := make(chan struct{})
-	go func() {
-		g.Go(func() {})
-		close(goDone)
-	}()
-
-	// Release job 1 so job 2 can proceed.
-	close(release)
-	select {
-	case <-spy.blockedCh:
-	case <-time.After(time.Second):
-		t.Fatal("expected Blocked callback after semaphore contention")
-	}
-	select {
-	case <-goDone:
-	case <-time.After(time.Second):
-		t.Fatal("second Go did not return")
-	}
+	// g.Go blocks the calling goroutine on the semaphore until job1 finishes.
+	// By the time it returns, Blocked() and Dispatched() have already fired.
+	g.Go(func() {})
 	g.Close()
 
 	spy.mu.Lock()
