@@ -114,18 +114,39 @@ func (sb *StatusBar) buildBarContent(width int) string {
 	base := hamr + barKeys
 	used := barBaseVisibleLen // visible chars consumed so far
 
-	// Append status indicators right-to-left priority: ERR first, then VER.
-	var suffix string
+	// Build version tag (right-aligned).
+	var rightTag string
+	var rightLen int
+	switch {
+	case vs == VersionMismatch && vmsg != "":
+		rightTag = barYellow + "VER" + barReset + barDim + " " + vmsg + barReset
+		rightLen = 4 + len(vmsg) // "VER " + msg
+	case vs == VersionUpdate && vmsg != "":
+		rightTag = barYellow + "UPD" + barReset + barDim + " " + vmsg + barReset
+		rightLen = 4 + len(vmsg) // "UPD " + msg
+	case vs == VersionDev:
+		rightTag = barYellow + "DEV" + barReset
+		rightLen = 3
+	}
+
+	// Build error indicator (inline after hotkeys).
+	var errSuffix string
+	errUsed := 0
 
 	if hasErrors {
 		names := es.RuleNames()
 		errPrefix := "  " + barRed + "ERR" + barReset + barDim + " "
 		errPrefixVisibleLen := 6 // "  ERR "
 
-		available := width - used - errPrefixVisibleLen
+		// Reserve space for right tag + 2 char gap, and 1 col to avoid wrap.
+		reserved := 1
+		if rightLen > 0 {
+			reserved += rightLen + 2
+		}
+		available := width - used - errPrefixVisibleLen - reserved
 		if available < 3 {
-			suffix += "  " + barRed + "ERR" + barReset
-			used += 5 // "  ERR"
+			errSuffix = "  " + barRed + "ERR" + barReset
+			errUsed = 5
 		} else {
 			joined := strings.Join(names, ", ")
 			if len(joined) > available {
@@ -135,35 +156,24 @@ func (sb *StatusBar) buildBarContent(width int) string {
 					joined = joined[:available-1] + "…"
 				}
 			}
-			suffix += errPrefix + joined + barReset
-			used += errPrefixVisibleLen + len(joined)
+			errSuffix = errPrefix + joined + barReset
+			errUsed = errPrefixVisibleLen + len(joined)
 		}
 	}
 
-	switch {
-	case vs == VersionMismatch && vmsg != "":
-		verTag := "  " + barYellow + "VER" + barReset + barDim + " " + vmsg + barReset
-		verVisibleLen := 6 + len(vmsg) // "  VER " + msg
-		if used+verVisibleLen <= width {
-			suffix += verTag
-		} else if used+5 <= width {
-			suffix += "  " + barYellow + "VER" + barReset
-		}
-	case vs == VersionUpdate && vmsg != "":
-		updTag := "  " + barYellow + "UPD" + barReset + barDim + " " + vmsg + barReset
-		updVisibleLen := 6 + len(vmsg) // "  UPD " + msg
-		if used+updVisibleLen <= width {
-			suffix += updTag
-		} else if used+5 <= width {
-			suffix += "  " + barYellow + "UPD" + barReset
-		}
-	case vs == VersionDev:
-		if used+5 <= width {
-			suffix += "  " + barYellow + "DEV" + barReset
-		}
+	if rightLen == 0 {
+		return base + errSuffix
 	}
 
-	return base + suffix
+	// Pad between left content and right-aligned tag.
+	// Use width-1 to avoid writing in the last column, which wraps the cursor.
+	leftUsed := used + errUsed
+	maxCol := width - 1
+	if leftUsed+rightLen+2 > maxCol {
+		return base + errSuffix
+	}
+	gap := maxCol - leftUsed - rightLen
+	return base + errSuffix + strings.Repeat(" ", gap) + rightTag
 }
 
 // Start activates the status bar. It sets a scroll region that reserves the

@@ -12,6 +12,11 @@ const devVersion = "dev"
 var (
 	version = devVersion
 	commit  = "none"
+
+	// releaseBuild is true when version was set via ldflags at build time.
+	// Evaluated after ldflags apply but before init() overwrites version
+	// from debug.ReadBuildInfo (which returns stale Go module tags).
+	releaseBuild = version != devVersion
 )
 
 func init() {

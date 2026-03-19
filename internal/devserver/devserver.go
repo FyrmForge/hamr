@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -199,6 +200,9 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	// Ensure docker compose services are running before build.
 	for i := range r.cfg.Dev.DockerCompose {
+		if runCtx.Err() != nil {
+			return nil
+		}
 		dc := &r.cfg.Dev.DockerCompose[i]
 		r.logger.Info("ensuring docker compose", "name", dc.Name, "file", dc.File)
 		if output, err := r.ensureDockerCompose(runCtx, dc); err != nil {
@@ -216,6 +220,9 @@ func (r *Runner) Run(ctx context.Context) error {
 	order := graph.TopologicalOrder()
 	failed := make(map[string]bool)
 	for _, name := range order {
+		if runCtx.Err() != nil {
+			return nil
+		}
 		rule := r.findRule(name)
 		if rule == nil {
 			continue
@@ -611,6 +618,8 @@ func (r *Runner) ensureDockerCompose(ctx context.Context, dc *DockerCompose) (st
 	}
 	args = append(args, dc.Services...)
 	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.WaitDelay = 2 * time.Second
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = buildEnv(dc.Env)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
@@ -628,6 +637,8 @@ func (r *Runner) stopDockerCompose(dc *DockerCompose) {
 	defer cancel()
 	args := []string{"compose", "-f", dc.File, "down"}
 	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.WaitDelay = 2 * time.Second
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = buildEnv(dc.Env)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
