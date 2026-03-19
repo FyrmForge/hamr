@@ -226,8 +226,9 @@ The visible line count is adjustable and persists across page loads.
 When a build command fails, hamr:
 1. Shows a full-page error overlay with the build output
 2. Sets a red border on the widget
-3. Continues watching for changes
-4. Automatically reloads when the error is fixed
+3. Shows `ERR` with failing rule names in the terminal status bar
+4. Continues watching for changes
+5. Automatically reloads when the error is fixed
 
 ### Config Errors
 

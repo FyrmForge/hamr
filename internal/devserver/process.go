@@ -129,15 +129,21 @@ func (pm *ProcessManager) RunCommand(ctx context.Context, rule *WatchRule) (stri
 	color := nextColor()
 	capture := newTailBuffer()
 
+	// Show [name:build] when the rule also has a run step, plain [name] otherwise.
+	displayName := rule.Name
+	if rule.Run != "" {
+		displayName = rule.Name + ":build"
+	}
+
 	stdoutDest, stderrDest := pm.prefixDests()
 	var lw *logWriter
 	if pm.logBuf != nil {
-		lw = newLogWriter(rule.Name, color, pm.logBuf, pm.logBroker)
-		cmd.Stdout = io.MultiWriter(newPrefixWriter(stdoutDest, rule.Name, color), capture, lw)
-		cmd.Stderr = io.MultiWriter(newPrefixWriter(stderrDest, rule.Name, color), capture, lw)
+		lw = newLogWriter(displayName, color, pm.logBuf, pm.logBroker)
+		cmd.Stdout = io.MultiWriter(newPrefixWriter(stdoutDest, displayName, color), capture, lw)
+		cmd.Stderr = io.MultiWriter(newPrefixWriter(stderrDest, displayName, color), capture, lw)
 	} else {
-		cmd.Stdout = io.MultiWriter(newPrefixWriter(stdoutDest, rule.Name, color), capture)
-		cmd.Stderr = io.MultiWriter(newPrefixWriter(stderrDest, rule.Name, color), capture)
+		cmd.Stdout = io.MultiWriter(newPrefixWriter(stdoutDest, displayName, color), capture)
+		cmd.Stderr = io.MultiWriter(newPrefixWriter(stderrDest, displayName, color), capture)
 	}
 
 	if err := cmd.Run(); err != nil {
@@ -166,15 +172,21 @@ func (pm *ProcessManager) StartProcess(ctx context.Context, rule *WatchRule) err
 	color := nextColor()
 	capture := newTailBuffer()
 
+	// Show [name:run] when the rule also has a build step, plain [name] otherwise.
+	displayName := rule.Name
+	if rule.Cmd != "" {
+		displayName = rule.Name + ":run"
+	}
+
 	stdoutDest, stderrDest := pm.prefixDests()
 	var lw *logWriter
 	if pm.logBuf != nil {
-		lw = newLogWriter(rule.Name, color, pm.logBuf, pm.logBroker)
-		cmd.Stdout = io.MultiWriter(newPrefixWriter(stdoutDest, rule.Name, color), capture, lw)
-		cmd.Stderr = io.MultiWriter(newPrefixWriter(stderrDest, rule.Name, color), capture, lw)
+		lw = newLogWriter(displayName, color, pm.logBuf, pm.logBroker)
+		cmd.Stdout = io.MultiWriter(newPrefixWriter(stdoutDest, displayName, color), capture, lw)
+		cmd.Stderr = io.MultiWriter(newPrefixWriter(stderrDest, displayName, color), capture, lw)
 	} else {
-		cmd.Stdout = io.MultiWriter(newPrefixWriter(stdoutDest, rule.Name, color), capture)
-		cmd.Stderr = io.MultiWriter(newPrefixWriter(stderrDest, rule.Name, color), capture)
+		cmd.Stdout = io.MultiWriter(newPrefixWriter(stdoutDest, displayName, color), capture)
+		cmd.Stderr = io.MultiWriter(newPrefixWriter(stderrDest, displayName, color), capture)
 	}
 
 	if err := cmd.Start(); err != nil {
@@ -315,7 +327,7 @@ func (pm *ProcessManager) prefixDests() (stdout, stderr io.Writer) {
 // processes).
 type prefixWriter struct {
 	dest   io.Writer
-	tag    []byte // e.g. "\033[36m[templ]\033[0m "
+	tag    []byte // e.g. "\033[36m[site:build]\033[0m "
 	buf    []byte
 	mu     sync.Mutex
 }

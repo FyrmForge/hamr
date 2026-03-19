@@ -40,3 +40,33 @@ func TestErrorState_HasErrors(t *testing.T) {
 	es.Clear("go")
 	assert.False(t, es.HasErrors())
 }
+
+func TestErrorState_OnChange(t *testing.T) {
+	es := NewErrorState()
+	var calls int
+	es.OnChange(func() { calls++ })
+
+	es.Set("go", "err")
+	assert.Equal(t, 1, calls)
+
+	es.Clear("go")
+	assert.Equal(t, 2, calls)
+}
+
+func TestErrorState_RuleNames(t *testing.T) {
+	es := NewErrorState()
+	assert.Empty(t, es.RuleNames())
+
+	es.Set("go", "err")
+	es.Set("templ", "err")
+	es.Set("css", "err")
+
+	assert.Equal(t, []string{"css", "go", "templ"}, es.RuleNames())
+}
+
+func TestErrorState_OnChange_NilSafe(t *testing.T) {
+	es := NewErrorState()
+	// No callback registered — should not panic.
+	es.Set("go", "err")
+	es.Clear("go")
+}

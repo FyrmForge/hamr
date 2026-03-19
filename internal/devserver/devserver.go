@@ -32,6 +32,8 @@ type Runner struct {
 	logger     *slog.Logger
 	verbose    bool
 	noProxy    bool
+	hotkeys    *HotkeyReader
+	statusBar  *StatusBar
 }
 
 // Option configures a Runner.
@@ -55,6 +57,20 @@ func WithNoProxy(v bool) Option {
 // WithConfigPath sets the config file path so the runner can watch it for changes.
 func WithConfigPath(path string) Option {
 	return func(r *Runner) { r.configPath = path }
+}
+
+// WithHotkeys provides an externally managed HotkeyReader.
+// When set, Run() uses this reader instead of creating its own,
+// and does not stop it on return — the caller owns its lifecycle.
+func WithHotkeys(h *HotkeyReader) Option {
+	return func(r *Runner) { r.hotkeys = h }
+}
+
+// WithStatusBar provides an externally managed StatusBar.
+// When set, Run() uses this bar instead of creating its own,
+// and does not stop it on return — the caller owns its lifecycle.
+func WithStatusBar(sb *StatusBar) Option {
+	return func(r *Runner) { r.statusBar = sb }
 }
 
 // NewRunner creates a new Runner with the given config and options.
@@ -107,9 +123,17 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	// Start reverse proxy.
 	var proxySrv *http.Server
-	var statusBar StatusBar
+	// Use externally provided status bar, or create a local one.
+	statusBar := r.statusBar
+	ownStatusBar := statusBar == nil
+	if ownStatusBar {
+		statusBar = &StatusBar{}
+	}
+	statusBar.SetErrorState(errorState)
 	defer func() {
-		statusBar.Stop()
+		if ownStatusBar {
+			statusBar.Stop()
+		}
 		r.logger.Info("shutting down")
 		if !configReload {
 			broker.Broadcast(SSEEvent{Type: "shutdown"})
@@ -137,6 +161,31 @@ func (r *Runner) Run(ctx context.Context) error {
 		errorState: errorState, graph: graph, logger: r.logger,
 	}
 
+	// Initialize hotkey reader early so quit works during startup
+	// (docker compose, initial build). Without this, Ctrl+C in raw mode
+	// has nowhere to go — SIGINT is disabled and the event loop hasn't started.
+	hotkeyReader := r.hotkeyReader(runCtx)
+	if ownStatusBar {
+		statusBar.Start()
+	}
+	startupDone := make(chan struct{})
+	startupExited := make(chan struct{})
+	go func() {
+		defer close(startupExited)
+		for {
+			select {
+			case action := <-hotkeyReader.Actions():
+				if r.handleHotkey(action, actions, statusBar, cancel) {
+					return
+				}
+			case <-startupDone:
+				return
+			case <-runCtx.Done():
+				return
+			}
+		}
+	}()
+
 	if !r.noProxy && r.cfg.ProxyConfigured {
 		inject := r.cfg.Proxy.InjectReload != nil && *r.cfg.Proxy.InjectReload
 		handler := NewProxyHandler(r.cfg.Proxy.Target, broker, errorState, logBuf, actions, inject)
@@ -162,19 +211,39 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 
 	// Initial build: run all rules in topological order.
+	// Track failures so dependents are skipped rather than started with stale artifacts.
 	r.logger.Info("running initial build")
 	order := graph.TopologicalOrder()
+	failed := make(map[string]bool)
 	for _, name := range order {
 		rule := r.findRule(name)
 		if rule == nil {
 			continue
 		}
+
+		// Skip if any dependency failed.
+		depFailed := false
+		for _, dep := range rule.Depends {
+			if failed[dep] {
+				depFailed = true
+				break
+			}
+		}
+		if depFailed {
+			r.logger.Warn("skipping rule (dependency failed)", "rule", name)
+			failed[name] = true
+			graph.MarkDone(name)
+			continue
+		}
+
 		if rule.Cmd != "" {
 			if output, err := pm.RunCommand(runCtx, rule); err != nil {
 				r.logger.Error("initial build failed", "rule", name, "err", err)
 				errorState.Set(name, output)
 				broker.Broadcast(buildErrorEvent(name, output))
-				// Continue — don't abort the whole dev server for a build error.
+				failed[name] = true
+				graph.MarkDone(name)
+				continue
 			}
 		}
 		if rule.Run != "" {
@@ -199,10 +268,8 @@ func (r *Runner) Run(ctx context.Context) error {
 	if len(r.cfg.Dev.Watch) == 0 {
 		r.logger.Info("no watch rules, running daemons only")
 		r.logger.Info("ready")
-		var hotkeyReader HotkeyReader
-		hotkeyReader.Start(runCtx)
-		defer hotkeyReader.Stop()
-		statusBar.Start()
+		close(startupDone)
+		<-startupExited
 		if r.configPath != "" {
 			go r.watchConfigFile(runCtx, configReloadCh)
 		}
@@ -214,7 +281,7 @@ func (r *Runner) Run(ctx context.Context) error {
 				configReload = true
 				return ErrConfigReload
 			case action := <-hotkeyReader.Actions():
-				if r.handleHotkey(action, actions, &statusBar, cancel) {
+				if r.handleHotkey(action, actions, statusBar, cancel) {
 					return nil
 				}
 			}
@@ -233,10 +300,8 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	r.logger.Info("watching for changes")
 	r.logger.Info("ready")
-	var hotkeyReader HotkeyReader
-	hotkeyReader.Start(runCtx)
-	defer hotkeyReader.Stop()
-	statusBar.Start()
+	close(startupDone)
+	<-startupExited
 
 	// Watch the config file for changes.
 	if r.configPath != "" {
@@ -343,7 +408,7 @@ func (r *Runner) Run(ctx context.Context) error {
 			configReload = true
 			return ErrConfigReload
 		case action := <-hotkeyReader.Actions():
-			if r.handleHotkey(action, actions, &statusBar, cancel) {
+			if r.handleHotkey(action, actions, statusBar, cancel) {
 				return nil
 			}
 		case evt, ok := <-watcher.Events():
@@ -359,6 +424,17 @@ func (r *Runner) Run(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+// hotkeyReader returns the externally provided HotkeyReader if set,
+// otherwise creates and starts a local one tied to the given context.
+func (r *Runner) hotkeyReader(ctx context.Context) *HotkeyReader {
+	if r.hotkeys != nil {
+		return r.hotkeys
+	}
+	h := &HotkeyReader{}
+	h.Start(ctx)
+	return h
 }
 
 // handleHotkey processes a hotkey action. Returns true if the server should exit.

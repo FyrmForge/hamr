@@ -48,27 +48,53 @@ func runDev(cmd *cobra.Command, _ []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Create hotkey reader and status bar once so they survive config reloads.
+	// Defer Stop immediately — both are safe on zero value.
+	// Only Start after the first successful config load so the terminal stays
+	// in cooked mode (Ctrl+C works, no staircase output) during config errors.
+	var hotkeys devserver.HotkeyReader
+	defer hotkeys.Stop()
+
+	var statusBar devserver.StatusBar
+	defer statusBar.Stop()
+
+	var started bool
+
 	for {
 		cfg, err := devserver.LoadConfig(configPath)
 		if err != nil {
-			fmt.Printf("%s config error: %v\n", devserver.HamrDevTag(), err)
-			fmt.Printf("%s waiting for config fix...\n", devserver.HamrDevTag())
-			if waitErr := devserver.WaitForConfigChange(ctx, configPath); waitErr != nil {
+			fmt.Printf("%s config error: %v\r\n", devserver.HamrDevTag(), err)
+			fmt.Printf("%s waiting for config fix...\r\n", devserver.HamrDevTag())
+			var waitErr error
+			if started {
+				waitErr = devserver.WaitForConfigChangeOrQuit(ctx, configPath, hotkeys.Actions())
+			} else {
+				waitErr = devserver.WaitForConfigChange(ctx, configPath)
+			}
+			if waitErr != nil {
 				return waitErr
 			}
-			fmt.Printf("\n%s--- config changed, retrying ---\n", devserver.HamrDevTag())
+			fmt.Printf("\r\n%s--- config changed, retrying ---\r\n", devserver.HamrDevTag())
 			continue
+		}
+
+		if !started {
+			hotkeys.Start(ctx)
+			statusBar.Start()
+			started = true
 		}
 
 		runner := devserver.NewRunner(cfg,
 			devserver.WithConfigPath(configPath),
 			devserver.WithVerbose(verbose),
 			devserver.WithNoProxy(noProxy),
+			devserver.WithHotkeys(&hotkeys),
+			devserver.WithStatusBar(&statusBar),
 		)
 
 		err = runner.Run(ctx)
 		if errors.Is(err, devserver.ErrConfigReload) {
-			fmt.Printf("\n%s--- config changed, restarting ---\n", devserver.HamrDevTag())
+			fmt.Printf("\r\n%s--- config changed, restarting ---\r\n", devserver.HamrDevTag())
 			continue
 		}
 		return err
