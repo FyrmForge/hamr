@@ -140,7 +140,7 @@ func checkVersionStatus(sb *devserver.StatusBar, configPath string) {
 		return
 	}
 
-	if cliVer.Major != projVer.Major || cliVer.Minor != projVer.Minor {
+	if cliVer != projVer {
 		fmt.Printf("%s version mismatch: cli v%s, project v%s\r\n", devserver.HamrDevTag(), cliVer, projVer)
 		sb.SetVersionStatus(devserver.VersionMismatch, fmt.Sprintf("cli v%s proj v%s", cliVer, projVer))
 		return
