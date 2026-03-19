@@ -59,7 +59,7 @@ var barKeys = barDim +
 
 const barBaseVisibleLen = 39 // "  🔨" (4 cols) + barKeys (35 visible chars)
 
-// SetErrorState wires the error state so the bar redraws on error changes.
+// SetErrorState wires the error state so the bar redraws on error changes
 func (sb *StatusBar) SetErrorState(es *ErrorState) {
 	sb.mu.Lock()
 	sb.errorState = es
