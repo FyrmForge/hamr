@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/FyrmForge/hamr/internal/devserver"
+	"github.com/FyrmForge/hamr/internal/scaffold"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -84,6 +85,8 @@ func runDev(cmd *cobra.Command, _ []string) error {
 			started = true
 		}
 
+		checkVersionStatus(&statusBar, configPath)
+
 		runner := devserver.NewRunner(cfg,
 			devserver.WithConfigPath(configPath),
 			devserver.WithVerbose(verbose),
@@ -99,4 +102,40 @@ func runDev(cmd *cobra.Command, _ []string) error {
 		}
 		return err
 	}
+}
+
+// checkVersionStatus compares the CLI version against the project's [hamr].version
+// and updates the status bar indicator accordingly.
+func checkVersionStatus(sb *devserver.StatusBar, configPath string) {
+	if version == devVersion {
+		sb.SetVersionStatus(devserver.VersionDev, "")
+		return
+	}
+
+	meta, err := scaffold.LoadMetadata(configPath)
+	if err != nil || !meta.HasHamrSection() {
+		sb.SetVersionStatus(devserver.VersionOK, "")
+		return
+	}
+
+	cliVer, err := scaffold.ParseVersion(version)
+	if err != nil {
+		sb.SetVersionStatus(devserver.VersionOK, "")
+		return
+	}
+
+	projVer, err := scaffold.ParseVersion(meta.Hamr.Version)
+	if err != nil {
+		sb.SetVersionStatus(devserver.VersionOK, "")
+		return
+	}
+
+	if cliVer.Major != projVer.Major || cliVer.Minor != projVer.Minor {
+		msg := fmt.Sprintf("cli=%s project=%s", cliVer, projVer)
+		fmt.Printf("%s version mismatch: %s\r\n", devserver.HamrDevTag(), msg)
+		sb.SetVersionStatus(devserver.VersionMismatch, msg)
+		return
+	}
+
+	sb.SetVersionStatus(devserver.VersionOK, "")
 }

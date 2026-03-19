@@ -219,6 +219,20 @@ A terminal-style log window at the bottom of the screen with two tabs:
 
 The visible line count is adjustable and persists across page loads.
 
+## Terminal Status Bar
+
+The bottom row of the terminal shows a persistent status bar with hotkey hints and
+health indicators. The 🔨 emoji reflects overall state:
+
+| Color | Meaning |
+|-------|---------|
+| Green | All builds passing, released CLI |
+| Yellow | Dev build (`DEV`) or version mismatch (`VER`) |
+| Red | Active build errors (`ERR rule1, rule2`) |
+
+When the CLI version (major.minor) differs from the project's `[hamr].version` in
+hamr.toml, the bar shows `VER cli=X.Y.Z project=A.B.C` as a reminder to upgrade.
+
 ## Error Handling
 
 ### Build Errors

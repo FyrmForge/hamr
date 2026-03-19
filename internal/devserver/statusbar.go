@@ -12,24 +12,36 @@ import (
 	"golang.org/x/term"
 )
 
+// VersionStatus indicates the CLI-vs-project version state.
+type VersionStatus int
+
+const (
+	VersionOK       VersionStatus = iota // versions match or no project version
+	VersionDev                           // CLI is a dev build
+	VersionMismatch                      // CLI major.minor differs from project
+)
+
 // StatusBar renders a persistent hotkey bar at the bottom of the terminal
 // using ANSI scroll regions. All normal output is confined above the bar.
 type StatusBar struct {
-	mu         sync.Mutex
-	fd         int
-	running    bool
-	sigCh      chan os.Signal
-	stopCh     chan struct{}
-	errorState *ErrorState
+	mu            sync.Mutex
+	fd            int
+	running       bool
+	sigCh         chan os.Signal
+	stopCh        chan struct{}
+	errorState    *ErrorState
+	versionStatus VersionStatus
+	versionMsg    string // e.g. "cli=0.4.0 project=0.5.0"
 }
 
 // bar content constants.
 const (
-	barDim   = "\033[2m"
-	barBold  = "\033[1m"
-	barReset = "\033[0m"
-	barRed   = "\033[1;31m"
-	barGreen = "\033[32m"
+	barDim    = "\033[2m"
+	barBold   = "\033[1m"
+	barReset  = "\033[0m"
+	barRed    = "\033[1;31m"
+	barGreen  = "\033[32m"
+	barYellow = "\033[33m"
 )
 
 // barKeys is the hotkey hints portion (without the leading emoji).
@@ -53,49 +65,80 @@ func (sb *StatusBar) SetErrorState(es *ErrorState) {
 	es.OnChange(sb.Redraw)
 }
 
-// buildBarContent returns the bar string with a colored emoji and error indicator.
+// SetVersionStatus sets the version indicator and triggers a redraw.
+func (sb *StatusBar) SetVersionStatus(status VersionStatus, msg string) {
+	sb.mu.Lock()
+	sb.versionStatus = status
+	sb.versionMsg = msg
+	sb.mu.Unlock()
+	sb.Redraw()
+}
+
+// buildBarContent returns the bar string with a colored emoji and status indicators.
 func (sb *StatusBar) buildBarContent(width int) string {
 	sb.mu.Lock()
 	es := sb.errorState
+	vs := sb.versionStatus
+	vmsg := sb.versionMsg
 	sb.mu.Unlock()
 
 	hasErrors := es != nil && es.HasErrors()
 
-	// Color the emoji: green when healthy, red when errors.
+	// Emoji color priority: red (errors) > yellow (dev/mismatch) > green (ok).
 	var hamr string
-	if hasErrors {
+	switch {
+	case hasErrors:
 		hamr = "  " + barRed + "🔨" + barReset
-	} else {
+	case vs == VersionDev || vs == VersionMismatch:
+		hamr = "  " + barYellow + "🔨" + barReset
+	default:
 		hamr = "  " + barGreen + "🔨" + barReset
 	}
 	base := hamr + barKeys
+	used := barBaseVisibleLen // visible chars consumed so far
 
-	if !hasErrors {
-		return base
-	}
+	// Append status indicators right-to-left priority: ERR first, then VER.
+	var suffix string
 
-	names := es.RuleNames()
+	if hasErrors {
+		names := es.RuleNames()
+		errPrefix := "  " + barRed + "ERR" + barReset + barDim + " "
+		errPrefixVisibleLen := 6 // "  ERR "
 
-	// "  ERR rule1, rule2" — red bold ERR, dim rule names.
-	errPrefix := "  " + barRed + "ERR" + barReset + barDim + " "
-	errPrefixVisibleLen := 6 // "  ERR "
-
-	available := width - barBaseVisibleLen - errPrefixVisibleLen
-	if available < 3 {
-		// Not enough room for any names, just show ERR marker.
-		return base + "  " + barRed + "ERR" + barReset
-	}
-
-	joined := strings.Join(names, ", ")
-	if len(joined) > available {
-		if available <= 3 {
-			joined = joined[:available]
+		available := width - used - errPrefixVisibleLen
+		if available < 3 {
+			suffix += "  " + barRed + "ERR" + barReset
+			used += 5 // "  ERR"
 		} else {
-			joined = joined[:available-1] + "…"
+			joined := strings.Join(names, ", ")
+			if len(joined) > available {
+				if available <= 3 {
+					joined = joined[:available]
+				} else {
+					joined = joined[:available-1] + "…"
+				}
+			}
+			suffix += errPrefix + joined + barReset
+			used += errPrefixVisibleLen + len(joined)
 		}
 	}
 
-	return base + errPrefix + joined + barReset
+	if vs == VersionMismatch && vmsg != "" {
+		verTag := "  " + barYellow + "VER" + barReset + barDim + " " + vmsg + barReset
+		verVisibleLen := 6 + len(vmsg) // "  VER " + msg
+		if used+verVisibleLen <= width {
+			suffix += verTag
+		} else if used+5 <= width { // at least "  VER"
+			suffix += "  " + barYellow + "VER" + barReset
+		}
+	} else if vs == VersionDev {
+		devTag := "  " + barYellow + "DEV" + barReset
+		if used+5 <= width {
+			suffix += devTag
+		}
+	}
+
+	return base + suffix
 }
 
 // Start activates the status bar. It sets a scroll region that reserves the
