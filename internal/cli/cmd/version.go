@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"runtime/debug"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -19,7 +20,7 @@ func init() {
 	if version == devVersion || commit == "none" {
 		if bi, ok := debug.ReadBuildInfo(); ok {
 			if version == devVersion && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
-				version = bi.Main.Version
+				version = strings.TrimPrefix(bi.Main.Version, "v")
 			}
 			if commit == "none" {
 				for _, s := range bi.Settings {
