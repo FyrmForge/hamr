@@ -83,9 +83,18 @@ func runDev(cmd *cobra.Command, _ []string) error {
 			hotkeys.Start(ctx)
 			statusBar.Start()
 			started = true
-		}
 
-		checkVersionStatus(&statusBar, configPath)
+			checkVersionStatus(&statusBar, configPath)
+
+			// Check for newer hamr release in the background (non-blocking).
+			if version != devVersion {
+				devserver.CheckLatestVersion(ctx, version, func(latest string) {
+					if statusBar.SetVersionUpdateIfOK("latest=" + latest) {
+						fmt.Printf("%s update available: %s → %s\r\n", devserver.HamrDevTag(), version, latest)
+					}
+				})
+			}
+		}
 
 		runner := devserver.NewRunner(cfg,
 			devserver.WithConfigPath(configPath),

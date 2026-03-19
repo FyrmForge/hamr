@@ -19,6 +19,7 @@ const (
 	VersionOK       VersionStatus = iota // versions match or no project version
 	VersionDev                           // CLI is a dev build
 	VersionMismatch                      // CLI major.minor differs from project
+	VersionUpdate                        // newer version available on GitHub
 )
 
 // StatusBar renders a persistent hotkey bar at the bottom of the terminal
@@ -74,6 +75,22 @@ func (sb *StatusBar) SetVersionStatus(status VersionStatus, msg string) {
 	sb.Redraw()
 }
 
+// SetVersionUpdateIfOK sets VersionUpdate only if the current status is VersionOK.
+// This prevents a background update check from overwriting a more important status
+// like VersionMismatch or VersionDev.
+func (sb *StatusBar) SetVersionUpdateIfOK(msg string) bool {
+	sb.mu.Lock()
+	if sb.versionStatus != VersionOK {
+		sb.mu.Unlock()
+		return false
+	}
+	sb.versionStatus = VersionUpdate
+	sb.versionMsg = msg
+	sb.mu.Unlock()
+	sb.Redraw()
+	return true
+}
+
 // buildBarContent returns the bar string with a colored emoji and status indicators.
 func (sb *StatusBar) buildBarContent(width int) string {
 	sb.mu.Lock()
@@ -84,12 +101,12 @@ func (sb *StatusBar) buildBarContent(width int) string {
 
 	hasErrors := es != nil && es.HasErrors()
 
-	// Emoji color priority: red (errors) > yellow (dev/mismatch) > green (ok).
+	// Emoji color priority: red (errors) > yellow (dev/mismatch/update) > green (ok).
 	var hamr string
 	switch {
 	case hasErrors:
 		hamr = "  " + barRed + "🔨" + barReset
-	case vs == VersionDev || vs == VersionMismatch:
+	case vs == VersionDev || vs == VersionMismatch || vs == VersionUpdate:
 		hamr = "  " + barYellow + "🔨" + barReset
 	default:
 		hamr = "  " + barGreen + "🔨" + barReset
@@ -123,18 +140,26 @@ func (sb *StatusBar) buildBarContent(width int) string {
 		}
 	}
 
-	if vs == VersionMismatch && vmsg != "" {
+	switch {
+	case vs == VersionMismatch && vmsg != "":
 		verTag := "  " + barYellow + "VER" + barReset + barDim + " " + vmsg + barReset
 		verVisibleLen := 6 + len(vmsg) // "  VER " + msg
 		if used+verVisibleLen <= width {
 			suffix += verTag
-		} else if used+5 <= width { // at least "  VER"
+		} else if used+5 <= width {
 			suffix += "  " + barYellow + "VER" + barReset
 		}
-	} else if vs == VersionDev {
-		devTag := "  " + barYellow + "DEV" + barReset
+	case vs == VersionUpdate && vmsg != "":
+		updTag := "  " + barYellow + "UPD" + barReset + barDim + " " + vmsg + barReset
+		updVisibleLen := 6 + len(vmsg) // "  UPD " + msg
+		if used+updVisibleLen <= width {
+			suffix += updTag
+		} else if used+5 <= width {
+			suffix += "  " + barYellow + "UPD" + barReset
+		}
+	case vs == VersionDev:
 		if used+5 <= width {
-			suffix += devTag
+			suffix += "  " + barYellow + "DEV" + barReset
 		}
 	}
 

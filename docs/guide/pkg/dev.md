@@ -226,12 +226,13 @@ health indicators. The 🔨 emoji reflects overall state:
 
 | Color | Meaning |
 |-------|---------|
-| Green | All builds passing, released CLI |
-| Yellow | Dev build (`DEV`) or version mismatch (`VER`) |
+| Green | All builds passing, released CLI, up to date |
+| Yellow | Dev build (`DEV`), version mismatch (`VER`), or update available (`UPD`) |
 | Red | Active build errors (`ERR rule1, rule2`) |
 
-When the CLI version (major.minor) differs from the project's `[hamr].version` in
-hamr.toml, the bar shows `VER cli=X.Y.Z project=A.B.C` as a reminder to upgrade.
+- **`DEV`** — running a local dev build (not a released binary)
+- **`VER cli=X.Y.Z project=A.B.C`** — CLI major.minor differs from the project's `[hamr].version`
+- **`UPD latest=X.Y.Z`** — a newer hamr release is available on GitHub (checked once per session)
 
 ## Error Handling
 
