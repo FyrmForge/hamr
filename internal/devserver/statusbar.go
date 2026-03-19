@@ -129,11 +129,11 @@ func (sb *StatusBar) buildBarContent(width int) string {
 	var rightLen int
 	switch {
 	case vs == VersionMismatch && vmsg != "":
-		rightTag = barYellow + "VER" + barReset + barDim + " " + vmsg + barReset
-		rightLen = 4 + len(vmsg) // "VER " + msg
+		rightTag = barYellow + vmsg + barReset
+		rightLen = len(vmsg)
 	case vs == VersionUpdate && vmsg != "":
-		rightTag = barYellow + "UPD" + barReset + barDim + " " + vmsg + barReset
-		rightLen = 4 + len(vmsg) // "UPD " + msg
+		rightTag = barYellow + vlabel + " ➜ " + vmsg + barReset
+		rightLen = len(vlabel) + 3 + len(vmsg) // "v0.5.0 ➜ v0.6.9"
 	case vs == VersionDev:
 		rightTag = barYellow + "DEV" + barReset
 		rightLen = 3

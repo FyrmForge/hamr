@@ -90,8 +90,8 @@ func runDev(cmd *cobra.Command, _ []string) error {
 			// Check for newer hamr release in the background (non-blocking).
 			if releaseBuild {
 				devserver.CheckLatestVersion(ctx, version, func(latest string) {
-					if statusBar.SetVersionUpdateIfOK("latest=" + latest) {
-						fmt.Printf("%s update available: %s → %s\r\n", devserver.HamrDevTag(), version, latest)
+					if statusBar.SetVersionUpdateIfOK("v" + latest) {
+						fmt.Printf("%s update available: v%s → v%s\r\n", devserver.HamrDevTag(), version, latest)
 					}
 				})
 			}
@@ -141,9 +141,8 @@ func checkVersionStatus(sb *devserver.StatusBar, configPath string) {
 	}
 
 	if cliVer.Major != projVer.Major || cliVer.Minor != projVer.Minor {
-		msg := fmt.Sprintf("cli=%s project=%s", cliVer, projVer)
-		fmt.Printf("%s version mismatch: %s\r\n", devserver.HamrDevTag(), msg)
-		sb.SetVersionStatus(devserver.VersionMismatch, msg)
+		fmt.Printf("%s version mismatch: cli v%s, project v%s\r\n", devserver.HamrDevTag(), cliVer, projVer)
+		sb.SetVersionStatus(devserver.VersionMismatch, fmt.Sprintf("cli v%s proj v%s", cliVer, projVer))
 		return
 	}
 
