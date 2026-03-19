@@ -84,6 +84,7 @@ func runDev(cmd *cobra.Command, _ []string) error {
 			statusBar.Start()
 			started = true
 
+			statusBar.SetVersion("v" + version)
 			checkVersionStatus(&statusBar, configPath)
 
 			// Check for newer hamr release in the background (non-blocking).

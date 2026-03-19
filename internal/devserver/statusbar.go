@@ -33,6 +33,7 @@ type StatusBar struct {
 	errorState    *ErrorState
 	versionStatus VersionStatus
 	versionMsg    string // e.g. "cli=0.4.0 project=0.5.0"
+	versionLabel  string // e.g. "v0.6.7"
 }
 
 // bar content constants.
@@ -66,6 +67,14 @@ func (sb *StatusBar) SetErrorState(es *ErrorState) {
 	es.OnChange(sb.Redraw)
 }
 
+// SetVersion sets the version label shown on the right side of the bar.
+func (sb *StatusBar) SetVersion(label string) {
+	sb.mu.Lock()
+	sb.versionLabel = label
+	sb.mu.Unlock()
+	sb.Redraw()
+}
+
 // SetVersionStatus sets the version indicator and triggers a redraw.
 func (sb *StatusBar) SetVersionStatus(status VersionStatus, msg string) {
 	sb.mu.Lock()
@@ -97,6 +106,7 @@ func (sb *StatusBar) buildBarContent(width int) string {
 	es := sb.errorState
 	vs := sb.versionStatus
 	vmsg := sb.versionMsg
+	vlabel := sb.versionLabel
 	sb.mu.Unlock()
 
 	hasErrors := es != nil && es.HasErrors()
@@ -127,6 +137,11 @@ func (sb *StatusBar) buildBarContent(width int) string {
 	case vs == VersionDev:
 		rightTag = barYellow + "DEV" + barReset
 		rightLen = 3
+	default:
+		if vlabel != "" {
+			rightTag = barDim + vlabel + barReset
+			rightLen = len(vlabel)
+		}
 	}
 
 	// Build error indicator (inline after hotkeys).
