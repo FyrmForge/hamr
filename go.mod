@@ -3,9 +3,7 @@ module github.com/FyrmForge/hamr
 go 1.25.0
 
 retract (
-	v1.6.2
-	v1.6.1
-	v1.6.0
+	[v1.0.0, v1.6.3]
 )
 
 require (
