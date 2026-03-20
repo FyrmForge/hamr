@@ -3,8 +3,9 @@ module github.com/FyrmForge/hamr
 go 1.25.0
 
 retract (
-	v1.6.1 // self-retraction
-	v1.6.0 // published prematurely
+	v1.6.2
+	v1.6.1
+	v1.6.0
 )
 
 require (
