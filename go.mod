@@ -2,6 +2,11 @@ module github.com/FyrmForge/hamr
 
 go 1.25.0
 
+retract (
+	v1.6.1 // self-retraction
+	v1.6.0 // published prematurely
+)
+
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/a-h/templ v0.3.1001
