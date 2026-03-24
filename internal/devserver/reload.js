@@ -882,10 +882,14 @@
                 if (window.__hamr_error_page) {
                     updateErrorPage();
                 } else {
-                    fetch(location.href).then(function(resp) {
+                    fetch(location.href, {headers: {"Accept": "text/html"}}).then(function(resp) {
+                        if (resp.headers.get("X-Hamr-Waiting")) {
+                            location.reload();
+                            return null;
+                        }
                         return resp.text();
                     }).then(function(html) {
-                        swapBody(html);
+                        if (html) swapBody(html);
                     }).catch(function() {
                         location.reload();
                     });
@@ -940,9 +944,14 @@
             setState("reloading");
 
             // Full reload: fetch new page and swap DOM.
-            fetch(location.href).then(function(resp) {
+            fetch(location.href, {headers: {"Accept": "text/html"}}).then(function(resp) {
+                if (resp.headers.get("X-Hamr-Waiting")) {
+                    location.reload();
+                    return null;
+                }
                 return resp.text();
             }).then(function(html) {
+                if (!html) return;
                 swapBody(html);
                 setState("connected");
                 updateWidgetState();

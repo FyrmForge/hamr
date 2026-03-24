@@ -1,9 +1,12 @@
 .PHONY: build test lint templint{{- if not .MigrateAtStartup}} migrate{{- if eq .DBConnector "sqlx"}} migrate-down migrate-status migrate-create{{- end}}{{- end}} db-sh docker-up docker-down docker-delete docker-reload clean install check-templ generate{{- if eq .CSS "tailwind"}} check-node-modules css css-build{{- end}}{{- if .StaticS3}} sync-static{{- end}}{{- if .IncludeLocale}} locale-gen{{- end}}
 
+HAMR_VERSION  := $(shell grep 'github.com/FyrmForge/hamr ' go.mod | awk '{print $$2}')
+TEMPL_VERSION := $(shell grep 'github.com/a-h/templ ' go.mod | awk '{print $$2}')
+
 ## install: Install development dependencies
 install:
-	go install github.com/FyrmForge/hamr/cmd/hamr
-	go install github.com/a-h/templ/cmd/templ
+	go install github.com/FyrmForge/hamr/cmd/hamr@$(HAMR_VERSION)
+	go install github.com/a-h/templ/cmd/templ@$(TEMPL_VERSION)
 {{- if eq .CSS "tailwind"}}
 	npm install
 {{- end}}
