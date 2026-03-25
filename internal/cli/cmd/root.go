@@ -14,6 +14,11 @@ var rootCmd = &cobra.Command{
 	SilenceUsage: true,
 }
 
+func init() {
+	// Disable Cobra's default completion command — we provide our own.
+	rootCmd.CompletionOptions.DisableDefaultCmd = true
+}
+
 // loadDotenv reads a .env file and sets any variables not already present
 // in the environment. Missing file is silently ignored.
 func loadDotenv(path string) {
@@ -56,6 +61,7 @@ func init() {
 	rootCmd.AddCommand(devCmd)
 	rootCmd.AddCommand(aiCmd)
 	rootCmd.AddCommand(localeCmd)
+	rootCmd.AddCommand(completionCmd)
 }
 
 // Execute runs the root command.

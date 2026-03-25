@@ -17,6 +17,11 @@ hamr
 │   └── gen                 Generate type-safe Go accessors from locale JSON
 ├── rename
 │   └── module <new-path>   Rename Go module and rewrite imports
+├── completion
+│   ├── bash                Generate bash completion script
+│   ├── zsh                 Generate zsh completion script
+│   ├── fish                Generate fish completion script
+│   └── install             Install completion scripts for your shell
 └── version                 Print hamr version
 ```
 
@@ -331,6 +336,57 @@ hamr version
 ```
 
 Output: `hamr <version> (<commit>)`
+
+---
+
+## hamr completion
+
+Generate or install shell completion scripts for bash, zsh, or fish.
+
+### Generate to stdout
+
+```bash
+hamr completion bash
+hamr completion zsh
+hamr completion fish
+```
+
+### Install
+
+```bash
+hamr completion install              # per-user install (auto-detects shell from $SHELL)
+hamr completion install --shell zsh  # override shell detection
+hamr completion install --system     # system-wide install (requires root)
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--shell` | auto-detect | Target shell: `bash`, `zsh`, or `fish` |
+| `--system` | `false` | Install system-wide instead of per-user |
+| `-y`, `--yes` | `false` | Skip confirmation prompt |
+
+**Per-user paths:**
+
+| Shell | Path |
+|-------|------|
+| bash  | `~/.local/share/bash-completion/completions/hamr` |
+| zsh   | `~/.zsh/completions/_hamr` |
+| fish  | `~/.config/fish/completions/hamr.fish` |
+
+**System-wide paths:**
+
+| Shell | Path |
+|-------|------|
+| bash  | `/usr/share/bash-completion/completions/hamr` |
+| zsh   | `/usr/share/zsh/site-functions/_hamr` |
+| fish  | `/usr/share/fish/vendor_completions.d/hamr.fish` |
+
+For zsh per-user installs, you may need to add the following to `~/.zshrc`:
+
+```bash
+fpath=(~/.zsh/completions $fpath)
+autoload -Uz compinit && compinit
+```
 
 ---
 
