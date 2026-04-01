@@ -40,3 +40,9 @@ func WithPreTick(fn PreTickFunc) Option {
 func WithPostTick(fn PostTickFunc) Option {
 	return func(j *Janitor) { j.postTick = append(j.postTick, fn) }
 }
+
+// WithRunImmediately causes all registered tasks to execute once as soon as
+// Start is called, in addition to their regular cron schedules.
+func WithRunImmediately() Option {
+	return func(j *Janitor) { j.runImmediately = true }
+}

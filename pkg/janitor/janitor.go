@@ -49,6 +49,8 @@ type Janitor struct {
 	timeout time.Duration
 	logger  *slog.Logger
 
+	runImmediately bool
+
 	tasks []scheduledTask
 
 	preRun   []PreRunFunc
@@ -117,6 +119,13 @@ func (j *Janitor) Start(ctx context.Context) error {
 	}
 
 	cronRef.Start()
+
+	if j.runImmediately {
+		for _, st := range j.tasks {
+			st := st // capture
+			go j.runTask(ctxRef, st.task)
+		}
+	}
 
 	go func() {
 		<-ctxRef.Done()

@@ -319,9 +319,9 @@ Response headers:
 
 ### 24. `pkg/janitor/janitor.go`
 - `Task` interface: `Name() string`, `Run(ctx) (int64, error)`
-- `New(interval, ...Option) *Janitor`
-- `AddTask(task)`, `Start()`, `Stop()`
-- Options: `WithTimeout(d)`, `WithRunImmediately(bool)`, `WithLogger(*slog.Logger)`
+- `New(opts ...Option) *Janitor`
+- `AddTask(schedule, task)`, `Start(ctx)`, `Stop()`
+- Options: `WithTimeout(d)`, `WithRunImmediately()`, `WithLogger(*slog.Logger)`
 
 ### 25. `pkg/storage/` (storage.go, local.go, s3.go)
 - `FileStorage` interface: `Save`, `Read`, `Delete`, `Exists`

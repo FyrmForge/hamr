@@ -349,6 +349,128 @@ func TestPostTick_called(t *testing.T) {
 	assert.Eventually(t, called.Load, 3*time.Second, 100*time.Millisecond)
 }
 
+func TestRunImmediately_firesOnStart(t *testing.T) {
+	task := &stubTask{name: "imm", affected: 5}
+	j := New(
+		WithLogger(discardLogger()),
+		WithRunImmediately(),
+		// Use a very long cron interval so the only execution comes from the
+		// immediate run, not the scheduler.
+	).AddTask("0 0 1 1 *", task)
+
+	require.NoError(t, j.Start(context.Background()))
+	defer j.Stop()
+
+	assert.Eventually(t, func() bool {
+		return task.callCount() >= 1
+	}, 3*time.Second, 50*time.Millisecond)
+}
+
+func TestRunImmediately_hooksStillApply(t *testing.T) {
+	task := &stubTask{name: "imm-hook", affected: 2}
+
+	var (
+		preRan  atomic.Bool
+		postRan atomic.Bool
+	)
+
+	j := New(
+		WithLogger(discardLogger()),
+		WithRunImmediately(),
+		WithPreRun(func(_ context.Context, name string) error {
+			preRan.Store(true)
+			return nil
+		}),
+		WithPostRun(func(_ context.Context, name string, affected int64, err error) {
+			postRan.Store(true)
+		}),
+	).AddTask("0 0 1 1 *", task)
+
+	require.NoError(t, j.Start(context.Background()))
+	defer j.Stop()
+
+	assert.Eventually(t, func() bool {
+		return preRan.Load() && postRan.Load() && task.callCount() >= 1
+	}, 3*time.Second, 50*time.Millisecond)
+}
+
+func TestRunImmediately_multipleTasks(t *testing.T) {
+	a := &stubTask{name: "imm-a", affected: 1}
+	b := &stubTask{name: "imm-b", affected: 2}
+
+	j := New(
+		WithLogger(discardLogger()),
+		WithRunImmediately(),
+	).AddTask("0 0 1 1 *", a).AddTask("0 0 1 1 *", b)
+
+	require.NoError(t, j.Start(context.Background()))
+	defer j.Stop()
+
+	assert.Eventually(t, func() bool {
+		return a.callCount() >= 1 && b.callCount() >= 1
+	}, 3*time.Second, 50*time.Millisecond)
+}
+
+func TestRunImmediately_preTickCalled(t *testing.T) {
+	task := &stubTask{name: "imm-pt", affected: 1}
+
+	var (
+		preTicked atomic.Bool
+		postTicked atomic.Bool
+	)
+
+	j := New(
+		WithLogger(discardLogger()),
+		WithRunImmediately(),
+		WithPreTick(func(_ context.Context) error {
+			preTicked.Store(true)
+			return nil
+		}),
+		WithPostTick(func(_ context.Context) {
+			postTicked.Store(true)
+		}),
+	).AddTask("0 0 1 1 *", task)
+
+	require.NoError(t, j.Start(context.Background()))
+	defer j.Stop()
+
+	assert.Eventually(t, func() bool {
+		return preTicked.Load() && postTicked.Load() && task.callCount() >= 1
+	}, 3*time.Second, 50*time.Millisecond)
+}
+
+func TestRunImmediately_preTickErrorSkipsTask(t *testing.T) {
+	task := &stubTask{name: "imm-pt-skip", affected: 1}
+
+	j := New(
+		WithLogger(discardLogger()),
+		WithRunImmediately(),
+		WithPreTick(func(_ context.Context) error {
+			return errors.New("block it")
+		}),
+	).AddTask("0 0 1 1 *", task)
+
+	require.NoError(t, j.Start(context.Background()))
+	defer j.Stop()
+
+	time.Sleep(500 * time.Millisecond)
+	assert.Equal(t, 0, task.callCount(), "pre-tick error should skip immediate task")
+}
+
+func TestWithoutRunImmediately_doesNotFireOnStart(t *testing.T) {
+	task := &stubTask{name: "no-imm", affected: 1}
+	j := New(
+		WithLogger(discardLogger()),
+		// Distant cron schedule, no WithRunImmediately.
+	).AddTask("0 0 1 1 *", task)
+
+	require.NoError(t, j.Start(context.Background()))
+	defer j.Stop()
+
+	time.Sleep(500 * time.Millisecond)
+	assert.Equal(t, 0, task.callCount(), "task should not run without WithRunImmediately")
+}
+
 func TestContextCancellation(t *testing.T) {
 	task := &stubTask{name: "ctx-cancel", affected: 1}
 	ctx, cancel := context.WithCancel(context.Background())

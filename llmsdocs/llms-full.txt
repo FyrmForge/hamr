@@ -955,6 +955,7 @@ func WithPreRun(fn PreRunFunc) Option      // runs before each task
 func WithPostRun(fn PostRunFunc) Option    // runs after each task
 func WithPreTick(fn PreTickFunc) Option    // runs before scheduled execution
 func WithPostTick(fn PostTickFunc) Option  // runs after scheduled execution
+func WithRunImmediately() Option           // fire all tasks once on Start
 ```
 
 ---

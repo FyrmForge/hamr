@@ -88,6 +88,27 @@ Standard cron format and robfig/cron descriptors are supported:
 | `WithPostRun(fn)` | — | Hook called after each task |
 | `WithPreTick(fn)` | — | Hook called before each scheduled execution |
 | `WithPostTick(fn)` | — | Hook called after each scheduled execution |
+| `WithRunImmediately()` | off | Run all tasks once as soon as `Start` is called |
+
+## Immediate Execution
+
+By default, tasks only run when their cron schedule fires. Use
+`WithRunImmediately()` to execute every task once at startup — useful for
+clearing stale data without waiting for the first scheduled tick.
+
+```go
+j := janitor.New(
+    janitor.WithTimeout(30*time.Second),
+    janitor.WithLogger(logger),
+    janitor.WithRunImmediately(),
+).
+    AddTask("@every 5m", &SessionCleanup{db: database})
+```
+
+Immediate runs go through the same hooks and timeouts as scheduled runs. They
+are fired as background goroutines — `Start` does not block waiting for them to
+finish. Because immediate runs bypass the cron overlap guard, a fast schedule
+(e.g. `@every 1s`) could briefly overlap with an in-flight immediate run.
 
 ## Hooks
 
@@ -177,4 +198,5 @@ func WithPreRun(fn PreRunFunc) Option
 func WithPostRun(fn PostRunFunc) Option
 func WithPreTick(fn PreTickFunc) Option
 func WithPostTick(fn PostTickFunc) Option
+func WithRunImmediately() Option
 ```

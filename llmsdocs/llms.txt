@@ -148,7 +148,7 @@ Cron-based background task runner.
 - `New(opts...) *Janitor`, `AddTask(schedule, task) *Janitor`
 - `Start(ctx) error`, `Stop()`
 - Options: `WithTimeout`, `WithLogger`, `WithPreRun`, `WithPostRun`,
-  `WithPreTick`, `WithPostTick`
+  `WithPreTick`, `WithPostTick`, `WithRunImmediately`
 
 ### async
 Concurrency primitives with panic recovery.

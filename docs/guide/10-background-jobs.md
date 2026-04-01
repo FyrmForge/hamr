@@ -67,6 +67,20 @@ func main() {
 
 Each task gets its own cron schedule. `AddTask` returns the Janitor for chaining.
 
+### Immediate Execution
+
+Add `WithRunImmediately()` to fire every task once at startup — useful for
+clearing stale data without waiting for the first cron tick:
+
+```go
+j := janitor.New(
+    janitor.WithTimeout(30*time.Second),
+    janitor.WithLogger(logger),
+    janitor.WithRunImmediately(),
+).
+    AddTask("@every 5m", &SessionCleanup{db: database})
+```
+
 ### Schedule Expressions
 
 Uses [robfig/cron](https://github.com/robfig/cron) syntax:
