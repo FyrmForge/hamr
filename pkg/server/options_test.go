@@ -225,7 +225,9 @@ func TestNew_gzipCompression(t *testing.T) {
 
 	zr, err := gzip.NewReader(strings.NewReader(rec.Body.String()))
 	require.NoError(t, err)
-	defer zr.Close()
+	defer func() {
+		require.NoError(t, zr.Close())
+	}()
 
 	body, err := io.ReadAll(zr)
 	require.NoError(t, err)
