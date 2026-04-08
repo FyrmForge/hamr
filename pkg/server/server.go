@@ -27,6 +27,7 @@ type Server struct {
 	host            string
 	port            int
 	devMode         bool
+	gzipConfig      GzipConfig
 	timeout         time.Duration
 	maxBodySize     string
 	shutdownTimeout time.Duration
@@ -38,7 +39,6 @@ type Server struct {
 	embeddedPrefix string
 	generatedDir   string
 	staticPages    []staticRoute
-
 }
 
 // New creates a Server with sensible defaults, applies options, and configures
@@ -47,6 +47,7 @@ func New(opts ...Option) (*Server, error) {
 	s := &Server{
 		host:            "",
 		port:            8080,
+		gzipConfig:      GzipConfig{Enabled: true},
 		timeout:         30 * time.Second,
 		maxBodySize:     "2M",
 		shutdownTimeout: 10 * time.Second,
@@ -83,6 +84,14 @@ func New(opts ...Option) (*Server, error) {
 	e.Use(echoMw.ContextTimeoutWithConfig(echoMw.ContextTimeoutConfig{
 		Timeout: s.timeout,
 	}))
+	e.Use(middleware.CacheControl(false))
+	if s.gzipConfig.Enabled {
+		e.Use(echoMw.GzipWithConfig(echoMw.GzipConfig{
+			Skipper:   s.gzipConfig.Skipper,
+			Level:     s.gzipConfig.Level,
+			MinLength: s.gzipConfig.MinLength,
+		}))
+	}
 	if !s.devMode {
 		e.Use(middleware.Secure())
 	}

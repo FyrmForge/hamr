@@ -1,7 +1,9 @@
 package server_test
 
 import (
+	"compress/gzip"
 	"embed"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -172,6 +174,103 @@ func TestWithStaticDir(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), "hello static")
+}
+
+func TestWithStaticDir_setsCacheControlForStaticAssets(t *testing.T) {
+	dir := t.TempDir()
+	err := os.WriteFile(filepath.Join(dir, "app.css"), []byte("body{}"), 0o644)
+	require.NoError(t, err)
+
+	srv, err := server.New(server.WithDevMode(true), server.WithStaticDir(dir))
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/static/app.css", nil)
+	rec := httptest.NewRecorder()
+	srv.Echo().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "public, max-age=86400", rec.Header().Get("Cache-Control"))
+}
+
+func TestWithStaticDir_setsImmutableCacheControlForImages(t *testing.T) {
+	dir := t.TempDir()
+	err := os.WriteFile(filepath.Join(dir, "logo.png"), []byte("png"), 0o644)
+	require.NoError(t, err)
+
+	srv, err := server.New(server.WithDevMode(true), server.WithStaticDir(dir))
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/static/logo.png", nil)
+	rec := httptest.NewRecorder()
+	srv.Echo().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "public, max-age=31536000, immutable", rec.Header().Get("Cache-Control"))
+}
+
+func TestNew_gzipCompression(t *testing.T) {
+	srv, err := server.New(server.WithDevMode(true))
+	require.NoError(t, err)
+	srv.GET("/test", func(c echo.Context) error {
+		return c.String(http.StatusOK, strings.Repeat("gzip me ", 64))
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	srv.Echo().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "gzip", rec.Header().Get("Content-Encoding"))
+
+	zr, err := gzip.NewReader(strings.NewReader(rec.Body.String()))
+	require.NoError(t, err)
+	defer zr.Close()
+
+	body, err := io.ReadAll(zr)
+	require.NoError(t, err)
+	assert.Equal(t, strings.Repeat("gzip me ", 64), string(body))
+}
+
+func TestWithGzipConfig_disabled_disablesCompression(t *testing.T) {
+	srv, err := server.New(server.WithDevMode(true), server.WithGzipConfig(server.GzipConfig{Enabled: false}))
+	require.NoError(t, err)
+	srv.GET("/test", func(c echo.Context) error {
+		return c.String(http.StatusOK, strings.Repeat("plain text ", 32))
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	srv.Echo().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Empty(t, rec.Header().Get("Content-Encoding"))
+	assert.Equal(t, strings.Repeat("plain text ", 32), rec.Body.String())
+}
+
+func TestWithGzipConfig_skipper_skipsCompression(t *testing.T) {
+	srv, err := server.New(server.WithDevMode(true), server.WithGzipConfig(server.GzipConfig{
+		Enabled: true,
+		Skipper: func(c echo.Context) bool {
+			return c.Request().URL.Path == "/events"
+		},
+	}))
+	require.NoError(t, err)
+
+	srv.GET("/events", func(c echo.Context) error {
+		c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
+		return c.String(http.StatusOK, strings.Repeat("event: ping\n\n", 16))
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/events", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	srv.Echo().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Empty(t, rec.Header().Get("Content-Encoding"))
+	assert.Equal(t, strings.Repeat("event: ping\n\n", 16), rec.Body.String())
 }
 
 func TestWithEmbeddedStatic(t *testing.T) {

@@ -5,10 +5,26 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	echoMw "github.com/labstack/echo/v4/middleware"
 )
 
 // Option configures a Server.
 type Option func(*Server)
+
+// GzipConfig configures gzip response compression.
+type GzipConfig struct {
+	// Enabled enables or disables gzip response compression.
+	Enabled bool
+
+	// Level is the gzip compression level. Zero uses Echo's default.
+	Level int
+
+	// MinLength is the minimum response size before compression is applied.
+	MinLength int
+
+	// Skipper skips gzip for matching requests.
+	Skipper echoMw.Skipper
+}
 
 // WithHost sets the bind address.
 func WithHost(host string) Option {
@@ -24,6 +40,12 @@ func WithPort(port int) Option {
 // In dev mode, security headers middleware is skipped.
 func WithDevMode(dev bool) Option {
 	return func(s *Server) { s.devMode = dev }
+}
+
+// WithGzipConfig configures gzip response compression.
+// Default: Gzip enabled with Echo defaults.
+func WithGzipConfig(cfg GzipConfig) Option {
+	return func(s *Server) { s.gzipConfig = cfg }
 }
 
 // WithMiddleware appends global middleware to the server.

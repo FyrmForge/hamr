@@ -207,9 +207,16 @@ Set `STATIC_BASE_URL` to the bucket's public URL or a CDN in front of it. See [S
 
 ### Cache Headers
 
-The server automatically sets cache headers via the [CacheControl middleware](pkg/middleware.md):
+The server automatically sets cache headers via the built-in [CacheControl middleware](pkg/middleware.md):
 - Images, fonts: `public, max-age=31536000, immutable`
 - CSS, JS: `public, max-age=86400`
+
+### Compression
+
+The server enables gzip response compression by default. Use
+`server.WithGzipConfig(server.GzipConfig{Enabled: false})` if compression should
+be handled only by nginx, Caddy, Traefik, or a CDN. Use `Skipper` to exclude
+specific routes such as streaming endpoints.
 
 ---
 
