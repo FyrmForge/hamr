@@ -28,6 +28,7 @@ type StatusBar struct {
 	mu            sync.Mutex
 	fd            int
 	running       bool
+	lastHeight    int
 	sigCh         chan os.Signal
 	stopCh        chan struct{}
 	errorState    *ErrorState
@@ -227,6 +228,7 @@ func (sb *StatusBar) Stop() {
 	sb.mu.Lock()
 	wasRunning := sb.running
 	sb.running = false
+	sb.lastHeight = 0
 	sb.mu.Unlock()
 
 	if !wasRunning {
@@ -277,13 +279,28 @@ func (sb *StatusBar) draw() {
 		return
 	}
 
+	sb.mu.Lock()
+	prevHeight := sb.lastHeight
+	sb.lastHeight = h
+	sb.mu.Unlock()
+
 	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "\033[1;%dr", h-1)      // set scroll region (rows 1..h-1)
-	fmt.Fprintf(&buf, "\033[%d;1H\033[2K", h) // move to bar row, clear it
-	buf.WriteString(sb.buildBarContent(w))    // bar text
-	fmt.Fprintf(&buf, "\033[%d;1H", h-1)      // cursor to bottom of scroll region
+	sb.writeDrawSequence(&buf, w, h, prevHeight)
 
 	termMu.Lock()
 	_, _ = os.Stdout.Write(buf.Bytes())
 	termMu.Unlock()
+}
+
+func (sb *StatusBar) writeDrawSequence(buf *bytes.Buffer, width, height, prevHeight int) {
+	buf.WriteString("\033[r") // reset scroll region before applying a resized layout
+
+	if prevHeight > 0 && prevHeight != height {
+		fmt.Fprintf(buf, "\033[%d;1H\033[2K", prevHeight) // clear the previously reserved bar row
+	}
+
+	fmt.Fprintf(buf, "\033[1;%dr", height-1)      // set scroll region (rows 1..height-1)
+	fmt.Fprintf(buf, "\033[%d;1H\033[2K", height) // move to bar row, clear it
+	buf.WriteString(sb.buildBarContent(width))    // bar text
+	fmt.Fprintf(buf, "\033[%d;1H", height-1)      // cursor to bottom of scroll region
 }
