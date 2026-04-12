@@ -85,7 +85,7 @@ func init() {
 	syncCmd.Flags().String("region", "", "S3 region (default us-east-1)")
 	syncCmd.Flags().String("access-key", "", "S3 access key")
 	syncCmd.Flags().String("secret-key", "", "S3 secret key")
-	syncCmd.Flags().Bool("path-style", true, "use path-style addressing (required for MinIO)")
+	syncCmd.Flags().Bool("path-style", true, "use path-style addressing (required for RustFS / path-style backends)")
 }
 
 // flagOrEnv returns the flag value if explicitly set, otherwise the env var,

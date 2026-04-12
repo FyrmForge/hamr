@@ -44,20 +44,20 @@ services:
 {{- end}}
 {{- if eq .StorageBackend "s3"}}
 
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
+  rustfs:
+    image: rustfs/rustfs:latest
+    command: --console-enable /data
     ports:
       - "9000:9000"
       - "9001:9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      RUSTFS_ACCESS_KEY: rustfsadmin
+      RUSTFS_SECRET_KEY: rustfsadmin
     volumes:
-      - minio_data:/data
+      - rustfs_data:/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "mc ready local || exit 1"]
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:9000/health || exit 1"]
       interval: 2s
       timeout: 3s
       retries: 5
@@ -69,5 +69,5 @@ volumes:
   pgadmin_data:
 {{- end}}
 {{- if eq .StorageBackend "s3"}}
-  minio_data:
+  rustfs_data:
 {{- end}}

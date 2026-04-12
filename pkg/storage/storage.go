@@ -1,5 +1,5 @@
 // Package storage provides a pluggable file storage abstraction with local
-// filesystem and S3-compatible backends (AWS S3, MinIO, Cloudflare R2).
+// filesystem and S3-compatible backends (AWS S3, RustFS, Cloudflare R2).
 package storage
 
 import (
@@ -42,10 +42,10 @@ type SignableStorage interface {
 
 // S3Config holds the parameters needed to connect to an S3-compatible service.
 type S3Config struct {
-	Endpoint       string // e.g. "http://localhost:9000" for MinIO
+	Endpoint       string // e.g. "http://localhost:9000" for RustFS
 	Bucket         string
 	Region         string
 	AccessKeyID    string
 	SecretAccessKey string
-	UsePathStyle   bool // true for MinIO / path-style addressing
+	UsePathStyle   bool // true for RustFS / path-style addressing
 }

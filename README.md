@@ -48,7 +48,7 @@ HAMR is two things:
 | `pkg/middleware`   | Auth, RBAC, flash messages, rate limiting, request ID, caching, audit, CSRF, CORS  | [docs/guide/pkg/middleware.md](docs/guide/pkg/middleware.md) |
 | `pkg/server`       | Echo wrapper with functional options and lifecycle hooks                           | [docs/guide/pkg/server.md](docs/guide/pkg/server.md) |
 | `pkg/janitor`      | Background task scheduler                                                          | [docs/guide/pkg/janitor.md](docs/guide/pkg/janitor.md) |
-| `pkg/storage`      | File storage interface with local filesystem and S3/R2/MinIO backends              | [docs/guide/pkg/storage.md](docs/guide/pkg/storage.md) |
+| `pkg/storage`      | File storage interface with local filesystem and S3/R2/RustFS backends             | [docs/guide/pkg/storage.md](docs/guide/pkg/storage.md) |
 | `pkg/async`        | Concurrent execution primitives with panic recovery                                | [docs/guide/pkg/async.md](docs/guide/pkg/async.md) |
 | `pkg/websocket`    | Session and room-based WebSocket hub with HTMX integration                         | [docs/guide/pkg/websocket.md](docs/guide/pkg/websocket.md) |
 | `pkg/media`        | Image and video upload, processing, and serving on top of storage                  | [docs/guide/pkg/media.md](docs/guide/pkg/media.md) |
@@ -110,7 +110,7 @@ hamr new myproject
 #   - GitHub username/org (auto-detected from gh CLI)
 #   - CSS approach (plain CSS with design system or Tailwind)
 #   - Database (PostgreSQL)
-#   - File storage (none, local, or S3/MinIO)
+#   - File storage (none, local, or S3/RustFS)
 #   - WebSocket support
 #   - E2E testing scaffold
 

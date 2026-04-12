@@ -6,7 +6,7 @@ Storage backend is configured during project scaffolding:
 
 ```bash
 hamr new myapp --storage local    # local filesystem storage
-hamr new myapp --storage s3       # S3-compatible storage (MinIO, AWS, R2)
+hamr new myapp --storage s3       # S3-compatible storage (RustFS, AWS, R2)
 hamr new myapp --storage none     # no file storage (default)
 hamr new myapp --static-s3        # sync static assets to S3 bucket
 ```
@@ -14,7 +14,7 @@ hamr new myapp --static-s3        # sync static assets to S3 bucket
 ---
 
 `hamr/pkg/storage` provides a file storage abstraction with local filesystem and
-S3-compatible backends (AWS S3, MinIO, Cloudflare R2).
+S3-compatible backends (AWS S3, RustFS, Cloudflare R2).
 
 ## Quick Start
 
@@ -80,16 +80,16 @@ err := store.Delete(ctx, "avatars/user-123.jpg")
 
 ## S3 Storage
 
-Works with AWS S3, MinIO, and Cloudflare R2.
+Works with AWS S3, RustFS, and Cloudflare R2.
 
 ```go
 store, err := storage.NewS3Storage(storage.S3Config{
-    Endpoint:        "http://localhost:9000",  // MinIO
+    Endpoint:        "http://localhost:9000",  // RustFS
     Bucket:          "uploads",
     Region:          "us-east-1",
     AccessKeyID:     os.Getenv("AWS_ACCESS_KEY_ID"),
     SecretAccessKey:  os.Getenv("AWS_SECRET_ACCESS_KEY"),
-    UsePathStyle:    true,  // required for MinIO
+    UsePathStyle:    true,  // required for RustFS
 }, storage.WithS3Logger(logger))
 ```
 
@@ -103,12 +103,12 @@ url, err := store.SignURL(ctx, "avatars/user-123.jpg", 15*time.Minute)
 
 | Field | Description |
 |-------|-------------|
-| `Endpoint` | Service URL (e.g. `http://localhost:9000` for MinIO) |
+| `Endpoint` | Service URL (e.g. `http://localhost:9000` for RustFS) |
 | `Bucket` | Bucket name |
 | `Region` | AWS region |
 | `AccessKeyID` | AWS access key |
 | `SecretAccessKey` | AWS secret key |
-| `UsePathStyle` | `true` for MinIO / path-style addressing |
+| `UsePathStyle` | `true` for RustFS / path-style addressing |
 
 ## Using the Interface
 
@@ -132,7 +132,7 @@ The `hamr new` wizard asks whether you want file storage and which backend:
 
 ```
 File storage?    [y/N]
-Storage backend: Local folder / S3 (MinIO)
+Storage backend: Local folder / S3 (RustFS)
 ```
 
 Or via flags:
@@ -151,13 +151,13 @@ hamr new myapp --storage s3 --static-s3 --module github.com/user/myapp
 
 **S3 storage** (`--storage s3`):
 - S3 env vars (`S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`) in `.env`
-- MinIO service in `docker/docker-compose.yaml` (ports 9000 + 9001 console)
+- RustFS service in `docker/docker-compose.yaml` (ports 9000 + 9001 console)
 - `storage.NewS3Storage(...)` in `cmd/site/main.go`
 - `FileStorage` wired into `web.Deps`
 
 **S3 static asset sync** (`--static-s3`, only with `--storage s3`):
 - `make sync-static` target in Makefile (runs `hamr sync --watch`)
-- `STATIC_BASE_URL` defaults to MinIO bucket URL so templates reference S3
+- `STATIC_BASE_URL` defaults to RustFS bucket URL so templates reference S3
 - Use `hamr sync` for one-shot uploads (CI) or `hamr sync --watch` for development
 
 ### StaticBaseURL

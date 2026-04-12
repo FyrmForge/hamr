@@ -15,7 +15,7 @@ hamr sync [flags]
 | `--region` | env `S3_REGION` | S3 region |
 | `--access-key` | env `S3_ACCESS_KEY` | S3 access key |
 | `--secret-key` | env `S3_SECRET_KEY` | S3 secret key |
-| `--path-style` | `true` | Use path-style addressing (required for MinIO) |
+| `--path-style` | `true` | Use path-style addressing (required for RustFS) |
 
 ```bash
 hamr sync                              # one-shot sync of static/ to S3
@@ -73,7 +73,7 @@ type BucketEnsurer interface {
 }
 ```
 
-`SyncAll` checks for this interface via type assertion and calls `EnsureBucket` if available. This is useful for S3/MinIO backends in development where the bucket may not exist yet.
+`SyncAll` checks for this interface via type assertion and calls `EnsureBucket` if available. This is useful for S3/RustFS backends in development where the bucket may not exist yet.
 
 ## Key helper
 

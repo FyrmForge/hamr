@@ -480,7 +480,7 @@ keep_running = true
 [[dev.docker_compose]]
 name = "services"
 file = "docker/docker-compose.services.yaml"
-services = ["mailhog", "minio"]
+services = ["mailhog", "rustfs"]
 
 [[dev.watch]]
 name = "go"

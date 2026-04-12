@@ -575,10 +575,10 @@ func TestGenerateProject_s3Storage(t *testing.T) {
 
 	require.NoError(t, GenerateProject(dir, cfg))
 
-	// docker-compose should have MinIO.
+	// docker-compose should have RustFS.
 	compose := readFile(t, dir, "docker/docker-compose.yaml")
-	assert.Contains(t, compose, "minio:")
-	assert.Contains(t, compose, "minio_data:")
+	assert.Contains(t, compose, "rustfs:")
+	assert.Contains(t, compose, "rustfs_data:")
 
 	// .env should have S3 vars.
 	envFile := readFile(t, dir, ".env.example")
@@ -623,9 +623,9 @@ func TestGenerateProject_localStorage(t *testing.T) {
 
 	require.NoError(t, GenerateProject(dir, cfg))
 
-	// docker-compose should NOT have MinIO.
+	// docker-compose should NOT have RustFS.
 	compose := readFile(t, dir, "docker/docker-compose.yaml")
-	assert.NotContains(t, compose, "minio:")
+	assert.NotContains(t, compose, "rustfs:")
 
 	// .env should have STORAGE_PATH.
 	envFile := readFile(t, dir, ".env.example")

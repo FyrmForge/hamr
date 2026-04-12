@@ -178,7 +178,7 @@ hamr sync [flags]
 | `--region` | env `S3_REGION` | S3 region |
 | `--access-key` | env `S3_ACCESS_KEY` | S3 access key |
 | `--secret-key` | env `S3_SECRET_KEY` | S3 secret key |
-| `--path-style` | `true` | Use path-style addressing (required for MinIO) |
+| `--path-style` | `true` | Use path-style addressing (required for RustFS) |
 
 ```bash
 hamr sync                              # one-shot sync of static/ to S3

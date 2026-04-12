@@ -17,7 +17,7 @@ import (
 )
 
 // BucketEnsurer is optionally implemented by storage backends that need
-// their bucket created before first use (e.g. S3/MinIO in dev mode).
+// their bucket created before first use (e.g. S3/RustFS in dev mode).
 type BucketEnsurer interface {
 	EnsureBucket(ctx context.Context) error
 }

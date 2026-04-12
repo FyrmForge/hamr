@@ -37,7 +37,7 @@ type presigner interface {
 }
 
 // S3Storage implements SignableStorage backed by an S3-compatible service
-// (AWS S3, MinIO, Cloudflare R2).
+// (AWS S3, RustFS, Cloudflare R2).
 type S3Storage struct {
 	client     s3API
 	presigner  presigner

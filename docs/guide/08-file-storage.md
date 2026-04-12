@@ -47,16 +47,16 @@ Creates the base directory if it doesn't exist. Files are stored relative to the
 
 ## S3 Storage
 
-Works with AWS S3, MinIO, and Cloudflare R2:
+Works with AWS S3, RustFS, and Cloudflare R2:
 
 ```go
 store, err := storage.NewS3Storage(storage.S3Config{
-    Endpoint:       "http://localhost:9000",  // MinIO
+    Endpoint:       "http://localhost:9000",  // RustFS
     Bucket:         "uploads",
     Region:         "us-east-1",
     AccessKeyID:    os.Getenv("AWS_ACCESS_KEY_ID"),
     SecretAccessKey: os.Getenv("AWS_SECRET_ACCESS_KEY"),
-    UsePathStyle:   true,  // required for MinIO
+    UsePathStyle:   true,  // required for RustFS
 }, storage.WithS3Logger(logger))
 ```
 
@@ -76,13 +76,13 @@ The `hamr new` wizard configures storage:
 
 ```bash
 hamr new myapp --storage local    # local filesystem
-hamr new myapp --storage s3       # S3-compatible (generates MinIO in docker-compose)
+hamr new myapp --storage s3       # S3-compatible (generates RustFS in docker-compose)
 hamr new myapp --static-s3        # sync static assets to S3 bucket
 ```
 
 S3 scaffolding generates:
 - S3 env vars in `.env`
-- MinIO service in `docker/docker-compose.yaml`
+- RustFS service in `docker/docker-compose.yaml`
 - Storage initialization in `cmd/site/main.go`
 
 ---

@@ -80,7 +80,7 @@ github.com/FyrmForge/hamr/
 │   ├── storage/
 │   │   ├── storage.go                  # FileStorage + SignableStorage interfaces
 │   │   ├── local.go                    # Local filesystem implementation
-│   │   └── s3.go                       # S3/R2/MinIO implementation
+│   │   └── s3.go                       # S3/R2/RustFS implementation
 │   ├── janitor/
 │   │   └── janitor.go                  # Task interface + scheduler
 │   ├── e2e/
@@ -421,7 +421,7 @@ internal/cli/templates/             # embedded text/template files
 2. **Go module path** (flag `--module` or prompt)
 3. **CSS approach**: Plain CSS with design system | Tailwind CSS
 4. **Sessions?** Yes/No (cookie-based session management)
-5. **File storage?** Yes/No — if yes, follow-up: Local folder | S3 (MinIO)
+5. **File storage?** Yes/No — if yes, follow-up: Local folder | S3 (RustFS)
 6. **S3 static watcher?** (if S3) Yes/No — watches `static/` and syncs to S3 during dev
 7. **WebSocket?** Yes/No
 8. **Notifications?** Yes/No

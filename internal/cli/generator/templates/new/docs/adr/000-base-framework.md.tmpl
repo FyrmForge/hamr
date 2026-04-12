@@ -24,7 +24,7 @@ This project was scaffolded using the HAMR framework (`github.com/FyrmForge/hamr
 - **Storage**: Local filesystem (via `hamr/pkg/storage`)
 {{- end}}
 {{- if eq .StorageBackend "s3"}}
-- **Storage**: S3/MinIO (via `hamr/pkg/storage`)
+- **Storage**: S3/RustFS (via `hamr/pkg/storage`)
 {{- end}}
 {{- if .IncludeWS}}
 - **WebSocket**: Session-based hub (via `hamr/pkg/websocket`)

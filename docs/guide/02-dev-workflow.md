@@ -14,7 +14,7 @@ hamr dev
 
 This reads `hamr.toml` from the current directory and starts:
 
-1. Docker Compose dependencies (Postgres, Redis, MinIO, etc.)
+1. Docker Compose dependencies (Postgres, Redis, RustFS, etc.)
 2. Initial build (templ generate → Go build → start app)
 3. File watchers with automatic rebuild on changes
 4. Reverse proxy with live reload injection

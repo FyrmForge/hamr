@@ -262,14 +262,14 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 					Description("Adds a storage layer for handling user-uploaded files like avatars or documents.").
 					Options(
 						huh.NewOption("Local", "local"),
-						huh.NewOption("Local + S3 (with MinIO for local dev)", "s3"),
+						huh.NewOption("Local + S3 (with RustFS for local dev)", "s3"),
 					).
 					Value(&res.StorageBackend),
 			),
 			print: func() {
 				switch res.StorageBackend {
 				case "s3":
-					fmt.Println("  Storage: Local + S3 (MinIO)")
+					fmt.Println("  Storage: Local + S3 (RustFS)")
 				default:
 					fmt.Println("  Storage: Local")
 				}
