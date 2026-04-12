@@ -24,42 +24,41 @@ API     (/api/)       → CORS, rate limit, bearer auth
 Auth and RBAC middleware is applied per-route for explicit, visible access control:
 
 ```
-Per-route  → RequireAuth, RequireNotAuth, Auth, RequireRoles, RequireActive
+Group      → auth.Load() (populates ctx from session, the only DB call)
+Per-route  → auth.RequireAuth(), auth.RequireNotAuth(), RequireRoles, RequireActive
 ```
 
 ## Authentication
 
 ### Session-based auth
 
+Create a `BrowserAuth` instance with functional options:
+
 ```go
-cfg := middleware.AuthConfig{
-    SessionManager: sm,
-    SubjectLoader:  func(ctx context.Context, id string) (any, error) {
+auth := middleware.NewBrowserAuth(sm,
+    middleware.WithSubjectLoader(func(ctx context.Context, id string) (any, error) {
         return repo.GetUser(ctx, id)
-    },
-    LoginRedirect: "/login",
-    HomeRedirect:  "/dashboard",
-}
+    }),
+    middleware.WithLoginRedirect("/login"),
+    middleware.WithHomeRedirect("/dashboard"),
+    middleware.WithHXRedirect(), // optional: use HX-Redirect for HTMX requests, 303 for browsers
+)
 ```
 
-Four middleware variants, applied per-route (except `OptionalAuth` which stays on the group):
+The design splits "load auth state" from "enforce auth policy":
 
 ```go
-// Per-route — returns 401 on failure (API)
-site.GET("/api/profile", profileHandler.Get, middleware.Auth(cfg))
+// Group-level — the only middleware that touches the DB.
+// Populates ctx if logged in, clears stale cookies, never blocks.
+site.Use(auth.Load())
 
-// Per-route — redirects to login on failure (browser)
-site.GET("/dashboard", dashHandler.Index, middleware.RequireAuth(cfg))
-
-// Group-level — populates context if logged in, never blocks
-site.Use(middleware.OptionalAuth(cfg))
-
-// Per-route — redirects authenticated users away (login/register pages)
-site.GET("/login", authHandler.LoginPage, middleware.RequireNotAuth(cfg))
+// Per-route — pure ctx checks, zero DB calls.
+site.GET("/dashboard", dashHandler.Index, auth.RequireAuth())
+site.GET("/login", authHandler.LoginPage, auth.RequireNotAuth())
 ```
 
-`SubjectLoader` is optional — if nil, only `SubjectIDKey` is set in context. Projects
-type-assert the loaded subject in handlers:
+`WithSubjectLoader` is optional — if not set, only `SubjectIDKey` is set in context.
+Projects type-assert the loaded subject in handlers:
 
 ```go
 user := middleware.GetSubject(c).(*models.User)
@@ -91,7 +90,7 @@ subj := middleware.GetSubject(c)    // any, only with session-based auth
 RBAC middleware is applied per-route alongside auth middleware:
 
 ```go
-requireAuth := middleware.RequireAuth(cfg)
+requireAuth := auth.RequireAuth()
 requireAdmin := middleware.RequireRoles(
     func(subject any, roles []string) bool {
         return slices.Contains(roles, subject.(*models.User).Role)
@@ -111,7 +110,7 @@ requireActive := middleware.RequireActive(
     },
 )
 
-site.GET("/settings", settingsHandler.Index, requireAuth, requireActive)
+site.GET("/settings", settingsHandler.Index, auth.RequireAuth(), requireActive)
 ```
 
 Returns 401 if no subject, 403 if the check fails.
@@ -375,11 +374,15 @@ func GetDirection(c echo.Context) string
 
 // Auth
 type SubjectLoader func(ctx context.Context, subjectID string) (any, error)
-type AuthConfig struct { ... }
-func Auth(cfg AuthConfig) echo.MiddlewareFunc
-func RequireAuth(cfg AuthConfig) echo.MiddlewareFunc
-func OptionalAuth(cfg AuthConfig) echo.MiddlewareFunc
-func RequireNotAuth(cfg AuthConfig) echo.MiddlewareFunc
+type BrowserAuthOption func(*BrowserAuth)
+func NewBrowserAuth(sm *auth.SessionManager, opts ...BrowserAuthOption) *BrowserAuth
+func WithSubjectLoader(loader SubjectLoader) BrowserAuthOption
+func WithLoginRedirect(url string) BrowserAuthOption
+func WithHomeRedirect(url string) BrowserAuthOption
+func WithHXRedirect() BrowserAuthOption
+func (b *BrowserAuth) Load() echo.MiddlewareFunc
+func (b *BrowserAuth) RequireAuth() echo.MiddlewareFunc
+func (b *BrowserAuth) RequireNotAuth() echo.MiddlewareFunc
 func GetSubjectID(c echo.Context) string
 func GetSubject(c echo.Context) any
 

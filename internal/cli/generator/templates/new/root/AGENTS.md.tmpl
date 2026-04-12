@@ -443,9 +443,9 @@ Session-based authentication using `hamr/pkg/auth` and `hamr/pkg/middleware`.
 
 Middleware is configured in `internal/web/server.go`:
 
-- `middleware.RequireAuth(cfg)` — redirects unauthenticated users to login
-- `middleware.OptionalAuth(cfg)` — populates context if logged in, never blocks
-- `middleware.RequireNotAuth(cfg)` — redirects authenticated users away from login/register
+- `auth.Load()` — group-level, populates context from session (the only DB call)
+- `auth.RequireAuth()` — per-route, redirects unauthenticated users to login
+- `auth.RequireNotAuth()` — per-route, redirects authenticated users away from login/register
 
 ### Handler Pattern
 

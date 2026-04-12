@@ -96,15 +96,14 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 {{- end}}
 {{- if .IncludeAuth}}
 
-	authCfg := hamrmw.AuthConfig{
-		SessionManager: deps.SessionManager,
-		SubjectLoader: func(reqCtx context.Context, id string) (any, error) {
+	auth := hamrmw.NewBrowserAuth(deps.SessionManager,
+		hamrmw.WithSubjectLoader(func(reqCtx context.Context, id string) (any, error) {
 			return deps.Store.GetUserByID(reqCtx, id)
-		},
-		LoginRedirect: "/login",
-		HomeRedirect:  "/",
-	}
-	site.Use(hamrmw.OptionalAuth(authCfg))
+		}),
+		hamrmw.WithLoginRedirect("/login"),
+		hamrmw.WithHomeRedirect("/"),
+	)
+	site.Use(auth.Load())
 {{- end}}
 
 	homeHandler := home.NewHandler()
@@ -114,18 +113,15 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 	// Auth routes.
 	authHandler := authhandler.NewHandler(deps.AuthService, deps.SessionManager)
 
-	requireNotAuth := hamrmw.RequireNotAuth(authCfg)
-	requireAuth := hamrmw.RequireAuth(authCfg)
+	site.GET("/login", authHandler.LoginPage, auth.RequireNotAuth())
+	site.POST("/login", authHandler.Login, auth.RequireNotAuth())
+	site.POST("/login/validate/:field", authHandler.LoginFormRules.ValidationHandler("field"), auth.RequireNotAuth())
 
-	site.GET("/login", authHandler.LoginPage)
-	site.POST("/login", authHandler.Login)
-	site.POST("/login/validate/:field", authHandler.LoginFormRules.ValidationHandler("field"))
+	site.GET("/register", authHandler.RegisterPage, auth.RequireNotAuth())
+	site.POST("/register", authHandler.Register, auth.RequireNotAuth())
+	site.POST("/register/validate/:field", authHandler.RegisterFormRules.ValidationHandler("field"), auth.RequireNotAuth())
 
-	site.GET("/register", authHandler.RegisterPage, requireNotAuth)
-	site.POST("/register", authHandler.Register, requireNotAuth)
-	site.POST("/register/validate/:field", authHandler.RegisterFormRules.ValidationHandler("field"), requireNotAuth)
-
-	site.POST("/logout", authHandler.Logout, requireAuth)
+	site.POST("/logout", authHandler.Logout, auth.RequireAuth())
 {{- end}}
 }
 

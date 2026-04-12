@@ -22,6 +22,7 @@ import (
 
 type mockSessionStore struct {
 	sessions map[string]*auth.Session // keyed by token
+	err      error                    // if non-nil, GetByToken returns this
 }
 
 func newMockStore() *mockSessionStore {
@@ -34,6 +35,9 @@ func (m *mockSessionStore) Create(_ context.Context, s *auth.Session) error {
 }
 
 func (m *mockSessionStore) GetByToken(_ context.Context, token string) (*auth.Session, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
 	s, ok := m.sessions[token]
 	if !ok {
 		return nil, nil
@@ -72,6 +76,9 @@ func testSubjectLoader(_ context.Context, subjectID string) (any, error) {
 	if subjectID == "error" {
 		return nil, errors.New("loader error")
 	}
+	if subjectID == "deleted" {
+		return nil, nil
+	}
 	return &testUser{ID: subjectID, Name: "Test User"}, nil
 }
 
@@ -108,21 +115,25 @@ func createTestSession(store *mockSessionStore, subjectID string) string {
 	return token
 }
 
+// newAuth creates a BrowserAuth with the given options for tests.
+func newAuth(mgr *auth.SessionManager, opts ...middleware.BrowserAuthOption) *middleware.BrowserAuth {
+	return middleware.NewBrowserAuth(mgr, opts...)
+}
+
 // ---------------------------------------------------------------------------
-// Auth tests
+// Load tests
 // ---------------------------------------------------------------------------
 
-func TestAuth_validSession(t *testing.T) {
+func TestLoad_validSession(t *testing.T) {
 	store, mgr, c, _ := setupAuthTest(t, "")
 	token := createTestSession(store, "user-1")
 	c.Request().AddCookie(&http.Cookie{Name: "session_token", Value: token})
 
+	ba := newAuth(mgr, middleware.WithSubjectLoader(testSubjectLoader))
+
 	var subjectID string
 	var subject any
-	handler := middleware.Auth(middleware.AuthConfig{
-		SessionManager: mgr,
-		SubjectLoader:  testSubjectLoader,
-	})(func(c echo.Context) error {
+	handler := ba.Load()(func(c echo.Context) error {
 		subjectID = middleware.GetSubjectID(c)
 		subject = middleware.GetSubject(c)
 		return c.String(http.StatusOK, "ok")
@@ -135,17 +146,16 @@ func TestAuth_validSession(t *testing.T) {
 	assert.Equal(t, "user-1", subject.(*testUser).ID)
 }
 
-func TestAuth_noSessionLoaderSetsIDOnly(t *testing.T) {
+func TestLoad_noSubjectLoaderSetsIDOnly(t *testing.T) {
 	store, mgr, c, _ := setupAuthTest(t, "")
 	token := createTestSession(store, "user-2")
 	c.Request().AddCookie(&http.Cookie{Name: "session_token", Value: token})
 
+	ba := newAuth(mgr)
+
 	var subjectID string
 	var subject any
-	handler := middleware.Auth(middleware.AuthConfig{
-		SessionManager: mgr,
-		// SubjectLoader is nil
-	})(func(c echo.Context) error {
+	handler := ba.Load()(func(c echo.Context) error {
 		subjectID = middleware.GetSubjectID(c)
 		subject = middleware.GetSubject(c)
 		return c.String(http.StatusOK, "ok")
@@ -157,21 +167,38 @@ func TestAuth_noSessionLoaderSetsIDOnly(t *testing.T) {
 	assert.Nil(t, subject)
 }
 
-func TestAuth_invalidSession(t *testing.T) {
-	_, mgr, c, rec := setupAuthTest(t, "bad-token")
+func TestLoad_noCookie(t *testing.T) {
+	_, mgr, c, rec := setupAuthTest(t, "")
 
-	handler := middleware.Auth(middleware.AuthConfig{
-		SessionManager: mgr,
-	})(func(c echo.Context) error {
+	ba := newAuth(mgr)
+
+	var called bool
+	handler := ba.Load()(func(c echo.Context) error {
+		called = true
 		return c.String(http.StatusOK, "ok")
 	})
 
 	err := handler(c)
-	require.Error(t, err)
+	require.NoError(t, err)
+	assert.True(t, called)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Empty(t, middleware.GetSubjectID(c))
+}
 
-	he, ok := err.(*echo.HTTPError)
-	require.True(t, ok)
-	assert.Equal(t, http.StatusUnauthorized, he.Code)
+func TestLoad_invalidSession(t *testing.T) {
+	_, mgr, c, rec := setupAuthTest(t, "bad-token")
+
+	ba := newAuth(mgr)
+
+	var called bool
+	handler := ba.Load()(func(c echo.Context) error {
+		called = true
+		return c.String(http.StatusOK, "ok")
+	})
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.True(t, called, "Load must not block on invalid session")
 
 	// Stale cookie must be cleared so the browser stops sending it.
 	cookies := rec.Result().Cookies()
@@ -180,166 +207,77 @@ func TestAuth_invalidSession(t *testing.T) {
 	assert.Equal(t, -1, cookies[0].MaxAge)
 }
 
-func TestAuth_noCookie(t *testing.T) {
-	_, mgr, c, _ := setupAuthTest(t, "")
+func TestLoad_subjectLoaderError(t *testing.T) {
+	store, mgr, c, _ := setupAuthTest(t, "")
+	token := createTestSession(store, "error") // triggers loader error
+	c.Request().AddCookie(&http.Cookie{Name: "session_token", Value: token})
 
-	handler := middleware.Auth(middleware.AuthConfig{
-		SessionManager: mgr,
-	})(func(c echo.Context) error {
+	ba := newAuth(mgr, middleware.WithSubjectLoader(testSubjectLoader))
+
+	handler := ba.Load()(func(c echo.Context) error {
 		return c.String(http.StatusOK, "ok")
 	})
 
 	err := handler(c)
 	require.Error(t, err)
-
-	he, ok := err.(*echo.HTTPError)
-	require.True(t, ok)
-	assert.Equal(t, http.StatusUnauthorized, he.Code)
+	assert.Contains(t, err.Error(), "loader error")
 }
 
-// ---------------------------------------------------------------------------
-// RequireAuth tests
-// ---------------------------------------------------------------------------
-
-func TestRequireAuth_redirectsOnFailure(t *testing.T) {
-	_, mgr, c, rec := setupAuthTest(t, "")
-
-	handler := middleware.RequireAuth(middleware.AuthConfig{
-		SessionManager: mgr,
-	})(func(c echo.Context) error {
-		return c.String(http.StatusOK, "ok")
-	})
-
-	err := handler(c)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusSeeOther, rec.Code)
-	assert.Equal(t, "/login", rec.Header().Get("Location"))
-}
-
-func TestRequireAuth_customRedirect(t *testing.T) {
-	_, mgr, c, rec := setupAuthTest(t, "")
-
-	handler := middleware.RequireAuth(middleware.AuthConfig{
-		SessionManager: mgr,
-		LoginRedirect:  "/auth/signin",
-	})(func(c echo.Context) error {
-		return c.String(http.StatusOK, "ok")
-	})
-
-	err := handler(c)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusSeeOther, rec.Code)
-	assert.Equal(t, "/auth/signin", rec.Header().Get("Location"))
-}
-
-// ---------------------------------------------------------------------------
-// OptionalAuth tests
-// ---------------------------------------------------------------------------
-
-func TestOptionalAuth_validSession(t *testing.T) {
-	store, mgr, c, _ := setupAuthTest(t, "")
-	token := createTestSession(store, "user-3")
-	c.Request().AddCookie(&http.Cookie{Name: "session_token", Value: token})
-
-	var subjectID string
-	handler := middleware.OptionalAuth(middleware.AuthConfig{
-		SessionManager: mgr,
-		SubjectLoader:  testSubjectLoader,
-	})(func(c echo.Context) error {
-		subjectID = middleware.GetSubjectID(c)
-		return c.String(http.StatusOK, "ok")
-	})
-
-	err := handler(c)
-	require.NoError(t, err)
-	assert.Equal(t, "user-3", subjectID)
-}
-
-func TestOptionalAuth_noCookie(t *testing.T) {
-	_, mgr, c, rec := setupAuthTest(t, "")
-
-	var called bool
-	handler := middleware.OptionalAuth(middleware.AuthConfig{
-		SessionManager: mgr,
-	})(func(c echo.Context) error {
-		called = true
-		return c.String(http.StatusOK, "ok")
-	})
-
-	err := handler(c)
-	require.NoError(t, err)
-	assert.True(t, called)
-	assert.Equal(t, http.StatusOK, rec.Code)
-}
-
-func TestOptionalAuth_invalidSession(t *testing.T) {
-	_, mgr, c, rec := setupAuthTest(t, "bad-token")
-
-	var called bool
-	handler := middleware.OptionalAuth(middleware.AuthConfig{
-		SessionManager: mgr,
-	})(func(c echo.Context) error {
-		called = true
-		return c.String(http.StatusOK, "ok")
-	})
-
-	err := handler(c)
-	require.NoError(t, err)
-	assert.True(t, called)
-	assert.Equal(t, http.StatusOK, rec.Code)
-}
-
-// ---------------------------------------------------------------------------
-// RequireNotAuth tests
-// ---------------------------------------------------------------------------
-
-func TestRequireNotAuth_authenticated(t *testing.T) {
+func TestLoad_validateSessionError(t *testing.T) {
 	store, mgr, c, rec := setupAuthTest(t, "")
-	token := createTestSession(store, "user-4")
-	c.Request().AddCookie(&http.Cookie{Name: "session_token", Value: token})
+	store.err = errors.New("db connection refused")
+	c.Request().AddCookie(&http.Cookie{Name: "session_token", Value: "any-token"})
 
-	handler := middleware.RequireNotAuth(middleware.AuthConfig{
-		SessionManager: mgr,
-	})(func(c echo.Context) error {
+	ba := newAuth(mgr)
+
+	handler := ba.Load()(func(c echo.Context) error {
 		return c.String(http.StatusOK, "ok")
 	})
 
 	err := handler(c)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusSeeOther, rec.Code)
-	assert.Equal(t, "/dashboard", rec.Header().Get("Location"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "db connection refused")
+
+	// Cookie must NOT be cleared — the failure is transient, not an invalid session.
+	cookies := rec.Result().Cookies()
+	assert.Empty(t, cookies, "cookie should not be cleared on DB error")
 }
 
-func TestRequireNotAuth_notAuthenticated(t *testing.T) {
-	_, mgr, c, rec := setupAuthTest(t, "")
+func TestLoad_nilSubjectClearsAuthState(t *testing.T) {
+	store, mgr, c, rec := setupAuthTest(t, "")
+	token := createTestSession(store, "deleted") // loader returns (nil, nil)
+	c.Request().AddCookie(&http.Cookie{Name: "session_token", Value: token})
+
+	ba := newAuth(mgr, middleware.WithSubjectLoader(testSubjectLoader))
 
 	var called bool
-	handler := middleware.RequireNotAuth(middleware.AuthConfig{
-		SessionManager: mgr,
-	})(func(c echo.Context) error {
+	handler := ba.Load()(func(c echo.Context) error {
 		called = true
 		return c.String(http.StatusOK, "ok")
 	})
 
 	err := handler(c)
 	require.NoError(t, err)
-	assert.True(t, called)
-	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.True(t, called, "Load must continue when subject is nil")
+	assert.Empty(t, middleware.GetSubjectID(c), "SubjectIDKey must not be set for deleted subject")
+	assert.Nil(t, middleware.GetSubject(c), "SubjectKey must not be set for deleted subject")
+
+	// Stale cookie must be cleared.
+	cookies := rec.Result().Cookies()
+	require.Len(t, cookies, 1)
+	assert.Equal(t, "session_token", cookies[0].Name)
+	assert.Equal(t, -1, cookies[0].MaxAge)
 }
 
-// ---------------------------------------------------------------------------
-// SessionKey test
-// ---------------------------------------------------------------------------
-
-func TestAuth_setsSessionKey(t *testing.T) {
+func TestLoad_setsSessionKey(t *testing.T) {
 	store, mgr, c, _ := setupAuthTest(t, "")
 	token := createTestSession(store, "user-5")
 	c.Request().AddCookie(&http.Cookie{Name: "session_token", Value: token})
 
+	ba := newAuth(mgr)
+
 	var session any
-	handler := middleware.Auth(middleware.AuthConfig{
-		SessionManager: mgr,
-	})(func(c echo.Context) error {
+	handler := ba.Load()(func(c echo.Context) error {
 		s, ok := ctx.Get(c, ctx.SessionKey)
 		if ok {
 			session = s
@@ -354,4 +292,181 @@ func TestAuth_setsSessionKey(t *testing.T) {
 	s, ok := session.(*auth.Session)
 	require.True(t, ok)
 	assert.Equal(t, "user-5", s.SubjectID)
+}
+
+// ---------------------------------------------------------------------------
+// RequireAuth tests
+// ---------------------------------------------------------------------------
+
+func TestRequireAuth_redirectsWhenNoSubject(t *testing.T) {
+	_, mgr, c, rec := setupAuthTest(t, "")
+
+	ba := newAuth(mgr)
+	handler := ba.RequireAuth()(func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	})
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusSeeOther, rec.Code)
+	assert.Equal(t, "/login", rec.Header().Get("Location"))
+}
+
+func TestRequireAuth_passesWhenSubject(t *testing.T) {
+	store, mgr, c, _ := setupAuthTest(t, "")
+	token := createTestSession(store, "user-1")
+	c.Request().AddCookie(&http.Cookie{Name: "session_token", Value: token})
+
+	ba := newAuth(mgr, middleware.WithSubjectLoader(testSubjectLoader))
+
+	// Run Load first to populate ctx.
+	load := ba.Load()(func(c echo.Context) error { return nil })
+	require.NoError(t, load(c))
+
+	// Fresh recorder so RequireAuth assertions aren't tainted by Load.
+	rec2 := httptest.NewRecorder()
+	c.SetResponse(echo.NewResponse(rec2, c.Echo()))
+
+	handler := ba.RequireAuth()(func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	})
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec2.Code)
+	assert.Equal(t, "ok", rec2.Body.String())
+}
+
+func TestRequireAuth_customRedirect(t *testing.T) {
+	_, mgr, c, rec := setupAuthTest(t, "")
+
+	ba := newAuth(mgr, middleware.WithLoginRedirect("/auth/signin"))
+	handler := ba.RequireAuth()(func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	})
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusSeeOther, rec.Code)
+	assert.Equal(t, "/auth/signin", rec.Header().Get("Location"))
+}
+
+func TestRequireAuth_hxRedirect(t *testing.T) {
+	_, mgr, c, rec := setupAuthTest(t, "")
+	c.Request().Header.Set("HX-Request", "true")
+
+	ba := newAuth(mgr, middleware.WithHXRedirect())
+	handler := ba.RequireAuth()(func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	})
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "/login", rec.Header().Get("HX-Redirect"))
+	assert.Empty(t, rec.Body.String(), "HX-Redirect response must have empty body")
+}
+
+func TestRequireAuth_hxRedirectFallsBackFor303(t *testing.T) {
+	_, mgr, c, rec := setupAuthTest(t, "")
+	// No HX-Request header — normal browser navigation.
+
+	ba := newAuth(mgr, middleware.WithHXRedirect())
+	handler := ba.RequireAuth()(func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	})
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusSeeOther, rec.Code)
+	assert.Equal(t, "/login", rec.Header().Get("Location"))
+	assert.Empty(t, rec.Header().Get("HX-Redirect"))
+}
+
+// ---------------------------------------------------------------------------
+// RequireNotAuth tests
+// ---------------------------------------------------------------------------
+
+func TestRequireNotAuth_redirectsWhenSubject(t *testing.T) {
+	store, mgr, c, rec := setupAuthTest(t, "")
+	token := createTestSession(store, "user-4")
+	c.Request().AddCookie(&http.Cookie{Name: "session_token", Value: token})
+
+	ba := newAuth(mgr)
+
+	// Run Load first to populate ctx.
+	load := ba.Load()(func(c echo.Context) error { return nil })
+	require.NoError(t, load(c))
+
+	handler := ba.RequireNotAuth()(func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	})
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusSeeOther, rec.Code)
+	assert.Equal(t, "/dashboard", rec.Header().Get("Location"))
+}
+
+func TestRequireNotAuth_passesWhenNoSubject(t *testing.T) {
+	_, mgr, c, rec := setupAuthTest(t, "")
+
+	ba := newAuth(mgr)
+
+	var called bool
+	handler := ba.RequireNotAuth()(func(c echo.Context) error {
+		called = true
+		return c.String(http.StatusOK, "ok")
+	})
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.True(t, called)
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestRequireNotAuth_hxRedirect(t *testing.T) {
+	store, mgr, c, rec := setupAuthTest(t, "")
+	token := createTestSession(store, "user-4")
+	c.Request().AddCookie(&http.Cookie{Name: "session_token", Value: token})
+	c.Request().Header.Set("HX-Request", "true")
+
+	ba := newAuth(mgr, middleware.WithHXRedirect())
+
+	// Run Load first to populate ctx.
+	load := ba.Load()(func(c echo.Context) error { return nil })
+	require.NoError(t, load(c))
+
+	handler := ba.RequireNotAuth()(func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	})
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "/dashboard", rec.Header().Get("HX-Redirect"))
+	assert.Empty(t, rec.Body.String(), "HX-Redirect response must have empty body")
+}
+
+func TestRequireNotAuth_hxRedirectFallsBackFor303(t *testing.T) {
+	store, mgr, c, rec := setupAuthTest(t, "")
+	token := createTestSession(store, "user-4")
+	c.Request().AddCookie(&http.Cookie{Name: "session_token", Value: token})
+	// No HX-Request header — normal browser navigation.
+
+	ba := newAuth(mgr, middleware.WithHXRedirect())
+
+	// Run Load first to populate ctx.
+	load := ba.Load()(func(c echo.Context) error { return nil })
+	require.NoError(t, load(c))
+
+	handler := ba.RequireNotAuth()(func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	})
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusSeeOther, rec.Code)
+	assert.Equal(t, "/dashboard", rec.Header().Get("Location"))
+	assert.Empty(t, rec.Header().Get("HX-Redirect"))
 }

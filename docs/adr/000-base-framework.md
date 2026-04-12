@@ -64,7 +64,7 @@ github.com/FyrmForge/hamr/
 │   ├── ctx/
 │   │   └── ctx.go                      # Typed context keys (generics-based)
 │   ├── middleware/
-│   │   ├── auth.go                     # Auth, RequireAuth, OptionalAuth, RequireNotAuth
+│   │   ├── auth.go                     # BrowserAuth (Load, RequireAuth, RequireNotAuth)
 │   │   ├── rbac.go                     # RequireRoles, RequireActive (callback-based)
 │   │   ├── flash.go                    # Cookie-based one-time flash messages
 │   │   ├── ratelimit.go               # Token bucket rate limiter
@@ -232,8 +232,9 @@ Response headers:
 
 ### 13. `pkg/middleware/auth.go`
 - `SubjectLoader func(ctx context.Context, subjectID string) (any, error)` - the key abstraction; loads whatever the project calls a "user" by their ID
-- `AuthConfig`: SessionManager, SubjectLoader, CookieName, LoginRedirect, HomeRedirect
-- `Auth(cfg)`, `RequireAuth(cfg)`, `OptionalAuth(cfg)`, `RequireNotAuth(cfg)`
+- `NewBrowserAuth(sm, opts...)` — constructor with functional options (`WithSubjectLoader`, `WithLoginRedirect`, `WithHomeRedirect`, `WithHXRedirect`)
+- `Load()` — group-level middleware, the only one that hits the DB (session validation + subject loading)
+- `RequireAuth()`, `RequireNotAuth()` — per-route policy checks, pure ctx reads, zero DB calls
 - `GetSubject(c echo.Context) any`, `GetSubjectID(c echo.Context) string`
 - Projects type-assert the `any` return to their own user/account struct
 

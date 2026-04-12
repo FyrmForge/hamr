@@ -336,7 +336,7 @@ func TestGenerateProject_withAuth(t *testing.T) {
 	// Check server.go includes auth routes.
 	serverGo := readFile(t, dir, "internal/web/server.go")
 	assert.Contains(t, serverGo, "authhandler")
-	assert.Contains(t, serverGo, "hamrmw.RequireNotAuth")
+	assert.Contains(t, serverGo, "auth.RequireNotAuth()")
 }
 
 func TestGenerateProject_noSessions(t *testing.T) {

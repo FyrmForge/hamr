@@ -627,41 +627,36 @@ func MigrateForce(db *sqlx.DB, cfg MigrateConfig, version int) error  // fix dir
 ```go
 type SubjectLoader func(ctx context.Context, subjectID string) (any, error)
 
-type AuthConfig struct {
-    SessionManager *auth.SessionManager
-    SubjectLoader  SubjectLoader  // optional — if nil, only SubjectIDKey is set
-    LoginRedirect  string         // default: "/login"
-    HomeRedirect   string         // default: "/dashboard"
-}
+type BrowserAuthOption func(*BrowserAuth)
+
+func NewBrowserAuth(sm *auth.SessionManager, opts ...BrowserAuthOption) *BrowserAuth
+func WithSubjectLoader(loader SubjectLoader) BrowserAuthOption
+func WithLoginRedirect(url string) BrowserAuthOption   // default: "/login"
+func WithHomeRedirect(url string) BrowserAuthOption    // default: "/dashboard"
+func WithHXRedirect() BrowserAuthOption                // use HX-Redirect for HTMX requests, 303 for browsers
 ```
 
 #### Auth Middleware
 
-Auth middleware (except `OptionalAuth`) is applied per-route as variadic args, not via
-group `.Use()`. This makes each route's access requirements visible at its definition site.
+Auth is split into a loader (DB access, group-level) and policy checks (pure ctx reads, per-route).
 
 ```go
-func Auth(cfg AuthConfig) echo.MiddlewareFunc
+func (b *BrowserAuth) Load() echo.MiddlewareFunc
 ```
-Requires a valid session. Returns 401 on failure.
-Usage: `site.GET("/api/profile", handler.Get, middleware.Auth(cfg))`
+Validates session cookie, populates ctx (SubjectIDKey, SessionKey, SubjectKey). The only middleware that touches the DB. Never blocks — no cookie or invalid cookie just continues without auth state.
+Usage: `site.Use(auth.Load())`
 
 ```go
-func RequireAuth(cfg AuthConfig) echo.MiddlewareFunc
+func (b *BrowserAuth) RequireAuth() echo.MiddlewareFunc
 ```
-Requires a valid session. Redirects to login page on failure.
-Usage: `site.GET("/dashboard", handler.Index, middleware.RequireAuth(cfg))`
+Pure ctx check. Redirects to LoginRedirect when no subject in ctx (303 or HX-Redirect).
+Usage: `site.GET("/dashboard", handler.Index, auth.RequireAuth())`
 
 ```go
-func OptionalAuth(cfg AuthConfig) echo.MiddlewareFunc
+func (b *BrowserAuth) RequireNotAuth() echo.MiddlewareFunc
 ```
-Populates context if user is logged in, never blocks. Applied at the group level: `site.Use(middleware.OptionalAuth(cfg))`
-
-```go
-func RequireNotAuth(cfg AuthConfig) echo.MiddlewareFunc
-```
-Redirects already-authenticated users to the home page.
-Usage: `site.GET("/login", handler.LoginPage, middleware.RequireNotAuth(cfg))`
+Pure ctx check. Redirects to HomeRedirect when subject is in ctx (303 or HX-Redirect).
+Usage: `site.GET("/login", handler.LoginPage, auth.RequireNotAuth())`
 
 #### Subject Helpers
 

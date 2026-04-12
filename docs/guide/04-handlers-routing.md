@@ -72,13 +72,13 @@ Site    (/)           → sessions, CSRF, flash, cache, secure headers
 API     (/api/)       → CORS, rate limit, bearer auth
 ```
 
-Auth and RBAC middleware is applied per-route so every route's access requirements are visible at its definition site:
+The auth loader runs on the group (one DB call), while policy and RBAC checks are applied per-route so every route's access requirements are visible at its definition site:
 
 ```go
-// Auth middleware — applied per-route, not per-group
-requireAuth := middleware.RequireAuth(cfg)
-site.GET("/dashboard", dashHandler.Index, requireAuth)
-site.POST("/logout", authHandler.Logout, requireAuth)
+// Auth loader on the group, policy checks per-route
+site.Use(auth.Load())
+site.GET("/dashboard", dashHandler.Index, auth.RequireAuth())
+site.POST("/logout", authHandler.Logout, auth.RequireAuth())
 ```
 
 ---

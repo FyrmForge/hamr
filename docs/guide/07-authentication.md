@@ -81,35 +81,30 @@ err := sm.DeleteSubjectSessions(ctx, userID)
 
 ## Auth Middleware
 
-Configure auth middleware with your session manager and subject loader:
+Create a `BrowserAuth` instance with your session manager and options:
 
 ```go
-cfg := middleware.AuthConfig{
-    SessionManager: sm,
-    SubjectLoader: func(ctx context.Context, id string) (any, error) {
+auth := middleware.NewBrowserAuth(sm,
+    middleware.WithSubjectLoader(func(ctx context.Context, id string) (any, error) {
         return repo.GetUser(ctx, id)
-    },
-    LoginRedirect: "/login",
-    HomeRedirect:  "/dashboard",
-}
+    }),
+    middleware.WithLoginRedirect("/login"),
+    middleware.WithHomeRedirect("/dashboard"),
+)
 ```
 
-### Four Variants
+### Load + Policy
 
-Auth and RBAC middleware is applied per-route so every route's access requirements are visible at its definition site. Infrastructure middleware (sessions, CSRF, flash, secure headers) stays on the group.
+The design separates "load auth state" (one DB call) from "enforce policy" (pure ctx checks). Auth and RBAC middleware is applied per-route so every route's access requirements are visible at its definition site. Infrastructure middleware (sessions, CSRF, flash, secure headers) stays on the group.
 
 ```go
-// Per-route — returns 401 on failure (API)
-site.GET("/api/profile", profileHandler.Get, middleware.Auth(cfg))
+// Group-level — the only middleware that touches the DB.
+// Populates ctx if logged in, clears stale cookies, never blocks.
+site.Use(auth.Load())
 
-// Per-route — redirects to login on failure (browser)
-site.GET("/dashboard", dashHandler.Index, middleware.RequireAuth(cfg))
-
-// Group-level — populates context if logged in, never blocks
-site.Use(middleware.OptionalAuth(cfg))
-
-// Per-route — redirects authenticated users away (login/register pages)
-site.GET("/login", authHandler.LoginPage, middleware.RequireNotAuth(cfg))
+// Per-route — pure ctx checks, zero DB calls.
+site.GET("/dashboard", dashHandler.Index, auth.RequireAuth())
+site.GET("/login", authHandler.LoginPage, auth.RequireNotAuth())
 ```
 
 ### Reading Auth State in Handlers
@@ -202,7 +197,6 @@ func (h *Handler) Register(c echo.Context) error {
 After authentication, restrict access by role. Define middleware slices and pass them per-route:
 
 ```go
-requireAuth := middleware.RequireAuth(cfg)
 requireAdmin := middleware.RequireRoles(
     func(subject any, roles []string) bool {
         return slices.Contains(roles, subject.(*models.User).Role)
@@ -210,7 +204,7 @@ requireAdmin := middleware.RequireRoles(
     "admin", "superadmin",
 )
 
-adminRoutes := []echo.MiddlewareFunc{requireAuth, requireAdmin}
+adminRoutes := []echo.MiddlewareFunc{auth.RequireAuth(), requireAdmin}
 
 site.GET("/admin", adminHandler.Dashboard, adminRoutes...)
 site.GET("/admin/users", adminHandler.Users, adminRoutes...)
@@ -225,7 +219,7 @@ requireActive := middleware.RequireActive(
     },
 )
 
-site.GET("/settings", settingsHandler.Index, requireAuth, requireActive)
+site.GET("/settings", settingsHandler.Index, auth.RequireAuth(), requireActive)
 ```
 
 ---

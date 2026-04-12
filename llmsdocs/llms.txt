@@ -122,7 +122,7 @@ PostgreSQL connection with retry + migrations.
 
 ### middleware
 HTTP middleware for auth, CSRF, CORS, flash, security, RBAC, audit, rate limiting, locale.
-- Auth: `Auth(cfg)`, `RequireAuth(cfg)`, `OptionalAuth(cfg)`, `RequireNotAuth(cfg)`
+- Auth: `NewBrowserAuth(sm, opts...)`, `Load()`, `RequireAuth()`, `RequireNotAuth()`
 - Subject: `GetSubjectID(c) string`, `GetSubject(c) any`, `TrustedSubject()`
 - CSRF: `CSRF()`, `CSRFWithConfig(cfg)`
 - CORS: `CORS()`, `CORSWithConfig(cfg)`
