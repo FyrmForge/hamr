@@ -27,9 +27,9 @@ import (
 	authhandler "{{.Module}}/internal/web/handler/auth"
 {{- end}}
 	"{{.Module}}/internal/web/handler/about"
-	"{{.Module}}/internal/web/handler/errors"
 	"{{.Module}}/internal/web/handler/health"
 	"{{.Module}}/internal/web/handler/home"
+	"{{.Module}}/internal/web/components"
 )
 
 // Deps holds the dependencies for route registration.
@@ -59,10 +59,6 @@ type Deps struct {
 func RegisterRoutes(srv *server.Server, deps *Deps) {
 	e := srv.Echo()
 
-	// Error handler.
-	errorHandler := errors.NewHandler()
-	e.HTTPErrorHandler = errorHandler.Handle
-
 	// Health check — no session middleware.
 	healthHandler := health.NewHandler(deps.Store)
 	e.GET("/health", healthHandler.Health)
@@ -81,6 +77,7 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 	// Site routes.
 	site := e.Group("")
 	site.Use(middleware.Logging())
+	site.Use(hamrmw.ErrorPages(components.ErrorPage))
 	site.Use(hamrmw.SecureWithConfig(hamrmw.SecureConfig{
 		ContentSecurityPolicy: csp,
 	}))

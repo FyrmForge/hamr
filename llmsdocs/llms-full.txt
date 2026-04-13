@@ -230,22 +230,10 @@ func JSON(c echo.Context, status int, data any) error
 Sends a JSON response with the given status code.
 
 ```go
-func Error(c echo.Context, status int, msg string, component ...templ.Component) error
-```
-Sends an error response, negotiating between HTML and JSON. Optional templ
-component renders the HTML error page.
-
-```go
 func Redirect(c echo.Context, url string) error
 ```
 HTMX-aware redirect. For HTMX requests: sets HX-Redirect header, returns 200.
 For regular requests: returns 303.
-
-```go
-func ValidationError(c echo.Context, fields map[string]string, component ...templ.Component) error
-```
-Sends a 422 validation error response. Optional templ component renders the
-HTML error view.
 
 #### Pagination
 
@@ -621,6 +609,24 @@ func MigrateForce(db *sqlx.DB, cfg MigrateConfig, version int) error  // fix dir
 ### middleware
 
 > Package middleware provides HTTP middleware for the HAMR framework.
+
+#### Error Pages
+
+```go
+type ErrorPage func(code int, message string) templ.Component
+
+type PageOverride struct {
+    Code int
+    Page ErrorPage
+}
+
+func Page(code int, page ErrorPage) PageOverride
+func ErrorPages(defaultPage ErrorPage, overrides ...PageOverride) echo.MiddlewareFunc
+```
+Per-group middleware that catches errors and renders error pages. Extracts
+code/message from `*echo.HTTPError` (default 500), skips committed responses,
+logs 5xx via `logging.FromContext`, looks up per-code overrides, and renders
+via `respond.HTML`. Place after Logging so Logging sees the correct status.
 
 #### Auth Types
 

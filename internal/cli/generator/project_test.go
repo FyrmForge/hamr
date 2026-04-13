@@ -106,7 +106,6 @@ func TestBuildProjectFileList_coreFiles(t *testing.T) {
 		"internal/web/server.go",
 		"internal/web/handler/home/handler.go",
 		"internal/web/handler/health/handler.go",
-		"internal/web/handler/errors/handler.go",
 		"internal/web/components/layout.templ",
 		".gitignore",
 		"Makefile",
@@ -291,6 +290,15 @@ func TestGenerateProject_createsFiles(t *testing.T) {
 	assert.Contains(t, readme, "testproj")
 	assert.Contains(t, readme, "make migrate")
 
+	claude := readFile(t, dir, "CLAUDE.md")
+	assert.Contains(t, claude, "make migrate")
+	assert.NotContains(t, claude, "Migrations run automatically")
+
+	agents := readFile(t, dir, "AGENTS.md")
+	assert.Contains(t, agents, "make migrate")
+	assert.Contains(t, agents, "Configure rules via `[lint.templ]` in `hamr.toml`")
+	assert.NotContains(t, agents, ".templint.yml")
+
 	// Check main.go has correct imports and env config pattern.
 	mainGo := readFile(t, dir, "cmd/site/main.go")
 	assert.Contains(t, mainGo, "github.com/FyrmForge/hamr/pkg/config")
@@ -337,6 +345,12 @@ func TestGenerateProject_withAuth(t *testing.T) {
 	serverGo := readFile(t, dir, "internal/web/server.go")
 	assert.Contains(t, serverGo, "authhandler")
 	assert.Contains(t, serverGo, "auth.RequireNotAuth()")
+
+	agents := readFile(t, dir, "AGENTS.md")
+	assert.Contains(t, agents, "h.sessionManager.CreateSession")
+	assert.Contains(t, agents, `return respond.Redirect(c, "/")`)
+	assert.NotContains(t, agents, "h.sessions.CreateSession")
+	assert.NotContains(t, agents, `return respond.Redirect(c, "/dashboard")`)
 }
 
 func TestGenerateProject_noSessions(t *testing.T) {
@@ -606,6 +620,12 @@ func TestGenerateProject_s3Storage(t *testing.T) {
 	// go.mod should exist with correct module.
 	gomod := readFile(t, dir, "go.mod")
 	assert.Contains(t, gomod, "module github.com/test/s3proj")
+
+	agents := readFile(t, dir, "AGENTS.md")
+	assert.Contains(t, agents, "`S3_ACCESS_KEY`")
+	assert.Contains(t, agents, "`S3_SECRET_KEY`")
+	assert.NotContains(t, agents, "S3_ACCESS_KEY_ID")
+	assert.NotContains(t, agents, "S3_SECRET_ACCESS_KEY")
 }
 
 func TestGenerateProject_localStorage(t *testing.T) {
@@ -1075,6 +1095,15 @@ func TestGenerateProject_gorm(t *testing.T) {
 	// README mentions GORM.
 	readme := readFile(t, dir, "README.md")
 	assert.Contains(t, readme, "GORM")
+
+	agents := readFile(t, dir, "AGENTS.md")
+	assert.Contains(t, agents, "internal/db/            Database connection + GORM models")
+	assert.Contains(t, agents, "cmd/migrate/            Standalone migration runner")
+	assert.Contains(t, agents, "Models live in `internal/db/models.go`")
+	assert.Contains(t, agents, "Repo implementations use `gorm.DB`")
+	assert.Contains(t, agents, "Use `cmd/migrate` / `make migrate` to run `appdb.AutoMigrate(...)`")
+	assert.NotContains(t, agents, "Migrations in `internal/db/migrations/`")
+	assert.NotContains(t, agents, "Use `sqlx` for queries in repo implementations")
 }
 
 func TestGenerateProject_sqlxMigrateCommandUsesSQLXDB(t *testing.T) {
@@ -1130,6 +1159,14 @@ func TestGenerateProject_migrateAtStartup(t *testing.T) {
 	readme := readFile(t, dir, "README.md")
 	assert.NotContains(t, readme, "make migrate")
 	assert.Contains(t, readme, "Migrations run automatically")
+
+	claude := readFile(t, dir, "CLAUDE.md")
+	assert.NotContains(t, claude, "make migrate")
+	assert.Contains(t, claude, "Migrations run automatically")
+
+	agents := readFile(t, dir, "AGENTS.md")
+	assert.NotContains(t, agents, "make migrate")
+	assert.Contains(t, agents, "Migrations run automatically")
 }
 
 func TestGenerateProject_gormMigrateAtStartup(t *testing.T) {
@@ -1165,6 +1202,36 @@ func TestGenerateProject_gormMigrateAtStartup(t *testing.T) {
 
 	// No SQL migrations.
 	assertFileNotExists(t, dir, "internal/db/migrations/001_initial.up.sql")
+
+	claude := readFile(t, dir, "CLAUDE.md")
+	assert.NotContains(t, claude, "make migrate")
+	assert.Contains(t, claude, "Migrations run automatically")
+
+	agents := readFile(t, dir, "AGENTS.md")
+	assert.NotContains(t, agents, "make migrate")
+	assert.Contains(t, agents, "Migrations run automatically")
+	assert.Contains(t, agents, "Schema changes run during server startup via `appdb.AutoMigrate(...)`")
+	assert.NotContains(t, agents, "cmd/migrate/            Standalone migration runner")
+}
+
+func TestGenerateProject_agentsWebsocketDocs(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "wsdocsproj")
+
+	cfg := &ProjectConfig{
+		Name:      "wsdocsproj",
+		Module:    "github.com/test/wsdocsproj",
+		CSS:       "plain",
+		Database:  "postgres",
+		GoVersion: "1.25.0",
+		IncludeWS: true,
+	}
+
+	require.NoError(t, GenerateProject(dir, cfg))
+
+	agents := readFile(t, dir, "AGENTS.md")
+	assert.Contains(t, agents, "hub := websocket.NewHub()")
+	assert.Contains(t, agents, "websocket.WithSubjectIDFunc(...)")
+	assert.NotContains(t, agents, "echoCtx")
 }
 
 func TestGenerateProject_gormNoMigrateAtStartup(t *testing.T) {
@@ -1290,6 +1357,10 @@ func TestGenerateProject_locale(t *testing.T) {
 	assert.Contains(t, makefile, "locale-gen")
 	// build and test targets should run hamr locale gen.
 	assert.Contains(t, makefile, "hamr locale gen")
+
+	agents := readFile(t, dir, "AGENTS.md")
+	assert.Contains(t, agents, "internal/locale/         Generated type-safe i18n accessors after `hamr locale gen`")
+	assert.Contains(t, agents, "after internal/locale/locale.go exists:")
 }
 
 func TestGenerateProject_noLocale(t *testing.T) {

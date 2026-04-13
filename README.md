@@ -43,9 +43,9 @@ HAMR is two things:
 | `pkg/auth`         | Argon2id password hashing, token generation, session management                    | [docs/guide/pkg/auth.md](docs/guide/pkg/auth.md) |
 | `pkg/db`           | Database connection with retry, keep-alive, and migration runner                   | [docs/guide/pkg/db.md](docs/guide/pkg/db.md) |
 | `pkg/htmx`         | HTMX request detection and response header helpers                                 | [docs/guide/pkg/htmx.md](docs/guide/pkg/htmx.md) |
-| `pkg/respond`      | Content-negotiated responses (HTML via Templ or JSON from the same handler)        | [docs/guide/pkg/respond.md](docs/guide/pkg/respond.md) |
+| `pkg/respond`      | HTTP response helpers (HTML via Templ, JSON, HTMX-aware redirects)                 | [docs/guide/pkg/respond.md](docs/guide/pkg/respond.md) |
 | `pkg/ctx`          | Type-safe Echo context keys using generics                                         | [docs/guide/pkg/ctx.md](docs/guide/pkg/ctx.md) |
-| `pkg/middleware`   | Auth, RBAC, flash messages, rate limiting, request ID, caching, audit, CSRF, CORS  | [docs/guide/pkg/middleware.md](docs/guide/pkg/middleware.md) |
+| `pkg/middleware`   | Auth, RBAC, error pages, flash, rate limiting, caching, audit, CSRF, CORS          | [docs/guide/pkg/middleware.md](docs/guide/pkg/middleware.md) |
 | `pkg/server`       | Echo wrapper with functional options and lifecycle hooks                           | [docs/guide/pkg/server.md](docs/guide/pkg/server.md) |
 | `pkg/janitor`      | Background task scheduler                                                          | [docs/guide/pkg/janitor.md](docs/guide/pkg/janitor.md) |
 | `pkg/storage`      | File storage interface with local filesystem and S3/R2/RustFS backends             | [docs/guide/pkg/storage.md](docs/guide/pkg/storage.md) |
@@ -161,7 +161,7 @@ myproject/
 
 ## Architecture highlights
 
-**Content negotiation** -- the same handler serves both HTMX (HTML) and JSON API responses. No duplicate route sets.
+**Per-group error pages** -- middleware catches errors and renders templ components, with per-status-code overrides.
 
 **Identity is a string** -- all framework packages accept subject IDs as `string`. Projects using `int64`, `uuid.UUID`, or a field called `account_id` provide their own conversion at the boundary.
 

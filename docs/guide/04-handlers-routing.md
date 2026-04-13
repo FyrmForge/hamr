@@ -116,7 +116,7 @@ func (h *Handler) GetUser(c echo.Context) error {
     id := c.Param("id")
     user, err := h.repo.GetByID(c.Request().Context(), id)
     if err != nil {
-        return respond.Error(c, http.StatusNotFound, "User not found")
+        return echo.NewHTTPError(http.StatusNotFound, "User not found")
     }
     return respond.JSON(c, http.StatusOK, user)
 }
@@ -124,15 +124,16 @@ func (h *Handler) GetUser(c echo.Context) error {
 
 ### Error Responses
 
-```go
-// Simple error — negotiates format (JSON vs HTML) automatically
-respond.Error(c, http.StatusForbidden, "Access denied")
+Return an `echo.HTTPError` from handlers — the `ErrorPages` middleware catches it and
+renders the appropriate error page:
 
-// With an HTML error component
-respond.Error(c, http.StatusNotFound, "Not found", templates.NotFoundPage())
+```go
+return echo.NewHTTPError(http.StatusForbidden, "Access denied")
+return echo.NewHTTPError(http.StatusNotFound, "Not found")
 ```
 
-JSON output: `{"error": "Forbidden", "message": "Access denied", "code": 403}`
+The `ErrorPages` middleware renders error pages using templ components registered at
+the group level (see [Middleware](pkg/middleware.md)).
 
 ---
 
@@ -166,7 +167,7 @@ func (h *Handler) ListUsers(c echo.Context) error {
 
     users, total, err := h.repo.List(c.Request().Context(), page, size)
     if err != nil {
-        return respond.Error(c, http.StatusInternalServerError, "Failed to list users")
+        return echo.NewHTTPError(http.StatusInternalServerError, "Failed to list users")
     }
 
     return respond.JSON(c, http.StatusOK, respond.PagedResponse[User]{

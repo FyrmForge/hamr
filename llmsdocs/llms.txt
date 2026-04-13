@@ -77,9 +77,7 @@ Type-safe Echo context key helpers using generics.
 HTTP response helpers for HTMX-first applications.
 - `HTML(c, status, component) error`
 - `JSON(c, status, data) error`
-- `Error(c, status, msg, component...) error`
 - `Redirect(c, url) error` — HTMX-aware (sets HX-Redirect for HTMX, 303 otherwise)
-- `ValidationError(c, fields, component...) error` — returns 422
 - `ParsePagination(c, defaultSize) (page, size int)`
 - `NewPage(page, size, total) Page`
 
@@ -121,7 +119,8 @@ PostgreSQL connection with retry + migrations.
 - `StartKeepAlive(ctx, db, interval, _)`, `StartKeepAliveWithConfig(ctx, db, cfg)`
 
 ### middleware
-HTTP middleware for auth, CSRF, CORS, flash, security, RBAC, audit, rate limiting, locale.
+HTTP middleware for auth, CSRF, CORS, flash, security, RBAC, audit, rate limiting, error pages, locale.
+- Error Pages: `ErrorPages(defaultPage, overrides...)`, `Page(code, page)` — per-group error rendering
 - Auth: `NewBrowserAuth(sm, opts...)`, `Load()`, `RequireAuth()`, `RequireNotAuth()`
 - Subject: `GetSubjectID(c) string`, `GetSubject(c) any`, `TrustedSubject()`
 - CSRF: `CSRF()`, `CSRFWithConfig(cfg)`

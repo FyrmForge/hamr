@@ -274,17 +274,6 @@ The HTMX trigger pattern handles error clearing automatically:
 
 ---
 
-## Validation Errors
-
-`respond.ValidationError` returns a 422 response with field errors:
-
-```go
-return respond.ValidationError(c, errors)
-```
-
-- **JSON output:** `{"error": "Validation failed", "fields": {"email": "Invalid email address"}}`
-- **HTML output:** renders a templ component for Out-of-Band (OOB) swap display (pass as an additional argument)
-
 ---
 
 ## CSRF Protection

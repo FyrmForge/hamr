@@ -128,17 +128,17 @@ func (h *Handler) Login(c echo.Context) error {
 
     user, err := h.repo.GetByEmail(c.Request().Context(), email)
     if err != nil {
-        return respond.Error(c, http.StatusUnauthorized, "Invalid credentials")
+        return echo.NewHTTPError(http.StatusUnauthorized, "Invalid credentials")
     }
 
     match, err := auth.CheckPassword(password, user.PasswordHash)
     if err != nil || !match {
-        return respond.Error(c, http.StatusUnauthorized, "Invalid credentials")
+        return echo.NewHTTPError(http.StatusUnauthorized, "Invalid credentials")
     }
 
     session, err := h.sm.CreateSession(c.Request().Context(), user.ID, nil)
     if err != nil {
-        return respond.Error(c, http.StatusInternalServerError, "Login failed")
+        return echo.NewHTTPError(http.StatusInternalServerError, "Login failed")
     }
 
     c.SetCookie(&http.Cookie{
@@ -175,13 +175,13 @@ func (h *Handler) Register(c echo.Context) error {
         errors["password"] = msg
     }
     if len(errors) > 0 {
-        return respond.ValidationError(c, errors)
+        return respond.HTML(c, http.StatusUnprocessableEntity, registerForm(c, f, errors))
     }
 
     // Hash password
     hash, err := auth.HashPassword(password)
     if err != nil {
-        return respond.Error(c, http.StatusInternalServerError, "Registration failed")
+        return echo.NewHTTPError(http.StatusInternalServerError, "Registration failed")
     }
 
     // Create user...

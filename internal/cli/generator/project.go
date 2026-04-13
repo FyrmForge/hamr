@@ -191,13 +191,13 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 		{"templates/new/internal/web/handler/about/handler.go.tmpl", "internal/web/handler/about/handler.go"},
 		{"templates/new/internal/web/handler/about/about.templ.tmpl", "internal/web/handler/about/about.templ"},
 		{"templates/new/internal/web/handler/health/handler.go.tmpl", "internal/web/handler/health/handler.go"},
-		{"templates/new/internal/web/handler/errors/handler.go.tmpl", "internal/web/handler/errors/handler.go"},
 
 		// internal/middleware
 		{"templates/new/internal/middleware/logging.go.tmpl", "internal/middleware/logging.go"},
 
 		// internal/web/components
 		{"templates/new/internal/web/components/layout.templ.tmpl", "internal/web/components/layout.templ"},
+		{"templates/new/internal/web/components/error.templ.tmpl", "internal/web/components/error.templ"},
 		{"templates/new/internal/web/components/helpers.go.tmpl", "internal/web/components/helpers.go"},
 		{"templates/new/internal/web/components/form/fields.templ.tmpl", "internal/web/components/form/fields.templ"},
 		{"templates/new/internal/web/components/form/helpers.go.tmpl", "internal/web/components/form/helpers.go"},

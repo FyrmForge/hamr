@@ -1,8 +1,7 @@
-# Respond — Content-Negotiated HTTP Responses
+# Respond — HTTP Response Helpers
 
-`hamr/pkg/respond` provides content-negotiated HTTP response helpers. It detects htmx
-requests, negotiates between HTML and JSON responses, and renders templ components or
-JSON payloads via Echo.
+`hamr/pkg/respond` provides HTTP response helpers for HTMX-first applications. It renders
+templ components or JSON payloads via Echo.
 
 ## Quick Start
 
@@ -13,8 +12,8 @@ import "github.com/FyrmForge/hamr/pkg/respond"
 ## Design
 
 HAMR is HTMX-first. Use `respond.HTML` for templ components and `respond.JSON` for
-dedicated API endpoints. The `Error` and `ValidationError` helpers negotiate format
-automatically based on headers.
+dedicated API endpoints. Error handling is done via the `ErrorPages` middleware
+(see [Middleware](middleware.md)), not in the respond package.
 
 ## HTML Responses
 
@@ -32,42 +31,19 @@ func (h *Handler) Home(c echo.Context) error {
 func (h *Handler) GetUser(c echo.Context) error {
     user, err := h.repo.GetUser(ctx, id)
     if err != nil {
-        return respond.Error(c, http.StatusNotFound, "User not found")
+        return echo.NewHTTPError(http.StatusNotFound, "User not found")
     }
     return respond.JSON(c, http.StatusOK, user)
 }
 ```
 
-## Error Responses
+## Redirects
 
 ```go
-// Simple error — negotiates format automatically
-respond.Error(c, http.StatusForbidden, "Access denied")
-
-// With an HTML error component
-respond.Error(c, http.StatusNotFound, "Not found", templates.NotFoundPage())
+return respond.Redirect(c, "/dashboard")
 ```
 
-JSON output: `{"error": "Forbidden", "message": "Access denied", "code": 403}`
-
-HTML output: renders the provided templ component, or returns a plain text response if
-none is given.
-
-## Validation Errors
-
-```go
-errors := map[string]string{
-    "email": "Invalid email address",
-    "name":  "This field is required",
-}
-return respond.ValidationError(c, errors)
-```
-
-JSON output: `{"error": "Validation failed", "fields": {"email": "Invalid email address", "name": "This field is required"}}`
-
-HTML output: renders the provided templ component for OOB swap validation display.
-
-Always returns 422 (Unprocessable Entity).
+HTMX-aware: sets `HX-Redirect` header for HTMX requests, falls back to HTTP 303.
 
 ## Pagination
 
@@ -102,8 +78,7 @@ return respond.JSON(c, http.StatusOK, respond.PagedResponse[User]{
 // Responses
 func HTML(c echo.Context, status int, component templ.Component) error
 func JSON(c echo.Context, status int, data any) error
-func Error(c echo.Context, status int, msg string, component ...templ.Component) error
-func ValidationError(c echo.Context, fields map[string]string, component ...templ.Component) error
+func Redirect(c echo.Context, url string) error
 
 // Pagination
 type Page struct {

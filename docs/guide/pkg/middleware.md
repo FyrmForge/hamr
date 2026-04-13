@@ -28,6 +28,50 @@ Group      → auth.Load() (populates ctx from session, the only DB call)
 Per-route  → auth.RequireAuth(), auth.RequireNotAuth(), RequireRoles, RequireActive
 ```
 
+## Error Pages
+
+Per-group middleware that catches errors and renders error pages using templ components.
+
+### Setup
+
+```go
+site.Use(middleware.ErrorPages(components.ErrorPage))
+```
+
+With per-status-code overrides:
+
+```go
+site.Use(middleware.ErrorPages(components.ErrorPage,
+    middleware.Page(http.StatusNotFound, components.NotFound),
+))
+```
+
+### How It Works
+
+1. Calls the next handler
+2. If no error, passes through
+3. Extracts code/message from `*echo.HTTPError` (defaults to 500)
+4. Skips if `c.Response().Committed`
+5. Logs 5xx errors via `logging.FromContext`
+6. Looks up override for the code, falls back to default page
+7. Renders via `respond.HTML(c, code, page(code, message))`
+
+### ErrorPage Function
+
+Your project defines an `ErrorPage` function matching this signature:
+
+```go
+type ErrorPage func(code int, message string) templ.Component
+```
+
+### Middleware Ordering
+
+Place ErrorPages after Logging so Logging sees the correct response status:
+
+```
+Logging → ErrorPages → Secure → Flash → CSRF → Auth → Handler
+```
+
 ## Authentication
 
 ### Session-based auth
@@ -365,6 +409,12 @@ tr.T("home.title")
 ## API Reference
 
 ```go
+// Error Pages
+type ErrorPage func(code int, message string) templ.Component
+type PageOverride struct { Code int; Page ErrorPage }
+func Page(code int, page ErrorPage) PageOverride
+func ErrorPages(defaultPage ErrorPage, overrides ...PageOverride) echo.MiddlewareFunc
+
 // Locale
 type LocaleConfig struct { ... }
 func LocaleFromPath(cfg LocaleConfig) echo.MiddlewareFunc

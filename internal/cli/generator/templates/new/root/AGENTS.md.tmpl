@@ -5,7 +5,11 @@
 ```bash
 make install        # Install dev tools (templ)
 make docker-up      # Start PostgreSQL
+{{- if not .MigrateAtStartup}}
 make migrate        # Apply database migrations explicitly
+{{- else}}
+# Migrations run automatically when the server starts
+{{- end}}
 hamr dev            # Run dev server (file watching, builds, live reload)
 make build          # Build binary (generates templ first)
 make test           # Run tests
@@ -22,16 +26,23 @@ make e2e-local      # Run E2E tests locally
 
 ```
 cmd/site/              Application entry point (env config loaded here)
-internal/db/             Database connection + embedded migrations
+{{- if eq .DBConnector "gorm"}}
+internal/db/            Database connection + GORM models
+{{- else}}
+internal/db/            Database connection + embedded migrations
+{{- end}}
+{{- if not .MigrateAtStartup}}
+cmd/migrate/            Standalone migration runner
+{{- end}}
 internal/repo/           Data access layer (Store interface + PostgreSQL impl)
 internal/web/            HTTP layer
 internal/web/server.go   Route registration + middleware groups
-internal/web/handler/    One package per domain (home, health, errors{{- if .IncludeAuth}}, auth{{- end}})
+internal/web/handler/    One package per domain (home, health{{- if .IncludeAuth}}, auth{{- end}})
 internal/web/components/ Shared templ components (layout, form helpers)
 static/                  CSS, JS, images
 {{- if .IncludeLocale}}
 locales/                 Translation JSON files (one per language)
-internal/locale/         Generated type-safe i18n accessors
+internal/locale/         Generated type-safe i18n accessors after `hamr locale gen`
 {{- end}}
 ```
 
@@ -40,10 +51,14 @@ internal/locale/         Generated type-safe i18n accessors
 This project uses the HAMR framework (`github.com/FyrmForge/hamr`). Key packages:
 
 - `hamr/pkg/server` — Echo wrapper with functional options
-- `hamr/pkg/respond` — Content-negotiated responses (HTML/JSON)
+- `hamr/pkg/respond` — HTTP response helpers (HTML/JSON/Redirect)
 - `hamr/pkg/validate` — Validators + Form API (define rules once, validate full form & per-field)
 - `hamr/pkg/middleware` — Auth, CSRF, flash, rate limiting, etc.
+{{- if eq .DBConnector "sqlx"}}
 - `hamr/pkg/db` — Database connection with retry + migrations
+{{- else}}
+- `internal/db` — GORM connection helpers + `AutoMigrate`
+{{- end}}
 - `hamr/pkg/config` — Environment variable helpers
 - `hamr/pkg/logging` — Structured logging (slog)
 - `hamr/pkg/htmx` — HTMX request/response helpers
@@ -109,9 +124,8 @@ func (h *Handler) Create(c echo.Context) error {
 
 - `respond.HTML(c, status, component)` — Render a templ component
 - `respond.JSON(c, status, data)` — Return JSON
-- `respond.Error(c, status, msg)` — Error response (HTML or JSON)
-- `respond.ValidationError(c, fields)` — 422 with field errors
 - `respond.Redirect(c, url)` — HTMX-aware (sets HX-Redirect for HTMX, 303 otherwise)
+- `echo.NewHTTPError(code, msg)` — Return an error (caught by ErrorPages middleware)
 
 ### Status Codes
 
@@ -417,7 +431,7 @@ Custom components via `@apply` in `css/input.css`:
 - Control flow on one line (`if cond { <div>...</div> }`) is silently dropped by templ — always use multiline
 - Accessibility: `<img>` must have `alt=`, `<a>` must have `href=`
 - Style: avoid inline `style=` attributes, empty `class=""`, and `href="javascript:..."`
-- Configure rules via `.templint.yml` in the project root
+- Configure rules via `[lint.templ]` in `hamr.toml`
 
 ## Testing
 
@@ -430,8 +444,23 @@ Custom components via `@apply` in `css/input.css`:
 
 ## Database
 
+{{- if eq .DBConnector "sqlx"}}
 - Migrations in `internal/db/migrations/` (sequential numbering)
 - Use `sqlx` for queries in repo implementations
+{{- if .MigrateAtStartup}}
+- Migrations run during server startup via `db.Migrate(...)`
+{{- else}}
+- Use `cmd/migrate` / `make migrate` to apply pending migrations
+{{- end}}
+{{- else}}
+- Models live in `internal/db/models.go`
+- Repo implementations use `gorm.DB`
+{{- if .MigrateAtStartup}}
+- Schema changes run during server startup via `appdb.AutoMigrate(...)`
+{{- else}}
+- Use `cmd/migrate` / `make migrate` to run `appdb.AutoMigrate(...)`
+{{- end}}
+{{- end}}
 - Store interface in `internal/repo/repo.go`
 {{- if .IncludeAuth}}
 
@@ -451,20 +480,20 @@ Middleware is configured in `internal/web/server.go`:
 
 ```go
 // Login handler
-func (h *Handler) Login(c echo.Context) error {
-    email := c.FormValue("email")
-    password := c.FormValue("password")
+func (h *handler) Login(c echo.Context) error {
+    var f LoginForm
+    if err := c.Bind(&f); err != nil {
+        return echo.NewHTTPError(http.StatusBadRequest, "invalid form data")
+    }
 
-    user, err := h.store.GetUserByEmail(c.Request().Context(), email)
-    if err != nil { /* handle */ }
+    user, err := h.authService.Authenticate(c.Request().Context(), f.Email, f.Password)
+    if err != nil { /* return form error */ }
 
-    ok, err := auth.CheckPassword(password, user.PasswordHash)
-    if !ok { /* return error */ }
+    session, err := h.sessionManager.CreateSession(c.Request().Context(), user.ID, nil)
+    if err != nil { /* return 500 */ }
 
-    session, err := h.sessions.CreateSession(c.Request().Context(), user.ID, nil)
-    // Set session cookie...
-
-    return respond.Redirect(c, "/dashboard")
+    h.setSessionCookie(c, session)
+    return respond.Redirect(c, "/")
 }
 ```
 
@@ -538,7 +567,7 @@ fall back to the default locale at runtime).
 
 ```bash
 hamr locale gen
-# or
+# after internal/locale/locale.go exists:
 go generate ./internal/locale/...
 ```
 
@@ -581,8 +610,8 @@ Pluggable file storage with `hamr/pkg/storage`:
 - `S3_ENDPOINT` — S3 endpoint URL
 - `S3_BUCKET` — bucket name
 - `S3_REGION` — AWS region
-- `S3_ACCESS_KEY_ID` — access key
-- `S3_SECRET_ACCESS_KEY` — secret key
+- `S3_ACCESS_KEY` — access key
+- `S3_SECRET_KEY` — secret key
 {{- end}}
 {{- end}}
 {{- if .IncludeWS}}
@@ -594,13 +623,12 @@ WebSocket support via `hamr/pkg/websocket`:
 ### Hub Setup
 
 ```go
-hub := websocket.NewHub(
-    websocket.WithSubjectIDFunc(func(r *http.Request) string {
-        return middleware.GetSubjectID(echoCtx)
-    }),
-)
+hub := websocket.NewHub()
 defer hub.Close()
 ```
+
+If subject-based routing is needed, pass `websocket.WithSubjectIDFunc(...)` and
+derive the subject ID from request data available during the WebSocket upgrade.
 
 ### Sending Messages
 

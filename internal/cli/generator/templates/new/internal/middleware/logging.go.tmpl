@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
@@ -51,7 +52,7 @@ func Logging() echo.MiddlewareFunc {
 				}
 
 				msg := "[HTTP:" + method + ":" + slog.IntValue(status).String() + "]"
-				if status >= 500 {
+				if status >= http.StatusInternalServerError {
 					logger.Error(msg, attrs...)
 				} else {
 					logger.Info(msg, attrs...)

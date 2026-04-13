@@ -22,7 +22,7 @@ HAMR is **two things**:
 - **HTTP framework**: Echo, wrapped directly (opinionated, not swappable)
 - **Package layout**: Under `pkg/` (e.g. `hamr/pkg/validate`)
 - **Auth scaffold**: CLI option - user chooses between pre-built users/sessions tables or empty migration
-- **Content negotiation**: Same handler serves both HTMX (HTML) and JSON API
+- **Per-group error pages**: Middleware catches errors and renders templ components
 - **Extensibility**: Interfaces + functional options + lifecycle hooks
 - **WebSocket identity**: Session-based by default (works without auth), optional user-based targeting when auth is present
 - **Identity is configurable**: All packages that reference "user ID" accept it as a `string` and let the project configure how it's extracted. Projects using `int64`, `uuid.UUID`, or a field called `account_id` instead of `user_id` just provide their own extraction/conversion functions
@@ -828,7 +828,7 @@ docs/
 │   ├── validation.md              # pkg/validate — validators, custom rules, messages
 │   ├── authentication.md          # pkg/auth — hashing, sessions, SessionStore impl
 │   ├── database.md                # pkg/db — connect, migrate, embed.FS migrations
-│   ├── handlers.md                # pkg/respond + pkg/htmx — content negotiation, HTMX helpers
+│   ├── handlers.md                # pkg/respond + pkg/htmx — response helpers, HTMX helpers
 │   ├── middleware.md              # pkg/middleware — auth, RBAC, CSRF, rate limit, etc.
 │   ├── server.md                  # pkg/server — options, defaults, lifecycle hooks
 │   ├── storage.md                 # pkg/storage — local, S3, signed URLs

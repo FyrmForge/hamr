@@ -5,7 +5,11 @@
 ```bash
 make install        # Install dev tools (templ)
 make docker-up      # Start PostgreSQL
+{{- if not .MigrateAtStartup}}
 make migrate        # Apply database migrations explicitly
+{{- else}}
+# Migrations run automatically when the server starts
+{{- end}}
 hamr dev            # Run dev server (file watching, builds, live reload)
 make build          # Build binary (generates templ first)
 make test           # Run tests
