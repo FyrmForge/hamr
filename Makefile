@@ -2,7 +2,7 @@ VERSION ?= dev
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 LDFLAGS  = -X github.com/FyrmForge/hamr/internal/cli/cmd.version=$(VERSION) -X github.com/FyrmForge/hamr/internal/cli/cmd.commit=$(COMMIT)
 
-.PHONY: build lint test test-integration-db vet
+.PHONY: build lint test test-integration-db test-integration-scaffold vet
 
 build:
 	go build -ldflags '$(LDFLAGS)' -o bin/hamr ./cmd/hamr
@@ -15,6 +15,9 @@ test:
 
 test-integration-db:
 	go test -mod=mod -tags=integration -count=1 ./pkg/db -run TestConnectContext_ReconnectsAfterBackendTermination
+
+test-integration-scaffold:
+	go test -mod=mod -tags=integration -count=1 -timeout=20m -v ./test/integration/...
 
 vet:
 	go vet ./...
