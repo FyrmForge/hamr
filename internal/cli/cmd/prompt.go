@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -75,7 +76,7 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 							return fmt.Errorf("required")
 						}
 						if !generator.IsValidProjectName(s) {
-							return fmt.Errorf(generator.ProjectNameFormatMessage)
+							return errors.New(generator.ProjectNameFormatMessage)
 						}
 						return nil
 					}),

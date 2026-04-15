@@ -1,6 +1,7 @@
 package generator
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -21,7 +22,7 @@ func ValidateProjectName(name string) error {
 		return fmt.Errorf("project name is required")
 	}
 	if !IsValidProjectName(name) {
-		return fmt.Errorf(ProjectNameFormatMessage)
+		return errors.New(ProjectNameFormatMessage)
 	}
 	return nil
 }
