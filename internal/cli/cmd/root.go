@@ -62,6 +62,7 @@ func init() {
 	rootCmd.AddCommand(aiCmd)
 	rootCmd.AddCommand(localeCmd)
 	rootCmd.AddCommand(completionCmd)
+	rootCmd.AddCommand(genCmd)
 }
 
 // Execute runs the root command.

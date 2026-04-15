@@ -31,6 +31,10 @@
 - **hamr ai upgrade**: Git-based scaffold upgrade report. Clones the HAMR repo and diffs between version tags to produce a unified diff and stat summary of all changes between the project's baseline and current HAMR.
 - **.hamr/ai/**: Playground directory for all AI command artifacts (captures, upgrade reports). Gitignored. Configurable via `[ai] dir` in hamr.toml.
 - **hamr locale gen**: Code generator for type-safe i18n accessors.
+- **hamr gen static**: Content-based static asset fingerprinting. Reads from
+  static/, writes fingerprinted copies to dist/, and generates a Go source file
+  with the manifest baked in at compile time. Config in [static] section of
+  hamr.toml. `--clean` removes dist/ and resets the manifest.
 - **hamr completion install**: Installs shell completion scripts for bash, zsh, or fish. Auto-detects shell from $SHELL. Supports --system for system-wide install (requires root) and --shell to override detection.
 - **respond.Redirect**: HTMX-aware redirect that sets HX-Redirect for HTMX
   requests and falls back to HTTP 303.
@@ -113,6 +117,7 @@ func WithPort(port int) Option                           // listen port (1-65535
 func WithDevMode(dev bool) Option                        // skip security headers in dev
 func WithMiddleware(mw ...echo.MiddlewareFunc) Option    // append global middleware
 func WithStaticDir(path string) Option                   // serve static/ at /static
+func WithStaticDistDir(path string) Option               // dist/ takes priority over static/
 func WithEmbeddedStatic(fsys fs.FS, prefix string) Option // serve from embed.FS
 func WithErrorHandler(h echo.HTTPErrorHandler) Option    // custom error handler
 func WithTimeout(d time.Duration) Option                 // request context timeout
@@ -747,7 +752,9 @@ func CacheControl(disableCaching bool) echo.MiddlewareFunc
 func CacheControlWithConfig(cfg CacheConfig) echo.MiddlewareFunc
 ```
 `CacheControl` delegates to `CacheControlWithConfig`. Sets Cache-Control headers
-based on asset type. When DisableCaching is true, every response gets no-cache directives.
+based on asset type. Fingerprinted assets (URLs matching `*.HASH.*` pattern) are
+automatically served with immutable headers regardless of extension. When
+DisableCaching is true, every response gets no-cache directives.
 
 #### Security Headers
 
@@ -1783,6 +1790,43 @@ func (e *Emitter) ToRoom(room string, event *Event)
 func (e *Emitter) ToRoomExcept(room string, event *Event, exceptSessionID string)
 func (e *Emitter) Broadcast(event *Event)
 ```
+
+---
+
+### fingerprint
+
+> Package fingerprint provides content-based static asset fingerprinting.
+> Hashes file contents (SHA-256, 12 hex chars), writes fingerprinted copies
+> to a separate dist directory, and generates a Go source file with the
+> manifest baked in at compile time.
+
+```go
+func Fingerprint(srcDir, distDir string) (*Manifest, error)
+```
+Walks srcDir, hashes each file, writes fingerprinted copies to distDir (mirroring
+directory structure). Wipes distDir first. Validates distDir is safe to wipe
+(not `.`, not srcDir, must contain sentinel or be empty). Skips `.gitkeep`.
+
+```go
+func Clean(distDir string) error
+```
+Removes the dist directory entirely. Same safety validation as `Fingerprint`.
+
+```go
+func IsFingerprinted(path string) bool
+```
+Reports whether the URL path contains a fingerprint hash (`*.HASH.*` pattern).
+
+```go
+type Manifest struct {
+    Files map[string]string
+}
+func (m *Manifest) WriteGoManifest(path, pkg string) error
+```
+`WriteGoManifest` generates a Go source file with the manifest baked in as a
+compiled `map[string]string` literal. No runtime loading needed.
+
+CLI: `hamr gen static [--clean]`, config via `[static]` in hamr.toml
 
 ---
 

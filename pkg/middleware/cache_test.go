@@ -90,6 +90,31 @@ func TestCacheControl_disableCaching(t *testing.T) {
 	}
 }
 
+func TestCacheControl_fingerprintedAssets(t *testing.T) {
+	paths := []string{
+		"/static/css/output.a1b2c3d4e5f6.css",
+		"/static/js/main.789012345678.js",
+		"/static/img/logo.abcdef123456.png",
+	}
+
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+
+			handler := middleware.CacheControl(false)(func(c echo.Context) error {
+				return c.String(http.StatusOK, "ok")
+			})
+
+			err := handler(c)
+			require.NoError(t, err)
+			assert.Equal(t, "public, max-age=31536000, immutable", rec.Header().Get("Cache-Control"))
+		})
+	}
+}
+
 func TestCacheControlWithConfig_customExtensions(t *testing.T) {
 	cfg := middleware.CacheConfig{
 		ImmutableExtensions: []string{".avif"},

@@ -17,10 +17,6 @@ var BaseURL string
 // Set from main before any templates render.
 var StaticBaseURL = "/static"
 
-// StaticVersion is appended as a query string to static asset URLs for
-// cache busting. Set from main via ldflags (e.g. git commit hash).
-var StaticVersion = "dev"
-
 // FlashAlertClass returns the CSS alert class for a flash type (plain CSS).
 func FlashAlertClass(t middleware.FlashType) string {
 	switch t {
@@ -49,10 +45,15 @@ func FlashTailwindClass(t middleware.FlashType) string {
 	}
 }
 
-// StaticURL returns the full URL for a static asset path with a cache-busting
-// version query string.
+// StaticURL returns the full URL for a static asset, using the fingerprinted
+// path from the manifest when available (production), or the plain path (dev).
 func StaticURL(path string) string {
-	return StaticBaseURL + "/" + path + "?v=" + StaticVersion
+	if StaticManifest != nil {
+		if fp, ok := StaticManifest[path]; ok {
+			return StaticBaseURL + "/" + fp
+		}
+	}
+	return StaticBaseURL + "/" + path
 }
 
 // AbsoluteURL returns an absolute URL for the given path by prepending BaseURL.

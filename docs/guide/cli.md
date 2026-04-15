@@ -9,6 +9,8 @@ hamr
 ├── ai
 │   ├── capture <url>       Capture a browser screenshot of a page
 │   └── upgrade             Show scaffold changes between versions via git diff
+├── gen
+│   └── static              Fingerprint static assets into dist/
 ├── sync                    Sync local directory to S3-compatible bucket
 ├── vendor [dep[@version]]  Download/checksum frontend JS deps
 ├── lint
@@ -158,6 +160,40 @@ hamr ai upgrade --applied          # bump [hamr] version in hamr.toml
 The command clones the HAMR repository (bare, partial clone for speed) and runs `git diff` between the two version tags. The output includes a unified diff and stat summary covering all changes — scaffold templates, packages, and configuration.
 
 Reports are saved to `.hamr/ai/upgrades/` as JSON files. An LLM agent can consume the structured output to present changes conversationally and guide the developer through what to adopt.
+
+---
+
+## hamr gen static
+
+Fingerprint static assets by content-hashing filenames.
+
+```bash
+hamr gen static [flags]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | `hamr.toml` | Path to hamr.toml config file |
+| `--clean` | `false` | Remove dist/ and reset the generated manifest |
+
+```bash
+hamr gen static          # fingerprint static/ → dist/
+hamr gen static --clean  # remove dist/ and reset manifest
+```
+
+Reads source files from `static/`, creates fingerprinted copies (e.g. `output.a1b2c3d4e5f6.css`) in `dist/`, and generates a Go source file with the manifest baked in at compile time. The `make build` target runs this automatically before `go build`.
+
+**Configuration** via `hamr.toml`:
+
+```toml
+[static]
+dir = "static"
+dist = "dist"
+manifest = "internal/web/components/staticmanifest.go"
+package = "components"
+```
+
+**Guide:** [Static Assets](09-static-assets.md) covers fingerprinting, cache headers, and deployment.
 
 ---
 

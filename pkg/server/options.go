@@ -58,6 +58,13 @@ func WithStaticDir(path string) Option {
 	return func(s *Server) { s.staticDir = path }
 }
 
+// WithStaticDistDir sets a dist directory that takes priority over the static
+// directory when serving files at /static. Files are looked up in distDir first;
+// if not found, the request falls back to the regular static directory.
+func WithStaticDistDir(path string) Option {
+	return func(s *Server) { s.staticDistDir = path }
+}
+
 // WithEmbeddedStatic serves static files from an embed.FS at the given path prefix.
 // The pathPrefix must not be empty.
 func WithEmbeddedStatic(fsys fs.FS, pathPrefix string) Option {

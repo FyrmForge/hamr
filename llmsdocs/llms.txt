@@ -35,6 +35,10 @@
 - **hamr ai upgrade**: Git-based scaffold upgrade report. Clones the HAMR repo and diffs between version tags to produce a unified diff and stat summary of all changes between the project's baseline and current HAMR.
 - **.hamr/ai/**: Playground directory for all AI command artifacts (captures, upgrade reports). Gitignored. Configurable via `[ai] dir` in hamr.toml.
 - **hamr locale gen**: Code generator for type-safe i18n accessors.
+- **hamr gen static**: Content-based static asset fingerprinting. Reads from
+  static/, writes fingerprinted copies to dist/, and generates a Go source file
+  with the manifest baked in at compile time. Config in [static] section of
+  hamr.toml. `--clean` removes dist/ and resets the manifest.
 - **hamr completion install**: Installs shell completion scripts for bash, zsh, or fish. Auto-detects shell from $SHELL. Supports --system for system-wide install (requires root) and --shell to override detection.
 - **respond.Redirect**: HTMX-aware redirect that sets HX-Redirect for HTMX
   requests and falls back to HTTP 303.
@@ -54,7 +58,7 @@ Typed accessors for environment variables.
 Echo wrapper with functional options, graceful shutdown.
 - `New(opts ...Option) (*Server, error)` — constructor
 - Options: `WithHost`, `WithPort`, `WithDevMode`, `WithMiddleware`, `WithStaticDir`,
-  `WithEmbeddedStatic`, `WithErrorHandler`, `WithTimeout`, `WithMaxBodySize`,
+  `WithStaticDistDir`, `WithEmbeddedStatic`, `WithErrorHandler`, `WithTimeout`, `WithMaxBodySize`,
   `WithShutdownTimeout`, `WithGeneratedDir`
 - Methods: `Echo()`, `Addr()`, `Start()`, `Shutdown(ctx)`, `GET/POST/PUT/DELETE/PATCH`,
   `Group(prefix, mw...)`, `StaticPage(path, handler)`, `GenerateStatic(dir)`
@@ -126,7 +130,7 @@ HTTP middleware for auth, CSRF, CORS, flash, security, RBAC, audit, rate limitin
 - CSRF: `CSRF()`, `CSRFWithConfig(cfg)`
 - CORS: `CORS()`, `CORSWithConfig(cfg)`
 - Flash: `Flash()`, `FlashWithConfig(cfg)`, `SetFlash(c, message, flashType)`, `GetFlash(c)`
-- Security: `Secure()`, `SecureWithConfig(cfg)` (expanded `SecureConfig` with all header fields), `CacheControl(disableCaching)`, `CacheControlWithConfig(cfg)`
+- Security: `Secure()`, `SecureWithConfig(cfg)` (expanded `SecureConfig` with all header fields), `CacheControl(disableCaching)`, `CacheControlWithConfig(cfg)` (fingerprint-aware: `*.HASH.*` URLs get immutable headers)
 - RBAC: `RequireRoles(checker, roles...)`, `RequireActive(checker)`
 - Audit: `Audit(logger)`, `AuditWithConfig(cfg)`
 - Rate Limit: `RateLimit(store)`, `RateLimitWithConfig(cfg)`,
@@ -227,6 +231,14 @@ WebSocket hub with session, subject, and room routing.
 - Rooms: `JoinRoom`, `LeaveRoom`
 - Events: `NewEvent`, `NewHTMLEvent`, `NewOuterHTMLEvent`, `NewTriggerEvent`
 - `NewEmitter(hub)` — typed event wrapper over Hub
+
+### fingerprint
+Content-based static asset fingerprinting (SHA-256, 12 hex chars).
+- `Fingerprint(srcDir, distDir) (*Manifest, error)` — hash files from src, write fingerprinted copies to dist
+- `Clean(distDir) error` — remove the dist directory
+- `Manifest.WriteGoManifest(path, pkg) error` — generate Go source with compiled manifest map
+- `IsFingerprinted(path) bool` — check if URL path contains a fingerprint hash
+- CLI: `hamr gen static [--clean]`, config via `[static]` in hamr.toml
 
 ### sync
 File-watching and S3-syncing for static assets.

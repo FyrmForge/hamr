@@ -146,6 +146,58 @@ cmd = "hamr sync --watch --bucket myapp-static"
 
 ---
 
+## Asset Fingerprinting
+
+HAMR uses content-based file hashing for cache busting. Source files live in `static/`, fingerprinted copies go to `dist/` — a separate output directory that is committed to the repo.
+
+### CLI
+
+```bash
+hamr gen static          # fingerprint static/ → dist/
+hamr gen static --clean  # remove dist/
+```
+
+Configuration in `hamr.toml`:
+
+```toml
+[static]
+dir = "static"    # source directory
+dist = "dist"     # output directory
+```
+
+### How It Works
+
+1. `hamr gen static` walks the `static/` directory
+2. For each file, it computes a SHA-256 hash of the contents (12-char hex prefix)
+3. Writes fingerprinted copies to `dist/` mirroring the directory structure (e.g. `dist/css/output.a1b2c3d4e5f6.css`)
+4. Generates a Go source file (`internal/web/components/staticmanifest.go`) with the manifest baked in as a compiled map — no runtime loading needed
+5. `StaticURL("css/output.css")` returns `/static/css/output.a1b2c3d4e5f6.css` at compile time
+6. The server serves from `dist/` first, falling back to `static/` for non-fingerprinted files
+7. In dev mode (no fingerprinting), `StaticManifest` is nil — `StaticURL` returns the plain path
+
+### Build Pipeline
+
+The `make build` target runs fingerprinting before `go build` so the manifest is baked in:
+
+```
+templ generate → [locale gen] → [css:build] → hamr gen static → go build → make generate
+```
+
+### CI Verification
+
+`dist/` is committed. CI should verify it's up to date:
+
+```bash
+hamr gen static
+git diff --exit-code dist/
+```
+
+### Cache Headers
+
+Fingerprinted assets (any URL matching `*.HASH.*`) are served with `public, max-age=31536000, immutable` headers — the filename itself is the cache buster, so they can be cached indefinitely. Non-fingerprinted assets fall back to extension-based cache policies.
+
+---
+
 ## CDN Patterns
 
 ### StaticBaseURL
@@ -161,10 +213,12 @@ STATIC_BASE_URL=https://cdn.example.com/static
 ### Deployment Flow
 
 1. Build static assets (Tailwind, etc.)
-2. Generate static pages: `./bin/site --generate`
-3. Sync to S3: `hamr sync --dir static --bucket myapp-static`
-4. Sync generated pages: `hamr sync --dir generated --bucket myapp-static`
-5. Set `STATIC_BASE_URL` to your CDN URL
+2. Fingerprint assets: `hamr gen static` (generates compiled manifest)
+3. Build the binary: `go build -ldflags ... -o bin/site ./cmd/site` (manifest baked in)
+4. Generate static pages: `./bin/site --generate` (emits fingerprinted URLs)
+5. Sync to S3: `hamr sync --dir dist --bucket myapp-static`
+6. Sync generated pages: `hamr sync --dir generated --bucket myapp-static`
+7. Set `STATIC_BASE_URL` to your CDN URL
 
 ---
 

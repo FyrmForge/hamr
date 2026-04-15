@@ -199,6 +199,7 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 		{"templates/new/internal/web/components/layout.templ.tmpl", "internal/web/components/layout.templ"},
 		{"templates/new/internal/web/components/error.templ.tmpl", "internal/web/components/error.templ"},
 		{"templates/new/internal/web/components/helpers.go.tmpl", "internal/web/components/helpers.go"},
+		{"templates/new/internal/web/components/staticmanifest.go.tmpl", "internal/web/components/staticmanifest.go"},
 		{"templates/new/internal/web/components/form/fields.templ.tmpl", "internal/web/components/form/fields.templ"},
 		{"templates/new/internal/web/components/form/helpers.go.tmpl", "internal/web/components/form/helpers.go"},
 

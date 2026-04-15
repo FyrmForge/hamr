@@ -80,7 +80,6 @@ func main() {
 	slog.SetDefault(log)
 
 	components.StaticBaseURL = envStaticBaseURL
-	components.StaticVersion = version
 
 	// Base URL (cookie domain & CORS).
 	baseOrigin, {{- if .IncludeSessions}} baseDomain{{- else}} _{{- end}}, err := config.ParseBaseURL(envBaseURL)
@@ -95,6 +94,7 @@ func main() {
 		server.WithPort(envPort),
 		server.WithDevMode(envDevMode),
 		server.WithStaticDir("static"),
+		server.WithStaticDistDir("dist"),
 		server.WithGeneratedDir("generated"),
 	)
 	if err != nil {

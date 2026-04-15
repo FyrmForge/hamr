@@ -14,6 +14,12 @@ locale = {{.IncludeLocale}}
 storage = "{{.StorageBackend}}"
 pgadmin = {{.IncludePgAdmin}}
 
+[static]
+dir = "static"
+dist = "dist"
+manifest = "internal/web/components/staticmanifest.go"
+package = "components"
+
 [ai]
 # dir = ".hamr/ai"
 

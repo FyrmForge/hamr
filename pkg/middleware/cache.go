@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/FyrmForge/hamr/pkg/fingerprint"
 	"github.com/labstack/echo/v4"
 )
 
@@ -72,6 +73,8 @@ func CacheControlWithConfig(cfg CacheConfig) echo.MiddlewareFunc {
 
 			path := c.Request().URL.Path
 			switch {
+			case strings.HasPrefix(path, "/static/") && fingerprint.IsFingerprinted(path):
+				c.Response().Header().Set("Cache-Control", immutableHeader)
 			case hasSuffix(path, cfg.ImmutableExtensions):
 				c.Response().Header().Set("Cache-Control", immutableHeader)
 			case hasSuffix(path, cfg.StaticExtensions):

@@ -39,6 +39,7 @@ if err := srv.Start(); err != nil {
 | `WithDevMode(bool)` | `false` | Skips security headers in dev mode |
 | `WithMiddleware(mw...)` | — | Append global middleware |
 | `WithStaticDir(path)` | — | Serve static files from filesystem at `/static` |
+| `WithStaticDistDir(path)` | — | Dist directory takes priority over static dir (layered serving) |
 | `WithEmbeddedStatic(fs, prefix)` | — | Serve static files from `embed.FS` |
 | `WithErrorHandler(h)` | — | Custom Echo error handler |
 | `WithTimeout(d)` | 30s | Request context timeout |
@@ -149,6 +150,7 @@ func WithPort(port int) Option
 func WithDevMode(dev bool) Option
 func WithMiddleware(mw ...echo.MiddlewareFunc) Option
 func WithStaticDir(path string) Option
+func WithStaticDistDir(path string) Option
 func WithEmbeddedStatic(fsys fs.FS, pathPrefix string) Option
 func WithErrorHandler(h echo.HTTPErrorHandler) Option
 func WithTimeout(d time.Duration) Option

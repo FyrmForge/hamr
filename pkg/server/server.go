@@ -35,6 +35,7 @@ type Server struct {
 	userMiddleware []echo.MiddlewareFunc
 	errorHandler   echo.HTTPErrorHandler
 	staticDir      string
+	staticDistDir  string
 	embeddedFS     fs.FS
 	embeddedPrefix string
 	generatedDir   string
@@ -73,6 +74,9 @@ func New(opts ...Option) (*Server, error) {
 	if s.embeddedFS != nil && s.embeddedPrefix == "" {
 		return nil, fmt.Errorf("server: embedded static path prefix must not be empty")
 	}
+	if s.staticDistDir != "" && s.staticDir == "" {
+		return nil, fmt.Errorf("server: WithStaticDistDir requires WithStaticDir")
+	}
 
 	e := echo.New()
 	e.HideBanner = true
@@ -108,7 +112,14 @@ func New(opts ...Option) (*Server, error) {
 
 	// Static file serving.
 	if s.staticDir != "" {
-		e.Static("/static", s.staticDir)
+		if s.staticDistDir != "" {
+			e.StaticFS("/static", newLayeredFS(
+				os.DirFS(s.staticDistDir),
+				os.DirFS(s.staticDir),
+			))
+		} else {
+			e.Static("/static", s.staticDir)
+		}
 	}
 	if s.embeddedFS != nil {
 		e.StaticFS(s.embeddedPrefix, s.embeddedFS)

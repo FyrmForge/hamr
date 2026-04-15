@@ -71,7 +71,7 @@ one for `/robots.txt`. Both registered outside session/CSRF middleware in the sc
 
 `SiteName`, `DefaultDescription`, `DefaultOGImage` live as package-level vars in the
 generated `components/helpers.go` — consistent with existing `BaseURL`, `StaticBaseURL`,
-`StaticVersion`. Thin wrapper functions (`SEODescription(c)`, `SEOCanonical(c)`, etc.) bind
+`StaticManifest`. Thin wrapper functions (`SEODescription(c)`, `SEOCanonical(c)`, etc.) bind
 these defaults to the `seo` package accessors so the layout template stays clean.
 
 ### JSON-LD: WebSite schema by default
