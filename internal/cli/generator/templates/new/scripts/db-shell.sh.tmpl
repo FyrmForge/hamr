@@ -16,6 +16,6 @@ if [[ -f "$PROJECT_ROOT/.env" ]]; then
 	set +a
 fi
 
-DB_URL="${DATABASE_URL:-postgres://postgres:postgres@localhost:5432/{{.Name | lower}}?sslmode=disable}"
+DB_URL="${DATABASE_URL:-postgres://postgres:postgres@localhost:5432/{{.Name | slug}}?sslmode=disable}"
 
 exec pgcli "$DB_URL"

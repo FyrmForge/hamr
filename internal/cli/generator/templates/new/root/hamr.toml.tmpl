@@ -54,7 +54,7 @@ cmd = "npm run css"
 
 [[dev.daemon]]
 name = "sync-static"
-cmd = "hamr sync --watch --bucket {{.Name | lower}}-static"
+cmd = "hamr sync --watch --bucket {{.Name | slug}}-static"
 {{- end}}
 {{- if .IncludeLocale}}
 
@@ -77,7 +77,7 @@ reload = "full"
 # Sync generated static pages to S3 (uncomment to enable)
 # [[dev.daemon]]
 # name = "sync-generated"
-# cmd = "hamr sync --dir generated --watch --bucket {{.Name | lower}}-static"
+# cmd = "hamr sync --dir generated --watch --bucket {{.Name | slug}}-static"
 
 # Multi service example
 # [[dev.watch]]
@@ -111,4 +111,3 @@ dir = "locales"
 output = "internal/locale/locale.go"
 package = "locale"
 {{- end}}
-

@@ -6,7 +6,7 @@
       "Host": "postgres",
       "Port": 5432,
       "Username": "postgres",
-      "MaintenanceDB": "{{.Name | lower}}",
+      "MaintenanceDB": "{{.Name | slug}}",
       "SSLMode": "prefer",
       "PassFile": "/tmp/pgpass"
     }

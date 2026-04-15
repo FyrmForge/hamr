@@ -55,14 +55,14 @@ var (
 	envPort          = config.GetEnvOrDefaultInt("PORT", 8080)
 	envDevMode       = config.GetEnvOrDefaultBool("DEV_MODE", true)
 	envBaseURL       = config.GetEnvOrDefault("BASE_URL", "")
-	envDatabaseURL   = config.GetEnvOrDefault("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/{{.Name | lower}}?sslmode=disable")
+	envDatabaseURL   = config.GetEnvOrDefault("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/{{.Name | slug}}?sslmode=disable")
 	envStaticBaseURL = config.GetEnvOrDefault("STATIC_BASE_URL", "/static")
 {{- if eq .StorageBackend "local"}}
 	envStoragePath   = config.GetEnvOrDefault("STORAGE_PATH", "./uploads")
 {{- end}}
 {{- if eq .StorageBackend "s3"}}
 	envS3Endpoint    = config.GetEnvOrDefault("S3_ENDPOINT", "http://localhost:9000")
-	envS3Bucket      = config.GetEnvOrDefault("S3_BUCKET", "{{.Name | lower}}-uploads")
+	envS3Bucket      = config.GetEnvOrDefault("S3_BUCKET", "{{.Name | slug}}-uploads")
 	envS3Region      = config.GetEnvOrDefault("S3_REGION", "us-east-1")
 	envS3AccessKey   = config.GetEnvOrDefault("S3_ACCESS_KEY", "rustfsadmin")
 	envS3SecretKey   = config.GetEnvOrDefault("S3_SECRET_KEY", "rustfsadmin")

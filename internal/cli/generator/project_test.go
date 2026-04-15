@@ -22,6 +22,11 @@ func TestProjectConfig_Validate(t *testing.T) {
 			wantErr: "project name is required",
 		},
 		{
+			name:    "invalid name",
+			cfg:     ProjectConfig{Name: "proj name", Module: "github.com/test/proj"},
+			wantErr: ProjectNameFormatMessage,
+		},
+		{
 			name:    "empty module",
 			cfg:     ProjectConfig{Name: "proj"},
 			wantErr: "module path is required",
@@ -34,6 +39,10 @@ func TestProjectConfig_Validate(t *testing.T) {
 		{
 			name: "valid minimal",
 			cfg:  ProjectConfig{Name: "proj", Module: "github.com/test/proj"},
+		},
+		{
+			name: "valid dotted name",
+			cfg:  ProjectConfig{Name: "topleveluk.com", Module: "github.com/test/topleveluk.com"},
 		},
 		{
 			name: "valid with defaults filled",
@@ -79,6 +88,11 @@ func TestProjectConfig_Validate_defaultValues(t *testing.T) {
 	assert.Equal(t, "plain", cfg.CSS)
 	assert.Equal(t, "postgres", cfg.Database)
 	assert.NotEmpty(t, cfg.GoVersion, "GoVersion should be detected from local Go installation")
+}
+
+func TestProjectSlug(t *testing.T) {
+	assert.Equal(t, "topleveluk-com", ProjectSlug("TopLevelUK.com"))
+	assert.Equal(t, "my-app-v2", ProjectSlug("my_app.v2"))
 }
 
 func TestBuildProjectFileList_coreFiles(t *testing.T) {
@@ -804,6 +818,50 @@ func TestGenerateProject_s3WithoutStaticS3(t *testing.T) {
 	// .env.example should NOT have S3_STATIC_BUCKET.
 	envFile := readFile(t, dir, ".env.example")
 	assert.NotContains(t, envFile, "S3_STATIC_BUCKET")
+}
+
+func TestGenerateProject_dottedProjectName(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "topleveluk.com")
+
+	cfg := &ProjectConfig{
+		Name:           "topleveluk.com",
+		Module:         "github.com/test/topleveluk.com",
+		CSS:            "plain",
+		Database:       "postgres",
+		GoVersion:      "1.25.0",
+		IncludeStorage: true,
+		StorageBackend: "s3",
+		StaticS3:       true,
+		IncludePgAdmin: true,
+	}
+
+	require.NoError(t, GenerateProject(dir, cfg))
+
+	compose := readFile(t, dir, "docker/docker-compose.yaml")
+	assert.Contains(t, compose, "name: topleveluk-com-deps")
+	assert.Contains(t, compose, "POSTGRES_DB: topleveluk-com")
+	assert.NotContains(t, compose, "name: topleveluk.com-deps")
+
+	envFile := readFile(t, dir, ".env.example")
+	assert.Contains(t, envFile, "DATABASE_URL=postgres://postgres:postgres@localhost:5432/topleveluk-com?sslmode=disable")
+	assert.Contains(t, envFile, "S3_BUCKET=topleveluk-com-uploads")
+	assert.Contains(t, envFile, "S3_STATIC_BUCKET=topleveluk-com-static")
+
+	mainGo := readFile(t, dir, "cmd/site/main.go")
+	assert.Contains(t, mainGo, `config.GetEnvOrDefault("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/topleveluk-com?sslmode=disable")`)
+	assert.Contains(t, mainGo, `config.GetEnvOrDefault("S3_BUCKET", "topleveluk-com-uploads")`)
+
+	serversJSON := readFile(t, dir, "docker/pgadmin/servers.json")
+	assert.Contains(t, serversJSON, `"MaintenanceDB": "topleveluk-com"`)
+
+	hamrToml := readFile(t, dir, "hamr.toml")
+	assert.Contains(t, hamrToml, "hamr sync --watch --bucket topleveluk-com-static")
+
+	readme := readFile(t, dir, "README.md")
+	assert.Contains(t, readme, "# topleveluk.com")
+
+	gomod := readFile(t, dir, "go.mod")
+	assert.Contains(t, gomod, "module github.com/test/topleveluk.com")
 }
 
 func TestGenerateProject_pgAdmin(t *testing.T) {

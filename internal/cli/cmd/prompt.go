@@ -3,9 +3,9 @@ package cmd
 import (
 	"fmt"
 	"os/exec"
-	"regexp"
 	"strings"
 
+	"github.com/FyrmForge/hamr/internal/cli/generator"
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 )
@@ -74,8 +74,8 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 						if s == "" {
 							return fmt.Errorf("required")
 						}
-						if !regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`).MatchString(s) {
-							return fmt.Errorf("must start with a letter and contain only letters, digits, hyphens, or underscores")
+						if !generator.IsValidProjectName(s) {
+							return fmt.Errorf(generator.ProjectNameFormatMessage)
 						}
 						return nil
 					}),

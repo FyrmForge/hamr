@@ -38,8 +38,8 @@ type ProjectConfig struct {
 
 // Validate checks that the ProjectConfig has all required fields and valid values.
 func (cfg *ProjectConfig) Validate() error {
-	if cfg.Name == "" {
-		return fmt.Errorf("project name is required")
+	if err := ValidateProjectName(cfg.Name); err != nil {
+		return err
 	}
 	if cfg.Module == "" {
 		return fmt.Errorf("module path is required (use --module)")

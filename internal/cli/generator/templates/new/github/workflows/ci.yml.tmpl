@@ -27,11 +27,11 @@ jobs:
     #     env:
     #       POSTGRES_USER: postgres
     #       POSTGRES_PASSWORD: postgres
-    #       POSTGRES_DB: {{.Name | lower}}
+    #       POSTGRES_DB: {{.Name | slug}}
     #     ports:
     #       - 5432:5432
     #     options: >-
-    #       --health-cmd "pg_isready -U postgres -d {{.Name | lower}}"
+    #       --health-cmd "pg_isready -U postgres -d {{.Name | slug}}"
     #       --health-interval 10s
     #       --health-timeout 5s
     #       --health-retries 5
@@ -86,7 +86,7 @@ jobs:
 
       # - name: Run migrations
       #   env:
-      #     DATABASE_URL: postgres://postgres:postgres@localhost:5432/{{.Name | lower}}?sslmode=disable
+      #     DATABASE_URL: postgres://postgres:postgres@localhost:5432/{{.Name | slug}}?sslmode=disable
       #   run: make migrate
 
       - name: Run tests
