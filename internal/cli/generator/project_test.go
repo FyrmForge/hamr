@@ -119,7 +119,6 @@ func TestBuildProjectFileList_coreFiles(t *testing.T) {
 		"internal/repo/postgres/store.go",
 		"internal/web/server.go",
 		"internal/web/handler/home/handler.go",
-		"internal/web/handler/health/handler.go",
 		"internal/web/components/layout.templ",
 		".gitignore",
 		"Makefile",

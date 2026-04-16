@@ -27,7 +27,6 @@ import (
 	authhandler "{{.Module}}/internal/web/handler/auth"
 {{- end}}
 	"{{.Module}}/internal/web/handler/about"
-	"{{.Module}}/internal/web/handler/health"
 	"{{.Module}}/internal/web/handler/home"
 	"{{.Module}}/internal/web/components"
 )
@@ -58,10 +57,6 @@ type Deps struct {
 // RegisterRoutes registers all web route handlers on the server.
 func RegisterRoutes(srv *server.Server, deps *Deps) {
 	e := srv.Echo()
-
-	// Health check — no session middleware.
-	healthHandler := health.NewHandler(deps.Store)
-	e.GET("/health", healthHandler.Health)
 {{- if .IncludeWS}}
 
 	// WebSocket endpoint.

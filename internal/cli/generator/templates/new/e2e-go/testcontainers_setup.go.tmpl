@@ -156,7 +156,7 @@ func startServerContainer(ctx context.Context, dbURL string, network string) (te
 			"PORT":         "8080",
 			"DEV_MODE":     "false",
 		},
-		WaitingFor: wait.ForHTTP("/health").WithPort("8080/tcp").WithStartupTimeout(60 * time.Second),
+		WaitingFor: wait.ForHTTP("/api/health").WithPort("8080/tcp").WithStartupTimeout(60 * time.Second),
 	}
 
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{

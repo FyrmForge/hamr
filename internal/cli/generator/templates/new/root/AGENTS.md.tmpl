@@ -37,7 +37,7 @@ cmd/migrate/            Standalone migration runner
 internal/repo/           Data access layer (Store interface + PostgreSQL impl)
 internal/web/            HTTP layer
 internal/web/server.go   Route registration + middleware groups
-internal/web/handler/    One package per domain (home, health{{- if .IncludeAuth}}, auth{{- end}})
+internal/web/handler/    One package per domain (home{{- if .IncludeAuth}}, auth{{- end}})
 internal/web/components/ Shared templ components (layout, form helpers)
 static/                  CSS, JS, images
 {{- if .IncludeLocale}}
