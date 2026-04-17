@@ -67,7 +67,7 @@ debounce = 200
 
 [[dev.watch]]
 name = "site"
-watch = ["**/*.go", "**/*.templ"]
+watch = ["**/*.go", "**/*.templ", ".env"]
 ignore = ["*_templ.go", "*_test.go"]
 cmd = "go build -o ./bin/site ./cmd/site && ./bin/site --generate"
 run = "./bin/site"
