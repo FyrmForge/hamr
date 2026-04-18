@@ -24,7 +24,7 @@ Learn how to build full-stack Go applications with HAMR.
 2. [Development Workflow](02-dev-workflow.md) — Dev server, watch rules, live reload
 3. [Database](03-database.md) — PostgreSQL connection, migrations, repo pattern
 4. [Handlers & Routing](04-handlers-routing.md) — Server, routes, middleware, error handling
-5. [Templates & Frontend](05-templates-frontend.md) — Templ, HTMX, Alpine.js
+5. [Templates & Frontend](05-templates-frontend.md) — Templ, HTMX, optional Alpine.js
 6. [Forms & Validation](06-forms-validation.md) — Validators, CSRF, flash messages
 7. [Authentication](07-authentication.md) — Sessions, auth middleware, login/register
 8. [File Storage](08-file-storage.md) — Local/S3 storage, media processing

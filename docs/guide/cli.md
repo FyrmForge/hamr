@@ -53,6 +53,7 @@ When called without flags, an interactive wizard asks for each option. When all 
 | `--static-s3` | `false` | Sync static assets to a dedicated S3 bucket |
 | `--pgadmin` | `false` | Include pgAdmin in Docker Compose |
 | `--stripe` | `false` | Include Stripe webhook handler |
+| `--alpine` | `false` | Include Alpine.js for local UI state |
 
 ```bash
 hamr new myapp                                          # interactive wizard
@@ -96,7 +97,7 @@ By default, `hamr dev` also mirrors its recent log stream to `.hamr/dev_logs.txt
 
 ## hamr add skill
 
-Install an AI agent skill that teaches the target tool about HAMR — the CLI, the `pkg/*` packages, and the project's Go + templ + HTMX + Alpine conventions.
+Install an AI agent skill that teaches the target tool about HAMR — the CLI, the `pkg/*` packages, and the project's Go + templ + HTMX conventions (plus Alpine.js guidance when the project opted in). The skill reads `hamr.toml` from the current project to tailor its content; `--global` installs skip this and use default-off assumptions.
 
 ```bash
 hamr add skill <target> [flags]

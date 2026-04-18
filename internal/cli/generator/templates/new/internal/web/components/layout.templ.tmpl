@@ -51,7 +51,9 @@ templ Layout(c echo.Context, title string) {
 		{ children... }
 
 		<script src={ StaticURL("js/htmx.min.js") }></script>
+{{- if .IncludeAlpine}}
 		<script src={ StaticURL("js/alpine.min.js") } defer></script>
+{{- end}}
 		<script src={ StaticURL("js/main.js") }></script>
 		<script>
 			htmx.config.responseHandling = [

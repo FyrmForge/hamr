@@ -11,7 +11,7 @@ This project was scaffolded using the HAMR framework (`github.com/FyrmForge/hamr
 
 - **Language**: Go {{.GoVersion}}
 - **HTTP**: Echo v4 (via `hamr/pkg/server`)
-- **Templates**: Templ + HTMX + Alpine.js
+- **Templates**: Templ + HTMX{{if .IncludeAlpine}} + Alpine.js{{end}}
 - **Database**: PostgreSQL (via `hamr/pkg/db`)
 - **CSS**: {{.CSS}}
 {{- if .IncludeSessions}}

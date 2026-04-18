@@ -27,6 +27,7 @@ type wizardResult struct {
 	WebSocket        string // "yes" | "no"
 	E2E              string // "yes" | "no"
 	Stripe           string // "yes" | "no"
+	Alpine           string // "yes" | "no"
 }
 
 // wizardStep pairs a huh group with a callback that prints the selection.
@@ -59,6 +60,7 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 		WebSocket:        "yes",
 		E2E:              "yes",
 		Stripe:           "yes",
+		Alpine:           "no",
 	}
 
 	var steps []wizardStep
@@ -422,6 +424,33 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 			res.E2E = "yes"
 		} else {
 			res.E2E = "no"
+		}
+	}
+
+	// ── Alpine.js ──────────────────────────────────────────
+	if !cmd.Flags().Changed("alpine") {
+		if err := huh.NewForm(huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Alpine.js").
+				Description("Lightweight client-side library for local UI state (dropdowns, modals, tabs). HTMX covers most server-driven interactivity on its own — enable Alpine only if you want it for local widget state.").
+				Options(
+					huh.NewOption("No", "no"),
+					huh.NewOption("Yes", "yes"),
+				).
+				Value(&res.Alpine),
+		)).Run(); err != nil {
+			return nil, err
+		}
+		if res.Alpine == "yes" {
+			fmt.Println("  Alpine.js: Yes")
+		} else {
+			fmt.Println("  Alpine.js: No")
+		}
+	} else {
+		if v, _ := cmd.Flags().GetBool("alpine"); v {
+			res.Alpine = "yes"
+		} else {
+			res.Alpine = "no"
 		}
 	}
 

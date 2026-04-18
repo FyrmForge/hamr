@@ -129,6 +129,69 @@ func TestAddSkill_GlobalWritesToHome(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestAddSkill_RendersWithAlpineOn(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "hamr.toml"),
+		[]byte("[hamr]\nversion = \"0.0.0\"\n\n[options]\nalpine = true\n"), 0o644))
+	chdir(t, dir)
+
+	cmd := newAddSkillTestCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetArgs([]string{"claude"})
+	require.NoError(t, cmd.Execute())
+
+	practices, err := os.ReadFile(filepath.Join(dir, ".claude/skills/hamr/references/practices.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(practices), "## Alpine.js", "practices.md should include the Alpine section when project opted in")
+	assert.Contains(t, string(practices), "Alpine components")
+
+	skill, err := os.ReadFile(filepath.Join(dir, ".claude/skills/hamr/SKILL.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(skill), "**Alpine.js**")
+}
+
+func TestAddSkill_RendersWithAlpineOff(t *testing.T) {
+	dir := t.TempDir()
+	writeHamrToml(t, dir)
+	chdir(t, dir)
+
+	cmd := newAddSkillTestCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetArgs([]string{"claude"})
+	require.NoError(t, cmd.Execute())
+
+	practices, err := os.ReadFile(filepath.Join(dir, ".claude/skills/hamr/references/practices.md"))
+	require.NoError(t, err)
+	assert.NotContains(t, string(practices), "## Alpine.js", "practices.md should omit the Alpine section when project opted out")
+
+	skill, err := os.ReadFile(filepath.Join(dir, ".claude/skills/hamr/SKILL.md"))
+	require.NoError(t, err)
+	assert.NotContains(t, string(skill), "**Alpine.js**")
+
+	cli, err := os.ReadFile(filepath.Join(dir, ".claude/skills/hamr/references/cli.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(cli), "scaffolded without Alpine")
+}
+
+func TestAddSkill_AlpineDetectedFromDisk(t *testing.T) {
+	// Simulates a project scaffolded before the alpine option was tracked:
+	// hamr.toml has no alpine key, but static/js/alpine.min.js exists on disk.
+	dir := t.TempDir()
+	writeHamrToml(t, dir)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "static", "js"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "static", "js", "alpine.min.js"), []byte("/* alpine */"), 0o644))
+	chdir(t, dir)
+
+	cmd := newAddSkillTestCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetArgs([]string{"claude"})
+	require.NoError(t, cmd.Execute())
+
+	practices, err := os.ReadFile(filepath.Join(dir, ".claude/skills/hamr/references/practices.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(practices), "## Alpine.js", "Alpine section should render when alpine.min.js is present on disk")
+}
+
 func TestAddSkill_UnsupportedTargetErrors(t *testing.T) {
 	dir := t.TempDir()
 	writeHamrToml(t, dir)

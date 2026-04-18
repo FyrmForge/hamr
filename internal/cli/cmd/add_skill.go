@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/FyrmForge/hamr/internal/cli/generator"
+	"github.com/FyrmForge/hamr/internal/scaffold"
 	"github.com/spf13/cobra"
 )
 
@@ -15,8 +16,8 @@ var addSkillCmd = &cobra.Command{
 	Use:   "skill <target>",
 	Short: "Install an AI agent skill describing the HAMR framework",
 	Long: `Install an AI agent skill that teaches the target tool how to use the hamr CLI,
-which hamr packages exist, and the project's Go + templ + HTMX + Alpine coding
-practices.
+which hamr packages exist, and the project's Go + templ + HTMX coding practices
+(plus Alpine.js guidance when the project opted into it).
 
 Currently supported targets: claude.
 
@@ -54,7 +55,9 @@ func runAddSkill(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := generator.InstallSkill(target, destDir, force); err != nil {
+	data := loadSkillData(global)
+
+	if err := generator.InstallSkill(target, destDir, force, data); err != nil {
 		return err
 	}
 
@@ -83,6 +86,34 @@ func resolveSkillDest(target string, global bool) (string, error) {
 		return "", fmt.Errorf("no hamr.toml in current directory — run from a HAMR project root, or use --global")
 	}
 	return filepath.Join(cwd, rel), nil
+}
+
+// loadSkillData builds the render context for skill templates from the current
+// project. Global installs default to the scaffold baseline (Alpine off).
+// For project installs, Alpine is considered enabled if either hamr.toml's
+// [options].alpine is true, OR static/js/alpine.min.js exists on disk — the
+// disk check covers projects scaffolded before the alpine key was tracked and
+// projects that opted in via `hamr vendor alpine` post-scaffold.
+func loadSkillData(global bool) generator.SkillData {
+	if global {
+		return generator.SkillData{}
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return generator.SkillData{}
+	}
+
+	alpine := false
+	if meta, err := scaffold.LoadMetadata(filepath.Join(cwd, "hamr.toml")); err == nil {
+		alpine = meta.Options.Alpine
+	}
+	if !alpine {
+		if _, err := os.Stat(filepath.Join(cwd, "static", "js", "alpine.min.js")); err == nil {
+			alpine = true
+		}
+	}
+
+	return generator.SkillData{IncludeAlpine: alpine}
 }
 
 // skillToolDir maps a target name to the directory that tool reads skills from.

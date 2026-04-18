@@ -8,9 +8,9 @@
 
 HAMR is an opinionated Go full-stack framework and project bootstrapping CLI. It extracts
 proven patterns from a production Go web application into reusable, domain-agnostic
-packages. The goal: `hamr new myproject` gives you a production-ready Go + Templ + HTMX +
-Alpine.js full-stack app with sensible defaults, extensible architecture, and AI-ready
-documentation.
+packages. The goal: `hamr new myproject` gives you a production-ready Go + Templ + HTMX
+full-stack app (with optional Alpine.js) with sensible defaults, extensible architecture,
+and AI-ready documentation.
 
 HAMR is **two things**:
 1. **Framework library** (`pkg/`) - reusable Go packages projects import
@@ -515,7 +515,8 @@ type ServiceConfig struct {
 │   │   └── pages/              #   home.css
 │   ├── js/
 │   │   ├── htmx.min.js        # Vendored
-│   │   ├── alpine.min.js       # Vendored
+│   │   ├── idiomorph.min.js    # Vendored
+│   │   ├── alpine.min.js       # Vendored only if --alpine was selected at scaffold
 │   │   └── main.js             # HTMX config events, component init, afterSwap
 │   └── images/
 ├── docs/
@@ -588,6 +589,7 @@ toolchain requirement for projects that don't use Tailwind.
 hamr vendor                    # vendors all known deps at default versions
 hamr vendor --update           # re-vendors all deps at latest versions
 hamr vendor htmx               # vendor only htmx
+hamr vendor alpine             # opt in to Alpine after scaffolding without --alpine
 hamr vendor alpine@3.14.9      # vendor alpine at a specific version
 ```
 
@@ -949,7 +951,7 @@ After Sprint 6 (CLI complete):
 - Verify `TrustedSubject` middleware correctly sets subject in context
 - Verify docker-compose includes the new service
 - Verify Makefile has `run-billing` and `build-billing` targets
-- Run `hamr vendor` — vendors htmx + alpine into `static/js/`
+- Run `hamr vendor` — vendors htmx + idiomorph (plus alpine if `--alpine` was passed) into `static/js/`
 - Verify `hamr.vendor.json` is created with correct versions and paths
 - Verify `hamr vendor htmx@2.0.4` pins a specific version
 - Verify `hamr vendor --update` re-downloads at latest versions

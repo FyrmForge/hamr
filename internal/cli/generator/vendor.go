@@ -47,15 +47,28 @@ var defaultRegistry = map[string]VendorDep{
 
 const lockFileName = "hamr.vendor.json"
 
-// VendorAll downloads all registry dependencies into dir.
+// VendorAll downloads the selected registry dependencies into dir.
+// When deps is nil or empty, all registry deps are vendored.
 // If update is true, it re-downloads even if the lock file already has the dep.
-func VendorAll(dir string, update bool) error {
+func VendorAll(dir string, update bool, deps []string) error {
 	lock, err := readLockFile(dir)
 	if err != nil {
 		return err
 	}
 
-	for name, reg := range defaultRegistry {
+	selected := deps
+	if len(selected) == 0 {
+		selected = make([]string, 0, len(defaultRegistry))
+		for name := range defaultRegistry {
+			selected = append(selected, name)
+		}
+	}
+
+	for _, name := range selected {
+		reg, ok := defaultRegistry[name]
+		if !ok {
+			return fmt.Errorf("unknown dependency %q (known: htmx, alpine, idiomorph)", name)
+		}
 		if err := vendorDep(dir, name, reg.Version, reg, lock, update); err != nil {
 			return fmt.Errorf("vendor %s: %w", name, err)
 		}

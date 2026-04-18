@@ -40,6 +40,7 @@ type Options struct {
 	Stripe      bool   `toml:"stripe"`
 	Locale      bool   `toml:"locale"`
 	Storage     string `toml:"storage"`
+	Alpine      bool   `toml:"alpine"`
 }
 
 // HasHamrSection reports whether the loaded metadata contained a [hamr] section.

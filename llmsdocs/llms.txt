@@ -1,7 +1,7 @@
 # HAMR Framework
 
 > HAMR is a Go web framework built on Echo v4 for server-rendered HTML
-> applications using templ + HTMX + Alpine.js, backed by PostgreSQL.
+> applications using templ + HTMX (with optional Alpine.js), backed by PostgreSQL.
 > Import path: github.com/FyrmForge/hamr
 
 ## Glossary

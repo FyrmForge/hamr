@@ -26,6 +26,7 @@ e2e = false
 stripe = true
 locale = false
 storage = "local"
+alpine = true
 
 [proxy]
 listen = ":3000"
@@ -47,6 +48,7 @@ listen = ":3000"
 		assert.True(t, meta.Options.Stripe)
 		assert.False(t, meta.Options.Locale)
 		assert.Equal(t, "local", meta.Options.Storage)
+		assert.True(t, meta.Options.Alpine)
 	})
 
 	t.Run("no hamr section", func(t *testing.T) {

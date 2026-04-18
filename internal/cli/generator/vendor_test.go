@@ -186,7 +186,7 @@ func TestVendorAll(t *testing.T) {
 	withTestRegistry(t, ts.URL)
 
 	dir := t.TempDir()
-	require.NoError(t, VendorAll(dir, false))
+	require.NoError(t, VendorAll(dir, false, nil))
 
 	// All 3 files should exist.
 	assertFileExists(t, dir, "static/js/htmx.min.js")
@@ -202,6 +202,35 @@ func TestVendorAll(t *testing.T) {
 	assert.Equal(t, sha256hex("/* htmx */"), lock.Deps["htmx"].SHA256)
 	assert.Equal(t, sha256hex("/* alpine */"), lock.Deps["alpine"].SHA256)
 	assert.Equal(t, sha256hex("/* idiomorph */"), lock.Deps["idiomorph"].SHA256)
+}
+
+func TestVendorAll_withDepsFilter(t *testing.T) {
+	ts := newTestServer()
+	defer ts.Close()
+	withTestRegistry(t, ts.URL)
+
+	dir := t.TempDir()
+	require.NoError(t, VendorAll(dir, false, []string{"htmx", "idiomorph"}))
+
+	assertFileExists(t, dir, "static/js/htmx.min.js")
+	assertFileExists(t, dir, "static/js/idiomorph.min.js")
+	assertFileNotExists(t, dir, "static/js/alpine.min.js")
+
+	lock, err := readLockFile(dir)
+	require.NoError(t, err)
+	assert.Len(t, lock.Deps, 2)
+	assert.NotContains(t, lock.Deps, "alpine")
+}
+
+func TestVendorAll_unknownDepInFilter(t *testing.T) {
+	ts := newTestServer()
+	defer ts.Close()
+	withTestRegistry(t, ts.URL)
+
+	dir := t.TempDir()
+	err := VendorAll(dir, false, []string{"htmx", "jquery"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown dependency")
 }
 
 func TestVendorOne(t *testing.T) {
@@ -249,7 +278,7 @@ func TestVendorVerify_pass(t *testing.T) {
 	withTestRegistry(t, ts.URL)
 
 	dir := t.TempDir()
-	require.NoError(t, VendorAll(dir, false))
+	require.NoError(t, VendorAll(dir, false, nil))
 	require.NoError(t, VendorVerify(dir))
 }
 
@@ -259,7 +288,7 @@ func TestVendorVerify_mismatch(t *testing.T) {
 	withTestRegistry(t, ts.URL)
 
 	dir := t.TempDir()
-	require.NoError(t, VendorAll(dir, false))
+	require.NoError(t, VendorAll(dir, false, nil))
 
 	// Corrupt one file.
 	err := os.WriteFile(filepath.Join(dir, "static/js/htmx.min.js"), []byte("corrupted"), 0o644)
@@ -277,7 +306,7 @@ func TestVendorVerify_missingFile(t *testing.T) {
 	withTestRegistry(t, ts.URL)
 
 	dir := t.TempDir()
-	require.NoError(t, VendorAll(dir, false))
+	require.NoError(t, VendorAll(dir, false, nil))
 
 	// Delete one file.
 	require.NoError(t, os.Remove(filepath.Join(dir, "static/js/htmx.min.js")))

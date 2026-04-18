@@ -17,7 +17,7 @@ An opinionated Go full-stack framework and project scaffolding CLI. HAMR extract
 hamr new
 ```
 
-You get a production-ready Go + Templ + HTMX + Alpine.js application with sensible defaults, structured logging, database migrations, session auth, and AI-ready documentation baked in.
+You get a production-ready Go + Templ + HTMX application (with optional Alpine.js) with sensible defaults, structured logging, database migrations, session auth, and AI-ready documentation baked in.
 
 ## Documentation
 
@@ -136,7 +136,7 @@ myproject/
 │       ├── server.go        # Routes and middleware stack
 │       ├── handler/         # One package per domain (home/, auth/, errors/)
 │       └── components/      # Shared Templ components and layout
-├── static/                  # CSS, JS (vendored HTMX + Alpine), images
+├── static/                  # CSS, JS (vendored HTMX + idiomorph; Alpine if opted in), images
 ├── docs/                    # ADRs, feature specs, AI guides
 ├── docker/                  # Docker Compose for PostgreSQL
 ├── .github/workflows/       # CI and deploy pipelines
@@ -154,7 +154,7 @@ myproject/
 | Language        | Go 1.25+                           |
 | HTTP            | Echo v4                            |
 | Templates       | Templ                              |
-| Interactivity   | HTMX + Alpine.js                   |
+| Interactivity   | HTMX (+ optional Alpine.js)        |
 | Database        | PostgreSQL via pgx + sqlx          |
 | Migrations      | golang-migrate                     |
 | Auth            | Argon2id + cookie sessions         |

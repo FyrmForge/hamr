@@ -505,7 +505,7 @@ func TestGenerateProject_hamrConfigRebuildsGoOnTemplChanges(t *testing.T) {
 	require.NoError(t, GenerateProject(dir, cfg))
 
 	hamrToml := readFile(t, dir, "hamr.toml")
-	assert.Contains(t, hamrToml, `watch = ["**/*.go", "**/*.templ"]`)
+	assert.Contains(t, hamrToml, `watch = ["**/*.go", "**/*.templ", ".env"]`)
 	assert.Contains(t, hamrToml, `depends = ["templ"]`)
 }
 
@@ -1020,6 +1020,59 @@ func TestGenerateProject_noStripe(t *testing.T) {
 
 	envFile := readFile(t, dir, ".env.example")
 	assert.NotContains(t, envFile, "STRIPE_WEBHOOK_SECRET")
+}
+
+func TestGenerateProject_alpine(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "alpineproj")
+
+	cfg := &ProjectConfig{
+		Name:          "alpineproj",
+		Module:        "github.com/test/alpineproj",
+		CSS:           "plain",
+		Database:      "postgres",
+		GoVersion:     "1.25.0",
+		IncludeAlpine: true,
+	}
+
+	require.NoError(t, GenerateProject(dir, cfg))
+
+	layout := readFile(t, dir, "internal/web/components/layout.templ")
+	assert.Contains(t, layout, "js/alpine.min.js")
+
+	hamrToml := readFile(t, dir, "hamr.toml")
+	assert.Contains(t, hamrToml, "alpine = true")
+
+	readme := readFile(t, dir, "README.md")
+	assert.Contains(t, readme, "Alpine.js")
+
+	adr := readFile(t, dir, "docs/adr/000-base-framework.md")
+	assert.Contains(t, adr, "Alpine.js")
+}
+
+func TestGenerateProject_noAlpine(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "noalpineproj")
+
+	cfg := &ProjectConfig{
+		Name:      "noalpineproj",
+		Module:    "github.com/test/noalpineproj",
+		CSS:       "plain",
+		Database:  "postgres",
+		GoVersion: "1.25.0",
+	}
+
+	require.NoError(t, GenerateProject(dir, cfg))
+
+	layout := readFile(t, dir, "internal/web/components/layout.templ")
+	assert.NotContains(t, layout, "js/alpine.min.js")
+
+	hamrToml := readFile(t, dir, "hamr.toml")
+	assert.Contains(t, hamrToml, "alpine = false")
+
+	readme := readFile(t, dir, "README.md")
+	assert.NotContains(t, readme, "Alpine.js")
+
+	adr := readFile(t, dir, "docs/adr/000-base-framework.md")
+	assert.NotContains(t, adr, "Alpine.js")
 }
 
 func TestBuildProjectFileList_gorm(t *testing.T) {

@@ -195,6 +195,6 @@ e.IPExtractor = echo.ExtractIPFromXFFHeader()
 
 ## Next Steps
 
-- [Templates & Frontend](05-templates-frontend.md) — Templ components, HTMX, Alpine.js
+- [Templates & Frontend](05-templates-frontend.md) — Templ components, HTMX, optional Alpine.js
 - [Forms & Validation](06-forms-validation.md) — Form handling and validation
 - [Authentication](07-authentication.md) — Sessions and auth middleware

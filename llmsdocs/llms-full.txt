@@ -1866,7 +1866,7 @@ type BucketEnsurer interface {
 
 > Install an AI agent skill describing the HAMR framework.
 
-Writes a self-contained skill directory the target AI coding tool can load. The skill covers the `hamr` CLI, the `github.com/FyrmForge/hamr/pkg/*` packages, and HAMR's Go + templ + HTMX + Alpine coding practices.
+Writes a self-contained skill directory the target AI coding tool can load. The skill covers the `hamr` CLI, the `github.com/FyrmForge/hamr/pkg/*` packages, and HAMR's Go + templ + HTMX coding practices (plus Alpine.js guidance when the project opted in via `hamr new --alpine`). The skill is rendered per project: project installs read `hamr.toml` to decide which sections to include; `--global` installs default Alpine off.
 
 ```text
 hamr add skill <target> [flags]
@@ -1976,6 +1976,7 @@ stripe = false
 locale = false
 storage = "local"
 pgadmin = false
+alpine = false
 
 [ai]
 # dir = ".hamr/ai"

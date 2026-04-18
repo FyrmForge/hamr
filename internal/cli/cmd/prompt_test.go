@@ -239,3 +239,39 @@ func TestApplyWizardResult_gormNoMigrateAtStartup(t *testing.T) {
 	assert.Equal(t, "gorm", cfg.DBConnector)
 	assert.False(t, cfg.MigrateAtStartup)
 }
+
+func TestApplyWizardResult_alpine(t *testing.T) {
+	res := &wizardResult{
+		Owner:          "user",
+		CSS:            "plain",
+		Database:       "postgres",
+		StorageBackend: "local",
+		Alpine:         "yes",
+	}
+
+	cfg := &generator.ProjectConfig{
+		Name:      "app",
+		GoVersion: "1.25.0",
+	}
+	applyWizardResult(newCmd, "app", res, cfg)
+
+	assert.True(t, cfg.IncludeAlpine)
+}
+
+func TestApplyWizardResult_noAlpine(t *testing.T) {
+	res := &wizardResult{
+		Owner:          "user",
+		CSS:            "plain",
+		Database:       "postgres",
+		StorageBackend: "local",
+		Alpine:         "no",
+	}
+
+	cfg := &generator.ProjectConfig{
+		Name:      "app",
+		GoVersion: "1.25.0",
+	}
+	applyWizardResult(newCmd, "app", res, cfg)
+
+	assert.False(t, cfg.IncludeAlpine)
+}

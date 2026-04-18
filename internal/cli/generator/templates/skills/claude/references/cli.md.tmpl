@@ -193,7 +193,7 @@ hamr vendor --verify               # check checksums
 hamr vendor --url <url> --out <path>  # custom dep
 ```
 
-Built-in deps: `htmx`, `alpine`, `idiomorph`. Never check vendored JS in by hand — always go through `hamr vendor`.
+Built-in deps: `htmx`, `alpine`, `idiomorph`.[[if not .IncludeAlpine]] This project was scaffolded without Alpine — `alpine` is available via `hamr vendor alpine` if you later opt in.[[end]] Never check vendored JS in by hand — always go through `hamr vendor`.
 
 ## hamr rename module <new-path>
 

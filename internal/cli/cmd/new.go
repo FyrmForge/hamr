@@ -154,7 +154,11 @@ When all flags are provided, no interactive prompts are shown.`,
 		var warnings []string
 
 		// Auto-vendor JS dependencies (non-fatal).
-		if err := generator.VendorAll(dir, false); err != nil {
+		deps := []string{"htmx", "idiomorph"}
+		if cfg.IncludeAlpine {
+			deps = append(deps, "alpine")
+		}
+		if err := generator.VendorAll(dir, false, deps); err != nil {
 			warnings = append(warnings, fmt.Sprintf("could not vendor JS dependencies: %v", err))
 		}
 
@@ -232,6 +236,7 @@ func applyWizardResult(cmd *cobra.Command, name string, res *wizardResult, cfg *
 	cfg.IncludeE2E = res.E2E == "yes"
 	cfg.IncludeStripe = res.Stripe == "yes"
 	cfg.IncludeLocale = res.Locale == "yes"
+	cfg.IncludeAlpine = res.Alpine == "yes"
 
 	cfg.StorageBackend = res.StorageBackend
 	cfg.IncludeStorage = res.StorageBackend == "local" || res.StorageBackend == "s3"
@@ -283,4 +288,5 @@ func init() {
 	newCmd.Flags().Bool("pgadmin", false, "include pgAdmin in Docker Compose")
 	newCmd.Flags().Bool("stripe", false, "include Stripe webhook handler")
 	newCmd.Flags().Bool("locale", false, "include localisation (i18n) support")
+	newCmd.Flags().Bool("alpine", false, "include Alpine.js for local UI state")
 }

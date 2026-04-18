@@ -54,7 +54,7 @@ myapp/
 ├── migrations/               # SQL migration files
 ├── static/
 │   ├── css/                  # Stylesheets
-│   └── js/                   # Vendored JS (htmx, alpine, idiomorph)
+│   └── js/                   # Vendored JS (htmx, idiomorph; alpine if opted in)
 ├── docker/
 │   └── docker-compose.yaml   # Local dev services (Postgres, etc.)
 ├── generated/                # Pre-rendered static pages

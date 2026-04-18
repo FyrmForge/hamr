@@ -58,7 +58,7 @@ Examples:
 			return nil
 		}
 
-		if err := generator.VendorAll(dir, update); err != nil {
+		if err := generator.VendorAll(dir, update, nil); err != nil {
 			return err
 		}
 		fmt.Println("All dependencies vendored.")

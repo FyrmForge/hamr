@@ -82,6 +82,6 @@ docs/                    Documentation
 ## Stack
 
 - **Go** {{.GoVersion}} + Echo v4
-- **Templ** + HTMX + Alpine.js
+- **Templ** + HTMX{{if .IncludeAlpine}} + Alpine.js{{end}}
 - **PostgreSQL**{{- if eq .DBConnector "gorm"}} + GORM{{- end}}
 - **HAMR Framework** — server, middleware, validation, responses

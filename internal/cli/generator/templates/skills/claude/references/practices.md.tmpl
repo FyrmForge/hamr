@@ -1,6 +1,6 @@
 # HAMR Coding Practices
 
-Conventions for writing Go handlers, `.templ` files, HTMX-driven UIs, Alpine components, and forms in a HAMR project. Violating these is usually the reason something "silently doesn't work" — especially with templ and HTMX.
+Conventions for writing Go handlers, `.templ` files, HTMX-driven UIs,[[if .IncludeAlpine]] Alpine components,[[end]] and forms in a HAMR project. Violating these is usually the reason something "silently doesn't work" — especially with templ and HTMX.
 
 ---
 
@@ -88,7 +88,9 @@ templ Layout(title string) {
             <title>{ title }</title>
             <link rel="stylesheet" href={ StaticURL("css/app.css") }/>
             <script src={ StaticURL("js/htmx.min.js") } defer></script>
+[[- if .IncludeAlpine]]
             <script src={ StaticURL("js/alpine.min.js") } defer></script>
+[[- end]]
         </head>
         <body>
             { children... }
@@ -148,7 +150,9 @@ func (h *Handler) UserList(c echo.Context) error {
 
 - Server-fired client events: `htmx.Trigger(c.Response(), "userCreated", "showToast")`.
 - Timing variants: `htmx.TriggerAfterSettle(...)`, `htmx.TriggerAfterSwap(...)`.
+[[- if .IncludeAlpine]]
 - In Alpine: `x-on:user-created.window="..."` to react.
+[[- end]]
 
 ### Swap and target overrides
 
@@ -189,6 +193,7 @@ return respond.Redirect(c, "/users/" + in.ID)
 This prevents form resubmission on refresh and plays nicely with HTMX's `HX-Redirect`.
 
 ---
+[[- if .IncludeAlpine]]
 
 ## Alpine.js
 
@@ -214,6 +219,7 @@ Alpine owns *local* UI state. It is NOT the place for cross-page state, data fet
 - Always use `.window` modifier on custom event listeners you bind from HTMX-triggered events, since HTMX dispatches on the body.
 
 ---
+[[- end]]
 
 ## Forms
 

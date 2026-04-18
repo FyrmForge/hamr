@@ -31,6 +31,7 @@ type ProjectConfig struct {
 	IncludeE2E       bool
 	IncludeStripe    bool
 	IncludeLocale    bool
+	IncludeAlpine    bool
 	DefaultLocale    string // default: "en"
 	HamrVersion      string // HAMR version at scaffold time
 	ScaffoldedAt     string // date the project was scaffolded (YYYY-MM-DD)

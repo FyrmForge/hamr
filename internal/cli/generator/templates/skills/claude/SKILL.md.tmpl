@@ -1,6 +1,6 @@
 ---
 name: hamr
-description: Use this skill when working in a HAMR project or in the HAMR framework repo. Covers the `hamr` CLI, `github.com/FyrmForge/hamr/pkg/*`, and HAMR conventions for handlers, templ, HTMX, Alpine, and forms. Trigger when the task is specifically about HAMR, the `hamr` command, or code that already uses HAMR packages or conventions.
+description: Use this skill when working in a HAMR project or in the HAMR framework repo. Covers the `hamr` CLI, `github.com/FyrmForge/hamr/pkg/*`, and HAMR conventions for handlers, templ, HTMX,[[if .IncludeAlpine]] Alpine,[[end]] and forms. Trigger when the task is specifically about HAMR, the `hamr` command, or code that already uses HAMR packages or conventions.
 ---
 
 # HAMR
@@ -10,7 +10,9 @@ HAMR is a Go full-stack framework for server-rendered HTML apps. The stack is:
 - **Go + Echo v4** on the server
 - **templ** for compile-time type-safe HTML (NOT Go's `html/template`)
 - **HTMX** for server-driven interactivity
-- **Alpine.js** for local UI state
+[[- if .IncludeAlpine]]
+- **Alpine.js** for local UI state (opted in at scaffold time)
+[[- end]]
 - **PostgreSQL** by default, with SQLite support in newer scaffolds
 - **hamr** CLI for scaffolding, dev server, codegen, and tooling
 
@@ -26,7 +28,7 @@ Keep this file short. Pull in a reference only when the task needs it:
 
 - **`references/cli.md`** — only when you need to run, explain, or troubleshoot a `hamr` subcommand.
 - **`references/packages.md`** — only when writing Go that imports from `github.com/FyrmForge/hamr/pkg/*`, or when choosing a HAMR package.
-- **`references/practices.md`** — only when editing handler, `.templ`, HTMX, Alpine, or form code in a HAMR project.
+- **`references/practices.md`** — only when editing handler, `.templ`, HTMX,[[if .IncludeAlpine]] Alpine,[[end]] or form code in a HAMR project.
 
 Default to loading no reference files until the task needs one. When in doubt, prefer `references/practices.md` before `references/packages.md`.
 
@@ -38,7 +40,7 @@ Default to loading no reference files until the task needs one. When in doubt, p
 4. **POST handlers follow PRG**: after a successful write, redirect with `respond.Redirect(c, url)` (which sets `HX-Redirect` for HTMX requests and falls back to 303).
 5. **Validators come from `pkg/validate`** — do not roll your own. `validate.NewForm(...)` + `Field(name, rules...)` is the path for form validation; it also renders field errors as HTMX OOB swaps.
 6. **Config comes from `pkg/config`** helpers (`GetEnvOrDefault`, `GetEnvOrPanic`, etc.), not ad-hoc `os.Getenv` calls.
-7. **Never add JS libraries beyond the vendored set** (`htmx`, `alpine`, `idiomorph`). Use `hamr vendor` to manage them; do not check unvendored JS into `static/js/`.
+7. **Never add JS libraries beyond the vendored set** ([[if .IncludeAlpine]]`htmx`, `alpine`, `idiomorph`[[else]]`htmx`, `idiomorph`; `alpine` is available via `hamr vendor alpine` when needed[[end]]). Use `hamr vendor` to manage them; do not check unvendored JS into `static/js/`.
 8. **Build & test go through the Makefile.** Use `make build`, `make test`, `make lint`, `make templint` — never call `go build` / `go test` on individual packages.
 
 ## Project layout cheat-sheet

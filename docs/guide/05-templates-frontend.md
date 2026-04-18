@@ -1,6 +1,6 @@
 # Templates & Frontend
 
-HAMR uses Templ for compile-time type-safe HTML, HTMX for server-driven interactivity without client-side JavaScript, and Alpine.js for lightweight UI state. This guide covers how these pieces fit together.
+HAMR uses Templ for compile-time type-safe HTML and HTMX for server-driven interactivity without client-side JavaScript. Alpine.js is available as an opt-in addition for lightweight client-side UI state. This guide covers how these pieces fit together.
 
 **Package references:** [HTMX](pkg/htmx.md), [Respond](pkg/respond.md)
 
@@ -41,6 +41,7 @@ templ Layout(title string) {
         <title>{ title }</title>
         <link rel="stylesheet" href={ StaticURL("css/app.css") }/>
         <script src={ StaticURL("js/htmx.min.js") } defer></script>
+        // Alpine is only vendored/included when the project opted in.
         <script src={ StaticURL("js/alpine.min.js") } defer></script>
     </head>
     <body>
@@ -115,9 +116,9 @@ htmx.ReplaceURL(c.Response(), "/users/42")
 
 ---
 
-## Alpine.js
+## Alpine.js (optional)
 
-Alpine.js is vendored by default for client-side interactivity. Use it for dropdowns, modals, tabs, and other UI state:
+Alpine.js is opt-in. Enable it at scaffold time via `hamr new --alpine` (or answer **yes** to the Alpine prompt in the wizard). To add Alpine to an existing project, run `hamr vendor alpine` and add `<script src={ StaticURL("js/alpine.min.js") } defer></script>` to your layout's `<head>`. Use it for dropdowns, modals, tabs, and other local UI state:
 
 ```html
 <div x-data="{ open: false }">
@@ -151,7 +152,7 @@ STATIC_BASE_URL=https://cdn.example.com/static
 
 ## Vendored JS Dependencies
 
-HAMR vendors frontend JS dependencies (htmx, alpine, idiomorph) into `static/js/`. Manage them with:
+HAMR vendors frontend JS dependencies into `static/js/`. `htmx` and `idiomorph` are always vendored; `alpine` is vendored only when the project opts in. Manage them with:
 
 ```bash
 hamr vendor                     # vendor all deps at locked versions

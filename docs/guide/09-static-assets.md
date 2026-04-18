@@ -49,7 +49,7 @@ hamr vendor --update            # re-vendor all at latest
 hamr vendor --verify            # check checksums
 ```
 
-Built-in deps: `htmx`, `alpine`, `idiomorph`. Checksums are recorded in `hamr.vendor.json`.
+Built-in deps: `htmx`, `alpine`, `idiomorph`. New projects vendor `htmx` and `idiomorph` automatically; `alpine` is only vendored when the project opts in (`hamr new --alpine`). Run `hamr vendor alpine` later to opt in. Checksums are recorded in `hamr.vendor.json`.
 
 For custom dependencies:
 
