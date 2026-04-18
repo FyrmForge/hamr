@@ -6,6 +6,8 @@
 hamr
 ├── new [name]              Scaffold a new project
 ├── dev                     Start dev server with file watching + live reload
+├── add
+│   └── skill <target>      Install an AI agent skill describing hamr
 ├── ai
 │   ├── capture <url>       Capture a browser screenshot of a page
 │   └── upgrade             Show scaffold changes between versions via git diff
@@ -89,6 +91,31 @@ Reads `[proxy]`, `[dev]` sections from `hamr.toml`. Manages Docker Compose deps,
 By default, `hamr dev` also mirrors its recent log stream to `.hamr/dev_logs.txt` (rolling window, 200 lines, escape sequences stripped) for LLM consumption. This includes `[hamr dev]` messages plus stdout/stderr from watched commands and daemons. Configure via `log_file` and `log_file_max_lines` in `[dev]`.
 
 **Guide:** [Dev Server](pkg/dev.md) covers configuration, watch rules, daemons, Docker Compose, and examples.
+
+---
+
+## hamr add skill
+
+Install an AI agent skill that teaches the target tool about HAMR — the CLI, the `pkg/*` packages, and the project's Go + templ + HTMX + Alpine conventions.
+
+```bash
+hamr add skill <target> [flags]
+```
+
+| Flag       | Default | Description                                                           |
+|------------|---------|-----------------------------------------------------------------------|
+| `--global` | `false` | Install to `~/.<target>/skills/hamr/` instead of `./.<target>/skills/hamr/` |
+| `--force`  | `false` | Overwrite an existing skill directory                                 |
+
+```bash
+hamr add skill claude            # project-local: ./.claude/skills/hamr/
+hamr add skill claude --global   # user-global:   ~/.claude/skills/hamr/
+hamr add skill claude --force    # replace an existing install
+```
+
+Currently supported targets: `claude`. Support for `codex`, `opencode`, and other AI coding tools will follow.
+
+Project-local installs must be run from the root of a HAMR project (a directory containing `hamr.toml`) and are typically committed so the whole team benefits. Global installs work from any directory and persist per-user.
 
 ---
 

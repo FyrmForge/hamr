@@ -40,6 +40,7 @@
   with the manifest baked in at compile time. Config in [static] section of
   hamr.toml. `--clean` removes dist/ and resets the manifest.
 - **hamr completion install**: Installs shell completion scripts for bash, zsh, or fish. Auto-detects shell from $SHELL. Supports --system for system-wide install (requires root) and --shell to override detection.
+- **hamr add skill <target>**: Installs an AI agent skill describing the hamr framework. Target selects the AI tool (currently `claude`). Writes to `./.claude/skills/hamr/` by default; `--global` writes to `~/.claude/skills/hamr/`. Requires `hamr.toml` in CWD for project installs. `--force` overwrites.
 - **respond.Redirect**: HTMX-aware redirect that sets HX-Redirect for HTMX
   requests and falls back to HTTP 303.
 

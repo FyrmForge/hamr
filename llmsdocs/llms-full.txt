@@ -1862,6 +1862,35 @@ type BucketEnsurer interface {
 
 ## CLI Commands
 
+### hamr add skill
+
+> Install an AI agent skill describing the HAMR framework.
+
+Writes a self-contained skill directory the target AI coding tool can load. The skill covers the `hamr` CLI, the `github.com/FyrmForge/hamr/pkg/*` packages, and HAMR's Go + templ + HTMX + Alpine coding practices.
+
+```text
+hamr add skill <target> [flags]
+```
+
+Currently supported targets: `claude`. Additional targets (`codex`, `opencode`, etc.) will follow.
+
+Flags:
+- `--global` — install to `~/.<target>/skills/hamr/` instead of `./.<target>/skills/hamr/` (default: `false`)
+- `--force` — overwrite an existing skill directory (default: `false`)
+
+Destination resolution:
+- Default: `./.claude/skills/hamr/`, and the command **must** be run from a HAMR project root (directory containing `hamr.toml`).
+- `--global`: `~/.claude/skills/hamr/`, runnable from any directory.
+
+Examples:
+```bash
+hamr add skill claude
+hamr add skill claude --global
+hamr add skill claude --force
+```
+
+The installed skill is a directory with `SKILL.md` plus three progressive-disclosure references under `references/` (CLI, packages, practices). The AI tool loads `SKILL.md` by default and pulls in a reference only when relevant to the current task.
+
 ### hamr ai capture
 
 > Browser screenshot capture with HTML/text/metadata sidecars.

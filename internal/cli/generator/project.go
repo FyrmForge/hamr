@@ -127,7 +127,7 @@ func GenerateProject(dir string, cfg *ProjectConfig) error {
 			}
 		}
 
-		if err := renderFromFS(newTemplates, f.tmpl, dest, cfg); err != nil {
+		if err := renderFromFS(templates, f.tmpl, dest, cfg); err != nil {
 			if !cfg.InPlace {
 				_ = os.RemoveAll(dir)
 			}

@@ -11,8 +11,8 @@ import (
 	"text/template"
 )
 
-//go:embed templates/new
-var newTemplates embed.FS
+//go:embed templates
+var templates embed.FS
 
 // renderFromFS renders a template from the given embedded FS and writes the
 // result to destPath, creating parent directories as needed.
