@@ -245,3 +245,16 @@ Content-based static asset fingerprinting (SHA-256, 12 hex chars).
 File-watching and S3-syncing for static assets.
 - `SyncAll(ctx, store, dir) error`
 - `WatchAndSync(ctx, store, dir) error`
+
+### stripemock
+Local, in-memory Stripe mock for development. Renders a fake checkout page at
+`/dev/stripe` where the developer picks the outcome (paid/failed/cancelled).
+- `New(baseURL, currency string) *Client` — currency is ISO 4217 (GBP/USD/EUR/JPY, unknown falls through as "<CODE> x.xx")
+- `Mount(e *echo.Echo, client *Client)` — registers GET `/dev/stripe` + POST `/dev/stripe/complete`
+- `Client.CreateCheckoutSession(req CheckoutRequest) (*CheckoutSession, error)`
+- `Client.GetSessionResult(sessionID) (*PaymentResult, error)`
+- `Client.Currency() string`
+- Types: `CheckoutRequest`, `LineItem` (Amount is the smallest currency unit), `CheckoutSession`, `PaymentResult`
+- Statuses: `StatusPaid`, `StatusFailed`, `StatusCancelled`, `StatusRequiresAction`
+- Dev-only — no production guards; scaffolded `main.go` gates on `STRIPE_MOCK=true`
+- Wired automatically by `hamr new --stripe`; passed into `web.Deps.StripeMock`; currency via `STRIPE_CURRENCY` (default GBP)

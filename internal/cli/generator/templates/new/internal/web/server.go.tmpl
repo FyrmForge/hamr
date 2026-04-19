@@ -19,6 +19,9 @@ import (
 {{- if .IncludeWS}}
 	"github.com/FyrmForge/hamr/pkg/websocket"
 {{- end}}
+{{- if .IncludeStripe}}
+	"github.com/FyrmForge/hamr/pkg/stripemock"
+{{- end}}
 
 	"{{.Module}}/internal/middleware"
 	"{{.Module}}/internal/repo"
@@ -51,6 +54,11 @@ type Deps struct {
 {{- end}}
 {{- if .IncludeLocale}}
 	LocaleBundle *i18n.Bundle
+{{- end}}
+{{- if .IncludeStripe}}
+	// StripeMock is non-nil only when STRIPE_MOCK=true. Handlers that create
+	// checkouts should use this for outbound calls in dev.
+	StripeMock *stripemock.Client
 {{- end}}
 }
 

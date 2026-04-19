@@ -24,6 +24,9 @@ import (
 {{- if .IncludeStorage}}
 	"github.com/FyrmForge/hamr/pkg/storage"
 {{- end}}
+{{- if .IncludeStripe}}
+	"github.com/FyrmForge/hamr/pkg/stripemock"
+{{- end}}
 {{- if .IncludeLocale}}
 	"github.com/FyrmForge/hamr/pkg/i18n"
 	"github.com/FyrmForge/hamr/pkg/ptr"
@@ -69,6 +72,8 @@ var (
 {{- end}}
 {{- if .IncludeStripe}}
 	envStripeWebhookSecret = config.GetEnvOrDefault("STRIPE_WEBHOOK_SECRET", "")
+	envStripeMock          = config.GetEnvOrDefaultBool("STRIPE_MOCK", false)
+	envStripeCurrency      = config.GetEnvOrDefault("STRIPE_CURRENCY", "GBP")
 {{- end}}
 )
 
@@ -220,6 +225,18 @@ func main() {
 	}
 {{- end}}
 
+{{- if .IncludeStripe}}
+
+	// Local Stripe mock for development: serves a fake checkout page at
+	// /dev/stripe when STRIPE_MOCK=true. Leave unset in production.
+	var stripeMock *stripemock.Client
+	if envStripeMock {
+		stripeMock = stripemock.New(baseOrigin, envStripeCurrency)
+		stripemock.Mount(srv.Echo(), stripeMock)
+		log.Info("stripe mock enabled", "path", "/dev/stripe")
+	}
+{{- end}}
+
 	api.RegisterRoutes(srv, &api.Deps{
 		Store: store,
 {{- if .IncludeStripe}}
@@ -246,6 +263,9 @@ func main() {
 {{- end}}
 {{- if .IncludeLocale}}
 		LocaleBundle: localeBundle,
+{{- end}}
+{{- if .IncludeStripe}}
+		StripeMock: stripeMock,
 {{- end}}
 	})
 

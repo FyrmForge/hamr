@@ -1860,6 +1860,100 @@ type BucketEnsurer interface {
 
 ---
 
+### stripemock
+
+> Package stripemock is a local, in-memory Stripe mock for development. It
+> serves a fake checkout page where the developer picks the outcome of each
+> payment. Dev-only — no production safety guards; the caller gates mounting.
+
+```go
+func New(baseURL, currency string) *Client
+```
+Returns a new in-memory mock client. `baseURL` is used to build the dev-UI URL
+returned from CreateCheckoutSession (e.g. `http://localhost:8080`). `currency`
+is the ISO 4217 code (uppercase, e.g. `"GBP"`, `"USD"`, `"JPY"`) used to render
+amounts on the dev page. Built-in symbols: GBP/USD/EUR/JPY. Unknown codes
+render as `<CODE> x.xx`.
+
+```go
+func Mount(e *echo.Echo, client *Client)
+```
+Registers two routes on the provided Echo instance:
+- `GET  /dev/stripe`          — renders the checkout page for `?session=<id>`
+- `POST /dev/stripe/complete` — records the outcome and redirects to
+  the stored SuccessURL or CancelURL
+
+```go
+func (c *Client) CreateCheckoutSession(req CheckoutRequest) (*CheckoutSession, error)
+```
+Stores the request in memory and returns a CheckoutSession whose URL points
+at the local dev page. Sessions start at `StatusRequiresAction`.
+
+```go
+func (c *Client) GetSessionResult(sessionID string) (*PaymentResult, error)
+```
+Returns the current outcome for a session. Returns an error if the session
+is unknown.
+
+```go
+func (c *Client) SetOutcome(sessionID string, status PaymentStatus) error
+func (c *Client) GetRequest(sessionID string) (*CheckoutRequest, error)
+func (c *Client) SuccessURL(sessionID string) string
+func (c *Client) CancelURL(sessionID string) string
+func (c *Client) Currency() string
+```
+Used internally by the dev UI; exposed for custom integrations.
+
+```go
+type CheckoutRequest struct {
+    LineItems  []LineItem
+    SuccessURL string
+    CancelURL  string
+    Metadata   map[string]string
+}
+
+type LineItem struct {
+    Name     string
+    Amount   int64 // smallest currency unit (pence for GBP, cents for USD, whole yen for JPY)
+    Quantity int64
+}
+
+type CheckoutSession struct {
+    ID              string
+    URL             string
+    PaymentIntentID string
+}
+
+type PaymentResult struct {
+    SessionID       string
+    PaymentIntentID string
+    Status          PaymentStatus
+    Metadata        map[string]string
+}
+
+type PaymentStatus string
+
+const (
+    StatusPaid           PaymentStatus = "paid"
+    StatusFailed         PaymentStatus = "failed"
+    StatusCancelled      PaymentStatus = "cancelled"
+    StatusRequiresAction PaymentStatus = "requires_action"
+)
+```
+
+**Scaffold integration.** `hamr new --stripe` adds `STRIPE_MOCK` and
+`STRIPE_CURRENCY` (default `GBP`) to `.env.example`, wires `stripemock.New` +
+`stripemock.Mount` behind `if envStripeMock` in `main.go`, and passes the
+client into `web.Deps.StripeMock`. Leave `STRIPE_MOCK` unset (or `false`) in
+production.
+
+**Known limits.** Subscriptions, refunds, and webhook-event firing are not
+implemented. Sessions are in-memory and lost when the process exits. There is
+no real-Stripe interface — when a real client is introduced later, define the
+interface in your app.
+
+---
+
 ## CLI Commands
 
 ### hamr add skill

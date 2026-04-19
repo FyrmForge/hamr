@@ -35,12 +35,16 @@ API reference for every `hamr/pkg` package.
 17. [Sync](sync.md) — File synchronization (local to S3)
 18. [WebSocket](websocket.md) — Session and room-based real-time hub
 
+## Third-party Mocks
+
+19. [Stripemock](stripemock.md) — Local in-memory Stripe mock with dev UI
+
 ## Testing
 
-19. [E2E](e2e.md) — Reusable Go-Rod browser helpers for end-to-end tests
+20. [E2E](e2e.md) — Reusable Go-Rod browser helpers for end-to-end tests
 
 ## Tooling
 
-20. [Templint](templint.md) — Static linter for `.templ` files
-21. [Static Generation](static-generation.md) — Build-time page generation
-22. [Dev](dev.md) — Live reload development environment
+21. [Templint](templint.md) — Static linter for `.templ` files
+22. [Static Generation](static-generation.md) — Build-time page generation
+23. [Dev](dev.md) — Live reload development environment
