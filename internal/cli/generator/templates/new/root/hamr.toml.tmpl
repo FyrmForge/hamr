@@ -75,6 +75,12 @@ run = "./bin/site"
 depends = ["templ"{{- if .IncludeLocale}}, "locale"{{- end}}]
 reload = "full"
 
+[[dev.watch]]
+name = "static"
+watch = ["static/**/*"]
+cmd = "hamr gen static"
+debounce = 200
+
 # Sync generated static pages to S3 (uncomment to enable)
 # [[dev.daemon]]
 # name = "sync-generated"
