@@ -5,6 +5,10 @@ go {{.GoVersion}}
 
 require (
 	gorm.io/gorm v1.25.12
+{{- if eq .Database "sqlite"}}
+	github.com/glebarez/sqlite v1.11.0
+{{- else}}
 	gorm.io/driver/postgres v1.5.11
+{{- end}}
 )
 {{- end}}

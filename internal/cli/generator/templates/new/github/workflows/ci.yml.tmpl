@@ -19,6 +19,7 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+{{- if ne .Database "sqlite"}}
     # Optional: uncomment this service and the migration step below
     # if you want CI to apply schema changes as part of the workflow.
     # services:
@@ -35,6 +36,7 @@ jobs:
     #       --health-interval 10s
     #       --health-timeout 5s
     #       --health-retries 5
+{{- end}}
     steps:
       - uses: actions/checkout@v4
 
@@ -84,10 +86,17 @@ jobs:
             exit 1
           fi
 
+{{- if eq .Database "sqlite"}}
+      - name: Run migrations
+        env:
+          DATABASE_PATH: ./data/{{.Name | slug}}.db
+        run: make migrate
+{{- else}}
       # - name: Run migrations
       #   env:
       #     DATABASE_URL: postgres://postgres:postgres@localhost:5432/{{.Name | slug}}?sslmode=disable
       #   run: make migrate
+{{- end}}
 
       - name: Run tests
         run: make test

@@ -3,16 +3,29 @@ package db
 import (
 	"embed"
 
+{{- if eq .Database "sqlite"}}
+	"github.com/FyrmForge/hamr/pkg/db/sqlite"
+{{- else}}
 	"github.com/FyrmForge/hamr/pkg/db"
+{{- end}}
 )
 
 //go:embed migrations/*.sql
 var migrations embed.FS
 
 // MigrateConfig returns the migration configuration for this project.
+{{- if eq .Database "sqlite"}}
+func MigrateConfig() sqlite.MigrateConfig {
+	return sqlite.MigrateConfig{
+		FS:        migrations,
+		Directory: "migrations",
+	}
+}
+{{- else}}
 func MigrateConfig() db.MigrateConfig {
 	return db.MigrateConfig{
 		FS:        migrations,
 		Directory: "migrations",
 	}
 }
+{{- end}}

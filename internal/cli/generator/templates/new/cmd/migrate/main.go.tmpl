@@ -14,7 +14,11 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/FyrmForge/hamr/pkg/config"
+{{- if eq .Database "sqlite"}}
+	db "github.com/FyrmForge/hamr/pkg/db/sqlite"
+{{- else}}
 	"github.com/FyrmForge/hamr/pkg/db"
+{{- end}}
 
 	appdb "{{.Module}}/internal/db"
 {{- else}}
@@ -31,7 +35,11 @@ import (
 {{- end}}
 )
 
+{{- if eq .Database "sqlite"}}
+var envDatabasePath = config.GetEnvOrDefault("DATABASE_PATH", "./data/{{.Name | slug}}.db")
+{{- else}}
 var envDatabaseURL = config.GetEnvOrDefault("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/{{.Name | slug}}?sslmode=disable")
+{{- end}}
 {{- if eq .DBConnector "sqlx"}}
 
 const usage = `Usage: migrate <command> [args]
@@ -89,7 +97,11 @@ func connect() *sqlx.DB {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
+{{- if eq .Database "sqlite"}}
+	database, err := db.ConnectContext(ctx, envDatabasePath)
+{{- else}}
 	database, err := db.ConnectContext(ctx, envDatabaseURL)
+{{- end}}
 	if err != nil {
 		fatal("failed to connect to database: %v", err)
 	}
@@ -163,7 +175,14 @@ func runCreate(name string) {
 	upFile := filepath.Join(dir, prefix+".up.sql")
 	downFile := filepath.Join(dir, prefix+".down.sql")
 
+{{- if eq .Database "sqlite"}}
+	// SQLite: golang-migrate wraps each migration in its own transaction, so
+	// BEGIN/COMMIT statements here would fail with "transaction within a
+	// transaction". Write an empty scaffold instead.
+	scaffold := "-- write SQL here\n"
+{{- else}}
 	scaffold := "BEGIN;\n\n\nCOMMIT;\n"
+{{- end}}
 
 	if err := os.WriteFile(upFile, []byte(scaffold), 0o644); err != nil {
 		fatal("failed to create %s: %v", upFile, err)
@@ -213,7 +232,11 @@ func runUp() {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
+{{- if eq .Database "sqlite"}}
+	database, err := appdb.ConnectContext(ctx, envDatabasePath)
+{{- else}}
 	database, err := appdb.ConnectContext(ctx, envDatabaseURL)
+{{- end}}
 	if err != nil {
 		fatal("failed to connect to database: %v", err)
 	}

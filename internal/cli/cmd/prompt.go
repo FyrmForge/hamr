@@ -187,14 +187,20 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 			group: huh.NewGroup(
 				huh.NewSelect[string]().
 					Title("Database").
-					Description("Sets up a connection pool and Docker Compose service for local development.").
+					Description("PostgreSQL uses Docker Compose for local dev. SQLite is a single file — zero infrastructure, ideal for prototypes and local-first apps.").
 					Options(
 						huh.NewOption("PostgreSQL", "postgres"),
+						huh.NewOption("SQLite", "sqlite"),
 					).
 					Value(&res.Database),
 			),
 			print: func() {
-				fmt.Println("  Database: PostgreSQL")
+				switch res.Database {
+				case "sqlite":
+					fmt.Println("  Database: SQLite")
+				default:
+					fmt.Println("  Database: PostgreSQL")
+				}
 			},
 		})
 	} else {
@@ -401,7 +407,12 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 	}
 
 	// ── E2E testing ─────────────────────────────────────────
-	if !cmd.Flags().Changed("e2e") {
+	// E2E templates are PostgreSQL-specific (testcontainers + information_schema).
+	// Skip the prompt for SQLite; Validate() forces IncludeE2E = false there too.
+	switch {
+	case res.Database == "sqlite":
+		res.E2E = "no"
+	case !cmd.Flags().Changed("e2e"):
 		if err := huh.NewForm(huh.NewGroup(
 			huh.NewSelect[string]().
 				Title("E2E testing").
@@ -419,7 +430,7 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 		} else {
 			fmt.Println("  E2E tests: No")
 		}
-	} else {
+	default:
 		if v, _ := cmd.Flags().GetBool("e2e"); v {
 			res.E2E = "yes"
 		} else {

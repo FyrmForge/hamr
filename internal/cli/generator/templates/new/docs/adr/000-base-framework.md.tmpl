@@ -12,7 +12,11 @@ This project was scaffolded using the HAMR framework (`github.com/FyrmForge/hamr
 - **Language**: Go {{.GoVersion}}
 - **HTTP**: Echo v4 (via `hamr/pkg/server`)
 - **Templates**: Templ + HTMX{{if .IncludeAlpine}} + Alpine.js{{end}}
+{{- if eq .Database "sqlite"}}
+- **Database**: SQLite (via `hamr/pkg/db/sqlite`, pure-Go `modernc.org/sqlite` driver)
+{{- else}}
 - **Database**: PostgreSQL (via `hamr/pkg/db`)
+{{- end}}
 - **CSS**: {{.CSS}}
 {{- if .IncludeSessions}}
 - **Sessions**: Cookie-based (via `hamr/pkg/auth`)
@@ -41,7 +45,9 @@ internal/db/         Database connection + migrations
 internal/repo/       Data access layer (Store interface)
 internal/web/        HTTP handlers + components
 static/              CSS, JS, images
+{{- if or (ne .Database "sqlite") (eq .StorageBackend "s3")}}
 docker/              Docker Compose
+{{- end}}
 docs/                Documentation
 ```
 

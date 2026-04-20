@@ -33,11 +33,14 @@ inject_reload = true
 # log_file = ".hamr/dev_logs.txt"   # rolling dev log for LLM consumption (default)
 # log_file_max_lines = 200           # max lines kept (default)
 
+{{if or (ne .Database "sqlite") (eq .StorageBackend "s3") -}}
 [[dev.docker_compose]]
 name = "deps"
 file = "docker/docker-compose.yaml"
 keep_running = false
 wait_ready = true
+
+{{end -}}
 
 [[dev.watch]]
 name = "templ"

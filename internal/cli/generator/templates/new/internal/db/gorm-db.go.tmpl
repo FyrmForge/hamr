@@ -6,9 +6,18 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log/slog"
+{{- if eq .Database "sqlite"}}
+	"os"
+	"path/filepath"
+	"strings"
+{{- end}}
 	"time"
 
+{{- if eq .Database "sqlite"}}
+	"github.com/glebarez/sqlite"
+{{- else}}
 	"gorm.io/driver/postgres"
+{{- end}}
 	"gorm.io/gorm"
 )
 
@@ -25,9 +34,16 @@ func Connect(dsn string) (*gorm.DB, error) {
 // ConnectContext opens a GORM connection with retry and exponential backoff.
 // It respects the provided context for cancellation.
 func ConnectContext(ctx context.Context, dsn string) (*gorm.DB, error) {
+{{- if eq .Database "sqlite"}}
+	dsn = prepareSQLiteDSN(dsn)
+{{- end}}
 	var lastErr error
 	for attempt := 0; attempt < maxRetries; attempt++ {
+{{- if eq .Database "sqlite"}}
+		db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+{{- else}}
 		db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+{{- end}}
 		if err != nil {
 			lastErr = err
 		} else {
@@ -94,3 +110,29 @@ func jitter(base time.Duration) time.Duration {
 func AutoMigrate(db *gorm.DB) error {
 	return db.AutoMigrate(models()...)
 }
+{{- if eq .Database "sqlite"}}
+
+// prepareSQLiteDSN ensures the parent directory of the database file exists
+// and appends the standard pragmas (WAL, foreign_keys, busy_timeout) so every
+// connection opened by database/sql's pool picks them up.
+func prepareSQLiteDSN(dsn string) string {
+	path := dsn
+	if i := strings.IndexByte(dsn, '?'); i != -1 {
+		path = dsn[:i]
+	}
+	if path != "" && path != ":memory:" {
+		if dir := filepath.Dir(path); dir != "" && dir != "." {
+			_ = os.MkdirAll(dir, 0o755)
+		}
+	}
+
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	return dsn +
+		sep + "_pragma=journal_mode(WAL)" +
+		"&_pragma=foreign_keys(on)" +
+		"&_pragma=busy_timeout(5000)"
+}
+{{- end}}

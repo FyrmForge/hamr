@@ -4,7 +4,9 @@
 
 ```bash
 make install        # Install dev tools (templ)
-make docker-up      # Start PostgreSQL
+{{- if or (ne .Database "sqlite") (eq .StorageBackend "s3")}}
+make docker-up      # Start {{if eq .Database "sqlite"}}RustFS{{else}}PostgreSQL{{end}}
+{{- end}}
 {{- if not .MigrateAtStartup}}
 make migrate        # Apply database migrations explicitly
 {{- else}}
@@ -15,7 +17,9 @@ make build          # Build binary (generates templ first)
 make test           # Run tests
 make lint           # Run linters
 make templint       # Lint .templ files for silent failures and a11y issues
-make docker-down    # Stop PostgreSQL
+{{- if or (ne .Database "sqlite") (eq .StorageBackend "s3")}}
+make docker-down    # Stop services
+{{- end}}
 {{- if .IncludeE2E}}
 make e2e            # Run E2E tests (containerized)
 make e2e-local      # Run E2E tests locally
@@ -34,7 +38,7 @@ internal/db/            Database connection + embedded migrations
 {{- if not .MigrateAtStartup}}
 cmd/migrate/            Standalone migration runner
 {{- end}}
-internal/repo/           Data access layer (Store interface + PostgreSQL impl)
+internal/repo/           Data access layer (Store interface + {{if eq .Database "sqlite"}}SQLite{{else}}PostgreSQL{{end}} impl)
 internal/web/            HTTP layer
 internal/web/server.go   Route registration + middleware groups
 internal/web/handler/    One package per domain (home{{- if .IncludeAuth}}, auth{{- end}})
@@ -55,7 +59,11 @@ This project uses the HAMR framework (`github.com/FyrmForge/hamr`). Key packages
 - `hamr/pkg/validate` — Validators + Form API (define rules once, validate full form & per-field)
 - `hamr/pkg/middleware` — Auth, CSRF, flash, rate limiting, etc.
 {{- if eq .DBConnector "sqlx"}}
-- `hamr/pkg/db` — Database connection with retry + migrations
+{{- if eq .Database "sqlite"}}
+- `hamr/pkg/db/sqlite` — SQLite connection with pragmas + migrations
+{{- else}}
+- `hamr/pkg/db` — PostgreSQL connection with retry + migrations
+{{- end}}
 {{- else}}
 - `internal/db` — GORM connection helpers + `AutoMigrate`
 {{- end}}

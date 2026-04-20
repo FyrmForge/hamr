@@ -12,6 +12,13 @@ FROM alpine:3.21
 RUN apk --no-cache add ca-certificates
 COPY --from=builder /site /site
 COPY --from=builder /app/static /static
+{{- if eq .Database "sqlite"}}
+
+# SQLite database file directory — mount a volume here for persistence.
+RUN mkdir -p /data
+VOLUME ["/data"]
+ENV DATABASE_PATH=/data/{{.Name | slug}}.db
+{{- end}}
 
 EXPOSE 8080
 ENTRYPOINT ["/site"]

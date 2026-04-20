@@ -1,7 +1,8 @@
 # HAMR Framework
 
 > HAMR is a Go web framework built on Echo v4 for server-rendered HTML
-> applications using templ + HTMX (with optional Alpine.js), backed by PostgreSQL.
+> applications using templ + HTMX (with optional Alpine.js), backed by
+> PostgreSQL or SQLite.
 > Import path: github.com/FyrmForge/hamr
 
 ## Glossary
@@ -122,6 +123,17 @@ PostgreSQL connection with retry + migrations.
   `WithPgBouncerSafe`, `WithLogger`, `WithOnRetry`
 - `Migrate(db, cfg) error`, `MigrateDown`, `MigrateSteps`, `MigrateVersion`, `MigrateForce`
 - `StartKeepAlive(ctx, db, interval, _)`, `StartKeepAliveWithConfig(ctx, db, cfg)`
+
+### db/sqlite
+SQLite connection + migrations, pure-Go (modernc.org/sqlite). Mirrors pkg/db's API.
+- Import path: `github.com/FyrmForge/hamr/pkg/db/sqlite`
+- `Connect(path, opts...) (*sqlx.DB, error)` — creates parent dir, applies pragmas, pings
+- `ConnectContext(ctx, path, opts...) (*sqlx.DB, error)`
+- Defaults: `journal_mode=WAL`, `foreign_keys=ON`, `busy_timeout=5000ms`, `MaxOpenConns=1`
+- Options: `WithJournalMode`, `WithForeignKeys`, `WithBusyTimeout`, `WithMaxOpenConns`
+- `Migrate(db, cfg) error`, `MigrateDown`, `MigrateSteps`, `MigrateVersion`, `MigrateForce`
+- Wraps golang-migrate's pure-Go `database/sqlite` driver (not `database/sqlite3` which requires CGO)
+- Scaffolded projects: `DATABASE_PATH` env var (default `./data/<name>.db`); no Docker Compose unless S3 storage is also selected
 
 ### middleware
 HTTP middleware for auth, CSRF, CORS, flash, security, RBAC, audit, rate limiting, error pages, locale.

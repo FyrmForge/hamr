@@ -128,7 +128,8 @@ The `make build` target runs `templ generate`, `go build`, and `--generate` in s
 
 | Variable | Description |
 |----------|-------------|
-| `DATABASE_URL` | PostgreSQL connection string |
+| `DATABASE_URL` | PostgreSQL connection string (PostgreSQL projects only) |
+| `DATABASE_PATH` | SQLite database file path (SQLite projects only, default: `./data/<name>.db`) |
 | `PORT` | Server port (default: 8080) |
 | `DEV_MODE` | Set to `false` in production |
 

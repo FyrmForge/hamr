@@ -5,7 +5,9 @@ A Go web application built with the [HAMR framework](https://github.com/FyrmForg
 ## Prerequisites
 
 - Go {{.GoVersion}}+
-- Docker (for PostgreSQL)
+{{- if or (ne .Database "sqlite") (eq .StorageBackend "s3")}}
+- Docker{{- if ne .Database "sqlite"}} (for PostgreSQL){{- else}} (for S3/RustFS){{- end}}
+{{- end}}
 - [templ](https://templ.guide) CLI (`go install github.com/a-h/templ/cmd/templ@latest`)
 - [hamr](https://github.com/FyrmForge/hamr) CLI
 
@@ -15,9 +17,14 @@ A Go web application built with the [HAMR framework](https://github.com/FyrmForg
 # Install dev tools (templ)
 make install
 
+{{- if or (ne .Database "sqlite") (eq .StorageBackend "s3")}}
 # Start local services{{- if not .MigrateAtStartup}} and apply the schema{{- end}}
 make docker-up
 {{- if not .MigrateAtStartup}}
+make migrate
+{{- end}}
+{{- else if not .MigrateAtStartup}}
+# Apply the schema (creates ./data/{{.Name | slug}}.db)
 make migrate
 {{- end}}
 
@@ -43,9 +50,15 @@ make migrate-status # Show current migration version
 make migrate-create NAME=xxx  # Create a new migration
 {{- end}}
 {{- end}}
+{{- if eq .Database "sqlite"}}
+make db-sh          # Open sqlite3 shell to local dev DB
+{{- else}}
 make db-sh          # Open pgcli shell to local dev DB
+{{- end}}
+{{- if or (ne .Database "sqlite") (eq .StorageBackend "s3")}}
 make docker-up      # Start services
 make docker-down    # Stop services
+{{- end}}
 ```
 {{- if .MigrateAtStartup}}
 
@@ -75,7 +88,9 @@ internal/
   repo/                  Data access layer
   web/                   HTTP handlers + components
 static/                  CSS, JS, images
+{{- if or (ne .Database "sqlite") (eq .StorageBackend "s3")}}
 docker/                  Docker Compose
+{{- end}}
 docs/                    Documentation
 ```
 
@@ -83,5 +98,5 @@ docs/                    Documentation
 
 - **Go** {{.GoVersion}} + Echo v4
 - **Templ** + HTMX{{if .IncludeAlpine}} + Alpine.js{{end}}
-- **PostgreSQL**{{- if eq .DBConnector "gorm"}} + GORM{{- end}}
+- **{{if eq .Database "sqlite"}}SQLite{{else}}PostgreSQL{{end}}**{{- if eq .DBConnector "gorm"}} + GORM{{- end}}
 - **HAMR Framework** — server, middleware, validation, responses

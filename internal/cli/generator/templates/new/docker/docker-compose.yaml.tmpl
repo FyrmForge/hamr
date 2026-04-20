@@ -1,6 +1,7 @@
 name: {{.Name | slug }}-deps
 
 services:
+{{- if ne .Database "sqlite"}}
   postgres:
     image: postgres:18-alpine
     ports:
@@ -17,6 +18,7 @@ services:
       interval: 2s
       timeout: 3s
       retries: 5
+{{- end}}
 {{- if .IncludePgAdmin}}
 
   pgadmin:
@@ -64,7 +66,9 @@ services:
 {{- end}}
 
 volumes:
+{{- if ne .Database "sqlite"}}
   pg_data:
+{{- end}}
 {{- if .IncludePgAdmin}}
   pgadmin_data:
 {{- end}}

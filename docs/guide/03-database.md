@@ -1,8 +1,13 @@
 # Database
 
-The `db` package wraps pgx+sqlx with retry logic, connection pooling defaults, and migration helpers so you don't have to configure these manually. This guide covers connecting to PostgreSQL, running migrations, and organizing data access with the repository pattern.
+HAMR supports two databases out of the box:
 
-**Package references:** [DB](pkg/db.md)
+- **PostgreSQL** (default) — via `hamr/pkg/db`, which wraps pgx+sqlx with retry logic, connection pooling defaults, and migration helpers.
+- **SQLite** — via `hamr/pkg/db/sqlite`, built on the pure-Go `modernc.org/sqlite` driver. No CGO, no C toolchain, no Docker Compose for local dev.
+
+Choose SQLite at scaffold time with `hamr new --database=sqlite`. Both backends expose the same API shape (`ConnectContext`, `Migrate`, `MigrateDown`, `MigrateSteps`, `MigrateVersion`, `MigrateForce`) so most of the patterns in this guide apply to either. The PostgreSQL examples below are the default; the [SQLite](#sqlite) section at the end calls out what differs.
+
+**Package references:** [DB (PostgreSQL)](pkg/db.md), [DB SQLite](pkg/sqlite.md)
 
 ---
 
@@ -160,6 +165,61 @@ db.StartKeepAliveWithConfig(ctx, database, db.KeepAliveConfig{
     Timeout:  3 * time.Second,
 })
 ```
+
+---
+
+## SQLite
+
+For prototypes, embedded apps, and local-first tools, `hamr/pkg/db/sqlite` gives you a file-backed database with no Docker or connection strings. It uses `modernc.org/sqlite` (pure Go) so your project compiles without CGO.
+
+### Connecting
+
+```go
+import "github.com/FyrmForge/hamr/pkg/db/sqlite"
+
+ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+defer cancel()
+
+database, err := sqlite.ConnectContext(ctx, config.GetEnvOrDefault("DATABASE_PATH", "./data/app.db"))
+```
+
+`ConnectContext` creates the parent directory if missing and applies safe defaults on every pooled connection:
+
+- `journal_mode=WAL` — concurrent readers, better performance
+- `foreign_keys=ON` — SQLite disables these by default
+- `busy_timeout=5000` — 5s wait on lock contention instead of immediate failure
+
+Override via functional options: `WithJournalMode`, `WithForeignKeys`, `WithBusyTimeout`, `WithMaxOpenConns`.
+
+### Migrations
+
+Same shape as PostgreSQL — embed an `embed.FS` and call `Migrate`:
+
+```go
+//go:embed migrations/*.sql
+var migrationsFS embed.FS
+
+err := sqlite.Migrate(database, sqlite.MigrateConfig{
+    FS:        migrationsFS,
+    Directory: "migrations",
+})
+```
+
+Under the hood this wraps golang-migrate's pure-Go `database/sqlite` driver.
+
+### SQL Dialect Differences from PostgreSQL
+
+When writing migrations or repo queries for SQLite-flavoured projects:
+
+- Placeholders are `?`, not `$1`, `$2`.
+- Use `INTEGER PRIMARY KEY` (not `SERIAL`) or `TEXT PRIMARY KEY` for IDs.
+- Use `DATETIME` instead of `TIMESTAMPTZ`; defaults use `CURRENT_TIMESTAMP`.
+- Booleans are `INTEGER` (0/1) — scaffolded `active` columns default to `1`.
+- No `BEGIN/COMMIT` wrappers in migration files — golang-migrate handles transactions per step.
+
+### Scaffolded Layout
+
+`hamr new --database=sqlite` skips the `docker/` directory when storage is also local (nothing needs orchestration). The database file is created at `./data/<name>.db` on first migration; `data/` is added to `.gitignore`. The Dockerfile declares `/data` as a volume for persistence in containerised deployments. The env var is `DATABASE_PATH`, not `DATABASE_URL`.
 
 ---
 

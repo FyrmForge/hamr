@@ -21,7 +21,7 @@ Creates a complete project directory with:
   cmd/site/            - Application entry point and Dockerfile
   internal/            - Config, DB, repo, web layers
   static/              - CSS, JS, images
-  docker/              - Docker Compose for PostgreSQL
+  docker/              - Docker Compose (PostgreSQL only; skipped for SQLite)
   docs/                - ADR, feature specs, AI guides
 
 Usage:
@@ -280,7 +280,7 @@ func init() {
 	newCmd.Flags().String("storage", "local", "storage backend: \"local\" or \"s3\"")
 	newCmd.Flags().Bool("websocket", false, "include WebSocket support")
 	newCmd.Flags().Bool("e2e", false, "include E2E testing scaffolding")
-	newCmd.Flags().String("database", "postgres", "database type")
+	newCmd.Flags().String("database", "postgres", "database type: \"postgres\" or \"sqlite\"")
 	newCmd.Flags().String("db-connector", "sqlx", "DB connector: \"sqlx\" or \"gorm\"")
 	newCmd.Flags().Bool("migrate-startup", false, "run migrations at server startup instead of separate command")
 	newCmd.Flags().String("location", "subfolder", "project location: \"subfolder\" or \"current\"")

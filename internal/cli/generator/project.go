@@ -15,7 +15,7 @@ type ProjectConfig struct {
 	Name             string // "myproject"
 	Module           string // "github.com/user/myproject"
 	CSS              string // "plain" | "tailwind"
-	Database         string // "postgres"
+	Database         string // "postgres" | "sqlite"
 	DBConnector      string // "sqlx" | "gorm"
 	MigrateAtStartup bool   // run migrations when server starts
 	GoVersion        string // "1.25.0"
@@ -54,11 +54,19 @@ func (cfg *ProjectConfig) Validate() error {
 	if cfg.Database == "" {
 		cfg.Database = "postgres"
 	}
+	if cfg.Database != "postgres" && cfg.Database != "sqlite" {
+		return fmt.Errorf("invalid --database value %q: must be \"postgres\" or \"sqlite\"", cfg.Database)
+	}
 	if cfg.DBConnector == "" {
 		cfg.DBConnector = "sqlx"
 	}
 	if cfg.DBConnector != "sqlx" && cfg.DBConnector != "gorm" {
 		return fmt.Errorf("invalid --db-connector value %q: must be \"sqlx\" or \"gorm\"", cfg.DBConnector)
+	}
+	if cfg.Database == "sqlite" {
+		// pgAdmin is postgres-specific; E2E templates are postgres-specific.
+		cfg.IncludePgAdmin = false
+		cfg.IncludeE2E = false
 	}
 	if cfg.GoVersion == "" {
 		cfg.GoVersion = DetectGoVersion()
@@ -179,7 +187,6 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 
 		// internal/repo
 		{"templates/new/internal/repo/repo.go.tmpl", "internal/repo/repo.go"},
-		{"templates/new/internal/repo/postgres/store.go.tmpl", "internal/repo/postgres/store.go"},
 
 		// internal/api
 		{"templates/new/internal/api/server.go.tmpl", "internal/api/server.go"},
@@ -207,9 +214,6 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 		{"templates/new/static/js/main.js.tmpl", "static/js/main.js"},
 		{"templates/new/static/images/gitkeep.tmpl", "static/images/.gitkeep"},
 
-		// docker
-		{"templates/new/docker/docker-compose.yaml.tmpl", "docker/docker-compose.yaml"},
-
 		// docs
 		{"templates/new/docs/adr/000-base-framework.md.tmpl", "docs/adr/000-base-framework.md"},
 		{"templates/new/docs/features/TEMPLATE.md.tmpl", "docs/features/TEMPLATE.md"},
@@ -230,6 +234,20 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 		{"templates/new/root/go.mod.tmpl", "go.mod"},
 		{"templates/new/root/golangci.yml.tmpl", ".golangci.yml"},
 		{"templates/new/root/hamr.toml.tmpl", "hamr.toml"},
+	}
+
+	// Database-specific repo store.
+	switch cfg.Database {
+	case "sqlite":
+		files = append(files, templateFile{"templates/new/internal/repo/sqlite/store.go.tmpl", "internal/repo/sqlite/store.go"})
+	default:
+		files = append(files, templateFile{"templates/new/internal/repo/postgres/store.go.tmpl", "internal/repo/postgres/store.go"})
+	}
+
+	// Docker Compose — only when there's a service to run.
+	// PostgreSQL always needs it; SQLite only needs it when S3 storage is selected.
+	if cfg.Database != "sqlite" || cfg.StorageBackend == "s3" {
+		files = append(files, templateFile{"templates/new/docker/docker-compose.yaml.tmpl", "docker/docker-compose.yaml"})
 	}
 
 	// Plain CSS files.
@@ -260,12 +278,17 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 	if cfg.IncludeAuth {
 		files = append(files,
 			templateFile{"templates/new/internal/repo/user.go.tmpl", "internal/repo/user.go"},
-			templateFile{"templates/new/internal/repo/postgres/users.go.tmpl", "internal/repo/postgres/users.go"},
 			templateFile{"templates/new/internal/service/auth.go.tmpl", "internal/service/auth.go"},
 			templateFile{"templates/new/internal/web/handler/auth/handler.go.tmpl", "internal/web/handler/auth/handler.go"},
 			templateFile{"templates/new/internal/web/handler/auth/login.templ.tmpl", "internal/web/handler/auth/login.templ"},
 			templateFile{"templates/new/internal/web/handler/auth/register.templ.tmpl", "internal/web/handler/auth/register.templ"},
 		)
+		switch cfg.Database {
+		case "sqlite":
+			files = append(files, templateFile{"templates/new/internal/repo/sqlite/users.go.tmpl", "internal/repo/sqlite/users.go"})
+		default:
+			files = append(files, templateFile{"templates/new/internal/repo/postgres/users.go.tmpl", "internal/repo/postgres/users.go"})
+		}
 	}
 
 	// WebSocket files.
@@ -313,9 +336,19 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 		// sqlx (default)
 		files = append(files,
 			templateFile{"templates/new/internal/db/db.go.tmpl", "internal/db/db.go"},
-			templateFile{"templates/new/internal/db/migrations/001_initial.up.sql.tmpl", "internal/db/migrations/001_initial.up.sql"},
-			templateFile{"templates/new/internal/db/migrations/001_initial.down.sql.tmpl", "internal/db/migrations/001_initial.down.sql"},
 		)
+		switch cfg.Database {
+		case "sqlite":
+			files = append(files,
+				templateFile{"templates/new/internal/db/migrations/sqlite/001_initial.up.sql.tmpl", "internal/db/migrations/001_initial.up.sql"},
+				templateFile{"templates/new/internal/db/migrations/sqlite/001_initial.down.sql.tmpl", "internal/db/migrations/001_initial.down.sql"},
+			)
+		default:
+			files = append(files,
+				templateFile{"templates/new/internal/db/migrations/001_initial.up.sql.tmpl", "internal/db/migrations/001_initial.up.sql"},
+				templateFile{"templates/new/internal/db/migrations/001_initial.down.sql.tmpl", "internal/db/migrations/001_initial.down.sql"},
+			)
+		}
 	}
 
 	// Locale (i18n) files.

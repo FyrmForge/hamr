@@ -48,7 +48,8 @@ When called without flags, an interactive wizard asks for each option. When all 
 | `--storage` | `none` | Storage backend: `none`, `local`, or `s3` |
 | `--websocket` | `false` | Include WebSocket support |
 | `--e2e` | `false` | Include E2E testing scaffolding |
-| `--database` | `postgres` | Database type |
+| `--database` | `postgres` | Database type: `postgres` or `sqlite` |
+| `--db-connector` | `sqlx` | DB connector: `sqlx` or `gorm` |
 | `--location` | `subfolder` | Project location: `subfolder` or `current` |
 | `--static-s3` | `false` | Sync static assets to a dedicated S3 bucket |
 | `--pgadmin` | `false` | Include pgAdmin in Docker Compose |

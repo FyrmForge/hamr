@@ -611,6 +611,90 @@ func MigrateForce(db *sqlx.DB, cfg MigrateConfig, version int) error  // fix dir
 
 ---
 
+### db/sqlite
+
+> Package sqlite provides SQLite connection management and schema migration
+> utilities for hamr-scaffolded projects. It uses the pure-Go
+> `modernc.org/sqlite` driver so projects compile without CGO. Mirrors
+> `pkg/db`'s API shape with simpler semantics for a local-file database: no
+> retries, no pool tuning, safe pragmas by default.
+>
+> Import path: github.com/FyrmForge/hamr/pkg/db/sqlite
+
+#### Types
+
+```go
+type ConnectConfig struct {
+    JournalMode  string        // default "WAL"
+    ForeignKeys  bool          // default true
+    BusyTimeout  time.Duration // default 5s
+    MaxOpenConns int           // default 1 (SQLite is single-writer)
+}
+
+type ConnectOption func(*ConnectConfig)
+
+type MigrateConfig struct {
+    FS        embed.FS
+    Directory string
+}
+```
+
+#### Connection
+
+```go
+func Connect(path string, opts ...ConnectOption) (*sqlx.DB, error)
+```
+Opens a SQLite database file using context.Background(). Pass `:memory:` for
+an in-memory DB (handy for tests).
+
+```go
+func ConnectContext(ctx context.Context, path string, opts ...ConnectOption) (*sqlx.DB, error)
+```
+Creates the parent directory if missing, applies the configured pragmas on
+every pooled connection, and validates connectivity via PingContext.
+
+#### Connection Options
+
+```go
+func WithJournalMode(mode string) ConnectOption  // PRAGMA journal_mode
+func WithForeignKeys(enabled bool) ConnectOption // PRAGMA foreign_keys
+func WithBusyTimeout(d time.Duration) ConnectOption // PRAGMA busy_timeout
+func WithMaxOpenConns(n int) ConnectOption
+```
+
+#### Migration
+
+```go
+func Migrate(db *sqlx.DB, cfg MigrateConfig) error          // run all up migrations
+func MigrateDown(db *sqlx.DB, cfg MigrateConfig) error      // roll back all
+func MigrateSteps(db *sqlx.DB, cfg MigrateConfig, n int) error  // +n up, -n down
+func MigrateVersion(db *sqlx.DB, cfg MigrateConfig) (version uint, dirty bool, err error)
+func MigrateForce(db *sqlx.DB, cfg MigrateConfig, version int) error
+```
+
+Wraps golang-migrate's official pure-Go `database/sqlite` driver (distinct
+from `database/sqlite3`, which requires CGO via `mattn/go-sqlite3`).
+
+#### SQL Dialect Notes
+
+- Placeholders are `?`, not `$1`/`$2`.
+- Prefer `TEXT PRIMARY KEY` or `INTEGER PRIMARY KEY` — no `SERIAL`.
+- Use `DATETIME` (`CURRENT_TIMESTAMP` default) instead of `TIMESTAMPTZ`/`NOW()`.
+- Booleans are stored as `INTEGER` (0/1).
+- Do not wrap migration files in `BEGIN/COMMIT` — golang-migrate runs each
+  file in its own transaction.
+
+#### Scaffolded Project Conventions
+
+- Env var: `DATABASE_PATH` (default `./data/<name>.db`), not `DATABASE_URL`.
+- `data/` is gitignored; the Dockerfile declares `/data` as a `VOLUME`.
+- No Docker Compose is generated when storage is local (nothing needs
+  orchestration). S3 storage still emits a compose file for RustFS.
+- GORM projects use `github.com/glebarez/sqlite` (pure-Go GORM driver
+  wrapping `modernc.org/sqlite`).
+
+---
+
 ### middleware
 
 > Package middleware provides HTTP middleware for the HAMR framework.

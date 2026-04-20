@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if ! command -v pgcli >/dev/null 2>&1; then
-	echo "pgcli not found. Install it first: https://www.pgcli.com/" >&2
-	exit 1
-fi
-
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 
@@ -16,6 +11,20 @@ if [[ -f "$PROJECT_ROOT/.env" ]]; then
 	set +a
 fi
 
-DB_URL="${DATABASE_URL:-postgres://postgres:postgres@localhost:5432/{{.Name | slug}}?sslmode=disable}"
+{{- if eq .Database "sqlite"}}
+if ! command -v sqlite3 >/dev/null 2>&1; then
+	echo "sqlite3 not found. Install it via your package manager." >&2
+	exit 1
+fi
 
+DB_PATH="${DATABASE_PATH:-$PROJECT_ROOT/data/{{.Name | slug}}.db}"
+exec sqlite3 "$DB_PATH"
+{{- else}}
+if ! command -v pgcli >/dev/null 2>&1; then
+	echo "pgcli not found. Install it first: https://www.pgcli.com/" >&2
+	exit 1
+fi
+
+DB_URL="${DATABASE_URL:-postgres://postgres:postgres@localhost:5432/{{.Name | slug}}?sslmode=disable}"
 exec pgcli "$DB_URL"
+{{- end}}

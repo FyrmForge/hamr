@@ -19,32 +19,33 @@ API reference for every `hamr/pkg` package.
 ## Data & Storage
 
 9. [DB](db.md) — PostgreSQL connection, retry, and migrations
-10. [Storage](storage.md) — Pluggable file storage (local, S3)
-11. [Media](media.md) — Image and video processing
+10. [DB SQLite](sqlite.md) — SQLite connection and migrations (pure-Go, no CGO)
+11. [Storage](storage.md) — Pluggable file storage (local, S3)
+12. [Media](media.md) — Image and video processing
 
 ## Middleware & Auth
 
-12. [Middleware](middleware.md) — Auth, RBAC, flash, rate limiting, locale, CSRF, CORS
-13. [Auth](auth.md) — Password hashing and session management
-14. [I18n](i18n.md) — Internationalisation: translation bundles, plurals, RTL
+13. [Middleware](middleware.md) — Auth, RBAC, flash, rate limiting, locale, CSRF, CORS
+14. [Auth](auth.md) — Password hashing and session management
+15. [I18n](i18n.md) — Internationalisation: translation bundles, plurals, RTL
 
 ## Infrastructure
 
-15. [Janitor](janitor.md) — Cron-based background task scheduler
-16. [Async](async.md) — Concurrency helpers
-17. [Sync](sync.md) — File synchronization (local to S3)
-18. [WebSocket](websocket.md) — Session and room-based real-time hub
+16. [Janitor](janitor.md) — Cron-based background task scheduler
+17. [Async](async.md) — Concurrency helpers
+18. [Sync](sync.md) — File synchronization (local to S3)
+19. [WebSocket](websocket.md) — Session and room-based real-time hub
 
 ## Third-party Mocks
 
-19. [Stripemock](stripemock.md) — Local in-memory Stripe mock with dev UI
+20. [Stripemock](stripemock.md) — Local in-memory Stripe mock with dev UI
 
 ## Testing
 
-20. [E2E](e2e.md) — Reusable Go-Rod browser helpers for end-to-end tests
+21. [E2E](e2e.md) — Reusable Go-Rod browser helpers for end-to-end tests
 
 ## Tooling
 
-21. [Templint](templint.md) — Static linter for `.templ` files
-22. [Static Generation](static-generation.md) — Build-time page generation
-23. [Dev](dev.md) — Live reload development environment
+22. [Templint](templint.md) — Static linter for `.templ` files
+23. [Static Generation](static-generation.md) — Build-time page generation
+24. [Dev](dev.md) — Live reload development environment

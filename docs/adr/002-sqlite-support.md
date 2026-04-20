@@ -1,7 +1,7 @@
 # ADR-002: SQLite as a First-Class Database Choice
 
-- **Status**: Proposed
-- **Date**: 2026-04-15
+- **Status**: Accepted
+- **Date**: 2026-04-15 (accepted 2026-04-20)
 - **Authors**: JamesTiberiusKirk
 
 ## Context
@@ -48,18 +48,21 @@ carries ~130 lines of boilerplate migration driver code that can't be unit teste
 framework level. A framework package is testable, maintainable, and keeps generated code
 simple.
 
-### Built-in golang-migrate driver for SQLite
+### golang-migrate's pure-Go SQLite driver
 
-golang-migrate's official `database/sqlite3` package imports `github.com/mattn/go-sqlite3`
-(CGO). Instead, `pkg/db/sqlite/migrate.go` includes a thin `database.Driver` implementation
-(~80 lines) that:
+golang-migrate ships two sqlite packages. The `database/sqlite3` package pulls
+`github.com/mattn/go-sqlite3` (CGO) — rejected. The `database/sqlite` package,
+however, imports `modernc.org/sqlite` directly and is pure-Go. We use that.
 
-- Creates a `_schema_migrations` table (version INT, dirty BOOLEAN)
-- Reads SQL from `io.Reader` and executes via `db.Exec`
-- Lock/Unlock are no-ops (SQLite has file-level locking)
+`pkg/db/sqlite/migrate.go` wraps `migrate/v4/database/sqlite.WithInstance` and
+`source/iofs` to provide the same API surface as `pkg/db` (`Migrate`,
+`MigrateDown`, `MigrateSteps`, `MigrateVersion`, `MigrateForce`).
 
-This reuses golang-migrate's `source/iofs` for reading embedded migrations (already a hamr
-dependency) without pulling in any CGO transitive dependency.
+The original ADR proposed a hand-rolled ~80-line `database.Driver` implementation
+to avoid pulling the official driver. That was based on conflating the two
+packages; once verified, reusing the official pure-Go driver is strictly better
+— zero custom migration code to maintain and the driver is battle-tested via
+golang-migrate's own test suite.
 
 ### GORM SQLite via `github.com/glebarez/sqlite`
 
@@ -121,10 +124,12 @@ storage in containerised deployments. The env var is `DATABASE_PATH` (not `DATAB
 
 ### New files
 - `pkg/db/sqlite/sqlite.go` — connect with pragmas
-- `pkg/db/sqlite/migrate.go` — migration functions + built-in driver
+- `pkg/db/sqlite/migrate.go` — migration wrappers over `migrate/v4/database/sqlite`
 - `pkg/db/sqlite/sqlite_test.go` — unit tests
 - `templates/new/internal/repo/sqlite/store.go.tmpl` — store with `?` placeholders
 - `templates/new/internal/repo/sqlite/users.go.tmpl` — user queries
+- `templates/new/internal/db/migrations/sqlite/001_initial.up.sql.tmpl` — SQLite dialect
+- `templates/new/internal/db/migrations/sqlite/001_initial.down.sql.tmpl`
 
 ### Modified framework files
 - `go.mod` — add `modernc.org/sqlite`
