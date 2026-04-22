@@ -28,7 +28,14 @@
   `.hamr/dev_logs.txt`, 200 lines) for LLM consumption. The file contains
   `[hamr dev]` messages plus watched command/daemon stdout-stderr with terminal
   escapes stripped. Configure via `log_file` and `log_file_max_lines` in
-  `[dev]`; set `log_file = "none"` to disable.
+  `[dev]`; set `log_file = "none"` to disable. Refuses to start (released
+  builds only) when `[hamr] version` in `hamr.toml` is newer than the CLI;
+  bypass with `--skip-version-check`. A CLI *newer* than the scaffold only
+  warns and continues.
+- **hamr new**: Project scaffolder. On released builds, queries GitHub for the
+  latest release and refuses to run when the local CLI is out of date so
+  scaffolds never lag the template; bypass with `--skip-version-check`.
+  Network errors warn and fall through; dev builds skip the check.
 - **hamr ai capture**: Browser screenshot capture with HTML/text/metadata sidecars.
   Supports viewport, full-page, and tiled (`--tiles`) capture modes. Tiled mode
   produces viewport-sized PNGs from top to bottom with configurable overlap

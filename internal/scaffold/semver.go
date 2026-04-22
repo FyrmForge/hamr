@@ -14,9 +14,14 @@ type Version struct {
 }
 
 // ParseVersion parses a version string like "v0.3.2", "0.3.2", or "0.3.2-dev"
-// into a Version. Pre-release suffixes (e.g. "-dev", "-rc.1") are stripped.
+// into a Version. Pre-release suffixes ("-dev", "-rc.1") and SemVer build
+// metadata ("+build.42") are both stripped.
 func ParseVersion(s string) (Version, error) {
 	s = strings.TrimPrefix(s, "v")
+	// Strip SemVer build metadata (everything after first '+').
+	if i := strings.IndexByte(s, '+'); i != -1 {
+		s = s[:i]
+	}
 	// Strip pre-release suffix (everything after first hyphen).
 	if i := strings.IndexByte(s, '-'); i != -1 {
 		s = s[:i]

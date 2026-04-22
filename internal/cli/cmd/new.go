@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/FyrmForge/hamr/internal/cli/generator"
+	"github.com/FyrmForge/hamr/internal/scaffold"
 	"github.com/spf13/cobra"
 )
 
@@ -33,6 +35,11 @@ Flags are optional. Any flag not provided will be asked interactively.
 When all flags are provided, no interactive prompts are shown.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		skipVersionCheck, _ := cmd.Flags().GetBool("skip-version-check")
+		if err := ensureLatestCLI(cmd.Context(), skipVersionCheck); err != nil {
+			return err
+		}
+
 		var dir, name string
 		var inPlace, needsName, needsLocation bool
 
@@ -249,6 +256,42 @@ func applyWizardResult(cmd *cobra.Command, name string, res *wizardResult, cfg *
 	}
 }
 
+// fetchLatestReleaseFn is a package var so tests can stub out the network call.
+var fetchLatestReleaseFn = scaffold.FetchLatestRelease
+
+// ensureLatestCLI blocks hamr new when a newer hamr release is available on
+// GitHub. Dev builds skip the check entirely. Network failures warn and fall
+// through so users on flaky connections or CI are not stranded. The
+// --skip-version-check flag is an explicit escape hatch.
+func ensureLatestCLI(ctx context.Context, skip bool) error {
+	if skip || !releaseBuild {
+		return nil
+	}
+
+	current, err := scaffold.ParseVersion(version)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not parse current hamr version %q: %v\n", version, err)
+		return nil
+	}
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, scaffold.DefaultLatestReleaseTimeout)
+	defer cancel()
+
+	latest, err := fetchLatestReleaseFn(checkCtx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not check for newer hamr release: %v\n", err)
+		return nil
+	}
+
+	if current.Less(latest) {
+		return fmt.Errorf("hamr v%s is out of date; latest release is v%s — upgrade the CLI (https://github.com/FyrmForge/hamr/releases) or pass --skip-version-check to bypass", current, latest)
+	}
+	return nil
+}
+
 // normalizeHamrVersion returns a clean semver string for embedding in hamr.toml.
 // Released builds pass through as-is. Dev builds resolve the latest git tag and
 // append "-dev" (e.g. "0.5.0-dev"). Falls back to "0.0.0-dev" when no tag exists.
@@ -291,4 +334,5 @@ func init() {
 	newCmd.Flags().Bool("email-mock", false, "wire pkg/emailmock + enable the /__hamr/mail dev inbox")
 	newCmd.Flags().Bool("locale", false, "include localisation (i18n) support")
 	newCmd.Flags().Bool("alpine", false, "include Alpine.js for local UI state")
+	newCmd.Flags().Bool("skip-version-check", false, "skip the \"is a newer hamr release available\" check")
 }

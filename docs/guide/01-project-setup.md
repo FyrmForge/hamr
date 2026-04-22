@@ -33,6 +33,8 @@ hamr new . --module github.com/user/myapp
 
 See [CLI Reference](cli.md#hamr-new) for all flags.
 
+Before scaffolding, `hamr new` checks GitHub for the latest hamr release and refuses to run if this binary is out of date — so generated projects never lag the templates they were designed for. Pass `--skip-version-check` in CI or offline environments where the check is noise rather than a safety net.
+
 ---
 
 ## Project Structure

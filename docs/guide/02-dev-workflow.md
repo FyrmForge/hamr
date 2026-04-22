@@ -30,10 +30,13 @@ Browser :3000  →  hamr proxy  →  App :8080
 ### Flags
 
 ```bash
-hamr dev --config my.toml   # custom config path
-hamr dev --no-proxy         # skip proxy, just run watchers (API-only projects)
-hamr dev --verbose          # detailed watcher/rebuild logs
+hamr dev --config my.toml            # custom config path
+hamr dev --no-proxy                  # skip proxy, just run watchers (API-only projects)
+hamr dev --verbose                   # detailed watcher/rebuild logs
+hamr dev --skip-version-check        # bypass the scaffold/CLI version guard
 ```
+
+On startup, `hamr dev` compares `[hamr].version` in `hamr.toml` against the CLI. If the scaffold is newer than the CLI, it refuses to start — using an older CLI against a newer scaffold risks missing features it depends on. Upgrade the CLI or pass `--skip-version-check` to bypass. When the CLI is *newer* than the scaffold, dev still runs and the status bar flags the mismatch so you can plan an upgrade.
 
 ---
 

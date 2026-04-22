@@ -2215,6 +2215,20 @@ not bind `hamr dev`'s proxy to a public interface.
 
 ## CLI Commands
 
+### Version gating
+
+Two commands refuse to run on version mismatch (released CLI builds only):
+
+- **hamr new** — queries GitHub's latest release; if the local CLI is older,
+  refuses to scaffold so generated projects never lag the template. Network
+  errors only warn and fall through (offline/CI-friendly).
+- **hamr dev** — if `[hamr] version` in `hamr.toml` is newer than the CLI,
+  refuses to start. The opposite direction (CLI newer than scaffold) only
+  warns and the status bar shows the mismatch.
+
+Both accept `--skip-version-check` to bypass. Dev builds of the CLI (no
+release tag) skip both checks entirely.
+
 ### hamr add skill
 
 > Install an AI agent skill describing the HAMR framework.

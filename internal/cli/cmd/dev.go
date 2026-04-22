@@ -31,12 +31,18 @@ func init() {
 	devCmd.Flags().String("config", "hamr.toml", "path to config file")
 	devCmd.Flags().Bool("no-proxy", false, "skip the reverse proxy, just run watchers")
 	devCmd.Flags().BoolP("verbose", "v", false, "enable verbose (debug) logging")
+	devCmd.Flags().Bool("skip-version-check", false, "skip the \"scaffold newer than CLI\" guard")
 }
 
 func runDev(cmd *cobra.Command, _ []string) error {
 	configPath, _ := cmd.Flags().GetString("config")
 	noProxy, _ := cmd.Flags().GetBool("no-proxy")
 	verbose, _ := cmd.Flags().GetBool("verbose")
+	skipVersionCheck, _ := cmd.Flags().GetBool("skip-version-check")
+
+	if err := ensureCLINotBehindScaffold(configPath, skipVersionCheck); err != nil {
+		return err
+	}
 
 	// Save terminal state so we can always restore it, even after a panic
 	// (the hotkey reader puts the terminal into raw mode).
@@ -114,6 +120,36 @@ func runDev(cmd *cobra.Command, _ []string) error {
 	}
 }
 
+// ensureCLINotBehindScaffold blocks hamr dev when the project's hamr.toml
+// declares a version newer than the CLI. Using an older CLI against a newer
+// scaffold risks missing template/runtime features the scaffold depends on.
+// Dev CLI builds, missing/old [hamr] sections, and unparseable versions all
+// fall through so local hacking on hamr itself is not punished.
+func ensureCLINotBehindScaffold(configPath string, skip bool) error {
+	if skip || !releaseBuild {
+		return nil
+	}
+
+	meta, err := scaffold.LoadMetadata(configPath)
+	if err != nil || !meta.HasHamrSection() {
+		return nil
+	}
+
+	cliVer, err := scaffold.ParseVersion(version)
+	if err != nil {
+		return nil
+	}
+	projVer, err := scaffold.ParseVersion(meta.Hamr.Version)
+	if err != nil {
+		return nil
+	}
+
+	if cliVer.Less(projVer) {
+		return fmt.Errorf("scaffold was generated with hamr v%s but this CLI is v%s — upgrade the CLI (https://github.com/FyrmForge/hamr/releases) or pass --skip-version-check to bypass", projVer, cliVer)
+	}
+	return nil
+}
+
 // checkVersionStatus compares the CLI version against the project's [hamr].version
 // and updates the status bar indicator accordingly.
 func checkVersionStatus(sb *devserver.StatusBar, configPath string) {
@@ -141,8 +177,15 @@ func checkVersionStatus(sb *devserver.StatusBar, configPath string) {
 	}
 
 	if cliVer != projVer {
-		fmt.Printf("%s version mismatch: cli v%s, project v%s\r\n", devserver.HamrDevTag(), cliVer, projVer)
-		sb.SetVersionStatus(devserver.VersionMismatch, fmt.Sprintf("cli v%s proj v%s", cliVer, projVer))
+		var direction string
+		switch {
+		case cliVer.Less(projVer):
+			direction = "CLI is behind scaffold"
+		case projVer.Less(cliVer):
+			direction = "CLI is ahead of scaffold"
+		}
+		fmt.Printf("%s %s: cli v%s, project v%s\r\n", devserver.HamrDevTag(), direction, cliVer, projVer)
+		sb.SetVersionStatus(devserver.VersionMismatch, fmt.Sprintf("%s (cli v%s proj v%s)", direction, cliVer, projVer))
 		return
 	}
 

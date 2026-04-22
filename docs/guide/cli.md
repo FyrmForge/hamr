@@ -55,6 +55,7 @@ When called without flags, an interactive wizard asks for each option. When all 
 | `--pgadmin` | `false` | Include pgAdmin in Docker Compose |
 | `--stripe` | `false` | Include Stripe webhook handler |
 | `--alpine` | `false` | Include Alpine.js for local UI state |
+| `--skip-version-check` | `false` | Skip the "is a newer hamr release available" check |
 
 ```bash
 hamr new myapp                                          # interactive wizard
@@ -62,6 +63,8 @@ hamr new myapp --module github.com/user/myapp           # set module path
 hamr new myapp --css tailwind --storage s3 --websocket  # all features
 hamr new .                                              # scaffold into current directory
 ```
+
+Before scaffolding, `hamr new` queries GitHub for the latest release and refuses to run if this binary is out of date — the generated project would otherwise be missing features or templates that the latest hamr ships. Pass `--skip-version-check` to bypass (useful in CI or when offline). Network failures only warn and fall through so a flaky connection never blocks you. Dev builds of the CLI skip the check entirely.
 
 **Guide:** [Storage](pkg/storage.md) covers the `--storage` and `--static-s3` flags in detail.
 
@@ -80,6 +83,7 @@ hamr dev [flags]
 | `--config` | `hamr.toml` | Path to config file |
 | `--no-proxy` | `false` | Skip the reverse proxy, just run watchers |
 | `--verbose`, `-v` | `false` | Enable verbose (debug) logging |
+| `--skip-version-check` | `false` | Skip the "scaffold newer than CLI" guard |
 
 ```bash
 hamr dev                    # reads hamr.toml from current directory
@@ -87,6 +91,8 @@ hamr dev --config my.toml   # custom config path
 hamr dev --no-proxy         # skip proxy, just run watchers
 hamr dev --verbose          # detailed watcher/rebuild logs
 ```
+
+If `[hamr].version` in `hamr.toml` is newer than the running CLI, `hamr dev` refuses to start — running an old CLI against a scaffold that depends on newer features leads to silent breakage. Upgrade the CLI or pass `--skip-version-check` to bypass. When the CLI is *newer* than the scaffold, `hamr dev` only warns and continues (the status bar shows the mismatch). Dev builds skip the check entirely.
 
 Reads `[proxy]`, `[dev]` sections from `hamr.toml`. Manages Docker Compose deps, file watchers, build commands, long-running processes, and a reverse proxy with SSE-based live reload.
 
