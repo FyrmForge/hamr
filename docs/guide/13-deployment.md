@@ -1,6 +1,6 @@
 # Deployment
 
-A typical HAMR deployment is a single Go binary + PostgreSQL + optional S3 for file storage. This guide covers Docker builds, CI/CD pipelines, production configuration, and environment variables.
+A typical HAMR deployment is a single Go binary + PostgreSQL or SQLite + optional S3 for file storage. This guide covers Docker builds, CI/CD pipelines, production configuration, and environment variables.
 
 **Package references:** [Server](pkg/server.md), [Config](pkg/config.md)
 
@@ -51,6 +51,30 @@ CMD ["/bin/site"]
 - Generate static pages during the build stage
 - Copy `migrations/` if running migrations from the same binary
 - Include `ca-certificates` for HTTPS calls and `tzdata` for time zones
+
+### SQLite Deployments
+
+For SQLite projects the scaffolded Dockerfile declares `/data` as a volume so the database file survives container restarts:
+
+```dockerfile
+RUN mkdir -p /data
+VOLUME ["/data"]
+ENV DATABASE_PATH=/data/app.db
+```
+
+Mount host storage at `/data` to persist the file across redeploys:
+
+```bash
+docker run -v /srv/myapp/data:/data -e DATABASE_PATH=/data/app.db myapp
+```
+
+In Kubernetes use a `PersistentVolumeClaim` bound to `/data`. Because SQLite is a single-writer local file, run exactly **one** replica — horizontal scaling requires switching to PostgreSQL.
+
+**Backups.** With WAL mode enabled (the default), a live copy of the `.db` file is not consistent. Use either:
+
+- `sqlite3 /data/app.db ".backup /backup/app-$(date +%F).db"` — online backup API, safe while the app is writing
+- Stop the app, copy `/data/app.db`, `/data/app.db-wal`, and `/data/app.db-shm` together, then restart
+- For point-in-time recovery, use [Litestream](https://litestream.io/) to stream WAL frames to S3
 
 ---
 

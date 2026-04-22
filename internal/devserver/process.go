@@ -14,7 +14,11 @@ import (
 	"time"
 )
 
-const shutdownTimeout = 5 * time.Second
+// shutdownTimeout bounds how long we wait for a child process to exit after
+// SIGINT before escalating to SIGKILL. Kept short so a file save doesn't block
+// the next build — and so a restart window doesn't stall in-flight requests to
+// a half-shutdown child.
+const shutdownTimeout = 2 * time.Second
 
 // tailBuffer is a fixed-size ring buffer implementing io.Writer.
 // It keeps only the last tailBufSize bytes written, discarding older data.

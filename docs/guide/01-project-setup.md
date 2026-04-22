@@ -56,7 +56,7 @@ myapp/
 │   ├── css/                  # Stylesheets
 │   └── js/                   # Vendored JS (htmx, idiomorph; alpine if opted in)
 ├── docker/
-│   └── docker-compose.yaml   # Local dev services (Postgres, etc.)
+│   └── docker-compose.yaml   # Local dev services (Postgres, etc. — not generated for SQLite-only projects)
 ├── generated/                # Pre-rendered static pages
 ├── hamr.toml                 # Dev server configuration
 ├── .env                      # Environment variables
@@ -150,5 +150,5 @@ Always use `make` targets — never run `go build` or `go test` directly against
 ## Next Steps
 
 - [Development Workflow](02-dev-workflow.md) — Start the dev server with live reload
-- [Database](03-database.md) — Connect to PostgreSQL and run migrations
+- [Database](03-database.md) — Connect to PostgreSQL or SQLite and run migrations
 - [Handlers & Routing](04-handlers-routing.md) — Write your first handler

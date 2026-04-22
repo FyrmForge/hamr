@@ -22,7 +22,7 @@ Learn how to build full-stack Go applications with HAMR.
 
 1. [Project Setup](01-project-setup.md) — Scaffolding, project structure, config
 2. [Development Workflow](02-dev-workflow.md) — Dev server, watch rules, live reload
-3. [Database](03-database.md) — PostgreSQL connection, migrations, repo pattern
+3. [Database](03-database.md) — PostgreSQL or SQLite connection, migrations, repo pattern
 4. [Handlers & Routing](04-handlers-routing.md) — Server, routes, middleware, error handling
 5. [Templates & Frontend](05-templates-frontend.md) — Templ, HTMX, optional Alpine.js
 6. [Forms & Validation](06-forms-validation.md) — Validators, CSRF, flash messages

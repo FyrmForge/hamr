@@ -2,6 +2,7 @@ package devserver
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"encoding/json"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 //go:embed reload.js
@@ -45,15 +47,27 @@ func NewProxyHandler(target string, broker *SSEBroker, errorState *ErrorState, l
 			req.Header.Del("Accept-Encoding")
 		}
 	}
+	dialer := &net.Dialer{Timeout: 2 * time.Second, KeepAlive: 30 * time.Second}
 	proxy.Transport = &http.Transport{
 		// Disable compression so upstream sends uncompressed HTML,
 		// making body injection straightforward.
 		DisableCompression: true,
+		// Short timeouts so a half-up backend (port open, not serving) fails
+		// fast into ErrorHandler instead of stalling browser requests.
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return dialer.DialContext(ctx, network, addr)
+		},
+		ResponseHeaderTimeout: 2 * time.Second,
+		IdleConnTimeout:       30 * time.Second,
+		MaxIdleConns:          100,
 	}
 
 	if injectReload {
 		proxy.ModifyResponse = injectReloadScript
 	}
+	// Flush immediately so streaming responses (SSE, chunked HTMX) aren't
+	// buffered end-to-end by the proxy.
+	proxy.FlushInterval = -1
 
 	// Handle transport errors (backend down / connection refused).
 	waitingPage := renderWaitingPage(target)
@@ -130,8 +144,18 @@ func normalizeHost(addr string) string {
 	return addr
 }
 
+// maxInjectBody caps how large a response we're willing to buffer in-memory
+// for reload-script injection. Responses above this pass through untouched
+// so slow or large streams don't stall the proxy.
+const maxInjectBody = 5 * 1024 * 1024
+
 func injectReloadScript(resp *http.Response) error {
 	if resp.Request != nil && resp.Request.Method == http.MethodHead {
+		return nil
+	}
+	// HTMX partials don't need (and shouldn't contain) the reload script —
+	// injection would also force full-body buffering, stalling slow handlers.
+	if resp.Request != nil && resp.Request.Header.Get("HX-Request") != "" {
 		return nil
 	}
 	switch resp.StatusCode {
@@ -152,10 +176,21 @@ func injectReloadScript(resp *http.Response) error {
 		return nil
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	// Skip injection for oversized or chunked responses (Content-Length -1) —
+	// buffering them could hold the client for many seconds.
+	if resp.ContentLength > maxInjectBody || resp.ContentLength < 0 {
+		return nil
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxInjectBody+1))
 	_ = resp.Body.Close()
 	if err != nil {
 		return err
+	}
+	if int64(len(body)) > maxInjectBody {
+		// Larger than advertised — send original bytes through without injection.
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		return nil
 	}
 
 	// Find </body> and inject script before it.
@@ -190,7 +225,12 @@ func ListenAndServeProxy(addr string, handler http.Handler) (*http.Server, net.L
 		return nil, nil, err
 	}
 
-	srv := &http.Server{Handler: handler}
+	srv := &http.Server{
+		Handler: handler,
+		// Slowloris guard without capping body or long-lived (SSE) writes.
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 	go func() { _ = srv.Serve(ln) }()
 
 	return srv, ln, nil

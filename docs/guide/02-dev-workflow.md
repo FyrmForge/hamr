@@ -186,5 +186,5 @@ See [Dev](pkg/dev.md) for the full configuration reference and more examples.
 
 ## Next Steps
 
-- [Database](03-database.md) — PostgreSQL connection and migrations
+- [Database](03-database.md) — PostgreSQL or SQLite connection and migrations
 - [Handlers & Routing](04-handlers-routing.md) — Server setup and route groups

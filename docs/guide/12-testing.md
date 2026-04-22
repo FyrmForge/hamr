@@ -56,6 +56,29 @@ func TestUserRepo_Create(t *testing.T) {
 }
 ```
 
+For SQLite projects, use a `:memory:` database for fast, isolated per-test setup — no Docker, no filesystem cleanup:
+
+```go
+//go:embed migrations/*.sql
+var migrationsFS embed.FS
+
+func TestUserRepo_Create(t *testing.T) {
+    database, err := sqlite.ConnectContext(context.Background(), ":memory:")
+    require.NoError(t, err)
+    t.Cleanup(func() { database.Close() })
+
+    require.NoError(t, sqlite.Migrate(database, sqlite.MigrateConfig{
+        FS:        migrationsFS,
+        Directory: "migrations",
+    }))
+
+    repo := NewUserRepo(database)
+    // ...
+}
+```
+
+Each `:memory:` connection is an independent database — parallel tests don't share state.
+
 ### Validator Tests
 
 Validators are pure functions — easy to test:
@@ -159,6 +182,8 @@ e2e.SavePageHTML(t, page, "form-state")
 ## Integration Tests
 
 For tests that need a real database, [testcontainers-go](https://github.com/testcontainers/testcontainers-go) can spin up a Postgres instance in Docker per-test. HAMR's own `pkg/db` package uses this approach for connection resilience tests.
+
+For SQLite projects, prefer `:memory:` over testcontainers — it's faster and has no external dependencies. Use a temp file (`filepath.Join(t.TempDir(), "test.db")`) only when a test specifically exercises on-disk behaviour like WAL checkpointing or file locking.
 
 ---
 
