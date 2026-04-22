@@ -31,6 +31,7 @@ func Logging() echo.MiddlewareFunc {
 			logger := logging.FromContext(c.Request().Context()).With(
 				slog.String("request_id", reqID),
 				slog.String("client_ip", c.RealIP()),
+				slog.String("user_agent", c.Request().UserAgent()),
 			)
 			reqCtx := logging.WithLogger(c.Request().Context(), logger)
 			c.SetRequest(c.Request().WithContext(reqCtx))
