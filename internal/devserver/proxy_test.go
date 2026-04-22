@@ -73,6 +73,38 @@ func TestInjectReloadScript_ContentLength(t *testing.T) {
 	}
 }
 
+// TestInjectReloadScript_Chunked verifies that chunked responses (typical of
+// templ's streaming output) get the reload script injected. Before the proxy
+// change, Content-Length -1 responses were skipped entirely.
+func TestInjectReloadScript_Chunked(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		// Force chunked: don't set Content-Length; flush mid-body.
+		flusher, _ := w.(http.Flusher)
+		_, _ = w.Write([]byte("<html><body><p>hello"))
+		if flusher != nil {
+			flusher.Flush()
+		}
+		_, _ = w.Write([]byte("</p></body></html>"))
+	}))
+	defer backend.Close()
+
+	broker := NewSSEBroker(nil, nil, nil, false)
+	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, nil, nil, nil, nil, true)
+	proxy := httptest.NewServer(handler)
+	defer proxy.Close()
+
+	resp, err := http.Get(proxy.URL)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	got := string(body)
+	assert.Contains(t, got, "<p>hello</p>")
+	assert.Contains(t, got, "__hamr", "reload script must be injected into chunked responses")
+}
+
 func TestInjectReloadScript_NonHTML(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

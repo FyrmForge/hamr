@@ -181,9 +181,12 @@ func injectReloadScript(resp *http.Response) error {
 		return nil
 	}
 
-	// Skip injection for oversized or chunked responses (Content-Length -1) —
-	// buffering them could hold the client for many seconds.
-	if resp.ContentLength > maxInjectBody || resp.ContentLength < 0 {
+	// Skip injection when the upstream advertises a response larger than we're
+	// willing to buffer. Chunked responses (Content-Length -1) ARE buffered up
+	// to maxInjectBody — the LimitReader + post-read size check below guard
+	// against runaway payloads. Buffering localhost dev responses here is the
+	// price for getting the reload script into templ's chunked output.
+	if resp.ContentLength > maxInjectBody {
 		return nil
 	}
 
