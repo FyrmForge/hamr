@@ -97,7 +97,7 @@ func runDev(cmd *cobra.Command, _ []string) error {
 			if releaseBuild {
 				devserver.CheckLatestVersion(ctx, version, func(latest string) {
 					if statusBar.SetVersionUpdateIfOK("v" + latest) {
-						fmt.Printf("%s update available: v%s → v%s\r\n", devserver.HamrDevTag(), version, latest)
+						fmt.Printf("%s \033[1;93mupdate available: v%s → v%s\033[0m\r\n", devserver.HamrDevTag(), version, latest)
 					}
 				})
 			}
