@@ -33,6 +33,30 @@ inject_reload = true
 # log_file = ".hamr/dev_logs.txt"   # rolling dev log for LLM consumption (default)
 # log_file_max_lines = 200           # max lines kept (default)
 
+{{if .IncludeEmailMock -}}
+# Mail mock — captured email inbox viewable at /__hamr/mail during `hamr dev`.
+# Pair with pkg/emailmock as your email.Sender impl when EMAIL_MOCK=true.
+# Inbox is mirrored to a mbox file (openable in Thunderbird/mutt) so it
+# survives hamr dev restart. Set persist = false for ephemeral in-memory.
+[dev.email]
+enabled = true
+# max_messages = 500
+# max_message_bytes = 10485760         # 10 MiB
+# persist = true                        # default
+# persist_path = ".hamr/mail/inbox.mbox" # default
+{{- else -}}
+# Mail mock — captured email inbox viewable at /__hamr/mail during `hamr dev`.
+# Pair with pkg/emailmock as your email.Sender impl when EMAIL_MOCK=true.
+# Inbox is mirrored to a mbox file (openable in Thunderbird/mutt) so it
+# survives hamr dev restart. Set persist = false for ephemeral in-memory.
+# [dev.email]
+# enabled = true
+# max_messages = 500
+# max_message_bytes = 10485760         # 10 MiB
+# persist = true                        # default
+# persist_path = ".hamr/mail/inbox.mbox" # default
+{{- end}}
+
 {{if or (ne .Database "sqlite") (eq .StorageBackend "s3") -}}
 [[dev.docker_compose]]
 name = "deps"

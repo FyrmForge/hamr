@@ -27,6 +27,7 @@ type wizardResult struct {
 	WebSocket        string // "yes" | "no"
 	E2E              string // "yes" | "no"
 	Stripe           string // "yes" | "no"
+	EmailMock        string // "yes" | "no"
 	Alpine           string // "yes" | "no"
 }
 
@@ -60,6 +61,7 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 		WebSocket:        "yes",
 		E2E:              "yes",
 		Stripe:           "yes",
+		EmailMock:        "yes",
 		Alpine:           "no",
 	}
 
@@ -489,6 +491,33 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 			res.Stripe = "yes"
 		} else {
 			res.Stripe = "no"
+		}
+	}
+
+	// ── Email mock ─────────────────────────────────────────
+	if !cmd.Flags().Changed("email-mock") {
+		if err := huh.NewForm(huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Dev email inbox").
+				Description("Captures outbound mail via pkg/emailmock and shows it at /__hamr/mail during hamr dev. Inbox is persisted as an mbox file you can open in Thunderbird.").
+				Options(
+					huh.NewOption("Yes — wire emailmock + enable the /__hamr/mail inbox", "yes"),
+					huh.NewOption("No", "no"),
+				).
+				Value(&res.EmailMock),
+		)).Run(); err != nil {
+			return nil, err
+		}
+		if res.EmailMock == "yes" {
+			fmt.Println("  Dev email inbox: Enabled")
+		} else {
+			fmt.Println("  Dev email inbox: Disabled")
+		}
+	} else {
+		if v, _ := cmd.Flags().GetBool("email-mock"); v {
+			res.EmailMock = "yes"
+		} else {
+			res.EmailMock = "no"
 		}
 	}
 

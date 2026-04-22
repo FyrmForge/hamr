@@ -2038,6 +2038,181 @@ interface in your app.
 
 ---
 
+### email
+
+> Package email defines a provider-agnostic `Sender` interface for
+> transactional email and the value types that flow through it. Apps depend on
+> the interface; concrete implementations (real provider adapters, emailmock,
+> plain SMTP) are chosen at startup.
+
+```go
+type Sender interface {
+    Send(ctx context.Context, msg Message) (*Result, error)
+}
+```
+Implementations must be safe for concurrent use. `Send` respects context
+cancellation.
+
+```go
+type Message struct {
+    From        Address
+    To, Cc, Bcc []Address
+    ReplyTo     *Address          // nil if not overriding From
+    Subject     string
+    Text        string            // plaintext body
+    HTML        string            // html body
+    Attachments []Attachment      // downloadable files
+    Inline      []Attachment      // cid-referenced; ContentID must be set
+    Headers     map[string]string // custom SMTP/HTTP headers
+    Tags        map[string]string // free-form correlation metadata
+}
+
+type Address    struct { Name, Email string }
+type Attachment struct { Filename, ContentType string; Data []byte; ContentID string }
+type Result     struct { ID string } // provider-assigned message id (may be empty)
+
+func Addr(name, email string) Address
+```
+
+**Body semantics.** Set `Text`, `HTML`, or both. Real adapters producing MIME
+emit `multipart/alternative` when both are present.
+
+**Inline images.** Reference as `<img src="cid:logo">` in HTML; add an
+Attachment to `Inline` with `ContentID = "logo"`. The emailmock viewer rewrites
+`cid:` to local URLs; real adapters include the parts in the MIME tree.
+
+**Extension points.** The interface is deliberately narrow. Provider-specific
+features belong in:
+- `Headers` — custom SMTP/RFC5322 headers (List-Unsubscribe, X-*, In-Reply-To)
+- `Tags` — correlation metadata (user_id, campaign_id) for provider webhooks
+- Your own adapter — templates, per-recipient substitutions, scheduled send,
+  tracking flags
+
+**Swap pattern.**
+```go
+var sender email.Sender
+if os.Getenv("EMAIL_MOCK") == "true" {
+    sender = emailmock.New(os.Getenv("HAMR_DEV_URL"))
+} else {
+    sender = myapp.NewRealSender(cfg)
+}
+```
+
+---
+
+### emailmock
+
+> Package emailmock is a dev-only `email.Sender` that ships messages to the
+> hamr dev server's in-memory inbox at `/__hamr/mail`. It does not construct
+> MIME, talk SMTP, or call any provider API — it POSTs JSON to the hamr dev
+> proxy's ingest endpoint.
+
+**What this mock tests.** How your application uses `email.Sender` — field
+population, recipient handling, attachment construction, HTML/text body
+rendering, inline image CIDs. It does NOT validate your production provider
+adapter's MIME construction, SMTP handshake, or HTTP wire format. Use your
+provider's test environment or integration tests for those.
+
+```go
+func New(baseURL string) *Client
+```
+`baseURL` is the hamr dev proxy origin (e.g. `http://localhost:3000`).
+Trailing slashes are stripped. Empty baseURL is accepted but every `Send` will
+fail until reconfigured. Default request timeout is 10 seconds.
+
+```go
+func (c *Client) Send(ctx context.Context, msg email.Message) (*email.Result, error)
+```
+JSON-encodes `msg` and POSTs to `<baseURL>/__hamr/mail/ingest`. On 200 returns
+the server-assigned `*email.Result{ID}`; on 422 with a magic-recipient body
+returns `ErrBounced` or `ErrRejected`; on 413 returns a size-limit error;
+otherwise returns a wrapped HTTP error.
+
+```go
+var (
+    ErrBounced  = errors.New("emailmock: recipient bounced")
+    ErrRejected = errors.New("emailmock: recipient rejected")
+)
+```
+Sentinel errors; use `errors.Is` to detect.
+
+**Failure simulation.** Any recipient whose local-part (case-insensitive)
+matches `bounce` or `reject` short-circuits storage:
+
+| Local-part | Returned error |
+|------------|----------------|
+| `bounce`   | `ErrBounced`   |
+| `reject`   | `ErrRejected`  |
+
+Checked across `To`, `Cc`, and `Bcc`. Nothing is stored in the inbox for
+rejected messages.
+
+**Dev inbox UI** (served at `/__hamr/mail` on the hamr dev proxy):
+
+- Inbox list — newest-first, substring search over subject, recipients, sender
+- Detail view — tabs: HTML / Plaintext / Raw / Headers / Attachments
+- HTML tab — sandboxed `<iframe sandbox="">` with restrictive CSP
+  (`default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'`),
+  mobile-viewport toggle (375px), images-blocked toggle
+- Raw tab — best-effort RFC822-shaped reconstruction (NOT real MIME; the
+  mock never receives MIME)
+- Outcome simulation — per-message Mark Failed / Mark Delayed for post-hoc
+  status tagging on already-captured messages
+- Inbox-wide Clear, per-message Delete
+
+**HTTP ingest API** (for non-Go clients):
+
+```
+POST /__hamr/mail/ingest
+Content-Type: application/json
+
+{"From":{"Email":"..."}, "To":[{"Email":"..."}], "Subject":"...", "HTML":"...", ...}
+
+→ 200  {"ID":"msg_..."}
+→ 413  {"error":"message too large"}
+→ 422  {"error":"bounced"}  or  {"error":"rejected"}
+```
+Attachment `Data` is base64-encoded per Go's JSON conventions.
+
+**Server-side config** (in `hamr.toml`):
+```toml
+[dev.email]
+enabled           = true                     # opt-in; default false
+max_messages      = 500                      # ring-buffer size; oldest evicted first
+max_message_bytes = 10485760                 # per-message cap; ingest returns 413 above this
+persist           = true                     # default; mirror inbox to mbox file
+persist_path      = ".hamr/mail/inbox.mbox"  # default
+```
+Requires `[proxy]` to be configured — inbox UI lives on the proxy mux.
+`hamr dev` refuses to start if `enabled = true` without a proxy.
+
+**Lifecycle.** Inbox survives app restarts triggered by file-watch rebuilds
+(the dev proxy keeps running). When persistence is enabled (default) it
+also survives restarts of `hamr dev` itself via the mbox file.
+
+**Persistence format.** Standard MBOXO mbox. Each message is a real RFC 822 /
+MIME document separated by a `From ` line, so Thunderbird, mutt, and Apple
+Mail can open the file directly. Runtime metadata (status, tags, received-at,
+internal id) round-trips via `X-Hamr-*` headers that real mail clients
+ignore. Bodies not ending in `\n` gain one trailing newline after round-trip
+(MBOXO separator requirement). Set `persist = false` to skip the file.
+
+**CSRF guard.** Mutating POST endpoints (`/clear`, `/:id/delete`,
+`/:id/fail`, `/:id/delay`) reject requests whose `Origin` header is set but
+doesn't match the request Host. Requests without an `Origin` header (curl,
+tests, non-browser clients) pass through. The mock is unauthenticated — do
+not bind `hamr dev`'s proxy to a public interface.
+
+**Dev-only.** No production guards. Gate on `EMAIL_MOCK=true` in `main.go`.
+
+**Known limits.**
+- In-memory; no persistence across `hamr dev` restart
+- Raw view is reconstructed, not true MIME wire bytes
+- Single shared inbox — no per-user segmentation
+- No webhook simulation, no open/click tracking simulation
+
+---
+
 ## CLI Commands
 
 ### hamr add skill

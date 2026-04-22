@@ -161,6 +161,42 @@ keep_running = true
 | `keep_running` | bool | `false` | Don't `docker compose down` when hamr stops |
 | `env` | list | — | Extra environment variables |
 
+### Mail Mock
+
+Opt-in, in-memory email inbox viewable at `/__hamr/mail` on the proxy. Apps
+send through [`pkg/emailmock`](emailmock.md) (which implements
+[`email.Sender`](email.md)) when running locally; real providers are swapped
+in for production.
+
+```toml
+[dev.email]
+enabled           = true                     # opt-in; default false
+max_messages      = 500                      # ring-buffer size; oldest evicted first
+max_message_bytes = 10485760                 # per-message cap; ingest returns 413 above this
+persist           = true                     # default; mirror to mbox file
+persist_path      = ".hamr/mail/inbox.mbox"  # default
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Mount the inbox and ingest handler |
+| `max_messages` | int | 500 | Ring buffer cap; oldest messages evicted first |
+| `max_message_bytes` | int | 10 MiB | Per-message byte cap; over-cap ingests return 413 |
+| `persist` | bool | `true` | Mirror inbox to an mbox file so it survives `hamr dev` restart |
+| `persist_path` | string | `.hamr/mail/inbox.mbox` | Path to the mbox file |
+
+Requires `[proxy]` to be configured — the inbox UI is served on the proxy mux.
+`hamr dev` refuses to start if `enabled = true` without a proxy section.
+
+The inbox survives app restarts triggered by file-watch rebuilds. When
+persistence is enabled (default) it also survives restarts of `hamr dev`
+itself via the mbox file at `persist_path`. The file is a standard MBOXO
+archive — open it in Thunderbird, mutt, or Apple Mail for a real mail-client
+view.
+
+See [emailmock](emailmock.md) for usage, magic-recipient failure simulation,
+and the HTTP ingest API.
+
 ## File Logging
 
 By default, `hamr dev` mirrors its recent output to a rolling log file at `.hamr/dev_logs.txt`. The file contains `[hamr dev]` infrastructure messages plus stdout/stderr from watched commands and daemons, with terminal escape sequences stripped. This is designed for LLM consumption: an AI assistant can read the file to understand what happened during the dev session without scraping the terminal.

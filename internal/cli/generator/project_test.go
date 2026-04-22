@@ -996,6 +996,91 @@ func TestGenerateProject_stripe(t *testing.T) {
 	assert.Contains(t, envFile, "STRIPE_WEBHOOK_SECRET")
 }
 
+func TestBuildProjectFileList_emailMock(t *testing.T) {
+	cfg := &ProjectConfig{
+		Name:             "proj",
+		Module:           "github.com/test/proj",
+		CSS:              "plain",
+		IncludeEmailMock: true,
+	}
+	files := buildProjectFileList(cfg)
+
+	dests := make(map[string]bool)
+	for _, f := range files {
+		dests[f.dest] = true
+	}
+	assert.True(t, dests["internal/web/handler/devemail/handler.go"])
+}
+
+func TestGenerateProject_emailMock(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "emailproj")
+
+	cfg := &ProjectConfig{
+		Name:             "emailproj",
+		Module:           "github.com/test/emailproj",
+		CSS:              "plain",
+		Database:         "postgres",
+		GoVersion:        "1.25.0",
+		IncludeEmailMock: true,
+	}
+
+	require.NoError(t, GenerateProject(dir, cfg))
+
+	assertFileExists(t, dir, "internal/web/handler/devemail/handler.go")
+
+	// main.go wires the emailmock client behind EMAIL_MOCK.
+	mainGo := readFile(t, dir, "cmd/site/main.go")
+	assert.Contains(t, mainGo, `"github.com/FyrmForge/hamr/pkg/email"`)
+	assert.Contains(t, mainGo, `"github.com/FyrmForge/hamr/pkg/emailmock"`)
+	assert.Contains(t, mainGo, "envEmailMock")
+	assert.Contains(t, mainGo, "emailmock.New(envHamrDevURL)")
+	assert.Contains(t, mainGo, "EmailSender: emailSender")
+
+	// web/server.go has EmailSender field + route registration.
+	serverGo := readFile(t, dir, "internal/web/server.go")
+	assert.Contains(t, serverGo, "EmailSender email.Sender")
+	assert.Contains(t, serverGo, "/dev/send-test-email")
+	assert.Contains(t, serverGo, "devemail.NewHandler")
+
+	// .env.example has the mock env vars.
+	envFile := readFile(t, dir, ".env.example")
+	assert.Contains(t, envFile, "EMAIL_MOCK=true")
+	assert.Contains(t, envFile, "HAMR_DEV_URL=")
+
+	// hamr.toml has [dev.email] enabled.
+	hamrToml := readFile(t, dir, "hamr.toml")
+	assert.Contains(t, hamrToml, "[dev.email]")
+	assert.Contains(t, hamrToml, "enabled = true")
+}
+
+func TestGenerateProject_noEmailMock(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "noemailproj")
+
+	cfg := &ProjectConfig{
+		Name:      "noemailproj",
+		Module:    "github.com/test/noemailproj",
+		CSS:       "plain",
+		Database:  "postgres",
+		GoVersion: "1.25.0",
+	}
+
+	require.NoError(t, GenerateProject(dir, cfg))
+
+	assertFileNotExists(t, dir, "internal/web/handler/devemail/handler.go")
+
+	mainGo := readFile(t, dir, "cmd/site/main.go")
+	assert.NotContains(t, mainGo, "emailmock.New")
+	assert.NotContains(t, mainGo, "envEmailMock")
+
+	envFile := readFile(t, dir, ".env.example")
+	assert.NotContains(t, envFile, "EMAIL_MOCK=")
+
+	hamrToml := readFile(t, dir, "hamr.toml")
+	// The commented example block is still present; the uncommented block is not.
+	assert.Contains(t, hamrToml, "# [dev.email]")
+	assert.NotContains(t, hamrToml, "\n[dev.email]")
+}
+
 func TestGenerateProject_noStripe(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "nostripeproj")
 

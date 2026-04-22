@@ -30,6 +30,7 @@ type ProjectConfig struct {
 	IncludeWS        bool
 	IncludeE2E       bool
 	IncludeStripe    bool
+	IncludeEmailMock bool // wire pkg/emailmock + enable /__hamr/mail in hamr.toml
 	IncludeLocale    bool
 	IncludeAlpine    bool
 	DefaultLocale    string // default: "en"
@@ -302,6 +303,14 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 	if cfg.IncludeStripe {
 		files = append(files,
 			templateFile{"templates/new/internal/api/handler/stripe/handler.go.tmpl", "internal/api/handler/stripe/handler.go"},
+		)
+	}
+
+	// Dev-only email test handler — sends a sample message through the
+	// configured email.Sender so the /__hamr/mail inbox can be demoed immediately.
+	if cfg.IncludeEmailMock {
+		files = append(files,
+			templateFile{"templates/new/internal/web/handler/devemail/handler.go.tmpl", "internal/web/handler/devemail/handler.go"},
 		)
 	}
 

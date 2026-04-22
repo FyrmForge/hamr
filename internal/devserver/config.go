@@ -27,6 +27,39 @@ type DevConfig struct {
 	DockerCompose   []DockerCompose `toml:"docker_compose"`
 	LogFile         string          `toml:"log_file"`
 	LogFileMaxLines int             `toml:"log_file_max_lines"`
+	Email           EmailConfig     `toml:"email"`
+}
+
+// EmailConfig holds the [dev.email] table for the mail mock. When Enabled
+// is true, hamr dev runs an email inbox at /__hamr/mail on the reverse proxy.
+// Requires [proxy] to be configured.
+//
+// Persistence defaults to on: the inbox is mirrored to an mbox file at
+// PersistPath so it survives hamr dev restart. Set Persist=false for an
+// ephemeral in-memory-only inbox.
+type EmailConfig struct {
+	Enabled         bool   `toml:"enabled"`
+	MaxMessages     int    `toml:"max_messages"`      // default 500
+	MaxMessageBytes int64  `toml:"max_message_bytes"` // default 10MiB
+	Persist         *bool  `toml:"persist"`           // default true
+	PersistPath     string `toml:"persist_path"`      // default ".hamr/mail/inbox.mbox"
+}
+
+// PersistEnabled returns whether persistence is on. Defaults to true when the
+// field is unset (nil).
+func (c EmailConfig) PersistEnabled() bool {
+	if c.Persist == nil {
+		return true
+	}
+	return *c.Persist
+}
+
+// ResolvedPersistPath returns PersistPath with the default applied.
+func (c EmailConfig) ResolvedPersistPath() string {
+	if c.PersistPath != "" {
+		return c.PersistPath
+	}
+	return ".hamr/mail/inbox.mbox"
 }
 
 // DockerCompose declares a docker compose file that hamr ensures is running.

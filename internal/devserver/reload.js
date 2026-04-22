@@ -219,10 +219,15 @@
             "#__hamr-panel .hp-rule-dot.error{background:#EF4444;}" +
 
             // Footer toggle
-            "#__hamr-panel .hp-footer{padding:10px 14px;border-top:1px solid #2E3338;display:flex;align-items:center;gap:8px;}" +
+            "#__hamr-panel .hp-footer{padding:10px 14px;border-top:1px solid #2E3338;display:flex;flex-direction:column;align-items:stretch;gap:8px;}" +
             "#__hamr-panel .hp-footer label{display:flex;align-items:center;gap:6px;font-size:12px;color:#6B7280;cursor:pointer;}" +
             "#__hamr-panel .hp-footer label:hover{color:#D4D4D4;}" +
             "#__hamr-panel .hp-footer input[type=checkbox]{accent-color:#FFB347;cursor:pointer;}" +
+            "#__hamr-panel .hp-mail-btn{display:flex;align-items:center;gap:6px;font-size:12px;color:#6B7280;" +
+            "text-decoration:none;padding:6px 8px;border:1px solid #3A3F45;border-radius:6px;" +
+            "background:#2A2E33;transition:color 0.15s,border-color 0.15s,background 0.15s;}" +
+            "#__hamr-panel .hp-mail-btn:hover{color:#E8E8E8;border-color:#FFB347;background:#2F3438;}" +
+            "#__hamr-panel .hp-mail-btn svg{flex-shrink:0;}" +
 
             // Logs overlay — to the right of the widget, fills remaining width
             "#__hamr-logs{position:fixed;bottom:16px;left:86px;right:16px;z-index:100000;" +
@@ -515,11 +520,17 @@
             html += '</div>';
         }
 
-        // Logs toggle.
+        // Logs toggle + optional mail-inbox shortcut.
         var logsChecked = isLogOverlayOpen();
         html += '<div class="hp-footer">' +
-            '<label><input type="checkbox" class="hp-logs-toggle"' + (logsChecked ? " checked" : "") + '> Show logs</label>' +
-            '</div>';
+            '<label><input type="checkbox" class="hp-logs-toggle"' + (logsChecked ? " checked" : "") + '> Show logs</label>';
+        if (config.mail_mock) {
+            html += '<a class="hp-mail-btn" href="/__hamr/mail" target="_blank" rel="noopener" title="Open captured email inbox in a new tab">' +
+                '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+                '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg>' +
+                'Open mail inbox</a>';
+        }
+        html += '</div>';
 
         panel.innerHTML = html;
 

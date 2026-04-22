@@ -22,6 +22,9 @@ import (
 {{- if .IncludeStripe}}
 	"github.com/FyrmForge/hamr/pkg/stripemock"
 {{- end}}
+{{- if .IncludeEmailMock}}
+	"github.com/FyrmForge/hamr/pkg/email"
+{{- end}}
 
 	"{{.Module}}/internal/middleware"
 	"{{.Module}}/internal/repo"
@@ -30,6 +33,9 @@ import (
 	authhandler "{{.Module}}/internal/web/handler/auth"
 {{- end}}
 	"{{.Module}}/internal/web/handler/about"
+{{- if .IncludeEmailMock}}
+	"{{.Module}}/internal/web/handler/devemail"
+{{- end}}
 	"{{.Module}}/internal/web/handler/home"
 	"{{.Module}}/internal/web/components"
 )
@@ -59,6 +65,12 @@ type Deps struct {
 	// StripeMock is non-nil only when STRIPE_MOCK=true. Handlers that create
 	// checkouts should use this for outbound calls in dev.
 	StripeMock *stripemock.Client
+{{- end}}
+{{- if .IncludeEmailMock}}
+	// EmailSender is the outbound mail transport. In dev it points at the
+	// hamr email inbox at /__hamr/mail (via pkg/emailmock); in production
+	// swap in a real provider adapter that satisfies email.Sender.
+	EmailSender email.Sender
 {{- end}}
 }
 
@@ -108,6 +120,16 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 
 	homeHandler := home.NewHandler()
 	site.GET("/", homeHandler.Index)
+{{- if .IncludeEmailMock}}
+
+	// Dev-only sample email endpoint. Sends a test message through the
+	// configured email.Sender so you can smoke-test the /__hamr/mail inbox.
+	// Gated on DevMode; no-op in production regardless of route registration.
+	if deps.EmailSender != nil {
+		devmailHandler := devemail.NewHandler(deps.EmailSender, deps.DevMode)
+		site.GET("/dev/send-test-email", devmailHandler.SendTest)
+	}
+{{- end}}
 {{- if .IncludeAuth}}
 
 	// Auth routes.

@@ -235,6 +235,7 @@ func applyWizardResult(cmd *cobra.Command, name string, res *wizardResult, cfg *
 	cfg.IncludeWS = res.WebSocket == "yes"
 	cfg.IncludeE2E = res.E2E == "yes"
 	cfg.IncludeStripe = res.Stripe == "yes"
+	cfg.IncludeEmailMock = res.EmailMock == "yes"
 	cfg.IncludeLocale = res.Locale == "yes"
 	cfg.IncludeAlpine = res.Alpine == "yes"
 
@@ -287,6 +288,7 @@ func init() {
 	newCmd.Flags().Bool("static-s3", false, "sync static assets to a dedicated S3 bucket")
 	newCmd.Flags().Bool("pgadmin", false, "include pgAdmin in Docker Compose")
 	newCmd.Flags().Bool("stripe", false, "include Stripe webhook handler")
+	newCmd.Flags().Bool("email-mock", false, "wire pkg/emailmock + enable the /__hamr/mail dev inbox")
 	newCmd.Flags().Bool("locale", false, "include localisation (i18n) support")
 	newCmd.Flags().Bool("alpine", false, "include Alpine.js for local UI state")
 }

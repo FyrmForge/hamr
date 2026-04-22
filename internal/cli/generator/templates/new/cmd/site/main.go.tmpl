@@ -31,6 +31,10 @@ import (
 {{- if .IncludeStripe}}
 	"github.com/FyrmForge/hamr/pkg/stripemock"
 {{- end}}
+{{- if .IncludeEmailMock}}
+	"github.com/FyrmForge/hamr/pkg/email"
+	"github.com/FyrmForge/hamr/pkg/emailmock"
+{{- end}}
 {{- if .IncludeLocale}}
 	"github.com/FyrmForge/hamr/pkg/i18n"
 	"github.com/FyrmForge/hamr/pkg/ptr"
@@ -86,6 +90,10 @@ var (
 	envStripeWebhookSecret = config.GetEnvOrDefault("STRIPE_WEBHOOK_SECRET", "")
 	envStripeMock          = config.GetEnvOrDefaultBool("STRIPE_MOCK", false)
 	envStripeCurrency      = config.GetEnvOrDefault("STRIPE_CURRENCY", "GBP")
+{{- end}}
+{{- if .IncludeEmailMock}}
+	envEmailMock   = config.GetEnvOrDefaultBool("EMAIL_MOCK", false)
+	envHamrDevURL  = config.GetEnvOrDefault("HAMR_DEV_URL", "http://localhost:3000")
 {{- end}}
 )
 
@@ -264,6 +272,17 @@ func main() {
 		log.Info("stripe mock enabled", "path", "/dev/stripe")
 	}
 {{- end}}
+{{- if .IncludeEmailMock}}
+
+	// Email sender. In dev (EMAIL_MOCK=true), ships messages to the hamr dev
+	// inbox at HAMR_DEV_URL/__hamr/mail. Swap for a real provider adapter in
+	// production.
+	var emailSender email.Sender
+	if envEmailMock {
+		emailSender = emailmock.New(envHamrDevURL)
+		log.Info("email mock enabled", "inbox", envHamrDevURL+"/__hamr/mail")
+	}
+{{- end}}
 
 	api.RegisterRoutes(srv, &api.Deps{
 		Store: store,
@@ -294,6 +313,9 @@ func main() {
 {{- end}}
 {{- if .IncludeStripe}}
 		StripeMock: stripeMock,
+{{- end}}
+{{- if .IncludeEmailMock}}
+		EmailSender: emailSender,
 {{- end}}
 	})
 

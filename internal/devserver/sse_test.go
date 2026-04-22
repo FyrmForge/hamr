@@ -14,7 +14,7 @@ import (
 )
 
 func TestSSEBroker_Handler(t *testing.T) {
-	broker := NewSSEBroker(nil, nil, nil)
+	broker := NewSSEBroker(nil, nil, nil, false)
 	srv := httptest.NewServer(broker.Handler())
 	defer srv.Close()
 
@@ -41,7 +41,7 @@ func TestSSEBroker_Handler(t *testing.T) {
 }
 
 func TestSSEBroker_Broadcast(t *testing.T) {
-	broker := NewSSEBroker(nil, nil, nil)
+	broker := NewSSEBroker(nil, nil, nil, false)
 	srv := httptest.NewServer(broker.Handler())
 	defer srv.Close()
 
@@ -68,7 +68,7 @@ func TestSSEBroker_Broadcast(t *testing.T) {
 }
 
 func TestSSEBroker_Broadcast_MultipleEvents(t *testing.T) {
-	broker := NewSSEBroker(nil, nil, nil)
+	broker := NewSSEBroker(nil, nil, nil, false)
 	srv := httptest.NewServer(broker.Handler())
 	defer srv.Close()
 
@@ -94,7 +94,7 @@ func TestSSEBroker_Broadcast_MultipleEvents(t *testing.T) {
 }
 
 func TestSSEBroker_MultipleClients(t *testing.T) {
-	broker := NewSSEBroker(nil, nil, nil)
+	broker := NewSSEBroker(nil, nil, nil, false)
 	srv := httptest.NewServer(broker.Handler())
 	defer srv.Close()
 
@@ -132,7 +132,7 @@ func TestSSEBroker_MultipleClients(t *testing.T) {
 }
 
 func TestSSEBroker_ClientDisconnect(t *testing.T) {
-	broker := NewSSEBroker(nil, nil, nil)
+	broker := NewSSEBroker(nil, nil, nil, false)
 	srv := httptest.NewServer(broker.Handler())
 	defer srv.Close()
 
@@ -150,7 +150,7 @@ func TestSSEBroker_ClientDisconnect(t *testing.T) {
 }
 
 func TestSSEBroker_Broadcast_NoClients(t *testing.T) {
-	broker := NewSSEBroker(nil, nil, nil)
+	broker := NewSSEBroker(nil, nil, nil, false)
 	assert.Equal(t, 0, broker.ClientCount())
 
 	// Should not panic or block.
@@ -158,7 +158,7 @@ func TestSSEBroker_Broadcast_NoClients(t *testing.T) {
 }
 
 func TestSSEBroker_Broadcast_FullChannel(t *testing.T) {
-	broker := NewSSEBroker(nil, nil, nil)
+	broker := NewSSEBroker(nil, nil, nil, false)
 	srv := httptest.NewServer(broker.Handler())
 	defer srv.Close()
 
@@ -193,7 +193,7 @@ func TestSSEBroker_ConfigEvent(t *testing.T) {
 	daemons := []Daemon{
 		{Name: "server", Cmd: "go run ./cmd/site"},
 	}
-	broker := NewSSEBroker(rules, daemons, nil)
+	broker := NewSSEBroker(rules, daemons, nil, false)
 	srv := httptest.NewServer(broker.Handler())
 	defer srv.Close()
 
@@ -213,8 +213,41 @@ func TestSSEBroker_ConfigEvent(t *testing.T) {
 }
 
 func TestSSEBroker_ClientCount(t *testing.T) {
-	broker := NewSSEBroker(nil, nil, nil)
+	broker := NewSSEBroker(nil, nil, nil, false)
 	assert.Equal(t, 0, broker.ClientCount())
+}
+
+// TestSSEBroker_ConfigEvent_MailMockFlag asserts the config SSE payload
+// carries the mail_mock flag so the dev-panel can decide whether to render
+// the inbox shortcut.
+func TestSSEBroker_ConfigEvent_MailMockFlag(t *testing.T) {
+	t.Run("enabled", func(t *testing.T) {
+		broker := NewSSEBroker(nil, nil, nil, true)
+		srv := httptest.NewServer(broker.Handler())
+		defer srv.Close()
+
+		resp, err := http.Get(srv.URL)
+		require.NoError(t, err)
+		defer func() { _ = resp.Body.Close() }()
+
+		events := readSSEEvents(bufio.NewScanner(resp.Body), 2)
+		require.Len(t, events, 2)
+		assert.Contains(t, events[1].data, `"mail_mock":true`)
+	})
+
+	t.Run("disabled omits key", func(t *testing.T) {
+		broker := NewSSEBroker(nil, nil, nil, false)
+		srv := httptest.NewServer(broker.Handler())
+		defer srv.Close()
+
+		resp, err := http.Get(srv.URL)
+		require.NoError(t, err)
+		defer func() { _ = resp.Body.Close() }()
+
+		events := readSSEEvents(bufio.NewScanner(resp.Body), 2)
+		require.Len(t, events, 2)
+		assert.NotContains(t, events[1].data, `"mail_mock"`)
+	})
 }
 
 type sseEvent struct {

@@ -106,7 +106,7 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	graph := NewGraph(r.cfg.Dev.Watch)
 	pm := NewProcessManager(r.logger)
-	broker := NewSSEBroker(r.cfg.Dev.Watch, r.cfg.Dev.Daemons, r.cfg.Dev.DockerCompose)
+	broker := NewSSEBroker(r.cfg.Dev.Watch, r.cfg.Dev.Daemons, r.cfg.Dev.DockerCompose, r.cfg.Dev.Email.Enabled)
 	errorState := NewErrorState()
 	logBuf := NewLogBuffer(1000)
 	pm.SetLogOutput(logBuf, broker)
@@ -187,9 +187,38 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 	}()
 
+	// Mail mock is gated on the proxy because its UI lives on the proxy mux.
+	// Fail loudly if enabled without a proxy rather than silently disabling.
+	var mailMock *MailMock
+	if r.cfg.Dev.Email.Enabled {
+		if !r.cfg.ProxyConfigured {
+			return fmt.Errorf("dev.email.enabled = true requires a [proxy] section in hamr.toml (the mail UI lives on the proxy mux)")
+		}
+		if r.noProxy {
+			return fmt.Errorf("dev.email.enabled = true cannot be used with --no-proxy (the mail UI lives on the proxy mux)")
+		}
+		opts := MailMockOptions{
+			MaxMessages:     r.cfg.Dev.Email.MaxMessages,
+			MaxMessageBytes: r.cfg.Dev.Email.MaxMessageBytes,
+			OnPersistError: func(err error) {
+				r.logger.Warn("mail mock persistence error", "err", err)
+			},
+		}
+		if r.cfg.Dev.Email.PersistEnabled() {
+			opts.PersistPath = r.cfg.Dev.Email.ResolvedPersistPath()
+		}
+		mailMock = NewMailMock(opts)
+		r.logger.Info("mail mock enabled",
+			"ui", "/__hamr/mail",
+			"ingest", "/__hamr/mail/ingest",
+			"max_messages", r.cfg.Dev.Email.MaxMessages,
+			"persist", opts.PersistPath,
+		)
+	}
+
 	if !r.noProxy && r.cfg.ProxyConfigured {
 		inject := r.cfg.Proxy.InjectReload != nil && *r.cfg.Proxy.InjectReload
-		handler := NewProxyHandler(r.cfg.Proxy.Target, broker, errorState, logBuf, actions, inject)
+		handler := NewProxyHandler(r.cfg.Proxy.Target, broker, errorState, logBuf, actions, mailMock, inject)
 		srv, _, err := ListenAndServeProxy(r.cfg.Proxy.Listen, handler)
 		if err != nil {
 			return fmt.Errorf("start proxy: %w", err)
