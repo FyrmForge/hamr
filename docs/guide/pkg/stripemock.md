@@ -235,6 +235,24 @@ mount on hamr's proxy mux. Apps point `stripe-go` at the proxy URL
 the listener. Earlier hamr versions used a dedicated `:3001` listener; the
 single-mux model removes that port and the `api_listen` config knob.
 
+**Path conflict with apps that serve their own `/v1/*`.** Because the mock
+mounts real Stripe paths on the same mux as the reverse proxy, `ServeMux`
+matches these before the catch-all and the request never reaches your app.
+The mock claims:
+
+- `/v1/checkout/sessions{,/}`
+- `/v1/payment_intents{,/}`
+- `/v1/accounts{,/}`, `/v1/account_links`
+- `/v1/refunds{,/}`
+- `/v1/payouts{,/}`
+
+If your own REST API is versioned at `/v1/*` and overlaps any of these,
+the mock will eat those requests while `[dev.stripe].enabled = true`. The
+cleanest workaround is to serve your app's API under a different prefix
+(e.g. `/api/v1/*`) — most hamr projects already do this. The mock has no
+way to know which `/v1/*` paths are yours vs Stripe's, and `stripe-go`'s
+`/v1`-prefix validation prevents moving the mock itself.
+
 ## Dashboard
 
 Open `http://<proxy>/__hamr/stripe` to see every resource the mock has

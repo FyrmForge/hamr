@@ -146,9 +146,23 @@ func acceptsHTML(r *http.Request) bool {
 	return strings.Contains(r.Header.Get("Accept"), "text/html")
 }
 
+// normalizeHost rewrites a listen/target address into a client-reachable
+// host:port. The raw config values (":3000", "0.0.0.0:3000", "[::]:3000")
+// are valid bind addresses but not valid client destinations — they mean
+// "listen on every interface." A browser or a spawned app process needs an
+// actual reachable host, so we substitute "localhost" for the unspecified
+// forms. Loopback addresses and hostnames are returned untouched.
 func normalizeHost(addr string) string {
 	if strings.HasPrefix(addr, ":") {
 		return "localhost" + addr
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	switch host {
+	case "0.0.0.0", "::", "[::]":
+		return "localhost:" + port
 	}
 	return addr
 }

@@ -319,10 +319,24 @@ func TestSSEEndpoint(t *testing.T) {
 }
 
 func TestNormalizeHost(t *testing.T) {
-	assert.Equal(t, "localhost:8080", normalizeHost(":8080"))
-	assert.Equal(t, "localhost:3000", normalizeHost(":3000"))
-	assert.Equal(t, "myhost:8080", normalizeHost("myhost:8080"))
-	assert.Equal(t, "127.0.0.1:9090", normalizeHost("127.0.0.1:9090"))
+	cases := []struct {
+		in, want string
+	}{
+		// Preserved as-is — already client-reachable.
+		{"myhost:8080", "myhost:8080"},
+		{"127.0.0.1:9090", "127.0.0.1:9090"},
+		{"localhost:3000", "localhost:3000"},
+		{"[::1]:8080", "[::1]:8080"},
+
+		// Bind-only forms rewritten to localhost.
+		{":8080", "localhost:8080"},
+		{":3000", "localhost:3000"},
+		{"0.0.0.0:3000", "localhost:3000"},
+		{"[::]:3000", "localhost:3000"},
+	}
+	for _, tc := range cases {
+		assert.Equal(t, tc.want, normalizeHost(tc.in), "input=%q", tc.in)
+	}
 }
 
 func TestListenAndServeProxy(t *testing.T) {

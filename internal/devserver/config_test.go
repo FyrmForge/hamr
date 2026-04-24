@@ -686,6 +686,10 @@ cmd = "echo"
 
 func TestLoadConfig_StripeEnabled(t *testing.T) {
 	path := writeConfig(t, `
+[proxy]
+listen = ":3000"
+target = ":8080"
+
 [dev.stripe]
 enabled = true
 webhook_url = "http://localhost:8080/api/webhooks/stripe"
@@ -746,4 +750,76 @@ cmd = "echo"
 			assert.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
+}
+
+func TestLoadConfig_RandomPortRejectedWhenMockEnabled(t *testing.T) {
+	// HAMR_DEV_URL / HAMR_STRIPE_MOCK_URL / checkout-session BaseURL are
+	// derived from proxy.listen verbatim. A ":0" random-bind can't be
+	// resolved without actually binding, so reject it at load time rather
+	// than silently emitting "http://localhost:0" to spawned processes.
+	tests := []struct {
+		name string
+		toml string
+	}{
+		{
+			name: "email mock + :0",
+			toml: `
+[proxy]
+listen = ":0"
+target = ":8080"
+
+[dev.email]
+enabled = true
+
+[[dev.watch]]
+name = "go"
+watch = "*.go"
+cmd = "echo"
+`,
+		},
+		{
+			name: "stripe mock + :0",
+			toml: `
+[proxy]
+listen = ":0"
+target = ":8080"
+
+[dev.stripe]
+enabled = true
+webhook_url = "http://localhost:8080/wh"
+webhook_secret = "whsec_x"
+
+[[dev.watch]]
+name = "go"
+watch = "*.go"
+cmd = "echo"
+`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeConfig(t, tt.toml)
+			_, err := LoadConfig(path)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "proxy.listen must have a non-zero port")
+		})
+	}
+}
+
+func TestLoadConfig_RandomPortOKWhenMocksDisabled(t *testing.T) {
+	// No mocks → no URL derivation → ":0" is fine. Covers deliberate
+	// dev-server-only smoke test patterns.
+	tomlStr := `
+[proxy]
+listen = ":0"
+target = ":8080"
+
+[[dev.watch]]
+name = "go"
+watch = "*.go"
+cmd = "echo"
+`
+	path := writeConfig(t, tomlStr)
+	_, err := LoadConfig(path)
+	require.NoError(t, err)
 }

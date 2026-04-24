@@ -1962,9 +1962,22 @@ Earlier hamr versions used a dedicated `:3001` listener for the API; the
 single-mux model removes that port and the `[dev.stripe].api_listen`
 config knob. `http.ServeMux`'s longest-prefix matching keeps `/v1/*` and
 `/__hamr/*` from colliding with the catch-all `/` reverse-proxy to the
-app — Stripe path namespaces (`/v1/checkout/sessions`,
-`/v1/payment_intents`, etc.) are extremely unlikely to clash with anything
-an app defines.
+app. **Caveat:** apps that version their own REST API at `/v1/*` (e.g.
+their own `/v1/accounts`, `/v1/refunds`, `/v1/payouts`) and turn on
+`[dev.stripe].enabled` will have those exact paths intercepted by the
+mock — the mock can't tell which `/v1/*` paths are Stripe's vs theirs.
+Workaround: serve the app's API under a different prefix (most projects
+already use `/api/v1/*`).
+
+**URL derivation.** `proxyClientBaseURL(cfg)` (in `stripemock.go`) builds
+`http://<normalized-host>:<port>` from `proxy.listen` and is used for the
+mock's `BaseURL` (rendered into checkout-session URLs) plus the
+`HAMR_DEV_URL` and `HAMR_STRIPE_MOCK_URL` env vars hamr injects into the
+spawned app. `normalizeHost` rewrites bind-only forms (`:port`,
+`0.0.0.0:port`, `[::]:port`) to `localhost:port` so the URL is
+client-reachable. Config validation rejects port `:0` (random-bind) plus
+absent `[proxy]` when either mock is enabled — the URL must be derivable
+from config alone, not from the runtime listener.
 
 **API surface (checkout sessions).**
 - `POST /v1/checkout/sessions` — create. Decodes Stripe's bracket-form body

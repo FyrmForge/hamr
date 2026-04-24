@@ -384,14 +384,14 @@ func randomHex(n int) string {
 	return hex.EncodeToString(b)[:n]
 }
 
-// stripeMockBaseURL returns the proxy origin used to construct user-facing
-// checkout URLs returned in CheckoutSession.URL. Always emits http:// — the
-// mock is localhost-only by design. Validation guarantees [proxy] is
-// configured when [dev.stripe].enabled = true.
-func stripeMockBaseURL(cfg *Config) string {
-	host := cfg.Proxy.Listen
-	if strings.HasPrefix(host, ":") {
-		host = "localhost" + host
-	}
-	return "http://" + host
+// proxyClientBaseURL returns the proxy's client-reachable origin
+// ("http://host:port") derived from cfg.Proxy.Listen. Used for the stripe
+// mock's BaseURL (rendered into checkout-session URLs) and for the
+// HAMR_DEV_URL / HAMR_STRIPE_MOCK_URL env vars injected into spawned
+// processes. Always http:// — the mock is localhost-only by design.
+// Validation guarantees [proxy] is configured when [dev.stripe] or
+// [dev.email] is enabled, and that the port is non-zero so the URL is
+// derivable from the configured listen value alone.
+func proxyClientBaseURL(cfg *Config) string {
+	return "http://" + normalizeHost(cfg.Proxy.Listen)
 }

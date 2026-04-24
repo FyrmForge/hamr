@@ -2,6 +2,7 @@ package devserver
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -371,7 +372,43 @@ func validate(cfg *Config) error {
 		}
 	}
 
+	// Email / Stripe mocks mount their routes on the proxy mux and derive
+	// HAMR_DEV_URL / HAMR_STRIPE_MOCK_URL from proxy.listen. Require a
+	// concrete [proxy] with a fixed port so the mock URL is derivable at
+	// config-load time — a random-port listener (":0") would force us to
+	// derive the URL only after binding, which isn't plumbed.
+	if cfg.Dev.Email.Enabled || cfg.Dev.Stripe.Enabled {
+		if !cfg.ProxyConfigured {
+			return fmt.Errorf("[proxy] is required when [dev.email] or [dev.stripe] is enabled: the mocks live on the proxy mux and their client-reachable URL is derived from proxy.listen")
+		}
+		if port := listenPort(cfg.Proxy.Listen); port == 0 {
+			return fmt.Errorf("proxy.listen must have a non-zero port when [dev.email] or [dev.stripe] is enabled: the mock's client-reachable URL is derived from proxy.listen and port 0 (random-bind) cannot be resolved without binding")
+		}
+	}
+
 	return nil
+}
+
+// listenPort extracts the port from a listen address. Returns 0 for a
+// malformed address or a ":0" random-bind. "" → 0 so absent addresses are
+// treated the same as explicit ":0" by callers that care.
+func listenPort(addr string) int {
+	if addr == "" {
+		return 0
+	}
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		if strings.HasPrefix(addr, ":") {
+			port = strings.TrimPrefix(addr, ":")
+		} else {
+			return 0
+		}
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 func detectCycles(rules []WatchRule) error {

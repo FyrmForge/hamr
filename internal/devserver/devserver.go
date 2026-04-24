@@ -108,7 +108,7 @@ func buildHamrInjectedEnv(cfg *Config) []string {
 		return nil
 	}
 	var injected []string
-	proxyOrigin := stripeMockBaseURL(cfg) // same origin builder; "stripe" name is historical
+	proxyOrigin := proxyClientBaseURL(cfg)
 	if cfg.Dev.Email.Enabled || cfg.Dev.Stripe.Enabled {
 		injected = append(injected, "HAMR_DEV_URL="+proxyOrigin)
 	}
@@ -268,7 +268,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		// attr as a tag override).
 		stripeLogger := r.logger.With("component", "stripe")
 		opts := StripeMockOptions{
-			BaseURL: stripeMockBaseURL(r.cfg),
+			BaseURL: proxyClientBaseURL(r.cfg),
 			Logger:  stripeLogger,
 			OnPersistError: func(err error) {
 				stripeLogger.Warn("persistence error", "err", err)
