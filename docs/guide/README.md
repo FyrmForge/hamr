@@ -2,9 +2,12 @@
 
 Learn how to build full-stack Go applications with HAMR.
 
-## CLI Reference
+## Reference
 
-[CLI Reference](cli.md) — All `hamr` commands and flags
+- [CLI Reference](cli.md) — All `hamr` commands and flags
+- [`hamr.toml` Reference](hamr-toml.md) — Full configuration schema
+
+## CLI Commands
 
 | Command | Description |
 |---------|-------------|

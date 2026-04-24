@@ -467,24 +467,24 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 		}
 	}
 
-	// ── Payment provider ───────────────────────────────────
+	// ── Stripe ─────────────────────────────────────────────
 	if !cmd.Flags().Changed("stripe") {
 		if err := huh.NewForm(huh.NewGroup(
 			huh.NewSelect[string]().
-				Title("Payment provider").
-				Description("Adds a webhook handler with signature verification and an event-type dispatch map.").
+				Title("Stripe").
+				Description("Real stripe-go SDK in your app code, with a local Stripe mock during hamr dev: a Stripe-compatible API on the proxy mux, real signed webhooks, and a dashboard at /__hamr/stripe with replay + refund actions. State persists across hamr dev restarts. Connect-aware (accounts, PaymentIntents w/ application_fee + transfer_data, refunds, payouts).").
 				Options(
-					huh.NewOption("Stripe — webhook handler using the stripe-go SDK", "yes"),
-					huh.NewOption("None", "no"),
+					huh.NewOption("Yes — wire stripe-go + the Stripe mock + /__hamr/stripe dashboard", "yes"),
+					huh.NewOption("No", "no"),
 				).
 				Value(&res.Stripe),
 		)).Run(); err != nil {
 			return nil, err
 		}
 		if res.Stripe == "yes" {
-			fmt.Println("  Payment provider: Stripe")
+			fmt.Println("  Stripe: Enabled (mock + dashboard)")
 		} else {
-			fmt.Println("  Payment provider: None")
+			fmt.Println("  Stripe: Disabled")
 		}
 	} else {
 		if v, _ := cmd.Flags().GetBool("stripe"); v {

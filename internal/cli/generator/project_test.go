@@ -980,20 +980,83 @@ func TestGenerateProject_stripe(t *testing.T) {
 	assert.Contains(t, handlerGo, "HandleWebhook")
 	assert.Contains(t, handlerGo, "webhook.ConstructEvent")
 
+	// Handler stubs every event the hamr Stripe mock fires so dev-time
+	// "unhandled event" surprises don't slip past the developer. If we add
+	// or rename an event in internal/devserver/stripemock_*.go, this test
+	// fires and forces the scaffold template to keep up.
+	for _, evt := range []string{
+		"checkout.session.completed",
+		"checkout.session.expired",
+		"checkout.session.async_payment_failed",
+		"account.updated",
+		"payment_intent.succeeded",
+		"payment_intent.payment_failed",
+		"charge.succeeded",
+		"charge.refunded",
+		"transfer.created",
+		"payout.paid",
+		"payout.failed",
+	} {
+		assert.Contains(t, handlerGo, evt, "scaffolded webhook handler must stub %q (mock fires it)", evt)
+	}
+
 	// API server.go imports stripe handler.
 	serverGo := readFile(t, dir, "internal/api/server.go")
 	assert.Contains(t, serverGo, "stripehandler")
 	assert.Contains(t, serverGo, "WebhookSecret")
 	assert.Contains(t, serverGo, "/webhooks/stripe")
 
-	// main.go has webhook secret env var.
+	// main.go uses real stripe-go via SetBackend (no pkg/stripemock anymore).
 	mainGo := readFile(t, dir, "cmd/site/main.go")
 	assert.Contains(t, mainGo, "envStripeWebhookSecret")
+	assert.Contains(t, mainGo, "envStripeMock")
+	assert.Contains(t, mainGo, "envStripeKey")
+	assert.Contains(t, mainGo, "envHamrStripeMockURL", "main.go must read HAMR_STRIPE_MOCK_URL (hamr-injected, no hardcoded port)")
 	assert.Contains(t, mainGo, "STRIPE_WEBHOOK_SECRET")
+	assert.Contains(t, mainGo, "STRIPE_MOCK")
+	assert.Contains(t, mainGo, "HAMR_STRIPE_MOCK_URL")
+	assert.Contains(t, mainGo, "stripe.SetBackend")
+	// Production safety guard: STRIPE_MOCK=true with DEV_MODE=false must
+	// refuse to start so a leftover dev flag in prod doesn't silently
+	// route real payment calls to a non-existent localhost mock.
+	assert.Contains(t, mainGo, "STRIPE_MOCK=true requires DEV_MODE=true",
+		"main.go must guard against STRIPE_MOCK in prod")
+	assert.NotContains(t, mainGo, "pkg/stripemock", "scaffold must no longer import the removed pkg/stripemock")
+	assert.NotContains(t, mainGo, "STRIPE_API_URL", "STRIPE_API_URL was retired in favor of STRIPE_MOCK + hamr-injected URL")
+	assert.NotContains(t, mainGo, "STRIPE_CURRENCY", "STRIPE_CURRENCY was retired (currency is now per-line-item via stripe-go)")
+	assert.NotContains(t, mainGo, `const hamrStripeMockURL`,
+		"hardcoded mock URL constant retired — HAMR_STRIPE_MOCK_URL is hamr-injected so it tracks proxy port changes")
 
-	// .env has STRIPE_WEBHOOK_SECRET.
+	// .env has the stripe trio.
 	envFile := readFile(t, dir, ".env.example")
-	assert.Contains(t, envFile, "STRIPE_WEBHOOK_SECRET")
+	assert.Contains(t, envFile, "STRIPE_KEY=")
+	assert.Contains(t, envFile, "STRIPE_MOCK=true")
+	assert.Contains(t, envFile, "STRIPE_WEBHOOK_SECRET=whsec_dev_")
+	assert.NotContains(t, envFile, "STRIPE_API_URL=")
+	assert.NotContains(t, envFile, "STRIPE_CURRENCY=")
+
+	// hamr.toml has [dev.stripe] block with the same generated webhook_secret
+	// as .env (the scaffold writes one value to both).
+	hamrToml := readFile(t, dir, "hamr.toml")
+	assert.Contains(t, hamrToml, "[dev.stripe]")
+	assert.Contains(t, hamrToml, "enabled = true")
+	assert.Contains(t, hamrToml, "webhook_url = \"http://localhost:8080/api/webhooks/stripe\"")
+	// Extract the secret from .env and assert hamr.toml contains the same value.
+	const envPrefix = "STRIPE_WEBHOOK_SECRET="
+	idx := strings.Index(envFile, envPrefix)
+	require.GreaterOrEqual(t, idx, 0)
+	envSecret := envFile[idx+len(envPrefix):]
+	if nl := strings.IndexAny(envSecret, "\n\r"); nl >= 0 {
+		envSecret = envSecret[:nl]
+	}
+	require.True(t, strings.HasPrefix(envSecret, "whsec_dev_"), "got %q", envSecret)
+	assert.Contains(t, hamrToml, "webhook_secret = \""+envSecret+"\"",
+		"hamr.toml webhook_secret must match the value generated into .env")
+
+	// web/server.go.tmpl no longer references the StripeMock dep.
+	webServerGo := readFile(t, dir, "internal/web/server.go")
+	assert.NotContains(t, webServerGo, "StripeMock")
+	assert.NotContains(t, webServerGo, "pkg/stripemock")
 }
 
 func TestBuildProjectFileList_emailMock(t *testing.T) {
@@ -1042,10 +1105,13 @@ func TestGenerateProject_emailMock(t *testing.T) {
 	assert.Contains(t, serverGo, "/dev/send-test-email")
 	assert.Contains(t, serverGo, "devemail.NewHandler")
 
-	// .env.example has the mock env vars.
+	// .env.example has the mock env vars. HAMR_DEV_URL was retired from
+	// the example file — `hamr dev` now injects it derived from
+	// [proxy].listen so .env doesn't need to track the proxy port.
 	envFile := readFile(t, dir, ".env.example")
 	assert.Contains(t, envFile, "EMAIL_MOCK=true")
-	assert.Contains(t, envFile, "HAMR_DEV_URL=")
+	assert.NotContains(t, envFile, "HAMR_DEV_URL=",
+		"HAMR_DEV_URL was retired from .env.example — hamr dev injects it now")
 
 	// hamr.toml has [dev.email] enabled.
 	hamrToml := readFile(t, dir, "hamr.toml")
@@ -1076,9 +1142,9 @@ func TestGenerateProject_noEmailMock(t *testing.T) {
 	assert.NotContains(t, envFile, "EMAIL_MOCK=")
 
 	hamrToml := readFile(t, dir, "hamr.toml")
-	// The commented example block is still present; the uncommented block is not.
-	assert.Contains(t, hamrToml, "# [dev.email]")
-	assert.NotContains(t, hamrToml, "\n[dev.email]")
+	// No [dev.email] block at all when the project wasn't scaffolded with the
+	// mock — users opt in by following the schema reference linked at the top.
+	assert.NotContains(t, hamrToml, "[dev.email]")
 }
 
 func TestGenerateProject_noStripe(t *testing.T) {

@@ -19,9 +19,6 @@ import (
 {{- if .IncludeWS}}
 	"github.com/FyrmForge/hamr/pkg/websocket"
 {{- end}}
-{{- if .IncludeStripe}}
-	"github.com/FyrmForge/hamr/pkg/stripemock"
-{{- end}}
 {{- if .IncludeEmailMock}}
 	"github.com/FyrmForge/hamr/pkg/email"
 {{- end}}
@@ -60,11 +57,6 @@ type Deps struct {
 {{- end}}
 {{- if .IncludeLocale}}
 	LocaleBundle *i18n.Bundle
-{{- end}}
-{{- if .IncludeStripe}}
-	// StripeMock is non-nil only when STRIPE_MOCK=true. Handlers that create
-	// checkouts should use this for outbound calls in dev.
-	StripeMock *stripemock.Client
 {{- end}}
 {{- if .IncludeEmailMock}}
 	// EmailSender is the outbound mail transport. In dev it points at the

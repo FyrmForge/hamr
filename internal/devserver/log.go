@@ -26,10 +26,16 @@ var levelColors = map[slog.Level]string{
 //
 // Format: [hamr dev] message key=value key=value ...
 // Errors and warnings get colored level labels.
+//
+// Subcomponent prefix: a logger derived via `.With("component", "stripe")`
+// (or any component string) renders as `[hamr:stripe]` instead of
+// `[hamr dev]`. The component attr is consumed for the prefix and not
+// duplicated in the rendered attr list.
 type devHandler struct {
-	w     io.Writer
-	level slog.Level
-	attrs []slog.Attr
+	w         io.Writer
+	level     slog.Level
+	attrs     []slog.Attr
+	component string // empty = use default [hamr dev] tag
 }
 
 func newDevHandler(w io.Writer, level slog.Level) *devHandler {
@@ -43,8 +49,17 @@ func (h *devHandler) Enabled(_ context.Context, l slog.Level) bool {
 func (h *devHandler) Handle(_ context.Context, r slog.Record) error {
 	var buf []byte
 
-	// Tag.
-	buf = append(buf, hamrTag...)
+	// Tag — default is [hamr dev], but components get [hamr:<component>].
+	if h.component != "" {
+		buf = append(buf, tagColor...)
+		buf = append(buf, '[', 'h', 'a', 'm', 'r', ':')
+		buf = append(buf, h.component...)
+		buf = append(buf, ']')
+		buf = append(buf, colorReset...)
+		buf = append(buf, ' ')
+	} else {
+		buf = append(buf, hamrTag...)
+	}
 
 	// Level label for warn/error.
 	lc, ok := levelColors[r.Level]
@@ -77,6 +92,11 @@ func (h *devHandler) Handle(_ context.Context, r slog.Record) error {
 		writeAttr(a)
 	}
 	r.Attrs(func(a slog.Attr) bool {
+		// Skip per-call "component" — it's a prefix override, not data.
+		// Handler-level component was already applied above.
+		if a.Key == "component" {
+			return true
+		}
 		writeAttr(a)
 		return true
 	})
@@ -90,17 +110,27 @@ func (h *devHandler) Handle(_ context.Context, r slog.Record) error {
 }
 
 func (h *devHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	newAttrs := make([]slog.Attr, len(h.attrs)+len(attrs))
-	copy(newAttrs, h.attrs)
-	copy(newAttrs[len(h.attrs):], attrs)
-	return &devHandler{w: h.w, level: h.level, attrs: newAttrs}
+	newComp := h.component
+	kept := make([]slog.Attr, 0, len(h.attrs)+len(attrs))
+	kept = append(kept, h.attrs...)
+	// Intercept "component" — use it for the prefix, drop from rendered
+	// attrs. Per-call attrs (slog.Logger.Info("...", "component", "x"))
+	// are filtered the same way at Handle time.
+	for _, a := range attrs {
+		if a.Key == "component" && a.Value.Kind() == slog.KindString {
+			newComp = a.Value.String()
+			continue
+		}
+		kept = append(kept, a)
+	}
+	return &devHandler{w: h.w, level: h.level, attrs: kept, component: newComp}
 }
 
 func (h *devHandler) WithGroup(name string) slog.Handler {
 	// Groups not used in the dev server — treat as prefix.
 	newAttrs := make([]slog.Attr, len(h.attrs))
 	copy(newAttrs, h.attrs)
-	return &devHandler{w: h.w, level: h.level, attrs: newAttrs}
+	return &devHandler{w: h.w, level: h.level, attrs: newAttrs, component: h.component}
 }
 
 var _ slog.Handler = (*devHandler)(nil)

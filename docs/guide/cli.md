@@ -463,4 +463,4 @@ autoload -Uz compinit && compinit
 
 ## Environment
 
-`hamr` loads `.env` from the current directory on every invocation, setting any variables not already present in the environment.
+`hamr sync` falls back to `.env` in the current directory for S3 credentials when both flags and shell env vars are unset. No other `hamr` command reads `.env` — the CLI deliberately doesn't mutate its own process env (earlier behavior leaked into spawned children and made `.env` edits silently invisible to live-reloaded site binaries).

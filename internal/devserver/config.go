@@ -28,6 +28,7 @@ type DevConfig struct {
 	LogFile         string          `toml:"log_file"`
 	LogFileMaxLines int             `toml:"log_file_max_lines"`
 	Email           EmailConfig     `toml:"email"`
+	Stripe          StripeConfig    `toml:"stripe"`
 }
 
 // EmailConfig holds the [dev.email] table for the mail mock. When Enabled
@@ -60,6 +61,44 @@ func (c EmailConfig) ResolvedPersistPath() string {
 		return c.PersistPath
 	}
 	return ".hamr/mail/inbox.mbox"
+}
+
+// StripeConfig holds the [dev.stripe] table for the local Stripe mock. When
+// Enabled is true, hamr dev mounts a Stripe-compatible HTTP backend on the
+// proxy mux at /v1/* so real stripe-go clients can talk to it via
+// stripe.SetBackend(...) pointing at the proxy URL. Requires [proxy] to be
+// configured (the API and dev UI both live on the proxy mux).
+//
+// The mock is dev-only: no production safeguards. Apps gate by leaving
+// STRIPE_MOCK unset in production so stripe-go reaches api.stripe.com.
+//
+// Webhook delivery: when an outcome is recorded (paid/failed/cancelled), the
+// mock fires a real signed webhook to WebhookURL with WebhookSecret, exactly
+// as Stripe would. The app's existing webhook handler (using stripe-go's
+// webhook.ConstructEvent) verifies and processes it unchanged.
+type StripeConfig struct {
+	Enabled       bool   `toml:"enabled"`
+	WebhookURL    string `toml:"webhook_url"`    // required when Enabled
+	WebhookSecret string `toml:"webhook_secret"` // required when Enabled
+	Persist       *bool  `toml:"persist"`        // default true
+	PersistPath   string `toml:"persist_path"`   // default ".hamr/stripe/state.json"
+}
+
+// PersistEnabled returns whether persistence is on. Defaults to true when
+// the field is unset (nil) — matches the email mock's behaviour.
+func (c StripeConfig) PersistEnabled() bool {
+	if c.Persist == nil {
+		return true
+	}
+	return *c.Persist
+}
+
+// ResolvedPersistPath returns PersistPath with the default applied.
+func (c StripeConfig) ResolvedPersistPath() string {
+	if c.PersistPath != "" {
+		return c.PersistPath
+	}
+	return ".hamr/stripe/state.json"
 }
 
 // DockerCompose declares a docker compose file that hamr ensures is running.
@@ -318,6 +357,17 @@ func validate(cfg *Config) error {
 			if err := validateAddr(cfg.Proxy.Target); err != nil {
 				return fmt.Errorf("proxy.target: %w", err)
 			}
+		}
+	}
+
+	// Validate Stripe mock. Required fields fire only when enabled — leaving
+	// the block out (or enabled=false) is the no-op path.
+	if cfg.Dev.Stripe.Enabled {
+		if cfg.Dev.Stripe.WebhookURL == "" {
+			return fmt.Errorf("dev.stripe.webhook_url is required when dev.stripe.enabled = true (point at your app's stripe webhook handler, e.g. \"http://localhost:8080/api/webhooks/stripe\")")
+		}
+		if cfg.Dev.Stripe.WebhookSecret == "" {
+			return fmt.Errorf("dev.stripe.webhook_secret is required when dev.stripe.enabled = true (must match your app's STRIPE_WEBHOOK_SECRET)")
 		}
 	}
 

@@ -671,3 +671,79 @@ run = "./tmp/app"
 	assert.Equal(t, "", cfg.Dev.Watch[0].Cmd)
 	assert.Equal(t, "./tmp/app", cfg.Dev.Watch[0].Run)
 }
+
+func TestLoadConfig_StripeDisabledByDefault(t *testing.T) {
+	path := writeConfig(t, `
+[[dev.watch]]
+name = "go"
+watch = "*.go"
+cmd = "echo"
+`)
+	cfg, err := LoadConfig(path)
+	require.NoError(t, err)
+	assert.False(t, cfg.Dev.Stripe.Enabled)
+}
+
+func TestLoadConfig_StripeEnabled(t *testing.T) {
+	path := writeConfig(t, `
+[dev.stripe]
+enabled = true
+webhook_url = "http://localhost:8080/api/webhooks/stripe"
+webhook_secret = "whsec_dev_local"
+
+[[dev.watch]]
+name = "go"
+watch = "*.go"
+cmd = "echo"
+`)
+	cfg, err := LoadConfig(path)
+	require.NoError(t, err)
+	assert.True(t, cfg.Dev.Stripe.Enabled)
+	assert.Equal(t, "http://localhost:8080/api/webhooks/stripe", cfg.Dev.Stripe.WebhookURL)
+	assert.Equal(t, "whsec_dev_local", cfg.Dev.Stripe.WebhookSecret)
+}
+
+func TestLoadConfig_StripeValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		toml    string
+		wantErr string
+	}{
+		{
+			name: "enabled without webhook_url",
+			toml: `
+[dev.stripe]
+enabled = true
+webhook_secret = "whsec_x"
+
+[[dev.watch]]
+name = "go"
+watch = "*.go"
+cmd = "echo"
+`,
+			wantErr: "dev.stripe.webhook_url is required",
+		},
+		{
+			name: "enabled without webhook_secret",
+			toml: `
+[dev.stripe]
+enabled = true
+webhook_url = "http://localhost:8080/wh"
+
+[[dev.watch]]
+name = "go"
+watch = "*.go"
+cmd = "echo"
+`,
+			wantErr: "dev.stripe.webhook_secret is required",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeConfig(t, tt.toml)
+			_, err := LoadConfig(path)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}

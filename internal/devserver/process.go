@@ -98,6 +98,7 @@ type ProcessManager struct {
 	fileLog       io.Writer // rolling file logger (nil if disabled)
 	stdinR        *os.File  // read end of pipe, given to child processes
 	stdinW        *os.File  // write end, kept open to prevent EOF
+	injectedEnv   []string  // hamr-injected vars (e.g. HAMR_STRIPE_MOCK_URL); rule.Env wins on conflicts
 }
 
 // SetLogOutput enables streaming process output to a LogBuffer and SSE broker.
@@ -109,6 +110,16 @@ func (pm *ProcessManager) SetLogOutput(buf *LogBuffer, broker *SSEBroker) {
 // SetFileLog enables writing prefixed process output to a rolling file logger.
 func (pm *ProcessManager) SetFileLog(w io.Writer) {
 	pm.fileLog = w
+}
+
+// SetInjectedEnv configures vars hamr will inject into every spawned rule
+// process. Rule-level Env still overrides on key conflict (last-wins via
+// buildEnv). Used to feed scaffolded apps the mock URLs hamr is hosting
+// (e.g. HAMR_STRIPE_MOCK_URL=http://localhost:3000) so the scaffold's
+// main.go doesn't need to hardcode those URLs and they automatically track
+// hamr.toml's [proxy].listen.
+func (pm *ProcessManager) SetInjectedEnv(env []string) {
+	pm.injectedEnv = env
 }
 
 // NewProcessManager creates a new process manager.
@@ -129,7 +140,7 @@ func (pm *ProcessManager) RunCommand(ctx context.Context, rule *WatchRule) (stri
 	pm.logger.Info("running", "rule", rule.Name, "cmd", rule.Cmd)
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", rule.Cmd)
-	cmd.Env = buildEnv(rule.Env)
+	cmd.Env = buildEnv(append(append([]string(nil), pm.injectedEnv...), rule.Env...))
 	color := nextColor()
 	capture := newTailBuffer()
 
@@ -170,7 +181,7 @@ func (pm *ProcessManager) StartProcess(ctx context.Context, rule *WatchRule) err
 	pm.logger.Info("starting", "rule", rule.Name, "run", rule.Run)
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", rule.Run)
-	cmd.Env = buildEnv(rule.Env)
+	cmd.Env = buildEnv(append(append([]string(nil), pm.injectedEnv...), rule.Env...))
 	cmd.Stdin = pm.stdinR
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	color := nextColor()

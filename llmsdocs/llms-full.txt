@@ -1944,97 +1944,367 @@ type BucketEnsurer interface {
 
 ---
 
-### stripemock
+### stripemock (local Stripe backend, hosted by `hamr dev`)
 
-> Package stripemock is a local, in-memory Stripe mock for development. It
-> serves a fake checkout page where the developer picks the outcome of each
-> payment. Dev-only — no production safety guards; the caller gates mounting.
+> A local Stripe-compatible HTTP backend that the official `stripe-go` SDK
+> talks to in development. App code uses real `stripe-go` calls in both dev
+> and production — the only difference is whether `STRIPE_MOCK=true` is
+> set, which makes the scaffolded `main.go` point `stripe-go` at the proxy
+> URL instead of api.stripe.com. The previous `pkg/stripemock` package has
+> been **removed**; the mock lives entirely server-side in
+> `internal/devserver/stripemock*.go`.
 
-```go
-func New(baseURL, currency string) *Client
+**Architecture.** Both the Stripe API surface (`/v1/*`) and the dev UI
+(`/__hamr/stripe/*`) mount on hamr's single proxy mux (default port
+`:3000`). `stripe-go` requires `req.URL.Path` to start with `/v1` — that's
+satisfied as long as paths begin with `/v1`, regardless of the listener.
+Earlier hamr versions used a dedicated `:3001` listener for the API; the
+single-mux model removes that port and the `[dev.stripe].api_listen`
+config knob. `http.ServeMux`'s longest-prefix matching keeps `/v1/*` and
+`/__hamr/*` from colliding with the catch-all `/` reverse-proxy to the
+app — Stripe path namespaces (`/v1/checkout/sessions`,
+`/v1/payment_intents`, etc.) are extremely unlikely to clash with anything
+an app defines.
+
+**API surface (checkout sessions).**
+- `POST /v1/checkout/sessions` — create. Decodes Stripe's bracket-form body
+  (`line_items[0][price_data][currency]=gbp` etc.) into a stored session.
+  Returns a `checkout.session`-shaped JSON response with `URL` pointing at
+  `/__hamr/stripe/checkout?session=<id>` on the proxy.
+- `GET /v1/checkout/sessions/{id}` — retrieve. Same JSON shape.
+
+**API surface (Connect accounts).**
+- `POST /v1/accounts` — create connected account. Defaults: type=express,
+  country=US, default_currency derived from country (GB→gbp, EU/DE/FR/IT/ES/NL→eur,
+  JP→jpy, otherwise usd). New accounts start in pre-onboarding state:
+  `charges_enabled=false`, `payouts_enabled=false`, `details_submitted=false`,
+  `requirements.currently_due=[business_type, external_account, tos_acceptance.date,
+  tos_acceptance.ip]`, `requirements.disabled_reason="requirements.past_due"`.
+- `GET /v1/accounts/{id}` — retrieve. Returns the same shape with current state.
+- `POST /v1/account_links` — generate hosted onboarding URL pointing at
+  `/__hamr/stripe/onboarding?account=<id>` on the proxy. `expires_at` set
+  to mirror Stripe's 5-minute TTL but not enforced.
+
+**Dev UI (account onboarding).**
+- `GET /__hamr/stripe/onboarding?account=<id>` — renders the account state
+  (type, country, currency, enabled flags, requirements list) and a
+  Complete button. Already-onboarded accounts show a green banner instead.
+- `POST /__hamr/stripe/account/complete` — flips `charges_enabled`,
+  `payouts_enabled`, `details_submitted` to true, clears `currently_due`
+  and `disabled_reason`, fires `account.updated`. 409 Conflict on
+  double-submit. Same-origin guard.
+
+**API surface (PaymentIntents — Connect-aware).**
+- `POST /v1/payment_intents` — create. Reads the `Stripe-Account` request
+  header (direct-charge model) and the body fields
+  `application_fee_amount`, `transfer_data[destination]`,
+  `transfer_data[amount]`, `on_behalf_of`, plus standard PI fields
+  (`amount`, `currency`, `capture_method`, `confirmation_method`,
+  `description`, `statement_descriptor`, `receipt_email`, `customer`,
+  `payment_method`, `metadata`). New PIs without a payment_method start in
+  `requires_payment_method`; with one, `requires_confirmation`.
+  **Validation**: `currency` required, `amount > 0`,
+  `application_fee_amount` non-negative and ≤ amount,
+  `transfer_data.destination` (if provided) must reference an existing
+  connected account.
+- `GET /v1/payment_intents/{id}` — retrieve. `latest_charge` is rendered as
+  an inline charge object once the outcome runs (caller doesn't need a
+  separate charge.Get round-trip).
+- `POST /v1/payment_intents/{id}/confirm` — advance from
+  `requires_payment_method` to `processing` for auto-capture (mirrors real
+  Stripe's sync card flow), or to `requires_capture` if
+  `capture_method=manual`. Defaults the payment_method to `pm_card_visa`
+  if absent so the rest of the flow doesn't error.
+
+**Dev UI (PaymentIntent).**
+- `GET /__hamr/stripe/payment_intent?id=<pi_id>` — renders the amount,
+  application fee, transfer destination + transfer amount (for destination
+  charges), an "as <acct>" tag (for direct charges), and Succeed/Fail
+  buttons. Already-terminal PIs return 410 Gone.
+- `POST /__hamr/stripe/payment_intent/complete` — outcomes: `succeed` or
+  `fail`.
+
+**Cascade on PaymentIntent succeed (destination charge).**
+Three signed webhooks fire **in order** from a single goroutine, matching
+real Stripe's delivery order:
+1. `payment_intent.succeeded` — PI status now `succeeded`,
+   `amount_received = amount`, `latest_charge` populated.
+2. `charge.succeeded` — auto-created Charge with
+   `paid=true`, `captured=true`, `application_fee_amount`,
+   `destination` (the connected account), `transfer` (the auto-created
+   transfer ID), `payment_intent` (this PI).
+3. `transfer.created` — auto-created Transfer to the connected account.
+   `amount = pi.amount - application_fee_amount` by default; overridden
+   when `transfer_data.amount` was set explicitly. `source_transaction`
+   points at the Charge.
+
+**Cascade on PaymentIntent succeed (no destination).** Just events 1 + 2;
+no transfer is created.
+
+**Cascade on PaymentIntent fail.** Only `payment_intent.payment_failed`.
+No Charge is synthesised — mirrors real Stripe's sync card-decline path
+where no Charge object exists for a payment that never settled.
+
+**Connect models supported.** Both:
+- **Destination charge** — platform creates PI on its own account, sets
+  `transfer_data[destination]` to forward funds (minus fee) to the
+  connected account on success. Platform is the merchant of record.
+- **Direct charge** — platform creates PI AS the connected account via
+  the `Stripe-Account` header. Connected account is the merchant of
+  record; platform takes its cut via `application_fee_amount`.
+
+**API surface (Refunds — Connect-aware).**
+- `POST /v1/refunds` — sync-success model that matches real Stripe's card
+  refund behavior: status is `succeeded` immediately, the
+  `charge.refunded` webhook fires async. Caller passes **exactly one** of
+  `payment_intent` or `charge` (rejected if both or neither).
+  - `amount` (optional) — defaults to the charge's remaining unrefunded
+    balance (full refund). Validated: positive, ≤ remaining.
+  - `reverse_transfer` (optional bool) — for destination charges,
+    reverses the auto-created Transfer to the connected account.
+    Increments `Transfer.amount_reversed`, capped at the transfer's
+    remaining unreversed balance. Synthesises a `trr_test_<hex>` ID and
+    populates `Refund.source_transfer_reversal`.
+  - `refund_application_fee` (optional bool) — flag tracked on the Refund
+    object. ApplicationFee is not modelled as a separate resource yet, so
+    no additional state changes today.
+  - `reason` (optional) — free-text reason ("duplicate", "fraudulent",
+    etc.).
+- `GET /v1/refunds/{id}` — retrieve.
+
+**Cascade on refund success.**
+1. `Charge.amount_refunded += refund.amount` (held under the same lock as
+   the validation so concurrent refunds can't double-spend).
+2. `Charge.refunded = true` if amount_refunded reaches charge.amount.
+3. If `reverse_transfer && charge.transfer != ""`: increment
+   `Transfer.amount_reversed` by min(refund.amount, remaining).
+4. Refund stored. Async webhook fanout: `charge.refunded` with the
+   *updated* Charge as the event payload.
+
+**What's not modelled.** Async-pending refunds (ACH, etc. — real Stripe
+returns status=`pending` and resolves later via `refund.updated`).
+Refund failures (no failure simulation on the create endpoint yet).
+ApplicationFeeRefund as a distinct resource. TransferReversal as a
+distinct retrievable resource (only the ID is surfaced on the Refund).
+
+**API surface (Payouts — Connect-aware).**
+- `POST /v1/payouts` — create a manually-triggered payout. Reads the
+  `Stripe-Account` request header to scope the payout to a connected
+  account; without the header, the payout is on the platform's own
+  balance. Stored in `pending` status with `automatic=false`.
+  Required: `amount` (positive int), `currency`. Optional: `method`
+  (standard|instant, default standard), `source_type` (default
+  bank_account), `description`, `statement_descriptor`, `metadata`.
+  `arrival_date` derived from method (now for instant, +48h for standard).
+  Validates: connected account exists if Stripe-Account header set
+  (mirrors real Stripe's 404 on typos).
+- `GET /v1/payouts/{id}` — retrieve.
+- `GET /v1/payouts` — list, scoped by `Stripe-Account` header. Honors
+  `?limit=` (1-100, default 10). Sorted newest-first. Cursor pagination
+  (`starting_after`) accepted but not honored — overkill for a dev mock.
+  This is the canonical marketplace dashboard query: "show all payouts to
+  this seller's connected account".
+
+**Dev UI (Payout).**
+- `GET /__hamr/stripe/payout?id=<po_id>` — renders amount, expected
+  arrival date, connected account tag (if any), method, and Mark
+  paid / Mark failed buttons. Already-terminal payouts return 410.
+- `POST /__hamr/stripe/payout/complete` — outcomes: `paid` or `fail`.
+
+**Outcome cascades.**
+| Button | Event | State after |
+|---|---|---|
+| Mark paid | `payout.paid` | status=`paid` |
+| Mark failed | `payout.failed` | status=`failed`, failure_code=`account_closed`, failure_message=`The bank account has been closed.` |
+
+(Failure code/message are hardcoded today; if you need to test other
+codes, the rule is in the `payoutOutcomes` map in
+`stripemock_payout_page.go` — extend with more outcomes or wire a form
+field through `handlePayoutComplete`.)
+
+**What's not modelled.** Automatic payouts (real Stripe creates payouts
+on a schedule from the connected account's balance). Payout cancel /
+reverse endpoints. The `failed → paid` recovery path that some banks
+trigger after an initial failure. ReconciliationStatus, BalanceTransaction.
+
+**Validation.**
+- All line items in a session must share the same currency. Mock surfaces
+  this as a 400 with a typed `*stripe.Error` shape so `stripe-go` callers
+  receive it as `&stripe.Error{...}`.
+- Unknown sessions on retrieve return a 404 in Stripe's canonical error shape.
+
+**Webhook delivery.** When the user clicks an outcome on the dev UI, the
+mock fires a real signed webhook (HMAC-SHA256 over `<unix>.<payload>`,
+header `Stripe-Signature: t=<unix>,v1=<hex>`) to the configured
+`webhook_url` with `webhook_secret`. The app's existing
+`webhook.ConstructEvent(body, sig, secret)` verifies it as production. The
+event envelope includes `api_version` (set to the mock's pinned version)
+which clears stripe-go's release-train compatibility check.
+
+**Outcome → event mapping (checkout).**
+| Button | Event | Status, payment_status | Redirect |
+|---|---|---|---|
+| Pay Successfully | `checkout.session.completed` | complete, paid | success_url |
+| Card Declined | `checkout.session.async_payment_failed` | complete, unpaid | cancel_url |
+| Cancel Payment | `checkout.session.expired` | expired, unpaid | cancel_url |
+
+**Outcome → event mapping (account onboarding).**
+| Action | Event | State after |
+|---|---|---|
+| Complete Onboarding | `account.updated` | charges_enabled=true, payouts_enabled=true, details_submitted=true, currently_due=[] |
+
+**Outcome → event mapping (PaymentIntent).**
+| Button | Cascade (in order) | PI status after |
+|---|---|---|
+| Succeed (destination charge) | `payment_intent.succeeded`, `charge.succeeded`, `transfer.created` | succeeded |
+| Succeed (no destination) | `payment_intent.succeeded`, `charge.succeeded` | succeeded |
+| Fail | `payment_intent.payment_failed` | requires_payment_method |
+
+**Outcome → event mapping (Refund).** No dev UI button — refunds are
+created by the app via `refund.New()`. The mock applies state changes
+synchronously and fires one webhook async.
+| Action | Event | State after |
+|---|---|---|
+| `refund.New(payment_intent=...)` (full) | `charge.refunded` | refund.status=succeeded, charge.refunded=true |
+| `refund.New(charge=..., amount=N)` (partial) | `charge.refunded` | refund.status=succeeded, charge.amount_refunded += N |
+| `refund.New(... reverse_transfer=true)` | `charge.refunded` | + transfer.amount_reversed += refund.amount |
+
+**Outcome → event mapping (Payout).**
+| Button | Event | State after |
+|---|---|---|
+| Mark paid | `payout.paid` | status=`paid` |
+| Mark failed | `payout.failed` | status=`failed`, failure_code+failure_message populated |
+
+**Race-safety.** Once a session leaves "open", subsequent outcome POSTs
+return 409 Conflict so a double-click can only fire one webhook. The
+checkout page also returns 410 Gone for already-completed sessions to
+prevent re-use from a stale browser tab.
+
+**API version pinning.** Constant `stripeAPIVersion` in
+`internal/devserver/stripemock.go` must equal `stripe.APIVersion` from the
+SDK in `go.mod`. A CI test (`TestStripeAPIVersionMatchesSDK`) enforces the
+link, so a `stripe-go` bump fails the build until the constant is bumped in
+lockstep. Current pinned value: `2025-08-27.basil` (matches `stripe-go/v82`).
+
+**CSRF guard.** Outcome-recording POST rejects requests whose `Origin`
+header is set and doesn't match the request's `Host`. Requests without an
+`Origin` (curl, tests) pass through.
+
+**Config (`hamr.toml`).**
+```toml
+[dev.stripe]
+enabled        = true
+webhook_url    = "http://localhost:8080/api/webhooks/stripe"   # required
+webhook_secret = "whsec_dev_..."                               # required
+persist        = true                                          # default
+persist_path   = ".hamr/stripe/state.json"                     # default
 ```
-Returns a new in-memory mock client. `baseURL` is used to build the dev-UI URL
-returned from CreateCheckoutSession (e.g. `http://localhost:8080`). `currency`
-is the ISO 4217 code (uppercase, e.g. `"GBP"`, `"USD"`, `"JPY"`) used to render
-amounts on the dev page. Built-in symbols: GBP/USD/EUR/JPY. Unknown codes
-render as `<CODE> x.xx`.
+`enabled = true` requires both `webhook_url` and `webhook_secret`, plus a
+`[proxy]` section (the API and UI both live on the proxy mux); `hamr dev`
+refuses to start otherwise with a typed error.
 
-```go
-func Mount(e *echo.Echo, client *Client)
-```
-Registers two routes on the provided Echo instance:
-- `GET  /dev/stripe`          — renders the checkout page for `?session=<id>`
-- `POST /dev/stripe/complete` — records the outcome and redirects to
-  the stored SuccessURL or CancelURL
+**Persistence.** Single JSON file at `persist_path`, atomically rewritten
+(tmp + rename) on every state mutation under the same lock that gates the
+mutation. Loaded on `NewStripeMock` if the path is set; corrupt files
+trigger the `OnPersistError` callback and the mock starts empty (no
+crash). Schema is forward-compatible — `encoding/json` ignores unknown
+fields and zeroes missing ones, so adding fields is safe. Set
+`persist = false` for in-memory-only mode.
 
-```go
-func (c *Client) CreateCheckoutSession(req CheckoutRequest) (*CheckoutSession, error)
-```
-Stores the request in memory and returns a CheckoutSession whose URL points
-at the local dev page. Sessions start at `StatusRequiresAction`.
+Why JSON not mbox: Stripe state is plain Go structs (no MIME equivalent),
+so a single JSON document is the natural shape. The file is human-readable
+which helps LLM workflows that want to read prior state across restarts.
 
-```go
-func (c *Client) GetSessionResult(sessionID string) (*PaymentResult, error)
-```
-Returns the current outcome for a session. Returns an error if the session
-is unknown.
+**Dashboard.** `GET /__hamr/stripe` renders an index with 5 tables —
+sessions, accounts, PaymentIntents, refunds, payouts — newest-first,
+capped at 25 rows per table. Designed both for human dev use and for
+LLMs reading the page to inspect prior state.
 
-```go
-func (c *Client) SetOutcome(sessionID string, status PaymentStatus) error
-func (c *Client) GetRequest(sessionID string) (*CheckoutRequest, error)
-func (c *Client) SuccessURL(sessionID string) string
-func (c *Client) CancelURL(sessionID string) string
-func (c *Client) Currency() string
-```
-Used internally by the dev UI; exposed for custom integrations.
+Per-row actions (all POST endpoints, same-origin guarded):
+- `POST /__hamr/stripe/resend` (`resource=`, `id=`) — re-fires the
+  natural event(s) for the resource's current state. PI succeed re-fires
+  the full 3-event cascade in order; refund re-fires `charge.refunded`
+  with the post-refund Charge state; payout re-fires the matching
+  `payout.paid` or `payout.failed`. Returns 400 if there's no natural
+  event for the current state (e.g., open session).
+- `POST /__hamr/stripe/refund` (`payment_intent=`, `amount=`,
+  `reverse_transfer`, `refund_application_fee`) — issues a refund directly
+  from the dashboard. Routes through the same `applyRefund` path
+  `refund.New` uses, so validation + Charge mutation + Transfer reversal
+  all behave identically.
+- `POST /__hamr/stripe/expire` (`session=`) — marks an open session as
+  expired and fires `checkout.session.expired`. 409 on already-terminal.
 
+**Dev panel button.** `sseConfig.StripeMock` (JSON key `stripe_mock`) is
+set when `[dev.stripe].enabled = true`. The dev-panel JS in `reload.js`
+renders an "Open Stripe mock" shortcut alongside the existing "Open mail
+inbox" button when this flag is present.
+
+**Scaffold integration.** `hamr new --stripe` generates a single random
+`whsec_dev_<32 hex>` at scaffold time and writes it to both `.env`
+(`STRIPE_WEBHOOK_SECRET=...`) and `hamr.toml` (`[dev.stripe].webhook_secret`)
+so the two stay in sync. Generated `cmd/site/main.go` reads `STRIPE_MOCK`
+and conditionally calls `stripe.SetBackend(...)`:
 ```go
-type CheckoutRequest struct {
-    LineItems  []LineItem
-    SuccessURL string
-    CancelURL  string
-    Metadata   map[string]string
+stripe.Key = envStripeKey
+if envStripeMock {
+    if !envDevMode {
+        log.Error("STRIPE_MOCK=true requires DEV_MODE=true (refusing to route Stripe calls to a local mock without dev mode)")
+        os.Exit(1)
+    }
+    stripe.SetBackend(stripe.APIBackend, stripe.GetBackendWithConfig(
+        stripe.APIBackend,
+        &stripe.BackendConfig{URL: stripe.String(envHamrStripeMockURL)},
+    ))
 }
-
-type LineItem struct {
-    Name     string
-    Amount   int64 // smallest currency unit (pence for GBP, cents for USD, whole yen for JPY)
-    Quantity int64
-}
-
-type CheckoutSession struct {
-    ID              string
-    URL             string
-    PaymentIntentID string
-}
-
-type PaymentResult struct {
-    SessionID       string
-    PaymentIntentID string
-    Status          PaymentStatus
-    Metadata        map[string]string
-}
-
-type PaymentStatus string
-
-const (
-    StatusPaid           PaymentStatus = "paid"
-    StatusFailed         PaymentStatus = "failed"
-    StatusCancelled      PaymentStatus = "cancelled"
-    StatusRequiresAction PaymentStatus = "requires_action"
-)
 ```
+`.env.example` ships with `STRIPE_MOCK=true` and a non-empty `STRIPE_KEY`.
+The mock URL is auto-injected by `hamr dev` as `HAMR_STRIPE_MOCK_URL`,
+derived from `hamr.toml` `[proxy].listen` — no hardcoded port to keep in
+sync. Production deployments leave `STRIPE_MOCK` unset so `stripe-go`
+reaches `api.stripe.com`, and `[dev.stripe]` is absent from production
+`hamr.toml`.
 
-**Scaffold integration.** `hamr new --stripe` adds `STRIPE_MOCK` and
-`STRIPE_CURRENCY` (default `GBP`) to `.env.example`, wires `stripemock.New` +
-`stripemock.Mount` behind `if envStripeMock` in `main.go`, and passes the
-client into `web.Deps.StripeMock`. Leave `STRIPE_MOCK` unset (or `false`) in
-production.
+**Production safety guard.** `STRIPE_MOCK=true && DEV_MODE=false` refuses
+to start. A leftover `STRIPE_MOCK=true` in a production `.env` would
+otherwise route real payment calls to a non-existent localhost endpoint
+and silently break checkouts. Staging that wants fake payments should
+also set `DEV_MODE=true`.
 
-**Known limits.** Subscriptions, refunds, and webhook-event firing are not
-implemented. Sessions are in-memory and lost when the process exits. There is
-no real-Stripe interface — when a real client is introduced later, define the
-interface in your app.
+**Hamr-injected env vars.** When `hamr dev` spawns the site process it
+sets two env vars derived from `hamr.toml` config:
+- `HAMR_DEV_URL=http://localhost:<proxy_port>` when either `[dev.email]`
+  or `[dev.stripe]` is enabled. The scaffold's email mock client uses it.
+- `HAMR_STRIPE_MOCK_URL=http://localhost:<proxy_port>` when
+  `[dev.stripe].enabled = true`. Scaffolded `main.go` points stripe-go
+  at this URL when `STRIPE_MOCK=true`.
+
+These pre-set vars win over `.env` (godotenv.Load doesn't overwrite
+already-set env), so users can't accidentally drift the mock URL from
+the actual proxy port. Hamr knows its own URL — nothing in `.env` should
+be more authoritative than that.
+
+**Known limits.** Mocked today: checkout sessions, Connect account
+onboarding (`Account` + `AccountLink`), Connect-aware PaymentIntents
+(with auto-cascade to Charge + Transfer on success), Refunds
+(sync-success with `reverse_transfer` and `refund_application_fee`),
+and Payouts (manual create + paid/failed outcomes, scoped list for
+marketplace dashboards). Not yet mocked: standalone Transfer create,
+Customer, Price, Subscription, Invoice, Dispute, GET endpoints for
+Charge / Transfer / ApplicationFee. Patterns are established in
+`internal/devserver/stripemock*.go` — add as needed. State is persisted
+by default to `.hamr/stripe/state.json` and reloaded across `hamr dev`
+restarts; set `persist = false` for ephemeral in-memory-only mode.
+
+**Logging.** Mock log lines are emitted via a dedicated logger tagged
+`[hamr:stripe]` (the standard `[hamr dev]` lines come from the proxy and
+file-watcher). Plumbed via a `component=stripe` slog attribute that
+hamr's `devHandler` interprets and strips before formatting, so attrs in
+the log line itself are unaffected. Most common emitted lines:
+`webhook delivery failed` (app server down or non-2xx response),
+`dashboard resend failed`, `dashboard refund webhook delivery failed`,
+`dashboard expire webhook delivery failed`, and a one-shot `mock enabled`
+at boot with the proxy URL the mock is reachable on.
 
 ---
 

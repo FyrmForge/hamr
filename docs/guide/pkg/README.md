@@ -42,7 +42,7 @@ API reference for every `hamr/pkg` package.
 
 ## Third-party Mocks
 
-21. [Stripemock](stripemock.md) — Local in-memory Stripe mock with dev UI
+21. [Stripemock](stripemock.md) — Local Stripe-compatible HTTP backend that real `stripe-go` talks to in dev
 22. [Emailmock](emailmock.md) — Local mock `email.Sender` with inbox viewer at `/__hamr/mail`
 
 ## Testing

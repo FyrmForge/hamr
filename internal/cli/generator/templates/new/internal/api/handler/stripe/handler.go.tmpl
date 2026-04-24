@@ -12,8 +12,10 @@ import (
 	"github.com/FyrmForge/hamr/pkg/logging"
 )
 
-// maxBodyBytes limits the size of the incoming webhook payload.
-const maxBodyBytes = 65536
+// maxBodyBytes limits the size of the incoming webhook payload. 512KB
+// covers Stripe's heaviest documented events (invoices with many line
+// items, expanded objects) without leaving room for runaway payloads.
+const maxBodyBytes = 512 * 1024
 
 type handler struct {
 	webhookSecret string
@@ -21,13 +23,38 @@ type handler struct {
 }
 
 // NewHandler creates a new Stripe webhook handler.
+//
+// The dispatch map below stubs every event the hamr Stripe mock fires
+// during `hamr dev` so unhandled events are visible at scaffold time
+// rather than silently 200-OK'd. Replace each stub body with your own
+// business logic; delete the entries you don't care about.
 func NewHandler(webhookSecret string) *handler {
 	h := &handler{
 		webhookSecret: webhookSecret,
 	}
 	h.handlers = map[string]func(ctx context.Context, event stripe.Event) error{
-		"checkout.session.completed": h.handleCheckoutSessionCompleted,
-		"invoice.payment_failed":     h.handleInvoicePaymentFailed,
+		// Checkout sessions (mock fires from /__hamr/stripe/checkout buttons).
+		"checkout.session.completed":            h.handleCheckoutSessionCompleted,
+		"checkout.session.expired":              h.handleCheckoutSessionExpired,
+		"checkout.session.async_payment_failed": h.handleCheckoutSessionAsyncPaymentFailed,
+
+		// Connect accounts (mock fires from /__hamr/stripe/onboarding).
+		"account.updated": h.handleAccountUpdated,
+
+		// PaymentIntents (mock fires from /__hamr/stripe/payment_intent).
+		"payment_intent.succeeded":      h.handlePaymentIntentSucceeded,
+		"payment_intent.payment_failed": h.handlePaymentIntentPaymentFailed,
+		"charge.succeeded":              h.handleChargeSucceeded,
+
+		// Refunds (mock fires sync on refund.New).
+		"charge.refunded": h.handleChargeRefunded,
+
+		// Connect transfers (mock auto-creates on PI succeed with transfer_data).
+		"transfer.created": h.handleTransferCreated,
+
+		// Payouts (mock fires from /__hamr/stripe/payout).
+		"payout.paid":   h.handlePayoutPaid,
+		"payout.failed": h.handlePayoutFailed,
 	}
 	return h
 }
@@ -68,12 +95,69 @@ func (h *handler) HandleWebhook(c echo.Context) error {
 	return c.NoContent(http.StatusOK)
 }
 
+// --- Checkout sessions ---
+
 func (h *handler) handleCheckoutSessionCompleted(ctx context.Context, event stripe.Event) error {
 	logging.FromContext(ctx).Info("checkout session completed", "eventID", event.ID)
 	return nil
 }
 
-func (h *handler) handleInvoicePaymentFailed(ctx context.Context, event stripe.Event) error {
-	logging.FromContext(ctx).Info("invoice payment failed", "eventID", event.ID)
+func (h *handler) handleCheckoutSessionExpired(ctx context.Context, event stripe.Event) error {
+	logging.FromContext(ctx).Info("checkout session expired", "eventID", event.ID)
+	return nil
+}
+
+func (h *handler) handleCheckoutSessionAsyncPaymentFailed(ctx context.Context, event stripe.Event) error {
+	logging.FromContext(ctx).Info("checkout session async payment failed", "eventID", event.ID)
+	return nil
+}
+
+// --- Connect accounts ---
+
+func (h *handler) handleAccountUpdated(ctx context.Context, event stripe.Event) error {
+	logging.FromContext(ctx).Info("account updated", "eventID", event.ID)
+	return nil
+}
+
+// --- PaymentIntents ---
+
+func (h *handler) handlePaymentIntentSucceeded(ctx context.Context, event stripe.Event) error {
+	logging.FromContext(ctx).Info("payment intent succeeded", "eventID", event.ID)
+	return nil
+}
+
+func (h *handler) handlePaymentIntentPaymentFailed(ctx context.Context, event stripe.Event) error {
+	logging.FromContext(ctx).Info("payment intent payment failed", "eventID", event.ID)
+	return nil
+}
+
+func (h *handler) handleChargeSucceeded(ctx context.Context, event stripe.Event) error {
+	logging.FromContext(ctx).Info("charge succeeded", "eventID", event.ID)
+	return nil
+}
+
+// --- Refunds ---
+
+func (h *handler) handleChargeRefunded(ctx context.Context, event stripe.Event) error {
+	logging.FromContext(ctx).Info("charge refunded", "eventID", event.ID)
+	return nil
+}
+
+// --- Connect transfers ---
+
+func (h *handler) handleTransferCreated(ctx context.Context, event stripe.Event) error {
+	logging.FromContext(ctx).Info("transfer created", "eventID", event.ID)
+	return nil
+}
+
+// --- Payouts ---
+
+func (h *handler) handlePayoutPaid(ctx context.Context, event stripe.Event) error {
+	logging.FromContext(ctx).Info("payout paid", "eventID", event.ID)
+	return nil
+}
+
+func (h *handler) handlePayoutFailed(ctx context.Context, event stripe.Event) error {
+	logging.FromContext(ctx).Info("payout failed", "eventID", event.ID)
 	return nil
 }

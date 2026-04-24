@@ -86,6 +86,38 @@ func NewRunner(cfg *Config, opts ...Option) *Runner {
 	return r
 }
 
+// buildHamrInjectedEnv returns env-var KEY=VALUE pairs that hamr dev sets
+// on every spawned rule process so the scaffolded site (or any rule) can
+// discover hamr-served URLs without hardcoding ports. The values are
+// derived from `hamr.toml` so they automatically track `[proxy].listen`
+// changes — no second source of truth in the scaffold.
+//
+// Currently emits:
+//   - HAMR_DEV_URL: proxy origin, set when [dev.email] OR [dev.stripe] is
+//     enabled (the email mock uses it as its ingest target; the scaffold's
+//     emailmock.New(envHamrDevURL) reads it).
+//   - HAMR_STRIPE_MOCK_URL: proxy origin, set only when [dev.stripe].enabled.
+//     Scaffolded main.go points stripe-go at this URL when STRIPE_MOCK=true.
+//
+// godotenv.Load() in the spawned site honors pre-set env vars (doesn't
+// overwrite), so these injected values win over any conflicting entry in
+// the user's .env — by design. Hamr knows its own proxy URL; nothing the
+// user puts in .env should be more authoritative than that.
+func buildHamrInjectedEnv(cfg *Config) []string {
+	if !cfg.ProxyConfigured {
+		return nil
+	}
+	var injected []string
+	proxyOrigin := stripeMockBaseURL(cfg) // same origin builder; "stripe" name is historical
+	if cfg.Dev.Email.Enabled || cfg.Dev.Stripe.Enabled {
+		injected = append(injected, "HAMR_DEV_URL="+proxyOrigin)
+	}
+	if cfg.Dev.Stripe.Enabled {
+		injected = append(injected, "HAMR_STRIPE_MOCK_URL="+proxyOrigin)
+	}
+	return injected
+}
+
 // Run starts the dev server and blocks until ctx is cancelled.
 func (r *Runner) Run(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
@@ -106,10 +138,11 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	graph := NewGraph(r.cfg.Dev.Watch)
 	pm := NewProcessManager(r.logger)
-	broker := NewSSEBroker(r.cfg.Dev.Watch, r.cfg.Dev.Daemons, r.cfg.Dev.DockerCompose, r.cfg.Dev.Email.Enabled)
+	broker := NewSSEBroker(r.cfg.Dev.Watch, r.cfg.Dev.Daemons, r.cfg.Dev.DockerCompose, r.cfg.Dev.Email.Enabled, r.cfg.Dev.Stripe.Enabled)
 	errorState := NewErrorState()
 	logBuf := NewLogBuffer(1000)
 	pm.SetLogOutput(logBuf, broker)
+	pm.SetInjectedEnv(buildHamrInjectedEnv(r.cfg))
 	if fileLog != nil {
 		pm.SetFileLog(fileLog)
 	}
@@ -216,15 +249,62 @@ func (r *Runner) Run(ctx context.Context) error {
 		)
 	}
 
+	// Stripe mock: API surface and dev UI both mount on the proxy mux. Apps
+	// point stripe-go at the proxy URL via STRIPE_MOCK=true. Stripe-go's
+	// path-prefix check (`req.URL.Path` must start with /v1) is satisfied
+	// because we register /v1/* explicitly — http.ServeMux's longest-prefix
+	// match keeps these from colliding with the / catch-all to the app.
+	var stripeMock *StripeMock
+	if r.cfg.Dev.Stripe.Enabled {
+		if !r.cfg.ProxyConfigured {
+			return fmt.Errorf("dev.stripe.enabled = true requires a [proxy] section in hamr.toml (the Stripe API + UI live on the proxy mux)")
+		}
+		if r.noProxy {
+			return fmt.Errorf("dev.stripe.enabled = true cannot be used with --no-proxy (the Stripe API + UI live on the proxy mux)")
+		}
+		// Reuse one stripe-prefixed logger for both the mock's internal use
+		// and the persist-error callback so all stripe-related output gets
+		// the [hamr:stripe] tag (the dev handler interprets the "component"
+		// attr as a tag override).
+		stripeLogger := r.logger.With("component", "stripe")
+		opts := StripeMockOptions{
+			BaseURL: stripeMockBaseURL(r.cfg),
+			Logger:  stripeLogger,
+			OnPersistError: func(err error) {
+				stripeLogger.Warn("persistence error", "err", err)
+			},
+		}
+		if r.cfg.Dev.Stripe.PersistEnabled() {
+			opts.PersistPath = r.cfg.Dev.Stripe.ResolvedPersistPath()
+		}
+		stripeMock = NewStripeMock(opts)
+		stripeMock.SetWebhookEndpoint(WebhookEndpoint{
+			URL:    r.cfg.Dev.Stripe.WebhookURL,
+			Secret: r.cfg.Dev.Stripe.WebhookSecret,
+		})
+	}
+
 	if !r.noProxy && r.cfg.ProxyConfigured {
 		inject := r.cfg.Proxy.InjectReload != nil && *r.cfg.Proxy.InjectReload
-		handler := NewProxyHandler(r.cfg.Proxy.Target, broker, errorState, logBuf, actions, mailMock, inject)
+		handler := NewProxyHandler(r.cfg.Proxy.Target, broker, errorState, logBuf, actions, mailMock, stripeMock, inject)
 		srv, _, err := ListenAndServeProxy(r.cfg.Proxy.Listen, handler)
 		if err != nil {
 			return fmt.Errorf("start proxy: %w", err)
 		}
 		proxySrv = srv
 		r.logger.Info("proxy listening", "addr", r.cfg.Proxy.Listen, "target", r.cfg.Proxy.Target)
+		if stripeMock != nil {
+			persistPath := ""
+			if r.cfg.Dev.Stripe.PersistEnabled() {
+				persistPath = r.cfg.Dev.Stripe.ResolvedPersistPath()
+			}
+			r.logger.With("component", "stripe").Info("mock enabled",
+				"api", r.cfg.Proxy.Listen+"/v1/*",
+				"ui", r.cfg.Proxy.Listen+"/__hamr/stripe/*",
+				"webhook_url", r.cfg.Dev.Stripe.WebhookURL,
+				"persist", persistPath,
+			)
+		}
 	}
 
 	// Ensure docker compose services are running before build.

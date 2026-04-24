@@ -265,18 +265,29 @@ File-watching and S3-syncing for static assets.
 - `SyncAll(ctx, store, dir) error`
 - `WatchAndSync(ctx, store, dir) error`
 
-### stripemock
-Local, in-memory Stripe mock for development. Renders a fake checkout page at
-`/dev/stripe` where the developer picks the outcome (paid/failed/cancelled).
-- `New(baseURL, currency string) *Client` — currency is ISO 4217 (GBP/USD/EUR/JPY, unknown falls through as "<CODE> x.xx")
-- `Mount(e *echo.Echo, client *Client)` — registers GET `/dev/stripe` + POST `/dev/stripe/complete`
-- `Client.CreateCheckoutSession(req CheckoutRequest) (*CheckoutSession, error)`
-- `Client.GetSessionResult(sessionID) (*PaymentResult, error)`
-- `Client.Currency() string`
-- Types: `CheckoutRequest`, `LineItem` (Amount is the smallest currency unit), `CheckoutSession`, `PaymentResult`
-- Statuses: `StatusPaid`, `StatusFailed`, `StatusCancelled`, `StatusRequiresAction`
-- Dev-only — no production guards; scaffolded `main.go` gates on `STRIPE_MOCK=true`
-- Wired automatically by `hamr new --stripe`; passed into `web.Deps.StripeMock`; currency via `STRIPE_CURRENCY` (default GBP)
+### stripemock (server-side, hosted by hamr dev)
+Local Stripe-compatible HTTP backend served on the same proxy mux as `/__hamr/*`. App code uses real `stripe-go/v82`; setting `STRIPE_MOCK=true` points it at the proxy URL (default `http://localhost:3000`). No abstraction layer — `pkg/stripemock` was removed; its surface is now entirely hamr-internal.
+- Mock pinned to API version `2025-08-27.basil` (matches stripe-go/v82); CI test asserts the constant equals `stripe.APIVersion`
+- Checkout sessions: `POST /v1/checkout/sessions` + `GET /v1/checkout/sessions/{id}`; rejects mixed-currency line items; dev UI at `/__hamr/stripe/checkout?session=<id>` with three outcome buttons (paid / failed / cancelled)
+- Connect accounts: `POST /v1/accounts` + `GET /v1/accounts/{id}` + `POST /v1/account_links`; new accounts start in pre-onboarding state (charges_enabled=false, requirements.currently_due populated); dev UI at `/__hamr/stripe/onboarding?account=<id>` with Complete button that flips enabled flags + clears requirements + fires `account.updated`
+- PaymentIntents (Connect-aware): `POST /v1/payment_intents` + `GET /v1/payment_intents/{id}` + `POST /v1/payment_intents/{id}/confirm`; supports `application_fee_amount`, `transfer_data[destination]`, `on_behalf_of`, `Stripe-Account` request header; rejects unknown destinations and `app_fee > amount`; dev UI at `/__hamr/stripe/payment_intent?id=<pi_id>` with Succeed/Fail buttons
+- Refunds (Connect-aware): `POST /v1/refunds` (sync-success model matching card refunds) + `GET /v1/refunds/{id}`; caller passes exactly one of `payment_intent`/`charge`; optional `amount` defaults to remaining; `reverse_transfer` updates `Transfer.amount_reversed` and synthesises `source_transfer_reversal` id; `refund_application_fee` flag tracked; updates `Charge.amount_refunded` + `Charge.refunded`; fires `charge.refunded`
+- Payouts (Connect-aware): `POST /v1/payouts` + `GET /v1/payouts/{id}` + `GET /v1/payouts` (list scoped by Stripe-Account header — the marketplace dashboard query, honors `?limit=`); manually-triggered start in `pending` (automatic=false); rejects unknown destination accounts; dev UI at `/__hamr/stripe/payout?id=<po_id>` with Mark paid / Mark failed buttons
+- Bracket-form decoding for `line_items[0][price_data][currency]=gbp` etc.
+- Outcome → real signed webhook (HMAC-SHA256, `Stripe-Signature: t=...,v1=...`) delivered to `webhook_url`; app's existing `webhook.ConstructEvent` verifies as production
+- Checkout outcome mapping: paid → `checkout.session.completed` + success_url; failed → `checkout.session.async_payment_failed` + cancel_url; cancelled → `checkout.session.expired` + cancel_url
+- Account outcome: Complete → `account.updated` event (charges_enabled=true, payouts_enabled=true, details_submitted=true)
+- PaymentIntent outcome cascades: succeed (destination charge) → `payment_intent.succeeded` + `charge.succeeded` + `transfer.created` (auto-creates Charge + Transfer; transfer amount = pi.amount - app_fee); succeed (no destination) → PI + charge events only; fail → `payment_intent.payment_failed` only (no synthesised charge, mirrors real sync card declines)
+- Refund cascade: synchronous success on POST → fires `charge.refunded` async with the post-refund Charge state; reverse_transfer increments the Transfer's amount_reversed (capped at remaining unreversed balance)
+- Payout outcomes: Mark paid → status=`paid` + `payout.paid` event; Mark failed → status=`failed` + populates `failure_code`/`failure_message` + `payout.failed` event
+- Race-safety: 409 Conflict on double-submit (checkout + account); 410 Gone on stale completed-session reload
+- Wired by `hamr new --stripe`: scaffolded `main.go` calls `stripe.SetBackend(...)` pointing at `HAMR_STRIPE_MOCK_URL` (auto-injected by `hamr dev` from `[proxy].listen`) when `envStripeMock` is true; refuses to start with `STRIPE_MOCK=true && !DEV_MODE` so a leftover dev flag in prod can't silently route real payments to localhost; `.env` and `hamr.toml` get a generated `whsec_dev_<hex>` shared secret
+- Config via `[dev.stripe]` in `hamr.toml`: `enabled`, `webhook_url`, `webhook_secret` (required when enabled), `persist` (default true), `persist_path` (default `.hamr/stripe/state.json`); requires `[proxy]` since both API and UI live on the proxy mux
+- Persistence: single JSON file atomically rewritten on every state mutation; loaded on `hamr dev` startup; survives restart so sessions/PIs/accounts/refunds/payouts don't vanish on every config tweak (useful for LLM workflows that read prior state)
+- Dashboard at `/__hamr/stripe`: 5 tables (sessions/accounts/PIs/refunds/payouts) newest-first, per-row actions: "Resend webhook" (re-fires natural events), "Refund" form on succeeded PIs (full or partial, with reverse_transfer toggle), "Expire" on open sessions; `hamr dev` panel shows an "Open Stripe mock" shortcut button when the mock is enabled (sse_config.stripe_mock flag)
+- Not yet mocked: standalone Transfer create, Customer, Price, Subscription, Invoice, Dispute, GET endpoints for Charge/Transfer/ApplicationFee
+- Logging: mock-emitted lines tagged `[hamr:stripe]` (separate from `[hamr dev]`) via a `component=stripe` slog attr that hamr's devHandler interprets and strips; `grep '\[hamr:stripe\]'` to filter
+- Dev/staging — production leaves `STRIPE_MOCK` unset and stripe-go talks to api.stripe.com
 
 ### email
 Provider-agnostic `Sender` interface for outbound transactional email. Apps depend on this interface; concrete impls (real provider adapters, emailmock, SMTP) plug in at startup.

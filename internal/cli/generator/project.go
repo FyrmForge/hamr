@@ -1,6 +1,8 @@
 package generator
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -30,7 +32,12 @@ type ProjectConfig struct {
 	IncludeWS        bool
 	IncludeE2E       bool
 	IncludeStripe    bool
-	IncludeEmailMock bool // wire pkg/emailmock + enable /__hamr/mail in hamr.toml
+	// StripeWebhookSecret is the dev-only signing secret shared between the
+	// scaffolded app's STRIPE_WEBHOOK_SECRET (.env) and hamr.toml's
+	// [dev.stripe].webhook_secret. Generated at scaffold time so the two stay
+	// in sync without manual coordination.
+	StripeWebhookSecret string
+	IncludeEmailMock    bool // wire pkg/emailmock + enable /__hamr/mail in hamr.toml
 	IncludeLocale    bool
 	IncludeAlpine    bool
 	DefaultLocale    string // default: "en"
@@ -92,7 +99,26 @@ func (cfg *ProjectConfig) Validate() error {
 	default:
 		return fmt.Errorf("invalid --storage value %q: must be \"local\" or \"s3\"", cfg.StorageBackend)
 	}
+	if cfg.IncludeStripe && cfg.StripeWebhookSecret == "" {
+		secret, err := generateStripeWebhookSecret()
+		if err != nil {
+			return fmt.Errorf("generate stripe webhook secret: %w", err)
+		}
+		cfg.StripeWebhookSecret = secret
+	}
 	return nil
+}
+
+// generateStripeWebhookSecret returns a Stripe-shaped dev signing secret
+// (whsec_dev_<32 random hex chars>). Used at scaffold time so the value
+// written to .env (STRIPE_WEBHOOK_SECRET) and hamr.toml ([dev.stripe]
+// .webhook_secret) match without the user having to coordinate them.
+func generateStripeWebhookSecret() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return "whsec_dev_" + hex.EncodeToString(b), nil
 }
 
 type templateFile struct {
@@ -107,6 +133,13 @@ func GenerateProject(dir string, cfg *ProjectConfig) error {
 	// Apply defaults for fields that may not be set when called without Validate().
 	if cfg.DBConnector == "" {
 		cfg.DBConnector = "sqlx"
+	}
+	if cfg.IncludeStripe && cfg.StripeWebhookSecret == "" {
+		secret, err := generateStripeWebhookSecret()
+		if err != nil {
+			return fmt.Errorf("generate stripe webhook secret: %w", err)
+		}
+		cfg.StripeWebhookSecret = secret
 	}
 
 	if cfg.InPlace {

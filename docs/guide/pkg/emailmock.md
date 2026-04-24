@@ -184,4 +184,4 @@ var ErrRejected = errors.New("emailmock: recipient rejected")
 
 - [email](email.md) — The `Sender` interface this package implements
 - [dev](dev.md) — `hamr dev` overview including the mail viewer
-- [stripemock](stripemock.md) — Same pattern applied to Stripe checkout
+- [stripemock](stripemock.md) — Same `hamr dev`-hosted mock pattern, applied to Stripe

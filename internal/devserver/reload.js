@@ -530,6 +530,12 @@
                 '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg>' +
                 'Open mail inbox</a>';
         }
+        if (config.stripe_mock) {
+            html += '<a class="hp-mail-btn" href="/__hamr/stripe" target="_blank" rel="noopener" title="Open Stripe mock dashboard in a new tab">' +
+                '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+                '<rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>' +
+                'Open Stripe mock</a>';
+        }
         html += '</div>';
 
         panel.innerHTML = html;

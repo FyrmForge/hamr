@@ -1,3 +1,5 @@
+# Schema reference: https://github.com/FyrmForge/hamr/blob/master/docs/guide/hamr-toml.md
+
 [hamr]
 version = "{{.HamrVersion}}"
 scaffolded_at = "{{.ScaffoldedAt}}"
@@ -21,51 +23,27 @@ dist = "dist"
 manifest = "internal/web/components/staticmanifest.go"
 package = "components"
 
-[ai]
-# dir = ".hamr/ai"
-
 [proxy]
 listen = ":3000"
 target = ":8080"
 inject_reload = true
-
-[dev]
-# log_file = ".hamr/dev_logs.txt"   # rolling dev log for LLM consumption (default)
-# log_file_max_lines = 200           # max lines kept (default)
-
-{{if .IncludeEmailMock -}}
-# Mail mock — captured email inbox viewable at /__hamr/mail during `hamr dev`.
-# Pair with pkg/emailmock as your email.Sender impl when EMAIL_MOCK=true.
-# Inbox is mirrored to a mbox file (openable in Thunderbird/mutt) so it
-# survives hamr dev restart. Set persist = false for ephemeral in-memory.
+{{if .IncludeEmailMock}}
 [dev.email]
 enabled = true
-# max_messages = 500
-# max_message_bytes = 10485760         # 10 MiB
-# persist = true                        # default
-# persist_path = ".hamr/mail/inbox.mbox" # default
-{{- else -}}
-# Mail mock — captured email inbox viewable at /__hamr/mail during `hamr dev`.
-# Pair with pkg/emailmock as your email.Sender impl when EMAIL_MOCK=true.
-# Inbox is mirrored to a mbox file (openable in Thunderbird/mutt) so it
-# survives hamr dev restart. Set persist = false for ephemeral in-memory.
-# [dev.email]
-# enabled = true
-# max_messages = 500
-# max_message_bytes = 10485760         # 10 MiB
-# persist = true                        # default
-# persist_path = ".hamr/mail/inbox.mbox" # default
-{{- end}}
-
-{{if or (ne .Database "sqlite") (eq .StorageBackend "s3") -}}
+{{end -}}
+{{if .IncludeStripe}}
+[dev.stripe]
+enabled = true
+webhook_url = "http://localhost:8080/api/webhooks/stripe"
+webhook_secret = "{{.StripeWebhookSecret}}"
+{{end -}}
+{{if or (ne .Database "sqlite") (eq .StorageBackend "s3")}}
 [[dev.docker_compose]]
 name = "deps"
 file = "docker/docker-compose.yaml"
 keep_running = false
 wait_ready = true
-
-{{end -}}
-
+{{end}}
 [[dev.watch]]
 name = "templ"
 watch = "**/*.templ"
@@ -107,36 +85,6 @@ name = "static"
 watch = ["static/**/*"]
 cmd = "hamr gen static"
 debounce = 200
-
-# Sync generated static pages to S3 (uncomment to enable)
-# [[dev.daemon]]
-# name = "sync-generated"
-# cmd = "hamr sync --dir generated --watch --bucket {{.Name | slug}}-static"
-
-# Multi service example
-# [[dev.watch]]
-# name = "site"
-# watch = ["internal/**/*.go", "cmd/site/*.go", "**/*.templ"]
-# ignore = ["*_templ.go", "*_test.go", "internal/api/**"]
-# cmd = "go build -o ./bin/site ./cmd/site && ./bin/site --generate"
-# run = "./bin/site"
-# depends = ["templ"]
-# reload = "full"
- 
-# # API service — rebuilt and restarted on change, no proxy
-# [[dev.watch]]
-# name = "api"
-# watch =["cmd/api/*.go", "internal/api/**"]
-# cmd = "go build -o ./bin/api ./cmd/api"
-# run = "./bin/api"
-# reload = "none"
-# env = ["API_PORT=9090"]
-
-# Templ linter — all rules enabled by default, override here
-# [lint.templ.rules.inline-style]
-# enabled = false
-# [lint.templ.rules.img-alt]
-# severity = "error"
 {{- if .IncludeLocale}}
 
 [locale]

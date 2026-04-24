@@ -1,10 +1,6 @@
 package cmd
 
 import (
-	"bufio"
-	"os"
-	"strings"
-
 	"github.com/spf13/cobra"
 )
 
@@ -17,38 +13,6 @@ var rootCmd = &cobra.Command{
 func init() {
 	// Disable Cobra's default completion command — we provide our own.
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
-}
-
-// loadDotenv reads a .env file and sets any variables not already present
-// in the environment. Missing file is silently ignored.
-func loadDotenv(path string) {
-	f, err := os.Open(path)
-	if err != nil {
-		return
-	}
-	defer f.Close() //nolint:errcheck // best-effort
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || line[0] == '#' {
-			continue
-		}
-		key, val, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		key = strings.TrimSpace(key)
-		val = strings.TrimSpace(val)
-		// Strip surrounding quotes.
-		if len(val) >= 2 && (val[0] == '"' || val[0] == '\'') && val[len(val)-1] == val[0] {
-			val = val[1 : len(val)-1]
-		}
-		// Don't override existing env vars.
-		if _, exists := os.LookupEnv(key); !exists {
-			_ = os.Setenv(key, val)
-		}
-	}
 }
 
 func init() {
@@ -66,8 +30,13 @@ func init() {
 	rootCmd.AddCommand(addCmd)
 }
 
-// Execute runs the root command.
+// Execute runs the root command. The CLI deliberately does NOT load .env
+// into its own process env — that would mutate global state and leak
+// stale values into spawned children's envs (a subtle bug where edits to
+// .env wouldn't reach live-reloaded site binaries because their
+// godotenv/autoload skipped already-set vars). The one CLI command that
+// needs .env values (`hamr sync` for S3 creds) reads them in a scoped
+// way via flagOrEnv → readDotenvKey.
 func Execute() error {
-	loadDotenv(".env")
 	return rootCmd.Execute()
 }

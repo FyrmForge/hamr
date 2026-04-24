@@ -29,7 +29,7 @@ import (
 	"github.com/FyrmForge/hamr/pkg/storage"
 {{- end}}
 {{- if .IncludeStripe}}
-	"github.com/FyrmForge/hamr/pkg/stripemock"
+	stripe "github.com/stripe/stripe-go/v82"
 {{- end}}
 {{- if .IncludeEmailMock}}
 	"github.com/FyrmForge/hamr/pkg/email"
@@ -68,7 +68,12 @@ var version = "dev"
 
 var (
 	envPort          = config.GetEnvOrDefaultInt("PORT", 8080)
-	envDevMode       = config.GetEnvOrDefaultBool("DEV_MODE", true)
+	// DEV_MODE defaults to false (fail closed in prod). Local dev sets
+	// DEV_MODE=true via .env so the scaffolded `.env` ships with it set
+	// explicitly. This makes the STRIPE_MOCK production guard actually
+	// guard — a leftover STRIPE_MOCK=true in a prod deploy without
+	// DEV_MODE explicitly set would otherwise slip through.
+	envDevMode       = config.GetEnvOrDefaultBool("DEV_MODE", false)
 	envBaseURL       = config.GetEnvOrDefault("BASE_URL", "")
 {{- if eq .Database "sqlite"}}
 	envDatabasePath  = config.GetEnvOrDefault("DATABASE_PATH", "./data/{{.Name | slug}}.db")
@@ -87,9 +92,14 @@ var (
 	envS3SecretKey   = config.GetEnvOrDefault("S3_SECRET_KEY", "rustfsadmin")
 {{- end}}
 {{- if .IncludeStripe}}
+	envStripeKey           = config.GetEnvOrDefault("STRIPE_KEY", "")
 	envStripeWebhookSecret = config.GetEnvOrDefault("STRIPE_WEBHOOK_SECRET", "")
 	envStripeMock          = config.GetEnvOrDefaultBool("STRIPE_MOCK", false)
-	envStripeCurrency      = config.GetEnvOrDefault("STRIPE_CURRENCY", "GBP")
+	// HAMR_STRIPE_MOCK_URL is auto-injected by `hamr dev` (derived from
+	// hamr.toml [proxy].listen) so the mock URL tracks proxy port changes
+	// without manual edits. The fallback is for app instances run outside
+	// hamr dev — where STRIPE_MOCK shouldn't be true anyway.
+	envHamrStripeMockURL   = config.GetEnvOrDefault("HAMR_STRIPE_MOCK_URL", "http://localhost:3000")
 {{- end}}
 {{- if .IncludeEmailMock}}
 	envEmailMock   = config.GetEnvOrDefaultBool("EMAIL_MOCK", false)
@@ -263,13 +273,33 @@ func main() {
 
 {{- if .IncludeStripe}}
 
-	// Local Stripe mock for development: serves a fake checkout page at
-	// /dev/stripe when STRIPE_MOCK=true. Leave unset in production.
-	var stripeMock *stripemock.Client
+	// Stripe SDK setup. With STRIPE_MOCK=true (dev-only), real stripe-go
+	// calls are routed to hamr's local mock served on the dev proxy — no
+	// abstraction layer in app code. In production leave STRIPE_MOCK unset
+	// and stripe-go talks to api.stripe.com directly.
+	//
+	// Production safety: STRIPE_MOCK=true with DEV_MODE=false is refused
+	// at startup. A leftover STRIPE_MOCK=true in a production .env would
+	// otherwise route real payment calls to a non-existent localhost mock,
+	// silently breaking checkouts. Failing closed loud is the only
+	// acceptable behavior. Staging environments that want fake payments
+	// should also set DEV_MODE=true.
+	//
+	// The mock URL is auto-injected by `hamr dev` as HAMR_STRIPE_MOCK_URL,
+	// derived from hamr.toml [proxy].listen. The default fallback only
+	// applies when running outside hamr dev — where STRIPE_MOCK shouldn't
+	// be true anyway.
+	stripe.Key = envStripeKey
 	if envStripeMock {
-		stripeMock = stripemock.New(baseOrigin, envStripeCurrency)
-		stripemock.Mount(srv.Echo(), stripeMock)
-		log.Info("stripe mock enabled", "path", "/dev/stripe")
+		if !envDevMode {
+			log.Error("STRIPE_MOCK=true requires DEV_MODE=true (refusing to route Stripe calls to a local mock without dev mode)")
+			os.Exit(1)
+		}
+		stripe.SetBackend(stripe.APIBackend, stripe.GetBackendWithConfig(
+			stripe.APIBackend,
+			&stripe.BackendConfig{URL: stripe.String(envHamrStripeMockURL)},
+		))
+		log.Info("stripe SDK pointed at hamr mock", "url", envHamrStripeMockURL)
 	}
 {{- end}}
 {{- if .IncludeEmailMock}}
@@ -310,9 +340,6 @@ func main() {
 {{- end}}
 {{- if .IncludeLocale}}
 		LocaleBundle: localeBundle,
-{{- end}}
-{{- if .IncludeStripe}}
-		StripeMock: stripeMock,
 {{- end}}
 {{- if .IncludeEmailMock}}
 		EmailSender: emailSender,

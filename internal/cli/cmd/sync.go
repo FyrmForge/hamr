@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/FyrmForge/hamr/pkg/storage"
 	ssync "github.com/FyrmForge/hamr/pkg/sync"
@@ -88,8 +90,17 @@ func init() {
 	syncCmd.Flags().Bool("path-style", true, "use path-style addressing (required for RustFS / path-style backends)")
 }
 
-// flagOrEnv returns the flag value if explicitly set, otherwise the env var,
+// flagOrEnv returns the flag value if explicitly set, otherwise the shell
+// env var, otherwise the matching key from `.env` in the current directory,
 // otherwise the fallback default.
+//
+// `.env` is read in a scoped, on-demand way (see readDotenvKey) — the CLI
+// never mutates its own process env. Earlier versions called `os.Setenv`
+// for every `.env` key at startup, which leaked into spawned children's
+// envs and made `.env` edits silently invisible to live-reloaded site
+// binaries (their own `godotenv/autoload` skipped already-set vars). This
+// is the one path that actually needed `.env` (S3 creds for `hamr sync`),
+// so the load happens here.
 func flagOrEnv(cmd *cobra.Command, flag, envKey, def string) string {
 	if cmd.Flags().Changed(flag) {
 		v, _ := cmd.Flags().GetString(flag)
@@ -98,5 +109,42 @@ func flagOrEnv(cmd *cobra.Command, flag, envKey, def string) string {
 	if v := os.Getenv(envKey); v != "" {
 		return v
 	}
+	if v, ok := readDotenvKey(".env", envKey); ok && v != "" {
+		return v
+	}
 	return def
+}
+
+// readDotenvKey parses a .env file looking for a single key. Returns the
+// trimmed value and ok=true on hit, ok=false on miss or unreadable file.
+// Does NOT call os.Setenv — call sites are scoped to where the value is
+// needed. Strips matching surrounding single or double quotes; lines
+// starting with '#' are comments; malformed lines are skipped.
+func readDotenvKey(path, key string) (string, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", false
+	}
+	defer f.Close() //nolint:errcheck
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || line[0] == '#' {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(k) != key {
+			continue
+		}
+		v = strings.TrimSpace(v)
+		if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') && v[len(v)-1] == v[0] {
+			v = v[1 : len(v)-1]
+		}
+		return v, true
+	}
+	return "", false
 }

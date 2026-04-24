@@ -45,6 +45,9 @@ type sseConfig struct {
 	// MailMock indicates the /__hamr/mail inbox UI is mounted. The dev panel
 	// uses this to decide whether to render the mail-inbox shortcut.
 	MailMock bool `json:"mail_mock,omitempty"`
+	// StripeMock indicates the /__hamr/stripe dashboard UI is mounted. The
+	// dev panel uses this to render the Stripe-mock shortcut.
+	StripeMock bool `json:"stripe_mock,omitempty"`
 }
 
 // SSEBroker manages SSE client connections and broadcasts events.
@@ -57,13 +60,14 @@ type SSEBroker struct {
 
 // NewSSEBroker creates a new SSE broker. The provided watch rules, daemons, and
 // docker compose entries are serialized once and sent to each client on connect
-// as a "config" event. mailMockEnabled flags the dev panel to render the mail
-// inbox shortcut.
-func NewSSEBroker(rules []WatchRule, daemons []Daemon, dockerCompose []DockerCompose, mailMockEnabled bool) *SSEBroker {
+// as a "config" event. The two mock flags decide which mock-shortcut buttons
+// the dev panel renders.
+func NewSSEBroker(rules []WatchRule, daemons []Daemon, dockerCompose []DockerCompose, mailMockEnabled, stripeMockEnabled bool) *SSEBroker {
 	cfg := sseConfig{
-		Rules:    make([]sseRule, len(rules)),
-		Daemons:  make([]sseDaemon, len(daemons)),
-		MailMock: mailMockEnabled,
+		Rules:      make([]sseRule, len(rules)),
+		Daemons:    make([]sseDaemon, len(daemons)),
+		MailMock:   mailMockEnabled,
+		StripeMock: stripeMockEnabled,
 	}
 	for i, r := range rules {
 		cfg.Rules[i] = sseRule{

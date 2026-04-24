@@ -100,7 +100,8 @@ depends = ["templ"]
 reload = "full"
 ```
 
-See [Development Workflow](02-dev-workflow.md) for the full `hamr.toml` reference.
+See [`hamr.toml` Reference](hamr-toml.md) for the full schema, or
+[Development Workflow](02-dev-workflow.md) for tutorial-style usage.
 
 ---
 

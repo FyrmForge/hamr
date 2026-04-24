@@ -222,8 +222,28 @@ When all flags are provided, no interactive prompts are shown.`,
 		}
 		fmt.Println("  hamr dev")
 
+		// Discoverability: list the dev URLs the project gets based on flags.
+		// The proxy default is :3000 — if a user changes [proxy].listen later
+		// these will need updating, but the scaffold ships with the default.
+		printTryItURLs(cfg)
+
 		return nil
 	},
+}
+
+// printTryItURLs lists hamr-served dev URLs the scaffolded project gets
+// based on which optional features were enabled. Always shows the app
+// itself; only mentions the Stripe dashboard / mail inbox when the
+// matching scaffold flag fired so it stays accurate per project.
+func printTryItURLs(cfg *generator.ProjectConfig) {
+	fmt.Println("\nThen visit:")
+	fmt.Println("  http://localhost:3000              your app")
+	if cfg.IncludeStripe {
+		fmt.Println("  http://localhost:3000/__hamr/stripe Stripe mock dashboard")
+	}
+	if cfg.IncludeEmailMock {
+		fmt.Println("  http://localhost:3000/__hamr/mail   email inbox")
+	}
 }
 
 // applyWizardResult maps the interactive form results onto the ProjectConfig.
@@ -330,8 +350,8 @@ func init() {
 	newCmd.Flags().String("location", "subfolder", "project location: \"subfolder\" or \"current\"")
 	newCmd.Flags().Bool("static-s3", false, "sync static assets to a dedicated S3 bucket")
 	newCmd.Flags().Bool("pgadmin", false, "include pgAdmin in Docker Compose")
-	newCmd.Flags().Bool("stripe", false, "include Stripe webhook handler")
-	newCmd.Flags().Bool("email-mock", false, "wire pkg/emailmock + enable the /__hamr/mail dev inbox")
+	newCmd.Flags().Bool("stripe", false, "wire stripe-go + the local Stripe mock (Connect-aware API at /v1/*, dashboard at /__hamr/stripe with replay/refund actions, signed webhooks, persistent state)")
+	newCmd.Flags().Bool("email-mock", false, "wire pkg/emailmock + the dev inbox at /__hamr/mail (mbox-persisted, Thunderbird-openable)")
 	newCmd.Flags().Bool("locale", false, "include localisation (i18n) support")
 	newCmd.Flags().Bool("alpine", false, "include Alpine.js for local UI state")
 	newCmd.Flags().Bool("skip-version-check", false, "skip the \"is a newer hamr release available\" check")

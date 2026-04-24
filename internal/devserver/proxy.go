@@ -34,7 +34,7 @@ func init() {
 // when there are active build errors.
 // If mailMock is non-nil, the mail inbox UI and ingest endpoint are mounted
 // under /__hamr/mail.
-func NewProxyHandler(target string, broker *SSEBroker, errorState *ErrorState, logBuf *LogBuffer, actions *DevActions, mailMock *MailMock, injectReload bool) http.Handler {
+func NewProxyHandler(target string, broker *SSEBroker, errorState *ErrorState, logBuf *LogBuffer, actions *DevActions, mailMock *MailMock, stripeMock *StripeMock, injectReload bool) http.Handler {
 	targetURL := &url.URL{
 		Scheme: "http",
 		Host:   normalizeHost(target),
@@ -104,6 +104,10 @@ func NewProxyHandler(target string, broker *SSEBroker, errorState *ErrorState, l
 	}
 	if mailMock != nil {
 		mailMock.RegisterRoutes(mux)
+	}
+	if stripeMock != nil {
+		stripeMock.RegisterAPIRoutes(mux)
+		stripeMock.RegisterUIRoutes(mux)
 	}
 	if logBuf != nil {
 		mux.HandleFunc("/__hamr/logs", func(w http.ResponseWriter, r *http.Request) {
