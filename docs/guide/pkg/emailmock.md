@@ -147,10 +147,14 @@ Content-Type: application/json
 
 ## Security Notes
 
-- **Sandboxed HTML preview.** The HTML tab renders inside an `<iframe sandbox="">`
-  (no JS, no forms, no navigation, no same-origin) with a restrictive CSP
+- **Sandboxed HTML preview.** The HTML tab renders inside an
+  `<iframe sandbox="allow-popups allow-popups-to-escape-sandbox">`
+  (no JS, no forms, no top-nav, no same-origin) with a restrictive CSP
   (`default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'`).
-  Captured HTML can't execute or phone home.
+  Captured HTML can't execute or phone home. Link clicks open in a new tab
+  — every `<a>` is rewritten so its `target` is `_blank`, plus
+  `<base target="_blank">` in the iframe document as a fallback — so the
+  iframe itself never navigates to email-controlled URLs.
 - **CSRF guard.** Mutating POST endpoints (`/clear`, `/:id/delete`,
   `/:id/fail`, `/:id/delay`) reject requests whose `Origin` header is set and
   doesn't match the request host. Requests without an `Origin` header (curl,

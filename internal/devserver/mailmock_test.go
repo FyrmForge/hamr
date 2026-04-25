@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -227,7 +228,7 @@ func TestHTMLFrame_SetsSandboxHeaders(t *testing.T) {
 
 	rec := postJSON(t, mux, "/__hamr/mail/ingest", map[string]any{
 		"Subject": "security",
-		"HTML":    `<p>hi <img src="cid:logo"></p><script>alert(1)</script>`,
+		"HTML":    `<p>hi <img src="cid:logo"></p><a href="https://example.com" target="_self">link</a><script>alert(1)</script>`,
 	})
 	var out struct{ ID string }
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
@@ -248,8 +249,17 @@ func TestHTMLFrame_SetsSandboxHeaders(t *testing.T) {
 	// cid: rewritten.
 	assert.Contains(t, body, "/__hamr/mail/"+out.ID+"/inline/logo")
 	assert.NotContains(t, body, `cid:logo`)
+	// <base target="_blank"> makes link clicks open new tabs instead of
+	// navigating inside the iframe — works in concert with the parent's
+	// sandbox="allow-popups allow-popups-to-escape-sandbox".
+	assert.Contains(t, body, `<base target="_blank">`)
+	// Belt-and-suspenders: every <a> in the email body gets its target
+	// rewritten to _blank, so an email with target="_self" cannot navigate
+	// the iframe even if some browser misinterprets <base>.
+	assert.Contains(t, body, `<a target="_blank" href="https://example.com">link</a>`)
+	assert.NotContains(t, body, `target="_self"`)
 	// Script tag is present in body but blocked by CSP — we don't strip it ourselves.
-	// The parent iframe sandbox="" + CSP default-src 'none' are the defense.
+	// The parent iframe sandbox (no allow-scripts) + CSP default-src 'none' are the defense.
 }
 
 func TestHTMLFrame_ImagesBlocked(t *testing.T) {
@@ -498,9 +508,18 @@ func TestDetail_DetailPageCarriesIframeSandbox(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	body := rec.Body.String()
-	// The detail page must emit sandbox="" on the HTML-preview iframe. This
-	// is load-bearing for security and must not be edited out of the template.
-	assert.Contains(t, body, `sandbox=""`)
+	// The detail page must emit a restrictive sandbox on the HTML-preview
+	// iframe. Only allow-popups + allow-popups-to-escape-sandbox are granted
+	// (so <a target="_blank"> clicks open as normal, un-sandboxed tabs).
+	// allow-scripts / allow-same-origin / allow-forms / allow-top-navigation
+	// must NEVER appear here — that's the load-bearing defense against
+	// captured email HTML, and removing this assertion or widening the
+	// sandbox without a security review is forbidden.
+	assert.Contains(t, body, `sandbox="allow-popups allow-popups-to-escape-sandbox"`)
+	assert.NotContains(t, body, "allow-scripts")
+	assert.NotContains(t, body, "allow-same-origin")
+	assert.NotContains(t, body, "allow-forms")
+	assert.NotContains(t, body, "allow-top-navigation")
 	assert.Contains(t, body, `referrerpolicy="no-referrer"`)
 }
 
@@ -611,6 +630,103 @@ func TestRewriteCID_HandlesMultipleAttrForms(t *testing.T) {
 		assert.Contains(t, out, prefix+id, "missing %s rewrite", id)
 	}
 	assert.NotContains(t, out, "cid:", "at least one cid: reference survived: %s", out)
+}
+
+func TestFormatSince(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		d    time.Duration
+		want string
+	}{
+		{"sub-second", 500 * time.Millisecond, "0s"},
+		{"negative", -5 * time.Second, "0s"},
+		{"seconds", 10 * time.Second, "10s"},
+		{"minutes only", 5 * time.Minute, "5m"},
+		{"minutes seconds", 5*time.Minute + 30*time.Second, "5m 30s"},
+		{"hours only", 3 * time.Hour, "3h"},
+		{"hours minutes", 3*time.Hour + 5*time.Minute, "3h 5m"},
+		{"hours drop seconds", 3*time.Hour + 30*time.Second, "3h"},
+		{"days only", 2 * 24 * time.Hour, "2d"},
+		{"days hours", 2*24*time.Hour + 20*time.Hour, "2d 20h"},
+		{"days drop minutes", 2*24*time.Hour + 5*time.Minute, "2d"},
+		{"68h example", 68*time.Hour + 29*time.Minute + 49*time.Second, "2d 20h"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, formatSince(tc.d))
+		})
+	}
+}
+
+func TestForceLinksToNewTab(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			"plain anchor gets target injected",
+			`<a href="https://example.com">x</a>`,
+			`<a target="_blank" href="https://example.com">x</a>`,
+		},
+		{
+			"existing _self overridden",
+			`<a target="_self" href="https://example.com">x</a>`,
+			`<a target="_blank" href="https://example.com">x</a>`,
+		},
+		{
+			"existing _top overridden",
+			`<a href="https://example.com" target="_top">x</a>`,
+			`<a target="_blank" href="https://example.com">x</a>`,
+		},
+		{
+			"named window target overridden",
+			`<a href="x" target="myframe">x</a>`,
+			`<a target="_blank" href="x">x</a>`,
+		},
+		{
+			"unquoted target overridden",
+			`<a href=x target=_self>x</a>`,
+			`<a target="_blank" href=x>x</a>`,
+		},
+		{
+			"single-quoted target overridden",
+			`<a href='x' target='_self'>x</a>`,
+			`<a target="_blank" href='x'>x</a>`,
+		},
+		{
+			"uppercase tag rewritten",
+			`<A HREF="x">x</A>`,
+			`<a target="_blank" HREF="x">x</A>`,
+		},
+		{
+			"<area> not rewritten",
+			`<area shape="rect" href="x">`,
+			`<area shape="rect" href="x">`,
+		},
+		{
+			"<abbr> not rewritten",
+			`<abbr title="x">y</abbr>`,
+			`<abbr title="x">y</abbr>`,
+		},
+		{
+			"multiple anchors all rewritten",
+			`<a href="a">1</a> and <a target="_self" href="b">2</a>`,
+			`<a target="_blank" href="a">1</a> and <a target="_blank" href="b">2</a>`,
+		},
+		{
+			"bare <a> tag",
+			`<a>x</a>`,
+			`<a target="_blank">x</a>`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, forceLinksToNewTab(tc.in))
+		})
+	}
 }
 
 func TestStripImgSrc_ReplacesSrcSrcsetAndStyleURL(t *testing.T) {

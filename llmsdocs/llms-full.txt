@@ -2434,9 +2434,12 @@ rejected messages.
 
 - Inbox list — newest-first, substring search over subject, recipients, sender
 - Detail view — tabs: HTML / Plaintext / Raw / Headers / Attachments
-- HTML tab — sandboxed `<iframe sandbox="">` with restrictive CSP
+- HTML tab — sandboxed `<iframe sandbox="allow-popups allow-popups-to-escape-sandbox">`
+  (no JS, no forms, no top-nav, no same-origin) with restrictive CSP
   (`default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'`),
-  mobile-viewport toggle (375px), images-blocked toggle
+  mobile-viewport toggle (375px), images-blocked toggle. Link clicks open
+  in a new tab — every `<a>` is rewritten so its `target` is `_blank`, plus
+  `<base target="_blank">` in the iframe document as a fallback.
 - Raw tab — best-effort RFC822-shaped reconstruction (NOT real MIME; the
   mock never receives MIME)
 - Outcome simulation — per-message Mark Failed / Mark Delayed for post-hoc

@@ -49,7 +49,8 @@ func (m *MailMock) handleInbox(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDetail renders the tabbed detail page. The HTML tab is rendered via
-// an <iframe sandbox=""> pointing at handleHTMLFrame.
+// an <iframe sandbox="allow-popups allow-popups-to-escape-sandbox"> pointing
+// at handleHTMLFrame.
 func (m *MailMock) handleDetail(w http.ResponseWriter, r *http.Request, msg *mailMessage) {
 	tab := r.URL.Query().Get("tab")
 	if tab == "" {
@@ -117,7 +118,12 @@ func (m *MailMock) handleDetail(w http.ResponseWriter, r *http.Request, msg *mai
 
 // handleHTMLFrame serves the iframe body: the email HTML rewritten so cid:
 // references resolve and with security headers that lock down what the iframe
-// can do. The iframe itself carries sandbox="" on the parent page.
+// can do. The iframe on the parent page carries
+// sandbox="allow-popups allow-popups-to-escape-sandbox" — everything stays
+// denied (scripts, forms, same-origin DOM, top-nav) except link clicks may
+// open new, un-sandboxed tabs. <base target="_blank"> in the wrapping doc
+// makes plain <a> links default to that behaviour without rewriting the
+// email body.
 //
 // The optional ?theme=dark|light param sets a color-scheme hint on the root
 // document. This affects UA defaults inside the iframe (scrollbars, form
@@ -131,6 +137,7 @@ func (m *MailMock) handleHTMLFrame(w http.ResponseWriter, r *http.Request, msg *
 	}
 
 	html := rewriteCID(msg.HTML, msg.ID)
+	html = forceLinksToNewTab(html)
 	if images == "blocked" {
 		html = stripImgSrc(html)
 	}
@@ -150,8 +157,13 @@ func (m *MailMock) handleHTMLFrame(w http.ResponseWriter, r *http.Request, msg *
 	// Wrap in a minimal document so inline styles in the email body don't
 	// bleed into the parent. `color-scheme` (meta + style) tells the UA which
 	// default palette to use for scrollbars, form widgets, and unstyled text.
+	// <base target="_blank"> defaults every anchor's target to a new tab so
+	// link clicks don't navigate the iframe. (rel="noopener noreferrer" is
+	// NOT valid on <base> per HTML spec — referrer leakage is handled by the
+	// document-level Referrer-Policy/meta above; window.opener cannot be
+	// abused because the iframe has no script context to navigate.)
 	_, _ = fmt.Fprintf(w,
-		`<!DOCTYPE html><html style="color-scheme:%s"><head><meta charset="utf-8"><meta name="color-scheme" content="%s"><meta name="referrer" content="no-referrer"></head><body>%s</body></html>`,
+		`<!DOCTYPE html><html style="color-scheme:%s"><head><meta charset="utf-8"><meta name="color-scheme" content="%s"><meta name="referrer" content="no-referrer"><base target="_blank"></head><body>%s</body></html>`,
 		theme, theme, html)
 }
 
@@ -240,6 +252,29 @@ func stripImgSrc(html string) string {
 	return html
 }
 
+// anchorOpenTag matches the opening tag of <a> elements (not <area>, <abbr>,
+// etc. — the \b after `a` ensures the next char is a non-word boundary like
+// space or `>`).
+var anchorOpenTag = regexp.MustCompile(`(?i)<a\b([^>]*)>`)
+
+// anchorTargetAttr matches a target="..." (or '...' or unquoted) attribute
+// inside an <a> tag's attribute list so we can strip it before injecting our
+// own.
+var anchorTargetAttr = regexp.MustCompile(`(?i)\s+target\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)`)
+
+// forceLinksToNewTab rewrites every <a> opening tag so target="_blank" is
+// the only target. This overrides email-supplied target="_self" / "_top" /
+// named-window values that would otherwise navigate the iframe instead of
+// opening a new tab. <base target="_blank"> in the wrapping doc is the
+// fallback for any tag this regex doesn't catch.
+func forceLinksToNewTab(html string) string {
+	return anchorOpenTag.ReplaceAllStringFunc(html, func(match string) string {
+		attrs := match[2 : len(match)-1] // drop "<a" and ">"
+		attrs = anchorTargetAttr.ReplaceAllString(attrs, "")
+		return `<a target="_blank"` + attrs + `>`
+	})
+}
+
 // renderRawMIMEish produces a human-readable, RFC822-shaped dump of a stored
 // message. This is NOT real MIME; it's a debugging aid. We never received
 // real wire bytes, so we can't show them.
@@ -313,9 +348,43 @@ var mailTmplFuncs = template.FuncMap{
 		return t.Format("2006-01-02 15:04:05")
 	},
 	"since": func(t time.Time) string {
-		d := time.Since(t).Round(time.Second)
-		return d.String()
+		return formatSince(time.Since(t))
 	},
+}
+
+// formatSince renders a duration in two-unit compact form: "2d 20h",
+// "3h 5m", "5m 30s", "10s". The smaller unit is omitted when zero
+// ("5m" not "5m 0s"). Sub-second and negative values render as "0s".
+func formatSince(d time.Duration) string {
+	s := int64(d.Truncate(time.Second).Seconds())
+	if s < 1 {
+		return "0s"
+	}
+	days := s / 86400
+	s %= 86400
+	hours := s / 3600
+	s %= 3600
+	minutes := s / 60
+	secs := s % 60
+	switch {
+	case days > 0:
+		if hours > 0 {
+			return fmt.Sprintf("%dd %dh", days, hours)
+		}
+		return fmt.Sprintf("%dd", days)
+	case hours > 0:
+		if minutes > 0 {
+			return fmt.Sprintf("%dh %dm", hours, minutes)
+		}
+		return fmt.Sprintf("%dh", hours)
+	case minutes > 0:
+		if secs > 0 {
+			return fmt.Sprintf("%dm %ds", minutes, secs)
+		}
+		return fmt.Sprintf("%dm", minutes)
+	default:
+		return fmt.Sprintf("%ds", secs)
+	}
 }
 
 // mailCSS styles the dev inbox chrome. Always dark — the preview theme toggle
@@ -463,9 +532,9 @@ var detailTmpl = template.Must(template.New("detail").Funcs(mailTmplFuncs).Parse
 <a class="btn {{if eq .Images "blocked"}}btn-primary{{end}}" href="?tab=html&images=blocked{{if ne .Viewport ""}}&viewport={{.Viewport}}{{end}}">Images blocked</a>
 <button type="button" id="hamr-preview-theme" class="btn" data-base-src="{{.IFrameSrc}}" title="Toggle the preview background + color-scheme hint — affects only the email view, not the inbox chrome"></button>
 </div>
-<p class="hint">Rendered in a sandboxed iframe — no JS, no network access except same-origin inline images. The preview-theme toggle changes the iframe background and passes a <code>color-scheme</code> meta to the rendered email (affects UA-default text/scrollbar colors; doesn't change the real <code>prefers-color-scheme</code> media query).</p>
+<p class="hint">Rendered in a sandboxed iframe — no JS, no forms, no network access except same-origin inline images. Link clicks open in a new tab so the iframe never navigates to email-controlled URLs. The preview-theme toggle changes the iframe background and passes a <code>color-scheme</code> meta to the rendered email (affects UA-default text/scrollbar colors; doesn't change the real <code>prefers-color-scheme</code> media query).</p>
 <div id="hamr-iframe-wrap" class="iframe-wrap {{if eq .Viewport "mobile"}}mobile{{end}} preview-light">
-<iframe id="hamr-preview-iframe" src="{{.IFrameSrc}}" sandbox="" referrerpolicy="no-referrer"></iframe>
+<iframe id="hamr-preview-iframe" src="{{.IFrameSrc}}" sandbox="allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer"></iframe>
 </div>
 <script>
 (function(){
