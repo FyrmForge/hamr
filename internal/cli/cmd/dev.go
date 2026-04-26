@@ -145,7 +145,7 @@ func ensureCLINotBehindScaffold(configPath string, skip bool) error {
 	}
 
 	if cliVer.Less(projVer) {
-		return fmt.Errorf("scaffold was generated with hamr v%s but this CLI is v%s — upgrade the CLI (https://github.com/FyrmForge/hamr/releases) or pass --skip-version-check to bypass", projVer, cliVer)
+		return fmt.Errorf("scaffold was generated with hamr v%s but this CLI is v%s — please update hamr with `go install github.com/FyrmForge/hamr/cmd/hamr@latest`, or pass --skip-version-check to bypass", projVer, cliVer)
 	}
 	return nil
 }
