@@ -362,6 +362,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "shift+tab":
 		m.cycleTab(false)
 		return m, nil
+	case "enter":
+		if m.ready {
+			m.view.GotoBottom()
+		}
+		return m, nil
 	}
 
 	// Forward navigation keys to the viewport so PageUp/PageDown/Home/End

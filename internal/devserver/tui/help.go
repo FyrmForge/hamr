@@ -56,5 +56,6 @@ var helpEntries = []helpEntry{
 	{"", ""},
 	{"↑ / ↓", "scroll log viewport line by line"},
 	{"PgUp / PgDn", "scroll log viewport by page"},
+	{"↩", "jump back to bottom and resume tailing"},
 	{"mouse wheel", "scroll log viewport"},
 }
