@@ -80,6 +80,14 @@ type dockerStacksMsg struct {
 	names []string
 }
 
+// proxyURLMsg publishes the actual reachable proxy URL once the runner
+// has bound its listener. The model renders this at the end of the left
+// status-bar cluster so the user always sees what hamr dev picked, even
+// when [dev].port_walk shifted the listener off the configured default.
+type proxyURLMsg struct {
+	url string
+}
+
 // Model is the top-level bubbletea model for hamr dev --tui.
 type Model struct {
 	width   int
@@ -115,6 +123,7 @@ type Model struct {
 	versionStatus devserver.VersionStatus
 	versionMsg    string // e.g. "CLI is ahead of scaffold (cli v1 proj v2)"
 	versionLabel  string // e.g. "v0.6.7"
+	proxyURL      string // e.g. "http://localhost:3001"; empty until proxy binds
 }
 
 // NewModel constructs a model that pushes hotkeys to the given source.
@@ -221,6 +230,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.versionStatus = devserver.VersionUpdate
 			m.versionMsg = msg.msg
 		}
+		return m, nil
+
+	case proxyURLMsg:
+		m.proxyURL = msg.url
 		return m, nil
 
 	case tea.KeyMsg:
@@ -909,6 +922,12 @@ func (m *Model) statusBar() string {
 		parts = append(parts, statusOK.Render("OK"))
 	} else {
 		parts = append(parts, statusErr.Render(fmt.Sprintf("ERR: %s", strings.Join(m.errors, ", "))))
+	}
+	// Proxy URL renders at the end of the left cluster (after OK/ERR) so
+	// it's always visible — particularly useful when [dev].port_walk
+	// shifted the listener off the configured default.
+	if m.proxyURL != "" {
+		parts = append(parts, barPad(2), statusDim.Render(m.proxyURL))
 	}
 	left := strings.Join(parts, "")
 

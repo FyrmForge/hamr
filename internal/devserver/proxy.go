@@ -244,13 +244,23 @@ func injectReloadScript(resp *http.Response) error {
 }
 
 // ListenAndServeProxy starts the proxy server. It blocks until the context
-// is cancelled or an error occurs.
+// is cancelled or an error occurs. Kept for tests and external callers
+// that don't need the +1-on-busy port walking — the dev runner uses
+// listenWalk + serveProxy directly so it can react to EADDRINUSE before
+// constructing the handler.
 func ListenAndServeProxy(addr string, handler http.Handler) (*http.Server, net.Listener, error) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, nil, err
 	}
+	return serveProxy(ln, handler), ln, nil
+}
 
+// serveProxy attaches handler to a fresh *http.Server and serves on the
+// already-bound listener in a goroutine. Returns the server so the caller
+// can Close it on shutdown. The listener's lifetime is owned by the
+// caller; Close on the returned server will close the listener too.
+func serveProxy(ln net.Listener, handler http.Handler) *http.Server {
 	srv := &http.Server{
 		Handler: handler,
 		// Slowloris guard without capping body or long-lived (SSE) writes.
@@ -258,6 +268,5 @@ func ListenAndServeProxy(addr string, handler http.Handler) (*http.Server, net.L
 		IdleTimeout:       120 * time.Second,
 	}
 	go func() { _ = srv.Serve(ln) }()
-
-	return srv, ln, nil
+	return srv
 }

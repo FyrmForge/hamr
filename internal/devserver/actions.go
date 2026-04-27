@@ -210,7 +210,7 @@ func (a *DevActions) handleDocker(w http.ResponseWriter, r *http.Request) {
 
 func (a *DevActions) dockerRestart(dc *DockerCompose, service string) {
 	a.logger.Info("docker compose restart", "name", dc.Name, "service", service)
-	args := []string{"compose", "-f", dc.File, "restart"}
+	args := append(composeArgs(dc), "restart")
 	if service != "" {
 		args = append(args, service)
 	} else {
@@ -235,7 +235,7 @@ func (a *DevActions) dockerWipe(dc *DockerCompose, service string) {
 
 	if service != "" {
 		// Single service: stop, rm -v, then up.
-		stopArgs := []string{"compose", "-f", dc.File, "rm", "-fsv", service}
+		stopArgs := append(composeArgs(dc), "rm", "-fsv", service)
 		stopRule := &WatchRule{Name: "docker:" + dc.Name, Cmd: dockerCmd(stopArgs), Env: dc.Env}
 		if output, err := a.pm.RunCommand(ctx, stopRule); err != nil {
 			a.logger.Error("docker compose rm failed", "name", dc.Name, "err", err)
@@ -243,7 +243,7 @@ func (a *DevActions) dockerWipe(dc *DockerCompose, service string) {
 			a.broker.Broadcast(buildErrorEvent(dc.Name, output))
 			return
 		}
-		upArgs := []string{"compose", "-f", dc.File, "up", "-d", service}
+		upArgs := append(composeArgs(dc), "up", "-d", service)
 		upRule := &WatchRule{Name: "docker:" + dc.Name, Cmd: dockerCmd(upArgs), Env: dc.Env}
 		if output, err := a.pm.RunCommand(ctx, upRule); err != nil {
 			a.logger.Error("docker compose up failed after wipe", "name", dc.Name, "err", err)
@@ -256,7 +256,7 @@ func (a *DevActions) dockerWipe(dc *DockerCompose, service string) {
 	}
 
 	// All services: down -v then up -d.
-	downArgs := []string{"compose", "-f", dc.File, "down", "-v"}
+	downArgs := append(composeArgs(dc), "down", "-v")
 	downRule := &WatchRule{Name: "docker:" + dc.Name, Cmd: dockerCmd(downArgs), Env: dc.Env}
 	if output, err := a.pm.RunCommand(ctx, downRule); err != nil {
 		a.logger.Error("docker compose down -v failed", "name", dc.Name, "err", err)
@@ -265,7 +265,7 @@ func (a *DevActions) dockerWipe(dc *DockerCompose, service string) {
 		return
 	}
 
-	upArgs := []string{"compose", "-f", dc.File, "up", "-d"}
+	upArgs := append(composeArgs(dc), "up", "-d")
 	upArgs = append(upArgs, dc.Services...)
 	upRule := &WatchRule{Name: "docker:" + dc.Name, Cmd: dockerCmd(upArgs), Env: dc.Env}
 	if output, err := a.pm.RunCommand(ctx, upRule); err != nil {
@@ -294,7 +294,7 @@ type dockerPSEntry struct {
 }
 
 func (a *DevActions) dockerStatus(dc *DockerCompose) ([]containerStatus, error) {
-	args := []string{"compose", "-f", dc.File, "ps", "--format", "json"}
+	args := append(composeArgs(dc), "ps", "--format", "json")
 	args = append(args, dc.Services...)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -344,7 +344,7 @@ func (a *DevActions) dockerStatus(dc *DockerCompose) ([]containerStatus, error) 
 }
 
 func (a *DevActions) dockerLogs(dc *DockerCompose) (string, error) {
-	args := []string{"compose", "-f", dc.File, "logs", "--tail=100"}
+	args := append(composeArgs(dc), "logs", "--tail=100")
 	args = append(args, dc.Services...)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

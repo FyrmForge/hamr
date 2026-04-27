@@ -40,6 +40,13 @@ type Runner struct {
 	hotkeys        HotkeySource
 	statusBar      *StatusBar
 	actionsHook    func(*DevActions)
+	proxyURLHook   func(string)
+
+	// proxyURL is set by Run() after the proxy listener has bound to its
+	// (possibly walked) port. Read by the o-open hotkey so it always points
+	// at the actual listening URL, not the value originally written in
+	// hamr.toml. Empty when the proxy isn't running.
+	proxyURL string
 }
 
 // Option configures a Runner.
@@ -121,6 +128,16 @@ func WithStatusBar(sb *StatusBar) Option {
 	return func(r *Runner) { r.statusBar = sb }
 }
 
+// WithProxyURLHook registers a callback that fires once the reverse proxy
+// has bound (after any +1-on-busy port walking) so the caller can publish
+// the actual reachable URL to its UI surface. The TUI runtime uses this to
+// push the URL into a bubbletea message; the legacy CLI bar gets the URL
+// directly via StatusBar.SetProxyURL inside Run. The hook fires on the
+// runner goroutine; copy the string and return — do not block.
+func WithProxyURLHook(fn func(string)) Option {
+	return func(r *Runner) { r.proxyURLHook = fn }
+}
+
 // NewRunner creates a new Runner with the given config and options.
 func NewRunner(cfg *Config, opts ...Option) *Runner {
 	r := &Runner{cfg: cfg}
@@ -143,11 +160,16 @@ func (r *Runner) baseLogWriter() io.Writer {
 
 // buildHamrInjectedEnv returns env-var KEY=VALUE pairs that hamr dev sets
 // on every spawned rule process so the scaffolded site (or any rule) can
-// discover hamr-served URLs without hardcoding ports. The values are
-// derived from `hamr.toml` so they automatically track `[proxy].listen`
-// changes — no second source of truth in the scaffold.
+// discover hamr-served URLs (and the chosen app port) without hardcoding
+// values. The proxyOrigin and appPort arguments are the *actual* values
+// the runner has bound or probed — they may differ from `hamr.toml` when
+// [dev].port_walk has shifted a busy port +1.
 //
 // Currently emits:
+//   - PORT: spawned app's listen port. Always set when the proxy is
+//     configured so the app and the proxy.target stay aligned even after a
+//     +1 walk. Apps read PORT to know where to listen; this is hamr taking
+//     ownership of that value when it controls the proxy.
 //   - HAMR_DEV_URL: proxy origin, set when [dev.email] OR [dev.stripe] is
 //     enabled (the email mock uses it as its ingest target; the scaffold's
 //     emailmock.New(envHamrDevURL) reads it).
@@ -156,19 +178,23 @@ func (r *Runner) baseLogWriter() io.Writer {
 //
 // godotenv.Load() in the spawned site honors pre-set env vars (doesn't
 // overwrite), so these injected values win over any conflicting entry in
-// the user's .env — by design. Hamr knows its own proxy URL; nothing the
-// user puts in .env should be more authoritative than that.
-func buildHamrInjectedEnv(cfg *Config) []string {
+// the user's .env — by design. Hamr knows its own proxy URL and the app
+// port it has chosen; nothing in .env should be more authoritative.
+func buildHamrInjectedEnv(cfg *Config, proxyOrigin string, appPort int) []string {
 	if !cfg.ProxyConfigured {
 		return nil
 	}
 	var injected []string
-	proxyOrigin := proxyClientBaseURL(cfg)
-	if cfg.Dev.Email.Enabled || cfg.Dev.Stripe.Enabled {
-		injected = append(injected, "HAMR_DEV_URL="+proxyOrigin)
+	if appPort > 0 {
+		injected = append(injected, fmt.Sprintf("PORT=%d", appPort))
 	}
-	if cfg.Dev.Stripe.Enabled {
-		injected = append(injected, "HAMR_STRIPE_MOCK_URL="+proxyOrigin)
+	if proxyOrigin != "" {
+		if cfg.Dev.Email.Enabled || cfg.Dev.Stripe.Enabled {
+			injected = append(injected, "HAMR_DEV_URL="+proxyOrigin)
+		}
+		if cfg.Dev.Stripe.Enabled {
+			injected = append(injected, "HAMR_STRIPE_MOCK_URL="+proxyOrigin)
+		}
 	}
 	return injected
 }
@@ -200,7 +226,9 @@ func (r *Runner) Run(ctx context.Context) error {
 	errorState := NewErrorState()
 	logBuf := NewLogBuffer(1000)
 	pm.SetLogOutput(logBuf, broker)
-	pm.SetInjectedEnv(buildHamrInjectedEnv(r.cfg))
+	// Injected env (PORT, HAMR_DEV_URL, HAMR_STRIPE_MOCK_URL) is set further
+	// down once the proxy listener has bound and we know the actual ports —
+	// hamr's port_walk may have shifted them above the configured defaults.
 	if fileLog != nil {
 		pm.SetFileLog(fileLog)
 	}
@@ -314,12 +342,9 @@ func (r *Runner) Run(ctx context.Context) error {
 		)
 	}
 
-	// Stripe mock: API surface and dev UI both mount on the proxy mux. Apps
-	// point stripe-go at the proxy URL via STRIPE_MOCK=true. Stripe-go's
-	// path-prefix check (`req.URL.Path` must start with /v1) is satisfied
-	// because we register /v1/* explicitly — http.ServeMux's longest-prefix
-	// match keeps these from colliding with the / catch-all to the app.
-	var stripeMock *StripeMock
+	// Stripe mock validation. The mock is constructed below — once we know
+	// the actual proxy port — so its BaseURL reflects any +1-on-busy walk
+	// rather than the originally-configured listen value.
 	if r.cfg.Dev.Stripe.Enabled {
 		if !r.cfg.ProxyConfigured {
 			return fmt.Errorf("dev.stripe.enabled = true requires a [proxy] section in hamr.toml (the Stripe API + UI live on the proxy mux)")
@@ -327,50 +352,112 @@ func (r *Runner) Run(ctx context.Context) error {
 		if r.noProxy {
 			return fmt.Errorf("dev.stripe.enabled = true cannot be used with --no-proxy (the Stripe API + UI live on the proxy mux)")
 		}
-		// Reuse one stripe-prefixed logger for both the mock's internal use
-		// and the persist-error callback so all stripe-related output gets
-		// the [hamr:stripe] tag (the dev handler interprets the "component"
-		// attr as a tag override).
-		stripeLogger := r.logger.With("component", "stripe")
-		opts := StripeMockOptions{
-			BaseURL: proxyClientBaseURL(r.cfg),
-			Logger:  stripeLogger,
-			OnPersistError: func(err error) {
-				stripeLogger.Warn("persistence error", "err", err)
-			},
-		}
-		if r.cfg.Dev.Stripe.PersistEnabled() {
-			opts.PersistPath = r.cfg.Dev.Stripe.ResolvedPersistPath()
-		}
-		stripeMock = NewStripeMock(opts)
-		stripeMock.SetWebhookEndpoint(WebhookEndpoint{
-			URL:    r.cfg.Dev.Stripe.WebhookURL,
-			Secret: r.cfg.Dev.Stripe.WebhookSecret,
-		})
 	}
 
+	// Resolve actual ports and stand up the proxy. listenWalk binds the
+	// proxy listener (walking +1 on EADDRINUSE up to a small cap when
+	// [dev].port_walk is on); probeFreePort picks a free app port the same
+	// way. Both walks log a WARN per shift so two `hamr dev` instances on
+	// the same machine surface the conflict instead of silently colliding.
+	//
+	// The cfg is mutated in memory so downstream code (mock URL derivation,
+	// waitForTarget, status bar) reads the actual values rather than the
+	// originally-configured ones. Persisting these to hamr.toml is out of
+	// scope — the next run probes again.
+	var (
+		stripeMock      *StripeMock
+		proxyOrigin     string
+		actualAppPort   int
+		originalAppPort int
+	)
 	if !r.noProxy && r.cfg.ProxyConfigured {
-		inject := r.cfg.Proxy.InjectReload != nil && *r.cfg.Proxy.InjectReload
-		handler := NewProxyHandler(r.cfg.Proxy.Target, broker, errorState, logBuf, actions, mailMock, stripeMock, inject)
-		srv, _, err := ListenAndServeProxy(r.cfg.Proxy.Listen, handler)
+		ln, proxyPort, err := listenWalk(r.cfg.Proxy.Listen, portWalkAttempts(r.cfg), r.logger)
 		if err != nil {
 			return fmt.Errorf("start proxy: %w", err)
 		}
-		proxySrv = srv
-		r.logger.Info("proxy listening", "addr", r.cfg.Proxy.Listen, "target", r.cfg.Proxy.Target)
-		if stripeMock != nil {
+
+		targetHost, targetStartPort, parseErr := splitListenAddr(r.cfg.Proxy.Target)
+		if parseErr != nil {
+			_ = ln.Close()
+			return fmt.Errorf("parse proxy.target %q: %w", r.cfg.Proxy.Target, parseErr)
+		}
+		probeHost := targetHost
+		if probeHost == "" {
+			probeHost = "127.0.0.1"
+		}
+		actualAppPort, err = probeFreePort(probeHost, targetStartPort, portWalkAttempts(r.cfg), r.logger)
+		if err != nil {
+			_ = ln.Close()
+			return fmt.Errorf("probe app port: %w", err)
+		}
+		originalAppPort = targetStartPort
+
+		// Mutate cfg in memory so the rest of Run sees the actual port pair.
+		// The original listen host (":3000" / "0.0.0.0:3000" / etc.) is
+		// preserved — only the port shifts.
+		listenHost := ""
+		if h, _, lerr := splitListenAddr(r.cfg.Proxy.Listen); lerr == nil {
+			listenHost = h
+		}
+		r.cfg.Proxy.Listen = joinHostPort(listenHost, proxyPort)
+		r.cfg.Proxy.Target = joinHostPort(targetHost, actualAppPort)
+
+		proxyOrigin = proxyClientBaseURLFromPort(proxyPort)
+		r.proxyURL = proxyOrigin
+
+		// Stripe mock construction is gated on Enabled — when disabled the
+		// pointer stays nil and NewProxyHandler skips its routes.
+		if r.cfg.Dev.Stripe.Enabled {
+			stripeLogger := r.logger.With("component", "stripe")
+			opts := StripeMockOptions{
+				BaseURL: proxyOrigin,
+				Logger:  stripeLogger,
+				OnPersistError: func(err error) {
+					stripeLogger.Warn("persistence error", "err", err)
+				},
+			}
+			if r.cfg.Dev.Stripe.PersistEnabled() {
+				opts.PersistPath = r.cfg.Dev.Stripe.ResolvedPersistPath()
+			}
+			stripeMock = NewStripeMock(opts)
+			webhookURL := rewriteWebhookURLForAppPort(r.cfg.Dev.Stripe.WebhookURL, originalAppPort, actualAppPort)
+			stripeMock.SetWebhookEndpoint(WebhookEndpoint{
+				URL:    webhookURL,
+				Secret: r.cfg.Dev.Stripe.WebhookSecret,
+			})
 			persistPath := ""
 			if r.cfg.Dev.Stripe.PersistEnabled() {
 				persistPath = r.cfg.Dev.Stripe.ResolvedPersistPath()
 			}
-			r.logger.With("component", "stripe").Info("mock enabled",
+			stripeLogger.Info("mock enabled",
 				"api", r.cfg.Proxy.Listen+"/v1/*",
 				"ui", r.cfg.Proxy.Listen+"/__hamr/stripe/*",
-				"webhook_url", r.cfg.Dev.Stripe.WebhookURL,
+				"webhook_url", webhookURL,
 				"persist", persistPath,
 			)
 		}
+
+		inject := r.cfg.Proxy.InjectReload != nil && *r.cfg.Proxy.InjectReload
+		handler := NewProxyHandler(r.cfg.Proxy.Target, broker, errorState, logBuf, actions, mailMock, stripeMock, inject)
+		proxySrv = serveProxy(ln, handler)
+
+		// Single-line banner that surfaces the actual reachable URL +
+		// app port. With port_walk on, this is the one place the user
+		// sees what hamr picked when something was busy.
+		r.logger.Info("hamr dev URL", "url", proxyOrigin, "app", normalizeHost(r.cfg.Proxy.Target))
+
+		// Publish the URL to the legacy CLI bar (no-op when the bar isn't
+		// running) and to the TUI runtime (when wired).
+		statusBar.SetProxyURL(proxyOrigin)
+		if r.proxyURLHook != nil {
+			r.proxyURLHook(proxyOrigin)
+		}
 	}
+
+	// Now that proxy port (and app port) are known, build and apply the
+	// injected env. SetInjectedEnv must precede the first StartProcess —
+	// initial-build is below so this is safe.
+	pm.SetInjectedEnv(buildHamrInjectedEnv(r.cfg, proxyOrigin, actualAppPort))
 
 	// Ensure docker compose services are running before build.
 	for i := range r.cfg.Dev.DockerCompose {
@@ -635,11 +722,19 @@ func (r *Runner) handleHotkey(action HotkeyAction, actions *DevActions, sb *Stat
 		r.logger.Info("rebuilding all rules")
 		go actions.RebuildAll()
 	case HotkeyOpenBrowser:
-		if r.cfg.ProxyConfigured {
+		// Prefer the URL the proxy actually bound to (post +1 walk) so the
+		// browser opens at the right place even when [dev].port_walk
+		// shifted the port off the configured default. Falls back to the
+		// configured listen value when the proxy isn't running yet.
+		switch {
+		case r.proxyURL != "":
+			r.logger.Info("opening browser", "url", r.proxyURL)
+			openBrowser(r.proxyURL)
+		case r.cfg.ProxyConfigured:
 			url := "http://" + normalizeHost(r.cfg.Proxy.Listen)
 			r.logger.Info("opening browser", "url", url)
 			openBrowser(url)
-		} else {
+		default:
 			r.logger.Warn("no proxy configured, cannot open browser")
 		}
 	case HotkeyClearTerminal:
@@ -794,9 +889,50 @@ func (r *Runner) findRule(name string) *WatchRule {
 	return nil
 }
 
+func composeArgs(dc *DockerCompose) []string {
+	projectDir := filepath.Dir(dc.File)
+	if projectDir == "" {
+		projectDir = "."
+	}
+	args := []string{"compose", "--project-directory", projectDir, "-f", dc.File}
+	override := composeOverridePath(dc.Name)
+	if info, err := os.Stat(override); err == nil && !info.IsDir() {
+		args = append(args, "-f", override)
+	}
+	return args
+}
+
 // ensureDockerCompose runs "docker compose up -d" for a compose entry.
 func (r *Runner) ensureDockerCompose(ctx context.Context, dc *DockerCompose) (string, error) {
-	args := []string{"compose", "-f", dc.File, "up", "-d"}
+	override := composeOverridePath(dc.Name)
+	if !r.cfg.Dev.PortWalkEnabled() {
+		_ = os.Remove(override)
+	} else {
+		services, err := parseComposePorts(dc.File)
+		if err != nil {
+			return "", err
+		}
+		updated, shifts := walkComposeServices(services, portWalkAttempts(r.cfg), r.logger)
+		if len(shifts) == 0 {
+			_ = os.Remove(override)
+		} else {
+			affected := make(map[string]bool, len(shifts))
+			for _, shift := range shifts {
+				affected[shift.Service] = true
+				r.logger.Warn("docker compose port walked",
+					"name", dc.Name,
+					"service", shift.Service,
+					"from", shift.Old,
+					"to", shift.New,
+				)
+			}
+			if err := writeComposeOverride(override, updated, affected); err != nil {
+				return "", err
+			}
+		}
+	}
+
+	args := append(composeArgs(dc), "up", "-d")
 	if dc.WaitReady {
 		args = append(args, "--wait")
 	}
@@ -831,7 +967,9 @@ func (r *Runner) ensureDockerCompose(ctx context.Context, dc *DockerCompose) (st
 func (r *Runner) followDockerLogs(runCtx context.Context, dc *DockerCompose, sink io.Writer, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	args := []string{"compose", "--ansi=always", "-f", dc.File, "logs", "-f", "--tail=50"}
+	args := append([]string{}, composeArgs(dc)...)
+	args = append(args[:1], append([]string{"--ansi=always"}, args[1:]...)...)
+	args = append(args, "logs", "-f", "--tail=50")
 	if len(dc.Services) > 0 {
 		args = append(args, dc.Services...)
 	}
@@ -870,7 +1008,7 @@ func (r *Runner) stopDockerCompose(dc *DockerCompose) {
 	r.logger.Info("stopping docker compose", "name", dc.Name)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	args := []string{"compose", "-f", dc.File, "down"}
+	args := append(composeArgs(dc), "down")
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.WaitDelay = 2 * time.Second
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -881,4 +1019,5 @@ func (r *Runner) stopDockerCompose(dc *DockerCompose) {
 	if err := cmd.Run(); err != nil {
 		r.logger.Error("docker compose down failed", "name", dc.Name, "err", err, "output", buf.String())
 	}
+	_ = os.Remove(composeOverridePath(dc.Name))
 }

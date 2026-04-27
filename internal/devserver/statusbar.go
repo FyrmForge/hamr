@@ -35,6 +35,7 @@ type StatusBar struct {
 	versionStatus VersionStatus
 	versionMsg    string // e.g. "cli=0.4.0 project=0.5.0"
 	versionLabel  string // e.g. "v0.6.7"
+	proxyURL      string // e.g. "http://localhost:3001"; empty until proxy binds
 }
 
 // bar content constants.
@@ -85,6 +86,17 @@ func (sb *StatusBar) SetVersionStatus(status VersionStatus, msg string) {
 	sb.Redraw()
 }
 
+// SetProxyURL stores the proxy's actual reachable URL (e.g.
+// "http://localhost:3001") and triggers a redraw so the user sees what
+// hamr dev bound to — particularly useful when [dev].port_walk shifted
+// the listener off the configured default. Empty string clears the slot.
+func (sb *StatusBar) SetProxyURL(url string) {
+	sb.mu.Lock()
+	sb.proxyURL = url
+	sb.mu.Unlock()
+	sb.Redraw()
+}
+
 // SetVersionUpdateIfOK sets VersionUpdate only if the current status is VersionOK.
 // This prevents a background update check from overwriting a more important status
 // like VersionMismatch or VersionDev.
@@ -108,6 +120,7 @@ func (sb *StatusBar) buildBarContent(width int) string {
 	vs := sb.versionStatus
 	vmsg := sb.versionMsg
 	vlabel := sb.versionLabel
+	purl := sb.proxyURL
 	sb.mu.Unlock()
 
 	hasErrors := es != nil && es.HasErrors()
@@ -124,6 +137,17 @@ func (sb *StatusBar) buildBarContent(width int) string {
 	}
 	base := hamr + barKeys
 	used := barBaseVisibleLen // visible chars consumed so far
+
+	// Proxy URL slot: rendered at the end of the left cluster (after the
+	// hotkey hints, before any error indicator) so the user always sees
+	// the actual reachable URL. Errors render after the URL so a long
+	// error list doesn't push the URL off the bar.
+	var urlSuffix string
+	urlUsed := 0
+	if purl != "" {
+		urlSuffix = "  " + barDim + purl + barReset
+		urlUsed = 2 + len(purl)
+	}
 
 	// Build version tag (right-aligned).
 	var rightTag string
@@ -145,7 +169,7 @@ func (sb *StatusBar) buildBarContent(width int) string {
 		}
 	}
 
-	// Build error indicator (inline after hotkeys).
+	// Build error indicator (inline after URL).
 	var errSuffix string
 	errUsed := 0
 
@@ -159,7 +183,7 @@ func (sb *StatusBar) buildBarContent(width int) string {
 		if rightLen > 0 {
 			reserved += rightLen + 2
 		}
-		available := width - used - errPrefixVisibleLen - reserved
+		available := width - used - urlUsed - errPrefixVisibleLen - reserved
 		if available < 3 {
 			errSuffix = "  " + barRed + "ERR" + barReset
 			errUsed = 5
@@ -178,18 +202,18 @@ func (sb *StatusBar) buildBarContent(width int) string {
 	}
 
 	if rightLen == 0 {
-		return base + errSuffix
+		return base + urlSuffix + errSuffix
 	}
 
 	// Pad between left content and right-aligned tag.
 	// Use width-1 to avoid writing in the last column, which wraps the cursor.
-	leftUsed := used + errUsed
+	leftUsed := used + urlUsed + errUsed
 	maxCol := width - 1
 	if leftUsed+rightLen+2 > maxCol {
-		return base + errSuffix
+		return base + urlSuffix + errSuffix
 	}
 	gap := maxCol - leftUsed - rightLen
-	return base + errSuffix + strings.Repeat(" ", gap) + rightTag
+	return base + urlSuffix + errSuffix + strings.Repeat(" ", gap) + rightTag
 }
 
 // Start activates the status bar. It sets a scroll region that reserves the

@@ -9,7 +9,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -132,4 +135,49 @@ func computeStripeSignature(t time.Time, payload []byte, secret string) []byte {
 	_, _ = fmt.Fprintf(mac, "%d.", t.Unix())
 	mac.Write(payload) //nolint:errcheck
 	return mac.Sum(nil)
+}
+
+// rewriteWebhookURLForAppPort returns rawURL with its port swapped from
+// originalAppPort to actualAppPort when the URL points at a localhost
+// address on the original port. Used by the dev runner so that when
+// [dev].port_walk shifts the spawned-app port (e.g. 8080 → 8081), the
+// Stripe mock fires webhooks at the new port instead of the stale value
+// the user wrote in hamr.toml.
+//
+// URLs that don't match (different host, different port, missing port,
+// unparseable) come back unchanged — users who configured an exotic
+// webhook URL (ngrok, public proxy, non-app target) keep what they set.
+func rewriteWebhookURLForAppPort(rawURL string, originalAppPort, actualAppPort int) string {
+	if rawURL == "" || originalAppPort == actualAppPort {
+		return rawURL
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	if !isLocalHostname(u.Hostname()) {
+		return rawURL
+	}
+	port := u.Port()
+	if port == "" {
+		// No explicit port — scheme default (e.g. :80 / :443) doesn't
+		// match a dev app port the user configured, so leave alone.
+		return rawURL
+	}
+	portInt, err := strconv.Atoi(port)
+	if err != nil || portInt != originalAppPort {
+		return rawURL
+	}
+	u.Host = net.JoinHostPort(u.Hostname(), strconv.Itoa(actualAppPort))
+	return u.String()
+}
+
+// isLocalHostname reports whether host is a loopback name we recognise.
+// IPv6 ::1 is normalised by url.URL.Hostname() (brackets removed).
+func isLocalHostname(host string) bool {
+	switch host {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	return false
 }

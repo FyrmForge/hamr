@@ -384,14 +384,15 @@ func randomHex(n int) string {
 	return hex.EncodeToString(b)[:n]
 }
 
-// proxyClientBaseURL returns the proxy's client-reachable origin
-// ("http://host:port") derived from cfg.Proxy.Listen. Used for the stripe
-// mock's BaseURL (rendered into checkout-session URLs) and for the
-// HAMR_DEV_URL / HAMR_STRIPE_MOCK_URL env vars injected into spawned
-// processes. Always http:// — the mock is localhost-only by design.
-// Validation guarantees [proxy] is configured when [dev.stripe] or
-// [dev.email] is enabled, and that the port is non-zero so the URL is
-// derivable from the configured listen value alone.
-func proxyClientBaseURL(cfg *Config) string {
-	return "http://" + normalizeHost(cfg.Proxy.Listen)
+// proxyClientBaseURLFromPort returns the proxy's client-reachable origin
+// ("http://localhost:<port>") for an actual bound port. Always http:// — the
+// mock is localhost-only by design. Used after the proxy listener has been
+// established so the URL reflects any +1-on-busy port walking that occurred,
+// rather than the value originally written in hamr.toml.
+//
+// The host portion always renders as "localhost" — listen addresses like
+// ":3001" or "0.0.0.0:3001" are bind-side concerns, not client-reachable
+// destinations.
+func proxyClientBaseURLFromPort(port int) string {
+	return fmt.Sprintf("http://localhost:%d", port)
 }

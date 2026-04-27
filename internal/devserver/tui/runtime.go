@@ -58,6 +58,7 @@ func (r *Runtime) Wire(opts []devserver.Option) []devserver.Option {
 		devserver.WithLogWriter(r.sink),
 		devserver.WithProcessOutput(r.sink, r.sink),
 		devserver.WithActionsHook(r.onActions),
+		devserver.WithProxyURLHook(r.SetProxyURL),
 	)
 }
 
@@ -142,6 +143,14 @@ func (r *Runtime) SetVersionStatus(status devserver.VersionStatus, msg string) {
 // chattier than the legacy bar, acceptable for the experimental flag.
 func (r *Runtime) SetVersionUpdateIfOK(msg string) {
 	r.program.Send(versionUpdateIfOKMsg{msg: msg})
+}
+
+// SetProxyURL publishes the actual reachable proxy URL to the model so
+// it can render in the status bar (mirrors
+// devserver.StatusBar.SetProxyURL). Wired via WithProxyURLHook so the
+// runner calls it once the listener has bound. Safe from any goroutine.
+func (r *Runtime) SetProxyURL(url string) {
+	r.program.Send(proxyURLMsg{url: url})
 }
 
 // Wait runs until ctx is done, then quits the program. Useful when the

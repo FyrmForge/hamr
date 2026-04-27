@@ -61,6 +61,102 @@ cmd = "go build ./cmd/site"
 	assert.True(t, *cfg.Proxy.InjectReload)
 }
 
+func TestLoadConfig_DevProxyAliases(t *testing.T) {
+	path := writeConfig(t, `
+[dev]
+proxy_listen = ":4000"
+proxy_target = ":9090"
+inject_reload = false
+
+[[dev.watch]]
+name = "go"
+watch = "**/*.go"
+cmd = "go build ./cmd/site"
+`)
+
+	cfg, err := LoadConfig(path)
+	require.NoError(t, err)
+
+	assert.True(t, cfg.ProxyConfigured)
+	assert.Equal(t, ":4000", cfg.Proxy.Listen)
+	assert.Equal(t, ":9090", cfg.Proxy.Target)
+	assert.False(t, *cfg.Proxy.InjectReload)
+}
+
+func TestLoadConfig_DevProxyTargetEnvRefFromDotenv(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".env"), []byte("PORT=8123\n"), 0o644))
+	path := filepath.Join(dir, "hamr.toml")
+	require.NoError(t, os.WriteFile(path, []byte(`
+[dev]
+proxy_listen = ":4000"
+proxy_target = "$PORT"
+
+[[dev.watch]]
+name = "go"
+watch = "**/*.go"
+cmd = "go build ./cmd/site"
+`), 0o644))
+
+	cfg, err := LoadConfig(path)
+	require.NoError(t, err)
+	assert.Equal(t, ":8123", cfg.Proxy.Target)
+}
+
+func TestLoadConfig_ProxyTargetEnvRefMissing(t *testing.T) {
+	path := writeConfig(t, `
+[dev]
+proxy_target = "$TARGET_ADDR"
+
+[[dev.watch]]
+name = "go"
+watch = "**/*.go"
+cmd = "go build ./cmd/site"
+`)
+
+	_, err := LoadConfig(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `proxy.target env ref "$TARGET_ADDR": not found`)
+}
+
+func TestLoadConfig_DevProxyAliasConflict(t *testing.T) {
+	path := writeConfig(t, `
+[proxy]
+listen = ":3000"
+
+[dev]
+proxy_listen = ":4000"
+
+[[dev.watch]]
+name = "go"
+watch = "**/*.go"
+cmd = "go build ./cmd/site"
+`)
+
+	_, err := LoadConfig(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "proxy.listen and dev.proxy_listen both set with different values")
+}
+
+func TestLoadConfig_DevInjectReloadConflict(t *testing.T) {
+	path := writeConfig(t, `
+[proxy]
+inject_reload = true
+
+[dev]
+inject_reload = false
+
+[[dev.watch]]
+name = "go"
+watch = "**/*.go"
+cmd = "go build ./cmd/site"
+`)
+
+	_, err := LoadConfig(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "proxy.inject_reload and dev.inject_reload both set with different values")
+}
+
 func TestLoadConfig_Full(t *testing.T) {
 	path := writeConfig(t, `
 [proxy]
@@ -467,6 +563,45 @@ cmd = "echo"
 `,
 			wantErr: "proxy.target",
 		},
+		{
+			name: "invalid dev proxy listen port",
+			toml: `
+[dev]
+proxy_listen = "noport"
+
+[[dev.watch]]
+name = "go"
+watch = "*.go"
+cmd = "echo"
+`,
+			wantErr: "proxy.listen",
+		},
+		{
+			name: "invalid dev proxy target port",
+			toml: `
+[dev]
+proxy_target = ":99999"
+
+[[dev.watch]]
+name = "go"
+watch = "*.go"
+cmd = "echo"
+`,
+			wantErr: "proxy.target",
+		},
+		{
+			name: "invalid dev proxy target env value",
+			toml: `
+[dev]
+proxy_target = "$TARGET_ADDR"
+
+[[dev.watch]]
+name = "go"
+watch = "*.go"
+cmd = "echo"
+`,
+			wantErr: `proxy.target env ref "$TARGET_ADDR": not found`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -752,11 +887,10 @@ cmd = "echo"
 	}
 }
 
-func TestLoadConfig_RandomPortRejectedWhenMockEnabled(t *testing.T) {
-	// HAMR_DEV_URL / HAMR_STRIPE_MOCK_URL / checkout-session BaseURL are
-	// derived from proxy.listen verbatim. A ":0" random-bind can't be
-	// resolved without actually binding, so reject it at load time rather
-	// than silently emitting "http://localhost:0" to spawned processes.
+func TestLoadConfig_RandomPortAllowedWhenMockEnabled(t *testing.T) {
+	// The runner now derives HAMR_DEV_URL / HAMR_STRIPE_MOCK_URL after the
+	// proxy listener has actually bound, so :0/random-bind is legal even
+	// when mail/stripe mocks are enabled.
 	tests := []struct {
 		name string
 		toml string
@@ -800,8 +934,7 @@ cmd = "echo"
 		t.Run(tt.name, func(t *testing.T) {
 			path := writeConfig(t, tt.toml)
 			_, err := LoadConfig(path)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "proxy.listen must have a non-zero port")
+			require.NoError(t, err)
 		})
 	}
 }

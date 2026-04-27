@@ -23,9 +23,9 @@ dist = "dist"
 manifest = "internal/web/components/staticmanifest.go"
 package = "components"
 
-[proxy]
-listen = ":3000"
-target = ":8080"
+[dev]
+proxy_listen = ":3000"
+proxy_target = "$PORT"
 inject_reload = true
 {{if .IncludeEmailMock}}
 [dev.email]

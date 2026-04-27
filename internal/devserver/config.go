@@ -1,9 +1,10 @@
 package devserver
 
 import (
+	"bufio"
 	"fmt"
-	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -28,8 +29,30 @@ type DevConfig struct {
 	DockerCompose   []DockerCompose `toml:"docker_compose"`
 	LogFile         string          `toml:"log_file"`
 	LogFileMaxLines int             `toml:"log_file_max_lines"`
+	ProxyListen     string          `toml:"proxy_listen"`
+	ProxyTarget     string          `toml:"proxy_target"`
+	InjectReload    *bool           `toml:"inject_reload"`
 	Email           EmailConfig     `toml:"email"`
 	Stripe          StripeConfig    `toml:"stripe"`
+
+	// PortWalk toggles the +1-on-busy walk for hamr-managed ports
+	// (proxy.listen, proxy.target / spawned-app PORT, and docker-compose
+	// host-port publishes). Default true: when a port is busy hamr walks +1
+	// up to a small cap and logs a WARN per shift, so two `hamr dev`
+	// instances on the same machine don't collide. Set false to disable
+	// walking and fail fast on EADDRINUSE — useful when CI or external
+	// tooling pins a specific port and would mis-target if hamr silently
+	// shifted.
+	PortWalk *bool `toml:"port_walk"`
+}
+
+// PortWalkEnabled returns whether the +1-on-busy port walk is enabled.
+// Defaults to true when the field is unset (nil) — opt-out, not opt-in.
+func (c DevConfig) PortWalkEnabled() bool {
+	if c.PortWalk == nil {
+		return true
+	}
+	return *c.PortWalk
 }
 
 // EmailConfig holds the [dev.email] table for the mail mock. When Enabled
@@ -235,14 +258,125 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
 
-	cfg.ProxyConfigured = meta.IsDefined("proxy")
+	cfg.ProxyConfigured = meta.IsDefined("proxy") || meta.IsDefined("dev", "proxy_listen") || meta.IsDefined("dev", "proxy_target") || meta.IsDefined("dev", "inject_reload")
+	if err := applyProxyAliases(&cfg, path); err != nil {
+		return nil, fmt.Errorf("validate config: %w", err)
+	}
 	applyDefaults(&cfg)
+	if err := resolveProxyEnvRefs(&cfg, path); err != nil {
+		return nil, fmt.Errorf("validate config: %w", err)
+	}
 
 	if err := validate(&cfg); err != nil {
 		return nil, fmt.Errorf("validate config: %w", err)
 	}
 
 	return &cfg, nil
+}
+
+func applyProxyAliases(cfg *Config, configPath string) error {
+	if cfg == nil {
+		return nil
+	}
+	if cfg.Dev.ProxyListen != "" {
+		if cfg.Proxy.Listen != "" && cfg.Proxy.Listen != cfg.Dev.ProxyListen {
+			return fmt.Errorf("proxy.listen and dev.proxy_listen both set with different values")
+		}
+		cfg.Proxy.Listen = cfg.Dev.ProxyListen
+	}
+	if cfg.Dev.ProxyTarget != "" {
+		if cfg.Proxy.Target != "" && cfg.Proxy.Target != cfg.Dev.ProxyTarget {
+			return fmt.Errorf("proxy.target and dev.proxy_target both set with different values")
+		}
+		cfg.Proxy.Target = cfg.Dev.ProxyTarget
+	}
+	if cfg.Dev.InjectReload != nil {
+		if cfg.Proxy.InjectReload != nil && *cfg.Proxy.InjectReload != *cfg.Dev.InjectReload {
+			return fmt.Errorf("proxy.inject_reload and dev.inject_reload both set with different values")
+		}
+		cfg.Proxy.InjectReload = cfg.Dev.InjectReload
+	}
+	return nil
+}
+
+func resolveProxyEnvRefs(cfg *Config, configPath string) error {
+	if cfg == nil || !cfg.ProxyConfigured {
+		return nil
+	}
+	if ref, ok := parseEnvRef(cfg.Proxy.Listen); ok {
+		v, err := resolveProxyAddrEnvRef(configPath, ref)
+		if err != nil {
+			return fmt.Errorf("proxy.listen env ref %q: %w", "$"+ref, err)
+		}
+		cfg.Proxy.Listen = v
+	}
+	if ref, ok := parseEnvRef(cfg.Proxy.Target); ok {
+		v, err := resolveProxyAddrEnvRef(configPath, ref)
+		if err != nil {
+			return fmt.Errorf("proxy.target env ref %q: %w", "$"+ref, err)
+		}
+		cfg.Proxy.Target = v
+	}
+	return nil
+}
+
+func resolveProxyAddrEnvRef(configPath, key string) (string, error) {
+	if v := os.Getenv(key); v != "" {
+		return normalizeProxyAddrEnvValue(v)
+	}
+	dotenvPath := filepath.Join(filepath.Dir(configPath), ".env")
+	if v, ok := readDotenvKey(dotenvPath, key); ok && v != "" {
+		return normalizeProxyAddrEnvValue(v)
+	}
+	return "", fmt.Errorf("not found in shell env or %s", dotenvPath)
+}
+
+func parseEnvRef(v string) (string, bool) {
+	v = strings.TrimSpace(v)
+	if len(v) < 2 || v[0] != '$' {
+		return "", false
+	}
+	return strings.TrimPrefix(v, "$"), true
+}
+
+func normalizeProxyAddrEnvValue(v string) (string, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "", fmt.Errorf("empty env value")
+	}
+	if _, err := strconv.Atoi(v); err == nil {
+		return ":" + v, nil
+	}
+	return v, nil
+}
+
+func readDotenvKey(path, key string) (string, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", false
+	}
+	defer f.Close() //nolint:errcheck
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || line[0] == '#' {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(k) != key {
+			continue
+		}
+		v = strings.TrimSpace(v)
+		if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') && v[len(v)-1] == v[0] {
+			v = v[1 : len(v)-1]
+		}
+		return v, true
+	}
+	return "", false
 }
 
 func applyDefaults(cfg *Config) {
@@ -373,44 +507,18 @@ func validate(cfg *Config) error {
 	}
 
 	// Email / Stripe mocks mount their routes on the proxy mux and derive
-	// HAMR_DEV_URL / HAMR_STRIPE_MOCK_URL from proxy.listen. Require a
-	// concrete [proxy] with a fixed port so the mock URL is derivable at
-	// config-load time — a random-port listener (":0") would force us to
-	// derive the URL only after binding, which isn't plumbed.
+	// HAMR_DEV_URL / HAMR_STRIPE_MOCK_URL from the actual bound port. A
+	// proxy section is still required (the mock UIs live on the proxy
+	// mux), but ":0" / random-bind is now allowed — the runner derives
+	// the URL after the listener has bound rather than at config-load.
 	if cfg.Dev.Email.Enabled || cfg.Dev.Stripe.Enabled {
 		if !cfg.ProxyConfigured {
-			return fmt.Errorf("[proxy] is required when [dev.email] or [dev.stripe] is enabled: the mocks live on the proxy mux and their client-reachable URL is derived from proxy.listen")
-		}
-		if port := listenPort(cfg.Proxy.Listen); port == 0 {
-			return fmt.Errorf("proxy.listen must have a non-zero port when [dev.email] or [dev.stripe] is enabled: the mock's client-reachable URL is derived from proxy.listen and port 0 (random-bind) cannot be resolved without binding")
+			return fmt.Errorf("[proxy] is required when [dev.email] or [dev.stripe] is enabled: the mocks live on the proxy mux and their client-reachable URL is derived from the bound proxy port")
 		}
 	}
 
 	return nil
 }
-
-// listenPort extracts the port from a listen address. Returns 0 for a
-// malformed address or a ":0" random-bind. "" → 0 so absent addresses are
-// treated the same as explicit ":0" by callers that care.
-func listenPort(addr string) int {
-	if addr == "" {
-		return 0
-	}
-	_, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		if strings.HasPrefix(addr, ":") {
-			port = strings.TrimPrefix(addr, ":")
-		} else {
-			return 0
-		}
-	}
-	n, err := strconv.Atoi(port)
-	if err != nil {
-		return 0
-	}
-	return n
-}
-
 func detectCycles(rules []WatchRule) error {
 	inDegree := make(map[string]int)
 	dependees := make(map[string][]string)

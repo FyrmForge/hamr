@@ -8,55 +8,63 @@ import (
 
 // TestBuildHamrInjectedEnv covers the env-var injection table — the
 // vars hamr dev sets on every spawned rule process so scaffolded sites
-// can discover hamr-served URLs without hardcoding ports.
+// can discover hamr-served URLs and the chosen app port without hardcoding.
 //
-// The contract: HAMR_DEV_URL fires when EITHER mock is enabled (both use
-// the proxy origin); HAMR_STRIPE_MOCK_URL fires only when stripe is
-// enabled. Both derive from [proxy].listen so port changes are picked up
-// without scaffold edits.
+// The contract: PORT is always injected when the proxy is configured so
+// the spawned app binds where hamr expects; HAMR_DEV_URL fires when EITHER
+// mock is enabled; HAMR_STRIPE_MOCK_URL fires only when stripe is enabled.
+// All values come from the actual bound/probed ports rather than the raw
+// hamr.toml defaults.
 func TestBuildHamrInjectedEnv(t *testing.T) {
 	t.Run("nothing enabled returns nil (inherit parent env)", func(t *testing.T) {
 		cfg := &Config{ProxyConfigured: true}
-		cfg.Proxy.Listen = ":3000"
-		assert.Nil(t, buildHamrInjectedEnv(cfg))
+		assert.Nil(t, buildHamrInjectedEnv(cfg, "", 0))
 	})
 
 	t.Run("proxy not configured returns nil (mocks can't run without proxy)", func(t *testing.T) {
 		cfg := &Config{ProxyConfigured: false}
 		cfg.Dev.Stripe.Enabled = true
 		cfg.Dev.Email.Enabled = true
-		assert.Nil(t, buildHamrInjectedEnv(cfg))
+		assert.Nil(t, buildHamrInjectedEnv(cfg, "http://localhost:3000", 8080))
+	})
+
+	t.Run("port only when mocks disabled", func(t *testing.T) {
+		cfg := &Config{ProxyConfigured: true}
+		got := buildHamrInjectedEnv(cfg, "", 8080)
+		assert.Equal(t, []string{"PORT=8080"}, got)
 	})
 
 	t.Run("email mock only", func(t *testing.T) {
 		cfg := &Config{ProxyConfigured: true}
-		cfg.Proxy.Listen = ":3000"
 		cfg.Dev.Email.Enabled = true
-		got := buildHamrInjectedEnv(cfg)
-		assert.Equal(t, []string{"HAMR_DEV_URL=http://localhost:3000"}, got)
+		got := buildHamrInjectedEnv(cfg, "http://localhost:3000", 8080)
+		assert.Equal(t, []string{
+			"PORT=8080",
+			"HAMR_DEV_URL=http://localhost:3000",
+		}, got)
 	})
 
 	t.Run("stripe mock only", func(t *testing.T) {
 		cfg := &Config{ProxyConfigured: true}
-		cfg.Proxy.Listen = ":3000"
 		cfg.Dev.Stripe.Enabled = true
-		got := buildHamrInjectedEnv(cfg)
+		got := buildHamrInjectedEnv(cfg, "http://localhost:3000", 8080)
 		assert.Equal(t, []string{
+			"PORT=8080",
 			"HAMR_DEV_URL=http://localhost:3000",
 			"HAMR_STRIPE_MOCK_URL=http://localhost:3000",
 		}, got)
 	})
 
-	t.Run("both mocks enabled, custom port", func(t *testing.T) {
+	t.Run("both mocks enabled, walked ports", func(t *testing.T) {
 		cfg := &Config{ProxyConfigured: true}
-		cfg.Proxy.Listen = ":3458"
 		cfg.Dev.Email.Enabled = true
 		cfg.Dev.Stripe.Enabled = true
-		got := buildHamrInjectedEnv(cfg)
+		got := buildHamrInjectedEnv(cfg, "http://localhost:3458", 9091)
 		assert.Equal(t, []string{
+			"PORT=9091",
 			"HAMR_DEV_URL=http://localhost:3458",
 			"HAMR_STRIPE_MOCK_URL=http://localhost:3458",
-		}, got, "non-default proxy port must propagate so scaffold doesn't need a hardcoded URL")
+		}, got, "walked ports must propagate so scaffold doesn't need hardcoded values")
 	})
 }
 
