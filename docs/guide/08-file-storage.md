@@ -60,6 +60,8 @@ store, err := storage.NewS3Storage(storage.S3Config{
 }, storage.WithS3Logger(logger))
 ```
 
+> When `hamr dev` walks the RustFS container's host port (because 9000 was busy), `S3_ENDPOINT` is auto-rewritten in the spawned site's env. Standalone `hamr sync` reads the same walks file, so neither the app code nor the sync watcher needs to know the port shifted. See [Port Walks](02-dev-workflow.md).
+
 ### Pre-Signed URLs
 
 Pre-signed URLs are temporary, time-limited links that grant access to private S3 objects without requiring authentication. S3 storage supports this via `SignableStorage`:

@@ -214,6 +214,22 @@ log_file_max_lines = 200            # max lines before old entries are pruned
 
 The `.hamr/` directory is created automatically and is included in the generated `.gitignore`.
 
+## Port Walks
+
+When a port hamr manages is busy at startup — proxy listen, the spawned-app `PORT`, or any `[[dev.docker_compose]]` host-published port — `hamr dev` walks +1 up to a small cap and logs a `WARN` per shift. Default behaviour; turn off with `[dev].port_walk = false` to fail fast on EADDRINUSE.
+
+```toml
+[dev]
+port_walk = true     # default; +1-on-busy walking with WARN logs
+```
+
+After walking, the rewritten port values flow to consumers in two ways:
+
+- **Spawned children** (site daemon, `hamr sync` daemon, custom daemons) get `KEY=VALUE` rewrites injected into their env on top of `.env`. `.env` on disk is never modified.
+- **Out-of-process consumers** (`make migrate`, `./scripts/db-shell.sh`, `hamr sync` from the shell) read `.hamr/walks.json`. `hamr env [--export]` prints the rewritten pairs for shell sourcing; the scaffold's `Makefile` wires this in via an `ENV_LOAD := eval "$(hamr env --export)"` prefix.
+
+Match rules and limitations are documented in the [`hamr.toml` reference](../hamr-toml.md). The on-disk `walks.json` schema is the contract between writer and reader; pinned by `internal/devserver/walks_roundtrip_test.go`.
+
 ## Lifecycle
 
 ```

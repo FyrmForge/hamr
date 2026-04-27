@@ -736,7 +736,8 @@ func TestGenerateProject_ciWorkflow(t *testing.T) {
 
 	makefile := readFile(t, dir, "Makefile")
 	assert.Contains(t, makefile, "## migrate: Run all pending migrations")
-	assert.Contains(t, makefile, "migrate:\n\tgo run ./cmd/migrate up")
+	assert.Contains(t, makefile, "migrate:\n\t$(ENV_LOAD) go run ./cmd/migrate up")
+	assert.Contains(t, makefile, "ENV_LOAD := eval", "scaffold must define ENV_LOAD so migrate / db-sh / generate pick up hamr-dev port walks")
 
 	deploy := readFile(t, dir, ".github/workflows/deploy.yml")
 	// Every non-empty line should be a comment.

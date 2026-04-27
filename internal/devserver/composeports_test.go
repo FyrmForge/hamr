@@ -92,7 +92,7 @@ func TestEnsureDockerCompose_RemovesStaleOverrideWhenPortWalkDisabled(t *testing
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	_, err = r.ensureDockerCompose(ctx, dc)
+	_, _, err = r.ensureDockerCompose(ctx, dc)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
 

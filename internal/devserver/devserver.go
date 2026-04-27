@@ -236,6 +236,17 @@ func (r *Runner) Run(ctx context.Context) error {
 		errorState.Set(rule, output)
 		broker.Broadcast(buildErrorEvent(rule, output))
 	}
+
+	// Clear any stale walks.json from a previous run before doing work
+	// that can fail. The canonical writeWalks below will overwrite this
+	// on success; if startup fails before reaching that point, consumers
+	// (`hamr env`, `hamr sync`, scaffold Makefile) see "no walks
+	// recorded" and fall through to literal .env values rather than
+	// replaying yesterday's rewrites against today's broken state.
+	if err := writeWalks(".", nil); err != nil {
+		r.logger.Warn("failed to clear stale walks file", "err", err)
+	}
+
 	var schedulerWG sync.WaitGroup
 	var followersWG sync.WaitGroup
 	var watcher *Watcher
@@ -365,16 +376,22 @@ func (r *Runner) Run(ctx context.Context) error {
 	// originally-configured ones. Persisting these to hamr.toml is out of
 	// scope — the next run probes again.
 	var (
-		stripeMock      *StripeMock
-		proxyOrigin     string
-		actualAppPort   int
-		originalAppPort int
+		stripeMock        *StripeMock
+		proxyOrigin       string
+		actualAppPort     int
+		originalAppPort   int
+		actualProxyPort   int
+		originalProxyPort int
 	)
 	if !r.noProxy && r.cfg.ProxyConfigured {
+		if _, p, perr := splitListenAddr(r.cfg.Proxy.Listen); perr == nil {
+			originalProxyPort = p
+		}
 		ln, proxyPort, err := listenWalk(r.cfg.Proxy.Listen, portWalkAttempts(r.cfg), r.logger)
 		if err != nil {
 			return fmt.Errorf("start proxy: %w", err)
 		}
+		actualProxyPort = proxyPort
 
 		targetHost, targetStartPort, parseErr := splitListenAddr(r.cfg.Proxy.Target)
 		if parseErr != nil {
@@ -454,19 +471,23 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 	}
 
-	// Now that proxy port (and app port) are known, build and apply the
-	// injected env. SetInjectedEnv must precede the first StartProcess —
-	// initial-build is below so this is safe.
-	pm.SetInjectedEnv(buildHamrInjectedEnv(r.cfg, proxyOrigin, actualAppPort))
-
-	// Ensure docker compose services are running before build.
+	// Ensure docker compose services are running before build. Walks from
+	// each entry are accumulated so we can persist a single walks.json and
+	// build the merged dotenv injection once all walks are known.
+	var composeShifts []portShift
+	composeShiftToEntry := make(map[int]string)
 	for i := range r.cfg.Dev.DockerCompose {
 		if runCtx.Err() != nil {
 			return nil
 		}
 		dc := &r.cfg.Dev.DockerCompose[i]
 		r.logger.Info("ensuring docker compose", "name", dc.Name, "file", dc.File)
-		if output, err := r.ensureDockerCompose(runCtx, dc); err != nil {
+		output, shifts, err := r.ensureDockerCompose(runCtx, dc)
+		for _, s := range shifts {
+			composeShifts = append(composeShifts, s)
+			composeShiftToEntry[len(composeShifts)-1] = dc.Name
+		}
+		if err != nil {
 			r.logger.Error("docker compose failed", "name", dc.Name, "err", err)
 			errorState.Set(dc.Name, output)
 			broker.Broadcast(buildErrorEvent(dc.Name, output))
@@ -483,6 +504,39 @@ func (r *Runner) Run(ctx context.Context) error {
 			go r.followDockerLogs(runCtx, dc, sink, &followersWG)
 		}
 	}
+
+	// Persist walk record + build the merged injected env. walks.json is
+	// the source of truth for `hamr env` / `hamr sync` invoked outside the
+	// dev process; the in-process injection below feeds spawned children
+	// (site daemon, sync-static daemon, etc.). Both paths share the same
+	// rewrite engine — driven by the same shifts list — so the values
+	// they emit are guaranteed identical.
+	walkRecords := buildWalkRecords(originalProxyPort, actualProxyPort, originalAppPort, actualAppPort, composeShifts, composeShiftToEntry)
+	if err := writeWalks(".", walkRecords); err != nil {
+		r.logger.Warn("failed to persist walks file", "err", err)
+	}
+	envRewrites, rewriteErr := resolveDotenvInjection(".env", shiftsToMap(walkRecords))
+	if rewriteErr != nil {
+		r.logger.Warn("failed to resolve .env rewrites", "err", rewriteErr)
+	}
+	for _, rewrite := range envRewrites {
+		r.logger.Info("walked .env value", "rewrite", rewrite)
+	}
+	// SetInjectedEnv must precede the first StartProcess — initial-build
+	// is below so this placement is safe. Compose ensure above doesn't
+	// consume pm.injectedEnv (it builds its own env from dc.Env), so
+	// moving the call from the old pre-loop position to here doesn't
+	// regress anything.
+	//
+	// Order matters: envRewrites first, buildHamrInjectedEnv last. buildEnv
+	// is last-wins on key conflict, so framework-owned vars (PORT,
+	// HAMR_DEV_URL, HAMR_STRIPE_MOCK_URL) authoritatively beat any .env
+	// rewrite that happens to share a key — important when a user has e.g.
+	// PORT=:8080 in .env and the whole-value rule would otherwise emit
+	// PORT=:8081, breaking int-parsing in the scaffolded main.go.
+	merged := append([]string(nil), envRewrites...)
+	merged = append(merged, buildHamrInjectedEnv(r.cfg, proxyOrigin, actualAppPort)...)
+	pm.SetInjectedEnv(merged)
 
 	// Initial build: run all rules in topological order.
 	// Track failures so dependents are skipped rather than started with stale artifacts.
@@ -903,16 +957,22 @@ func composeArgs(dc *DockerCompose) []string {
 }
 
 // ensureDockerCompose runs "docker compose up -d" for a compose entry.
-func (r *Runner) ensureDockerCompose(ctx context.Context, dc *DockerCompose) (string, error) {
+// Returns combined output (for error display) and the list of port shifts
+// the walk performed for this entry — caller threads them into walks.json
+// + dotenv injection so spawned processes and `hamr env` consumers see the
+// rewritten URLs.
+func (r *Runner) ensureDockerCompose(ctx context.Context, dc *DockerCompose) (string, []portShift, error) {
 	override := composeOverridePath(dc.Name)
+	var shifts []portShift
 	if !r.cfg.Dev.PortWalkEnabled() {
 		_ = os.Remove(override)
 	} else {
 		services, err := parseComposePorts(dc.File)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
-		updated, shifts := walkComposeServices(services, portWalkAttempts(r.cfg), r.logger)
+		updated, walked := walkComposeServices(services, portWalkAttempts(r.cfg), r.logger)
+		shifts = walked
 		if len(shifts) == 0 {
 			_ = os.Remove(override)
 		} else {
@@ -927,7 +987,7 @@ func (r *Runner) ensureDockerCompose(ctx context.Context, dc *DockerCompose) (st
 				)
 			}
 			if err := writeComposeOverride(override, updated, affected); err != nil {
-				return "", err
+				return "", nil, err
 			}
 		}
 	}
@@ -945,9 +1005,9 @@ func (r *Runner) ensureDockerCompose(ctx context.Context, dc *DockerCompose) (st
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 	if err := cmd.Run(); err != nil {
-		return buf.String(), fmt.Errorf("docker compose up failed: %w", err)
+		return buf.String(), shifts, fmt.Errorf("docker compose up failed: %w", err)
 	}
-	return "", nil
+	return "", shifts, nil
 }
 
 // followDockerLogs streams `docker compose logs -f` for one entry into

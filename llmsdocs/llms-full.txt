@@ -2544,6 +2544,84 @@ Two commands refuse to run on version mismatch (released CLI builds only):
 Both accept `--skip-version-check` to bypass. Dev builds of the CLI (no
 release tag) skip both checks entirely.
 
+### `[dev].port_walk` and `hamr env`
+
+`hamr dev` walks +1 on busy for every port it manages — the proxy listen,
+the spawned-app `PORT`, and each `[[dev.docker_compose]]` service's host
+ports — so two `hamr dev` instances on one machine (or a stray local
+Postgres on 5432) don't collide. Default is on; set `[dev].port_walk =
+false` to fail fast on EADDRINUSE for CI / pinned-port deployments. Each
+shift logs a WARN.
+
+When a port walks, values in `.env` referencing it (`DATABASE_URL`,
+`S3_ENDPOINT`, etc.) get rewritten transparently:
+
+- **In-process** (spawned site daemon, `hamr sync` daemon, custom
+  daemons): hamr injects the rewritten KEY=VALUE into the child env on
+  top of `.env`. Rule-level `Env` still wins on key conflict.
+- **Out of process** (Makefile targets, shell scripts, standalone CLI
+  invocations): `hamr dev` writes `.hamr/walks.json` after walking;
+  `hamr env [--export]` reads it plus `.env` and emits the rewritten
+  pairs. The scaffold's `Makefile` ships an `ENV_LOAD := eval
+  "$(hamr env --export)"` prefix on `migrate`, `db-sh`, `generate`,
+  `e2e-local`. `hamr sync` invoked standalone reads `walks.json`
+  itself — no wrapping needed.
+
+Match rules for which `.env` values get rewritten:
+
+- `(localhost|127.0.0.1|0.0.0.0|[::1]):<port>` anywhere in the value →
+  port swapped, host preserved.
+- whole-value `:<port>` (Go listener form) → port swapped.
+
+Values without an explicit port (e.g. `postgres://user@localhost/db`
+relying on the scheme default) are not rewritten — include the port in
+`.env` if you want auto-walking. Remote hosts (`db.prod.example.com:5432`)
+are also left alone. Userinfo-shaped colons in URLs
+(`postgres://user:5432pass@host:5432/db`) don't false-positive because
+the rule requires the local-host prefix.
+
+The whole-value `:<port>` rule rewrites connect and bind values
+uniformly. Dependency-port URLs (consumers connecting to walked
+publishers) work correctly. Bind-style values like `HEALTHCHECK_BIND=:8080`
+or `METRICS_ADDR=:9090` get the same treatment without per-var
+re-probing — the rewritten port could collide if multiple things in the
+project bind the same number. Use distinct ports per binder.
+
+`.hamr/walks.json` is regenerated on every `hamr dev` start and removed
+when no walks are needed. It's gitignored under the existing `.hamr/`
+rule. When `hamr dev` exits but the compose stack stays up
+(`keep_running = true`), the file persists so `make migrate` invocations
+that come later still resolve the right ports.
+
+The file is the contract surface between the writer (hamr dev) and the
+readers (`hamr env`, `hamr sync`, scaffold Makefile, scaffold
+`db-shell.sh`). Schema is a flat `shifts` array of
+`{kind, old, new, ...}` records — `kind` is one of `proxy`, `app`, or
+`compose`; compose entries also carry `service` and `compose_name`.
+Schema agreement between the two sides is pinned by the round-trip test
+in `internal/devserver/walks_roundtrip_test.go`, which produces the
+file via the writer and consumes it via the public resolver — schema
+drift on either side breaks that test.
+
+### hamr env
+
+Print env-var rewrites derived from the running dev server's port walks.
+
+```bash
+hamr env                       # KEY=VALUE (cwd as project root)
+hamr env --export              # export KEY=VALUE (single-quoted)
+hamr env --dir "$ROOT"         # resolve walks/.env from $ROOT, not cwd
+```
+
+Reads `.hamr/walks.json` + `.env`, applies the same match rules `hamr dev`
+uses internally, prints rewrites only for values that changed. When no
+walks are recorded the command exits 0 with no output — sourcing it is a
+no-op and the consumer falls through to `.env` unchanged.
+
+Designed for embedding in Makefiles / shell scripts that run outside
+`hamr dev` but need walked port values. The scaffold's `Makefile` does
+this automatically.
+
 ### hamr dev (terminal hotkeys)
 
 `hamr dev` runs a single-key hotkey reader on stdin while the dev server is

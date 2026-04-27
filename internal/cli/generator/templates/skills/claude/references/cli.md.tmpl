@@ -130,7 +130,21 @@ hamr sync --watch
 hamr sync --dir dist --bucket my-cdn
 ```
 
-Credentials can come from flags or env vars: `S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`. Flags take precedence. `--path-style` defaults `true` (required for RustFS and most non-AWS S3 deployments).
+Credentials can come from flags or env vars: `S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`. Flags take precedence. `--path-style` defaults `true` (required for RustFS and most non-AWS S3 deployments). When `hamr dev` walked the S3 container's host port, `hamr sync` reads `.hamr/walks.json` automatically — no wrapping needed.
+
+## hamr env
+
+Print `KEY=VALUE` (or `export KEY=VALUE` with `--export`) pairs derived from `.hamr/walks.json` (written by `hamr dev` after walking +1 on busy) merged with `.env`. Used in Makefiles and shell scripts to pick up walked DB/S3 ports without hardcoding.
+
+```bash
+hamr env                        # KEY=VALUE form (cwd as project root)
+hamr env --export               # export KEY=VALUE form, single-quoted
+hamr env --dir "$ROOT" --export # resolve walks/.env from $ROOT, not cwd
+```
+
+Exits 0 with no output when no walks recorded — sourcing it is a no-op and the consumer falls through to `.env` unchanged. Match rules: rewrites `(localhost|127.0.0.1|0.0.0.0|[::1]):<walked-port>` substrings or whole-value `:<walked-port>`. Values without an explicit port (e.g. `postgres://user@localhost/db` relying on scheme defaults) are not rewritten.
+
+The scaffold's `Makefile` ships an `ENV_LOAD := eval "$(hamr env --export)"` prefix on `migrate`, `db-sh`, `generate`, `e2e-local`. Don't strip it — those targets stop seeing walked ports without it.
 
 ## hamr lint templ
 

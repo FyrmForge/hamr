@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/FyrmForge/hamr/internal/devserver"
 	"github.com/FyrmForge/hamr/pkg/storage"
 	ssync "github.com/FyrmForge/hamr/pkg/sync"
 	"github.com/spf13/cobra"
@@ -91,16 +92,17 @@ func init() {
 }
 
 // flagOrEnv returns the flag value if explicitly set, otherwise the shell
-// env var, otherwise the matching key from `.env` in the current directory,
+// env var, otherwise the matching key from `.env` in the current directory
+// (with hamr-dev port walks applied transparently — so `hamr sync` invoked
+// from the shell while `hamr dev` is running picks up walked S3_ENDPOINT
+// values without the user having to wrap in `eval $(hamr env --export)`),
 // otherwise the fallback default.
 //
 // `.env` is read in a scoped, on-demand way (see readDotenvKey) — the CLI
 // never mutates its own process env. Earlier versions called `os.Setenv`
 // for every `.env` key at startup, which leaked into spawned children's
 // envs and made `.env` edits silently invisible to live-reloaded site
-// binaries (their own `godotenv/autoload` skipped already-set vars). This
-// is the one path that actually needed `.env` (S3 creds for `hamr sync`),
-// so the load happens here.
+// binaries (their own `godotenv/autoload` skipped already-set vars).
 func flagOrEnv(cmd *cobra.Command, flag, envKey, def string) string {
 	if cmd.Flags().Changed(flag) {
 		v, _ := cmd.Flags().GetString(flag)
@@ -110,9 +112,21 @@ func flagOrEnv(cmd *cobra.Command, flag, envKey, def string) string {
 		return v
 	}
 	if v, ok := readDotenvKey(".env", envKey); ok && v != "" {
-		return v
+		return rewriteWithWalks(v)
 	}
 	return def
+}
+
+// rewriteWithWalks applies the active hamr-dev port walks (if any) to a
+// single .env-derived value. Returns the value unchanged when no walks
+// file is present or when nothing in the value matches a walked port —
+// the common case when hamr dev isn't running or `port_walk = false`.
+//
+// Thin wrapper to keep the call site in flagOrEnv small; the actual work
+// (and the swallow-malformed-file behaviour) lives in
+// devserver.RewriteValueForWalks.
+func rewriteWithWalks(value string) string {
+	return devserver.RewriteValueForWalks(".", value)
 }
 
 // readDotenvKey parses a .env file looking for a single key. Returns the

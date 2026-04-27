@@ -23,7 +23,7 @@ hamr sync --watch                      # watch for changes and sync continuously
 hamr sync --dir dist --bucket my-cdn   # sync a different directory to a specific bucket
 ```
 
-S3 credentials can be provided via flags or environment variables (`S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`).
+S3 credentials can be provided via flags or environment variables (`S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`). When `hamr dev` is running and walked the storage container's host port (e.g. RustFS `9000` is busy), `hamr sync` reads `.hamr/walks.json` automatically and connects to the walked port — no wrapping in `eval $(hamr env --export)` needed for `hamr sync` itself. See [Port Walks](../02-dev-workflow.md).
 
 ---
 

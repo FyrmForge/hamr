@@ -45,6 +45,20 @@
   latest release and refuses to run when the local CLI is out of date so
   scaffolds never lag the template; bypass with `--skip-version-check`.
   Network errors warn and fall through; dev builds skip the check.
+- **hamr env**: Prints `KEY=VALUE` (or `export KEY=VALUE` with `--export`)
+  pairs derived from `.hamr/walks.json` (written by `hamr dev` after
+  walking +1 on busy) merged with `.env`. Used in Makefiles / shell scripts
+  to pick up walked DB/S3 ports without hardcoding. Exits 0 with no output
+  when no walks are recorded — eval is a safe no-op. Match rules: rewrites
+  values containing `(localhost|127.0.0.1|0.0.0.0|[::1]):<walked-port>` or
+  whole-value `:<walked-port>`. Values relying on scheme defaults (no
+  explicit port) are not rewritten.
+- **`[dev].port_walk`**: Default true. When a hamr-managed port is busy
+  (proxy listen, spawned-app PORT, or any `[[dev.docker_compose]]`
+  service's host-published port), hamr walks +1 up to a small cap and
+  warns. Rewritten port values are injected into spawned children's env
+  AND persisted to `.hamr/walks.json` for `hamr env` / `hamr sync`
+  consumers. The scaffold's `.env` is never modified on disk.
 - **hamr ai capture**: Browser screenshot capture with HTML/text/metadata sidecars.
   Supports viewport, full-page, and tiled (`--tiles`) capture modes. Tiled mode
   produces viewport-sized PNGs from top to bottom with configurable overlap

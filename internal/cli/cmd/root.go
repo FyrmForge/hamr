@@ -28,6 +28,7 @@ func init() {
 	rootCmd.AddCommand(completionCmd)
 	rootCmd.AddCommand(genCmd)
 	rootCmd.AddCommand(addCmd)
+	rootCmd.AddCommand(envCmd)
 }
 
 // Execute runs the root command. The CLI deliberately does NOT load .env

@@ -259,9 +259,47 @@ hamr sync --watch                      # watch for changes and sync continuously
 hamr sync --dir dist --bucket my-cdn   # sync a different directory to a specific bucket
 ```
 
-S3 credentials can be provided via flags or environment variables (`S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`). Flags take precedence.
+S3 credentials can be provided via flags or environment variables (`S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`). Flags take precedence. When `hamr dev` is running and walked an `S3_ENDPOINT` host port off its `.env` value, `hamr sync` reads `.hamr/walks.json` automatically and connects to the walked port — no manual override needed.
 
 **Guide:** [Sync](pkg/sync.md) covers the Go library API. [Storage](pkg/storage.md) covers S3 setup.
+
+---
+
+## hamr env
+
+Print env-var rewrites derived from the running dev server's port walks. Reads `.hamr/walks.json` (written by `hamr dev` after walking) and `.env`, applies the same rewrite rules `hamr dev` uses internally, and emits the resulting `KEY=VALUE` pairs to stdout.
+
+```bash
+hamr env             # KEY=VALUE form
+hamr env --export    # export KEY=VALUE form, single-quoted for safe sourcing
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--export` | `false` | Emit `export KEY=VALUE` for shell sourcing |
+| `--dir` | `.` | Project root to resolve `.hamr/walks.json` and `.env` from (use this when invoking from a script that may not run with the project root as cwd) |
+
+When no walks are recorded (port_walk disabled, every port was free, or `hamr dev` isn't running), the command exits 0 with no output — sourcing it is a no-op and the consumer falls through to `.env` unchanged.
+
+```make
+SHELL := bash
+.SHELLFLAGS := -ec
+ENV_LOAD := eval "$$(hamr env --export 2>/dev/null || true)";
+
+migrate:
+	$(ENV_LOAD) go run ./cmd/migrate
+```
+
+The scaffold's `Makefile` ships this prefix on `migrate`, `db-sh`, `generate`, and `e2e-local` already.
+
+Match rules for which `.env` values get rewritten:
+
+- `(localhost|127.0.0.1|0.0.0.0|[::1]):<port>` → port swapped, host kept.
+- whole-value `:<port>` → port swapped (Go listener form).
+
+Values without an explicit port (`postgres://user@localhost/db`) are not rewritten — include the port in `.env` if you want auto-walking. Remote hosts (`db.prod.example.com:5432`) are also left alone.
+
+**Guide:** [`[dev].port_walk`](hamr-toml.md) covers the underlying mechanism.
 
 ---
 

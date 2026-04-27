@@ -1,8 +1,23 @@
 {{- $hasCompose := or (ne .Database "sqlite") (eq .StorageBackend "s3") -}}
 .PHONY: build test lint templint{{- if not .MigrateAtStartup}} migrate{{- if eq .DBConnector "sqlx"}} migrate-down migrate-status migrate-create{{- end}}{{- end}} db-sh{{- if $hasCompose}} docker-up docker-down docker-delete docker-reload{{- end}} clean install check-templ generate{{- if eq .CSS "tailwind"}} check-node-modules css css-build{{- end}}{{- if .StaticS3}} sync-static{{- end}}{{- if .IncludeLocale}} locale-gen{{- end}}
 
+# Force bash so the ENV_LOAD eval below works cross-shell (sh on Debian/Ubuntu
+# is dash, which doesn't grok `eval "$(...)"` quoting consistently).
+SHELL := bash
+.SHELLFLAGS := -ec
+
 HAMR_VERSION  := $(shell grep 'github.com/FyrmForge/hamr ' go.mod | awk '{print $$2}')
 TEMPL_VERSION := $(shell grep 'github.com/a-h/templ ' go.mod | awk '{print $$2}')
+
+# ENV_LOAD: prefix targets that need hamr dev's port-walked .env values
+# (DATABASE_URL, S3_ENDPOINT, etc.). `hamr env --export` reads
+# .hamr/walks.json (written by `hamr dev` after walking) + .env, and emits
+# `export KEY=VALUE` lines for the values that were rewritten. When hamr
+# dev isn't running or no ports walked, output is empty and eval is a
+# no-op — the target falls through to whatever .env it already had.
+# `|| true` survives the case where `hamr` isn't on PATH (e.g. during
+# `make install`); plain .env still loads normally inside the binary.
+ENV_LOAD := eval "$$(hamr env --export 2>/dev/null || true)";
 
 ## install: Install development dependencies
 install:
@@ -47,7 +62,7 @@ build: check-templ{{- if eq .CSS "tailwind"}} check-node-modules{{- end}}
 
 ## generate: Generate static pages
 generate:
-	./bin/site --generate
+	$(ENV_LOAD) ./bin/site --generate
 
 ## test: Run all tests
 test: check-templ
@@ -60,26 +75,26 @@ test: check-templ
 
 ## migrate: Run all pending migrations
 migrate:
-	go run ./cmd/migrate up
+	$(ENV_LOAD) go run ./cmd/migrate up
 {{- if eq .DBConnector "sqlx"}}
 
 ## migrate-down: Roll back the last migration
 migrate-down:
-	go run ./cmd/migrate down
+	$(ENV_LOAD) go run ./cmd/migrate down
 
 ## migrate-status: Show current migration version
 migrate-status:
-	go run ./cmd/migrate status
+	$(ENV_LOAD) go run ./cmd/migrate status
 
 ## migrate-create: Create a new migration (usage: make migrate-create NAME=add_users)
 migrate-create:
-	go run ./cmd/migrate create $(NAME)
+	$(ENV_LOAD) go run ./cmd/migrate create $(NAME)
 {{- end}}
 {{- end}}
 
 ## db-sh: Open an interactive shell to the local dev database
 db-sh:
-	./scripts/db-shell.sh
+	$(ENV_LOAD) ./scripts/db-shell.sh
 
 ## lint: Run linters
 lint:
@@ -113,7 +128,7 @@ e2e:
 
 ## e2e-local: Run E2E tests against local server
 e2e-local:
-	go test -v -tags=e2e ./e2e-go -local -timeout 10m
+	$(ENV_LOAD) go test -v -tags=e2e ./e2e-go -local -timeout 10m
 
 ## e2e-run: Run specific E2E test: make e2e-run T=TestName
 e2e-run:
@@ -121,7 +136,7 @@ e2e-run:
 
 ## e2e-run-local: Run specific E2E test locally: make e2e-run-local T=TestName
 e2e-run-local:
-	go test -v -tags=e2e ./e2e-go -local -run "$(T)" -timeout 2m
+	$(ENV_LOAD) go test -v -tags=e2e ./e2e-go -local -run "$(T)" -timeout 2m
 {{- end}}
 
 {{- if .IncludeLocale}}

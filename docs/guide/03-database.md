@@ -28,6 +28,8 @@ defer database.Close()
 
 `ConnectContext` returns a `*sqlx.DB` with retry and exponential backoff (waits progressively longer between attempts). It validates connectivity with `PingContext` on each retry.
 
+> When `hamr dev` walks the Postgres container's host port (because 5432 was busy on your machine), `DATABASE_URL` is auto-rewritten in spawned children's env — your code keeps reading `DATABASE_URL` literally and the value points at the walked port. `make migrate`, `./scripts/db-shell.sh`, and any other Makefile target prefixed with `$(ENV_LOAD)` get the same rewrite via `hamr env`. See [Port Walks](02-dev-workflow.md) for the mechanism.
+
 ### Connection Options
 
 ```go

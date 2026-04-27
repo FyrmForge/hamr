@@ -495,6 +495,9 @@ Custom components via `@apply` in `css/input.css`:
 {{- end}}
 {{- end}}
 - Store interface in `internal/repo/repo.go`
+{{- if ne .Database "sqlite"}}
+- `DATABASE_URL` in `.env` is the source of truth; the running app reads it via `config.GetEnvOrPanic("DATABASE_URL")`. When `hamr dev` walks the Postgres host port (because `5432` is busy on this machine), the value is auto-rewritten in spawned children's env and persisted to `.hamr/walks.json` so out-of-process tooling can pick it up via `hamr env`. **Don't hardcode ports** in code that reads from `.env`; trust the rewrite.
+{{- end}}
 {{- if .IncludeAuth}}
 
 ## Auth
@@ -651,6 +654,8 @@ Pluggable file storage with `hamr/pkg/storage`:
 - `S3_REGION` — AWS region
 - `S3_ACCESS_KEY` — access key
 - `S3_SECRET_KEY` — secret key
+
+`hamr dev` walks the storage container's host port if `9000` is busy and rewrites `S3_ENDPOINT` for spawned children + `hamr sync`. Read it from `.env`/env vars; don't hardcode `localhost:9000` in code.
 {{- end}}
 {{- end}}
 {{- if .IncludeWS}}

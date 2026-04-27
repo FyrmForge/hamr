@@ -163,6 +163,19 @@ keep_running = true
 
 ---
 
+## Port Walks
+
+When a port hamr manages is busy at startup — proxy listen, the spawned-app `PORT`, or any `[[dev.docker_compose]]` host-published port — `hamr dev` walks +1 up to a small cap and logs a `WARN`. Two `hamr dev` instances on the same machine (or a stray local Postgres on 5432) won't collide.
+
+Values in `.env` that reference walked ports get rewritten transparently for the spawned site, daemons, and any standalone CLI invocation:
+
+- **In-process** (site daemon, `hamr sync` daemon, custom daemons): hamr injects the rewritten `KEY=VALUE` pairs into the child env on top of `.env`. The `.env` file on disk is never modified.
+- **Out of process** (`make migrate`, `./scripts/db-shell.sh`, `hamr sync` from the shell): hamr writes `.hamr/walks.json` after walking; `hamr env [--export]` reads it plus `.env` and emits the rewritten pairs. The scaffold's `Makefile` does this automatically via an `ENV_LOAD` prefix on targets that need DB/S3 env. `hamr sync` invoked standalone reads `walks.json` itself — no wrapping needed.
+
+Match rules and the omitted-port limitation are documented in [`hamr.toml` reference → `[dev].port_walk`](hamr-toml.md). Disable with `port_walk = false` in `[dev]` when you need fail-fast behaviour (CI, pinned-port deployments).
+
+---
+
 ## Browser Dev Panel
 
 The injected live reload script adds a small widget (bottom-left corner) showing:

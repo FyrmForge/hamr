@@ -118,6 +118,60 @@ present.
 |----------------------|--------|-------------------------|-------|
 | `log_file`           | string | `.hamr/dev_logs.txt`    | Rolling log file (also consumed by `hamr ai`). |
 | `log_file_max_lines` | int    | `200`                   | Lines retained. Must be > 0. |
+| `port_walk`          | bool   | `true`                  | When a hamr-managed port is busy, walk +1 up to a small cap and warn (see below). Set `false` to fail fast on EADDRINUSE. |
+
+#### `port_walk` — collision-tolerant port binding
+
+By default `hamr dev` walks +1 on busy for every port it manages: the proxy
+listen, the spawned-app `PORT`, and each `[[dev.docker_compose]]` service's
+host-published ports. Two `hamr dev` instances on the same machine (or a
+stray local Postgres on 5432) get a clean shift instead of a startup error.
+Each shift logs a `WARN` so the surprise is visible.
+
+When a port walks, the values consumers reference in `.env` (DATABASE_URL,
+S3_ENDPOINT, etc.) get rewritten transparently:
+
+- **In-process**: every spawned rule (site daemon, `hamr sync` daemon,
+  custom daemons) sees the rewritten values via env injection. The `.env`
+  file on disk is never modified.
+- **Out of process**: `hamr dev` writes `.hamr/walks.json` after walking;
+  `hamr env [--export]` reads it plus `.env` and emits the rewritten
+  `KEY=VALUE` pairs for sourcing in Makefiles, shell scripts, etc. The
+  scaffold's `Makefile` does this automatically via the `ENV_LOAD` prefix
+  on targets that need DB/S3 env (`migrate`, `db-sh`, `generate`,
+  `e2e-local`). `hamr sync` invoked standalone reads `walks.json` itself.
+
+`.hamr/walks.json` is the contract surface between the writer (`hamr dev`)
+and the readers (`hamr env`, `hamr sync`, scaffold Makefile, scaffold
+`db-shell.sh`). Schema is intentionally simple — a flat `shifts` array
+of `{kind, old, new}` records (compose entries also carry `service` and
+`compose_name`). Regenerated on every `hamr dev` start; removed when no
+walks happened so a stale file doesn't outlive its data. Gitignored under
+the existing `.hamr/` rule.
+
+Match rules for which `.env` values get rewritten:
+
+- `(localhost|127.0.0.1|0.0.0.0|[::1]):<oldPort>` anywhere in the value
+  → port swapped, host preserved (`postgres://...@localhost:5432/db` →
+  `postgres://...@localhost:5433/db`).
+- whole-value `:<oldPort>` (Go listener form) → port swapped
+  (`LISTEN_ADDR=:8080` → `:8081`).
+
+Values without an explicit port (`postgres://user@localhost/db` relying on
+the scheme default) are **not** rewritten — include the port in `.env` if
+you want auto-walking. Remote hosts (`db.prod.example.com:5432`) are also
+left alone.
+
+The whole-value `:<port>` rule rewrites *connect* and *bind* values
+uniformly. For dependency ports (postgres, rustfs, etc.) this is correct
+— consumers connect, hamr walked the publisher. For bind-style values
+(`HEALTHCHECK_BIND=:8080`, `METRICS_ADDR=:9090`) hamr does **not** re-probe
+per-var: the rewritten port could collide if multiple things in the
+project happen to bind on the same number. Use distinct ports per binder.
+
+Set `port_walk = false` to disable the shift entirely and fail fast on
+EADDRINUSE — useful in CI or anywhere external tooling pins specific
+ports and would mis-target if hamr silently shifted.
 
 ### `[dev.email]` — Mail mock
 
