@@ -41,7 +41,8 @@ cmd/migrate/            Standalone migration runner
 internal/repo/           Data access layer (Store interface + {{if eq .Database "sqlite"}}SQLite{{else}}PostgreSQL{{end}} impl)
 internal/web/            HTTP layer
 internal/web/server.go   Route registration + middleware groups
-internal/web/handler/    One package per domain (home{{- if .IncludeAuth}}, auth{{- end}})
+internal/web/handler/    One package per page, mirroring URL path
+                         (e.g. /admin/users → handler/admin/user/)
 internal/web/components/ Shared templ components (layout, form helpers)
 static/                  CSS, JS, images
 {{- if .IncludeLocale}}
@@ -76,14 +77,38 @@ complete package documentation.
 
 ## Handler Pattern
 
-One handler package per domain: `internal/web/handler/<name>/`
+One Go package per page, with the directory tree mirroring the URL path.
+A page package owns its main handler, its template files, and any HTMX
+helper routes that belong to it (validation endpoints, partials, modals).
 
-### Creating a New Handler
+```
+URL                     Package path
+/                       internal/web/handler/home
+/login                  internal/web/handler/auth/login
+/register               internal/web/handler/auth/register
+/admin                  internal/web/handler/admin
+/admin/users            internal/web/handler/admin/user
+/admin/users/:id/edit   internal/web/handler/admin/user/edit
+```
 
-1. Create a package under `internal/web/handler/<name>/`
-2. Define a `Handler` struct with dependencies injected via constructor
-3. Add route comments above each method: `// GET /path`
-4. Register routes in `internal/web/server.go`
+URL segments are typically plural (`/users`); package names are singular Go
+identifiers (`user`). When a parent path doesn't have its own page, the
+parent directory still exists but contains no `handler.go`.
+
+Pure-action endpoints with no view (e.g. `POST /logout`) hang off the most
+related page package — Logout lives in `handler/auth/login/` because it's
+the inverse of Login. Helpers shared across page packages in a section
+(e.g. session-cookie helpers used by login + register) live outside the
+handler tree, in `internal/auth/` or similar.
+
+### Creating a New Page Package
+
+1. Create a directory at `internal/web/handler/<path>/<page>/`
+2. `handler.go` (package `<page>`) — `NewHandler(deps)` returning `*handler`,
+   methods like `Page` (GET) and `Submit` (POST), plus any HTMX helper methods
+3. `<page>.templ` (same package) — the page's templates
+4. Register routes in `internal/web/server.go` — page route + every HTMX
+   helper route the page exposes
 
 ### Example
 
@@ -99,25 +124,25 @@ import (
     "{{.Module}}/internal/repo"
 )
 
-type Handler struct {
+type handler struct {
     store repo.Store
 }
 
-func NewHandler(store repo.Store) *Handler {
-    return &Handler{store: store}
+func NewHandler(store repo.Store) *handler {
+    return &handler{store: store}
 }
 
 // GET /things
-func (h *Handler) List(c echo.Context) error {
+func (h *handler) Page(c echo.Context) error {
     return respond.HTML(c, http.StatusOK, ThingsPage(c))
 }
 
 // POST /things
-func (h *Handler) Create(c echo.Context) error {
+func (h *handler) Submit(c echo.Context) error {
     var f CreateForm
     c.Bind(&f)
 
-    if errs := h.CreateFormRules.Validate(c); errs != nil {
+    if errs := h.FormRules.Validate(c); errs != nil {
         return respond.HTML(c, http.StatusUnprocessableEntity, createForm(c, f, errs))
     }
 
@@ -486,9 +511,15 @@ Middleware is configured in `internal/web/server.go`:
 
 ### Handler Pattern
 
+Login and register each get their own page package
+(`internal/web/handler/auth/login/`, `internal/web/handler/auth/register/`).
+Logout is a sibling action on the login package — it's the inverse of login,
+not its own page. Session-cookie helpers shared between login and register
+live in `internal/auth/`.
+
 ```go
-// Login handler
-func (h *handler) Login(c echo.Context) error {
+// Login handler — POST /login
+func (h *handler) Submit(c echo.Context) error {
     var f LoginForm
     if err := c.Bind(&f); err != nil {
         return echo.NewHTTPError(http.StatusBadRequest, "invalid form data")
@@ -500,7 +531,7 @@ func (h *handler) Login(c echo.Context) error {
     session, err := h.sessionManager.CreateSession(c.Request().Context(), user.ID, nil)
     if err != nil { /* return 500 */ }
 
-    h.setSessionCookie(c, session)
+    auth.SetSession(c, h.sessionManager, session)  // from {{.Module}}/internal/auth
     return respond.Redirect(c, "/")
 }
 ```

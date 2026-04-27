@@ -62,7 +62,8 @@ Composable validators. Use this for forms, API inputs, and anywhere you'd otherw
   - `NewForm(opts...) Form`, `Field(name, rules...)`, `FieldMsg(name, msg, rules...)`
   - `Form.Validate(c) map[string]string`
   - `Form.ValidationHandler(paramName) echo.HandlerFunc` — HTMX inline field validation endpoint
-  - `FieldBuilder.WithRenderer(fn)`, `WithCtx(rules...)`
+  - `FieldBuilder.WithRenderer(fn)`, `WithCtx(rules...)` — `CtxRule`s run after standard rules and only if all pass; reads via `c.FormValue("other_field")` are untrimmed regardless of `WithTrim`
+  - Cross-field via HTMX: `ValidationHandler` only sees the triggering input's value by default — pull other fields in with `hx-include="[name='other_field']"` on the input or its trigger won't have access to `c.FormValue("other_field")`
   - Options: `WithOOBRenderer(fn)`, `WithGeneralError(msg)`, `WithTrim(bool)`, `WithShortCircuit(bool)`
 
 ### `htmx`

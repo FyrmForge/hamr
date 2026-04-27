@@ -463,6 +463,35 @@ group.POST("/validate/:field", formRules.ValidationHandler("field"))
 Short-circuit: per-field always on (first rule failure stops). Per-form configurable
 via WithShortCircuit (default off — validates all fields).
 
+Cross-field via WithCtx (runs after standard rules, only if all pass):
+
+```go
+validate.Field("password_confirm", validate.Required).
+    WithCtx(func(c echo.Context, value string) string {
+        if value != c.FormValue("password") {
+            return "Passwords do not match"
+        }
+        return ""
+    })
+```
+
+WithTrim only trims the field being validated — values read via `c.FormValue` inside
+a CtxRule are untrimmed; apply `strings.TrimSpace` manually if needed.
+
+When the field is exposed via `ValidationHandler`, the per-field HTMX request only
+sends the triggering input's value by default. Other fields referenced inside the
+CtxRule must be pulled in with `hx-include`:
+
+```html
+<input name="password_confirm" hx-post="/register/validate/password_confirm"
+       hx-include="[name='password']" hx-swap="none" />
+```
+
+Without `hx-include`, `c.FormValue("password")` returns "". The validation is also
+asymmetric — editing the password field doesn't re-validate the confirm field unless
+its input is wired with a matching cross-trigger, or you rely on full-form
+`Validate(c)` at submit time.
+
 ---
 
 ### htmx
@@ -751,7 +780,7 @@ Usage: `site.GET("/dashboard", handler.Index, auth.RequireAuth())`
 func (b *BrowserAuth) RequireNotAuth() echo.MiddlewareFunc
 ```
 Pure ctx check. Redirects to HomeRedirect when subject is in ctx (303 or HX-Redirect).
-Usage: `site.GET("/login", handler.LoginPage, auth.RequireNotAuth())`
+Usage: `site.GET("/login", loginHandler.Page, auth.RequireNotAuth())`
 
 #### Subject Helpers
 

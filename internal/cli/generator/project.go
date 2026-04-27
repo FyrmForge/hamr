@@ -313,9 +313,11 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 		files = append(files,
 			templateFile{"templates/new/internal/repo/user.go.tmpl", "internal/repo/user.go"},
 			templateFile{"templates/new/internal/service/auth.go.tmpl", "internal/service/auth.go"},
-			templateFile{"templates/new/internal/web/handler/auth/handler.go.tmpl", "internal/web/handler/auth/handler.go"},
-			templateFile{"templates/new/internal/web/handler/auth/login.templ.tmpl", "internal/web/handler/auth/login.templ"},
-			templateFile{"templates/new/internal/web/handler/auth/register.templ.tmpl", "internal/web/handler/auth/register.templ"},
+			templateFile{"templates/new/internal/auth/cookies.go.tmpl", "internal/auth/cookies.go"},
+			templateFile{"templates/new/internal/web/handler/auth/login/handler.go.tmpl", "internal/web/handler/auth/login/handler.go"},
+			templateFile{"templates/new/internal/web/handler/auth/login/login.templ.tmpl", "internal/web/handler/auth/login/login.templ"},
+			templateFile{"templates/new/internal/web/handler/auth/register/handler.go.tmpl", "internal/web/handler/auth/register/handler.go"},
+			templateFile{"templates/new/internal/web/handler/auth/register/register.templ.tmpl", "internal/web/handler/auth/register/register.templ"},
 		)
 		switch cfg.Database {
 		case "sqlite":

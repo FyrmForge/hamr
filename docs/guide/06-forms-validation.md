@@ -219,6 +219,10 @@ validate.Field("password_confirm", validate.Required).
 
 Context-aware rules run after standard rules and only if all standard rules pass.
 
+`WithTrim` only trims the field being validated. Other values read inside a `CtxRule` (e.g. `c.FormValue("password")`) are untrimmed — apply `strings.TrimSpace` manually if cross-field comparisons need it.
+
+When this rule is exposed via HTMX per-field validation, the other field must be sent in the request — see [Cross-Field Validation (HTMX)](#cross-field-validation-htmx) below.
+
 ---
 
 ## HTMX Per-Field Validation
@@ -271,6 +275,38 @@ The HTMX trigger pattern handles error clearing automatically:
 1. User types bad email, leaves field -> `blur` fires -> OOB swap with `data-has-error="true"`
 2. User corrects -> `input` fires (because `data-has-error="true"` matches) -> after 300ms -> passes -> OOB swap with empty span, `data-has-error="false"`
 3. Once `data-has-error="false"`, input trigger stops firing on keystrokes
+
+### Cross-Field Validation (HTMX)
+
+`WithCtx` rules can read other form fields via `c.FormValue("other_field")` — but per-field HTMX requests, by default, only send the value of the input that triggered them. To make other fields available, pull them in with `hx-include`:
+
+```html
+<input
+    type="password"
+    name="password_confirm"
+    hx-post="/register/validate/password_confirm"
+    hx-include="[name='password']"
+    hx-trigger="blur, input[this.closest('.form-group').querySelector('[data-has-error=true]')] delay:300ms"
+    hx-swap="none"
+/>
+```
+
+Without `hx-include`, `c.FormValue("password")` inside the `CtxRule` returns `""` and the comparison silently misbehaves (an empty `password_confirm` typically passes a `value != ""` check, masking the mismatch).
+
+The validation is also asymmetric: editing `password_confirm` re-runs the comparison, but editing `password` does not re-validate `password_confirm`. To keep the confirm error in sync, mirror the wiring on the password input — point its trigger at the confirm validator and include the confirm field:
+
+```html
+<input
+    type="password"
+    name="password"
+    hx-post="/register/validate/password_confirm"
+    hx-include="[name='password_confirm']"
+    hx-trigger="input[this.closest('form').querySelector('[name=password_confirm][data-has-error=true]')] delay:300ms"
+    hx-swap="none"
+/>
+```
+
+If you don't want this round-tripping, skip the cross-trigger and rely on the full-form `Validate(c)` at submit time to surface the mismatch.
 
 ---
 

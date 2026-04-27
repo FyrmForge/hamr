@@ -178,7 +178,11 @@ func TestBuildProjectFileList_auth(t *testing.T) {
 	assert.True(t, dests["internal/repo/user.go"])
 	assert.True(t, dests["internal/repo/postgres/users.go"])
 	assert.True(t, dests["internal/service/auth.go"])
-	assert.True(t, dests["internal/web/handler/auth/handler.go"])
+	assert.True(t, dests["internal/auth/cookies.go"])
+	assert.True(t, dests["internal/web/handler/auth/login/handler.go"])
+	assert.True(t, dests["internal/web/handler/auth/login/login.templ"])
+	assert.True(t, dests["internal/web/handler/auth/register/handler.go"])
+	assert.True(t, dests["internal/web/handler/auth/register/register.templ"])
 }
 
 func TestBuildProjectFileList_noAuth(t *testing.T) {
@@ -340,7 +344,11 @@ func TestGenerateProject_withAuth(t *testing.T) {
 	assertFileExists(t, dir, "internal/repo/user.go")
 	assertFileExists(t, dir, "internal/repo/postgres/users.go")
 	assertFileExists(t, dir, "internal/service/auth.go")
-	assertFileExists(t, dir, "internal/web/handler/auth/handler.go")
+	assertFileExists(t, dir, "internal/auth/cookies.go")
+	assertFileExists(t, dir, "internal/web/handler/auth/login/handler.go")
+	assertFileExists(t, dir, "internal/web/handler/auth/login/login.templ")
+	assertFileExists(t, dir, "internal/web/handler/auth/register/handler.go")
+	assertFileExists(t, dir, "internal/web/handler/auth/register/register.templ")
 
 	// Check migrations include users table and are wrapped in a transaction.
 	upSQL := readFile(t, dir, "internal/db/migrations/001_initial.up.sql")
@@ -356,7 +364,10 @@ func TestGenerateProject_withAuth(t *testing.T) {
 
 	// Check server.go includes auth routes.
 	serverGo := readFile(t, dir, "internal/web/server.go")
-	assert.Contains(t, serverGo, "authhandler")
+	assert.Contains(t, serverGo, "/internal/web/handler/auth/login")
+	assert.Contains(t, serverGo, "/internal/web/handler/auth/register")
+	assert.Contains(t, serverGo, "loginHandler")
+	assert.Contains(t, serverGo, "registerHandler")
 	assert.Contains(t, serverGo, "auth.RequireNotAuth()")
 
 	agents := readFile(t, dir, "AGENTS.md")

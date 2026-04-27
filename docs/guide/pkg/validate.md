@@ -239,6 +239,10 @@ validate.Field("password_confirm", validate.Required).
     })
 ```
 
+`CtxRule`s run after standard rules and only if all standard rules pass. `WithTrim` only trims the field being validated — values read via `c.FormValue` inside a `CtxRule` are untrimmed.
+
+When exposed via `ValidationHandler`, the cross-referenced field must be sent in the per-field request via `hx-include` — see [Forms & Validation › Cross-Field Validation (HTMX)](../06-forms-validation.md#cross-field-validation-htmx).
+
 ### Full Form Validation
 
 ```go

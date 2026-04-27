@@ -104,7 +104,7 @@ site.Use(auth.Load())
 
 // Per-route — pure ctx checks, zero DB calls.
 site.GET("/dashboard", dashHandler.Index, auth.RequireAuth())
-site.GET("/login", authHandler.LoginPage, auth.RequireNotAuth())
+site.GET("/login", loginHandler.Page, auth.RequireNotAuth())
 ```
 
 ### Reading Auth State in Handlers
