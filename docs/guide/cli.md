@@ -84,12 +84,14 @@ hamr dev [flags]
 | `--no-proxy` | `false` | Skip the reverse proxy, just run watchers |
 | `--verbose`, `-v` | `false` | Enable verbose (debug) logging |
 | `--skip-version-check` | `false` | Skip the "scaffold newer than CLI" guard |
+| `--tui` | `false` | Run the experimental bubbletea TUI shell (preview; adds a `d` hotkey to wipe docker compose deps) |
 
 ```bash
 hamr dev                    # reads hamr.toml from current directory
 hamr dev --config my.toml   # custom config path
 hamr dev --no-proxy         # skip proxy, just run watchers
 hamr dev --verbose          # detailed watcher/rebuild logs
+hamr dev --tui              # try the experimental bubbletea shell
 ```
 
 If `[hamr].version` in `hamr.toml` is newer than the running CLI, `hamr dev` refuses to start — running an old CLI against a scaffold that depends on newer features leads to silent breakage. Upgrade the CLI or pass `--skip-version-check` to bypass. When the CLI is *newer* than the scaffold, `hamr dev` only warns and continues (the status bar shows the mismatch). Dev builds skip the check entirely.

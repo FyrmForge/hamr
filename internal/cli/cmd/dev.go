@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/FyrmForge/hamr/internal/devserver"
+	"github.com/FyrmForge/hamr/internal/devserver/tui"
 	"github.com/FyrmForge/hamr/internal/scaffold"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -32,6 +33,7 @@ func init() {
 	devCmd.Flags().Bool("no-proxy", false, "skip the reverse proxy, just run watchers")
 	devCmd.Flags().BoolP("verbose", "v", false, "enable verbose (debug) logging")
 	devCmd.Flags().Bool("skip-version-check", false, "skip the \"scaffold newer than CLI\" guard")
+	devCmd.Flags().Bool("tui", false, "run the experimental bubbletea TUI instead of the legacy stdout dev shell")
 }
 
 func runDev(cmd *cobra.Command, _ []string) error {
@@ -39,9 +41,17 @@ func runDev(cmd *cobra.Command, _ []string) error {
 	noProxy, _ := cmd.Flags().GetBool("no-proxy")
 	verbose, _ := cmd.Flags().GetBool("verbose")
 	skipVersionCheck, _ := cmd.Flags().GetBool("skip-version-check")
+	tuiMode, _ := cmd.Flags().GetBool("tui")
 
 	if err := ensureCLINotBehindScaffold(configPath, skipVersionCheck); err != nil {
 		return err
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if tuiMode {
+		return runDevTUI(ctx, configPath, noProxy, verbose)
 	}
 
 	// Save terminal state so we can always restore it, even after a panic
@@ -51,9 +61,6 @@ func runDev(cmd *cobra.Command, _ []string) error {
 			defer func() { _ = term.Restore(fd, oldState) }()
 		}
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	// Create hotkey reader and status bar once so they survive config reloads.
 	// Defer Stop immediately — both are safe on zero value.
@@ -120,6 +127,106 @@ func runDev(cmd *cobra.Command, _ []string) error {
 	}
 }
 
+// runDevTUI is the bubbletea-driven dev shell. The legacy raw-stdin path
+// stays the default; this runs only when --tui is passed.
+//
+// Layout: a bubbletea program owns the screen on the main goroutine; the
+// runner loop runs in a goroutine and writes all subprocess output, its
+// own slog lines, and the dev command's status messages into a viewport
+// sink that the program drains as LogLineMsg's. Hotkeys flow the other
+// way, via a HotkeySource the model writes to from its Update.
+//
+// Config reload is handled inside the runner goroutine — the bubbletea
+// program lives for the whole `hamr dev --tui` session.
+func runDevTUI(ctx context.Context, configPath string, noProxy, verbose bool) error {
+	rt := tui.NewRuntime()
+
+	runnerErrCh := make(chan error, 1)
+	go func() {
+		runnerErrCh <- runDevTUILoop(ctx, rt, configPath, noProxy, verbose)
+		// Tell bubbletea to exit once the runner is fully unwound — Quit
+		// is safe to call multiple times and a no-op if the program has
+		// already returned (e.g. user hit q).
+		rt.Quit()
+	}()
+
+	if err := rt.Start(); err != nil {
+		// Bubbletea bailed before the runner finished: tear it down so
+		// goroutines drain and we surface the most informative error.
+		<-runnerErrCh
+		return err
+	}
+	return <-runnerErrCh
+}
+
+// runDevTUILoop is the runner-side counterpart to runDevTUI. It mirrors
+// the CLI loop's config-reload behavior but writes status lines into the
+// TUI viewport instead of os.Stdout.
+func runDevTUILoop(ctx context.Context, rt *tui.Runtime, configPath string, noProxy, verbose bool) error {
+	// Status bar lives only in the legacy CLI shell. The TUI renders its
+	// own status bar from ErrorState (subscribed by Runtime.onActions).
+	var statusBar devserver.StatusBar
+
+	// Fire the version check once: the result lives for the whole TUI
+	// session (a config reload doesn't change the CLI binary's version).
+	var versionChecked bool
+
+	for {
+		cfg, err := devserver.LoadConfig(configPath)
+		if err != nil {
+			rt.Log(fmt.Sprintf("%s config error: %v", devserver.HamrDevTag(), err))
+			rt.Log(fmt.Sprintf("%s waiting for config fix...", devserver.HamrDevTag()))
+			if waitErr := devserver.WaitForConfigChange(ctx, configPath); waitErr != nil {
+				return waitErr
+			}
+			rt.Log(fmt.Sprintf("%s --- config changed, retrying ---", devserver.HamrDevTag()))
+			continue
+		}
+
+		if !versionChecked {
+			rt.SetVersion("v" + version)
+			status, msg, warning := computeVersionStatus(configPath)
+			if warning != "" {
+				rt.Log(fmt.Sprintf("%s %s", devserver.HamrDevTag(), warning))
+			}
+			rt.SetVersionStatus(status, msg)
+
+			// Background latest-release check: same logic as the legacy
+			// shell. The callback fires from a goroutine so it has to be
+			// goroutine-safe — Runtime.SetVersionUpdateIfOK is.
+			if releaseBuild {
+				devserver.CheckLatestVersion(ctx, version, func(latest string) {
+					rt.Log(fmt.Sprintf("%s update available: v%s → v%s", devserver.HamrDevTag(), version, latest))
+					rt.SetVersionUpdateIfOK("v" + latest)
+				})
+			}
+			versionChecked = true
+		}
+
+		// Surface the configured docker compose stacks to the TUI so
+		// Tab can cycle through them, and hand the runner the per-entry
+		// log sinks it needs to spawn `compose logs -f` followers.
+		dockerSinks := rt.RegisterDockerStacks(composeNames(cfg.Dev.DockerCompose))
+
+		opts := []devserver.Option{
+			devserver.WithConfigPath(configPath),
+			devserver.WithVerbose(verbose),
+			devserver.WithNoProxy(noProxy),
+			devserver.WithStatusBar(&statusBar),
+			devserver.WithDockerLogSinks(dockerSinks),
+		}
+		opts = rt.Wire(opts)
+		runner := devserver.NewRunner(cfg, opts...)
+
+		err = runner.Run(ctx)
+		if errors.Is(err, devserver.ErrConfigReload) {
+			rt.Log(fmt.Sprintf("%s --- config changed, restarting ---", devserver.HamrDevTag()))
+			continue
+		}
+		return err
+	}
+}
+
 // ensureCLINotBehindScaffold blocks hamr dev when the project's hamr.toml
 // declares a version newer than the CLI. Using an older CLI against a newer
 // scaffold risks missing template/runtime features the scaffold depends on.
@@ -150,30 +257,32 @@ func ensureCLINotBehindScaffold(configPath string, skip bool) error {
 	return nil
 }
 
-// checkVersionStatus compares the CLI version against the project's [hamr].version
-// and updates the status bar indicator accordingly.
-func checkVersionStatus(sb *devserver.StatusBar, configPath string) {
+// computeVersionStatus inspects the CLI and project versions and returns:
+//   - status: the indicator the bar/TUI should show
+//   - msg:    the persistent indicator text (e.g. "CLI is ahead (cli v0.1 proj v0.2)")
+//   - warning: a one-time human-readable line for log surfaces; "" when
+//     there's nothing to say
+//
+// Pure compute so both the legacy CLI bar and the TUI can share the
+// decision logic without one of them silently drifting.
+func computeVersionStatus(configPath string) (status devserver.VersionStatus, msg, warning string) {
 	if !releaseBuild {
-		sb.SetVersionStatus(devserver.VersionDev, "")
-		return
+		return devserver.VersionDev, "", ""
 	}
 
 	meta, err := scaffold.LoadMetadata(configPath)
 	if err != nil || !meta.HasHamrSection() {
-		sb.SetVersionStatus(devserver.VersionOK, "")
-		return
+		return devserver.VersionOK, "", ""
 	}
 
 	cliVer, err := scaffold.ParseVersion(version)
 	if err != nil {
-		sb.SetVersionStatus(devserver.VersionOK, "")
-		return
+		return devserver.VersionOK, "", ""
 	}
 
 	projVer, err := scaffold.ParseVersion(meta.Hamr.Version)
 	if err != nil {
-		sb.SetVersionStatus(devserver.VersionOK, "")
-		return
+		return devserver.VersionOK, "", ""
 	}
 
 	if cliVer != projVer {
@@ -184,10 +293,32 @@ func checkVersionStatus(sb *devserver.StatusBar, configPath string) {
 		case projVer.Less(cliVer):
 			direction = "CLI is ahead of scaffold"
 		}
-		fmt.Printf("%s %s: cli v%s, project v%s\r\n", devserver.HamrDevTag(), direction, cliVer, projVer)
-		sb.SetVersionStatus(devserver.VersionMismatch, fmt.Sprintf("%s (cli v%s proj v%s)", direction, cliVer, projVer))
-		return
+		return devserver.VersionMismatch,
+			fmt.Sprintf("%s (cli v%s proj v%s)", direction, cliVer, projVer),
+			fmt.Sprintf("%s: cli v%s, project v%s", direction, cliVer, projVer)
 	}
 
-	sb.SetVersionStatus(devserver.VersionOK, "")
+	return devserver.VersionOK, "", ""
+}
+
+// checkVersionStatus compares the CLI version against the project's [hamr].version
+// and updates the legacy CLI status bar indicator accordingly. The TUI
+// path uses computeVersionStatus directly and routes the warning into
+// the viewport via rt.Log.
+func checkVersionStatus(sb *devserver.StatusBar, configPath string) {
+	status, msg, warning := computeVersionStatus(configPath)
+	if warning != "" {
+		fmt.Printf("%s %s\r\n", devserver.HamrDevTag(), warning)
+	}
+	sb.SetVersionStatus(status, msg)
+}
+
+// composeNames returns the compose entry names in config order — the
+// TUI uses this to label each docker tab in `Tab` cycle order.
+func composeNames(entries []devserver.DockerCompose) []string {
+	out := make([]string, 0, len(entries))
+	for i := range entries {
+		out = append(out, entries[i].Name)
+	}
+	return out
 }

@@ -34,9 +34,46 @@ hamr dev --config my.toml            # custom config path
 hamr dev --no-proxy                  # skip proxy, just run watchers (API-only projects)
 hamr dev --verbose                   # detailed watcher/rebuild logs
 hamr dev --skip-version-check        # bypass the scaffold/CLI version guard
+hamr dev --tui                       # experimental bubbletea TUI shell (preview)
 ```
 
 On startup, `hamr dev` compares `[hamr].version` in `hamr.toml` against the CLI. If the scaffold is newer than the CLI, it refuses to start — using an older CLI against a newer scaffold risks missing features it depends on. Upgrade the CLI or pass `--skip-version-check` to bypass. When the CLI is *newer* than the scaffold, dev still runs and the status bar flags the mismatch so you can plan an upgrade.
+
+### Experimental TUI mode (`--tui`)
+
+`hamr dev --tui` runs a bubbletea-based shell instead of the legacy stdout output. The dev server itself is identical — same watchers, builds, proxy, mocks — only the terminal UI changes:
+
+- Status bar at the top with build state and any failing rules.
+- A scrollable log viewport in the middle (`PgUp`/`PgDn`/arrows to scroll).
+- Hotkey hints at the bottom.
+- Modal overlays for actions that need confirmation.
+
+Hotkeys mirror the legacy shell, plus a wipe action, a help overlay, and per-stack log tabs:
+
+| Key | Action |
+|-----|--------|
+| `r` | Rebuild all watch rules |
+| `o` | Open the proxy URL in the browser |
+| `c` | Clear the active tab's log buffer |
+| `d` | **Wipe a docker compose stack** — runs `docker compose down -v` and brings it back up. With one stack a confirm modal opens; with multiple, pick a number first. |
+| `Tab` / `Shift+Tab` | Cycle log tabs — `hamr dev` plus one tab per `[[dev.docker_compose]]` entry, fed by `docker compose logs -f` |
+| `/` | Search the active tab — incremental: matches highlight in yellow as you type, the first hit jumps into view, `[k/n]` counter updates per keystroke. `↩` locks the query in for navigation, `Esc` cancels. |
+| `n` / `N` | Jump to next / previous match (after committing a search). Wraps at the ends. |
+| `f` | Toggle filter view (only after committing) — hides every line that doesn't contain the search term. Press `f` again to restore the full view. |
+| `Esc` | Clear the active search highlights |
+| `?` | Toggle the help overlay (lists every binding) |
+| `q` / `Ctrl+C` | Quit |
+| `↑` / `↓` | Scroll the log viewport line by line |
+| `PgUp` / `PgDn` | Scroll the log viewport by page |
+| Mouse wheel | Scroll the log viewport |
+
+The status bar's left side reflects the active tab: 🔨 `hamr dev` for the framework view, 🐳 `<name>` for each docker stack (the `name` from `[[dev.docker_compose]]`). When more than one tab exists the status bar shows `[k/n]` so you know where in the cycle you are.
+
+Search state is **per tab** — committing a query on the docker stack tab and cycling away to hamr keeps both searches alive independently; cycle back and the highlights and `n`/`N` cursor are right where you left them. New log lines arriving while a search is active are scanned and the match counter updates without you having to re-commit.
+
+`d` is destructive: it removes container volumes, so you lose Postgres data, Redis state, and anything else stored there. The confirm modal exists to prevent accidental wipes — `y` proceeds, any other key cancels.
+
+The TUI is still under active development and runs alongside the legacy shell. Stick with the default unless you want to try the new flow; report rough edges as you find them.
 
 ---
 

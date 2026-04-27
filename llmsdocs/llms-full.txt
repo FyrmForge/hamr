@@ -2544,6 +2544,45 @@ Two commands refuse to run on version mismatch (released CLI builds only):
 Both accept `--skip-version-check` to bypass. Dev builds of the CLI (no
 release tag) skip both checks entirely.
 
+### hamr dev (terminal hotkeys)
+
+`hamr dev` runs a single-key hotkey reader on stdin while the dev server is
+running. The default shell uses an ANSI scroll-region status bar at the
+bottom of the terminal; `--tui` swaps that for an experimental
+bubbletea-driven shell with a scrollable log viewport, modal overlays, and
+an extra `d` hotkey for wiping docker compose deps.
+
+| Key                | Action                                                 | Mode      |
+|--------------------|--------------------------------------------------------|-----------|
+| `r`                | Rebuild all watch rules in topological order           | both      |
+| `o`                | Open the proxy URL in the default browser              | both      |
+| `c`                | Clear the active tab's log buffer / terminal           | both      |
+| `d`                | Wipe a docker compose stack (`down -v` + `up -d`)      | `--tui`   |
+| `Tab` / Shift+Tab  | Cycle log tabs (hamr ↔ docker stacks)                  | `--tui`   |
+| `/`                | Search active tab (case-insensitive substring, live)   | `--tui`   |
+| `n` / `N`          | Next / previous search match                           | `--tui`   |
+| `f`                | Toggle filter view (only matching lines)               | `--tui`   |
+| `Esc`              | Clear the active search                                | `--tui`   |
+| `?`                | Toggle help overlay listing every binding              | `--tui`   |
+| `q` / Ctrl+C       | Quit gracefully                                        | both      |
+| ↑ / ↓              | Scroll log viewport line by line                       | `--tui`   |
+| PgUp / PgDn        | Scroll log viewport by page                            | `--tui`   |
+| mouse wheel        | Scroll log viewport                                    | `--tui`   |
+
+In TUI mode the runner also spawns one `docker compose --ansi=always -f <file> logs -f --tail=50` follower per `[[dev.docker_compose]]` entry. Output flows into a dedicated per-entry buffer that Tab cycles through; the status bar's left badge switches between 🔨 `hamr dev` and 🐳 `<stack-name>` to indicate which buffer the viewport is showing. Followers self-restart after a wipe so the stream resumes once `up -d` brings the project back. `--ansi=always` is the top-level compose flag that forces colour through despite the no-TTY pipe target, so per-service prefix colours and any container ANSI render correctly inside the bubbles viewport.
+
+Search (`/`) is per-tab, case-insensitive substring, and incremental — matches recompute on every keystroke and the viewport jumps to the first hit as you type, with yellow highlights for matches and a brighter orange for the cursored one. `↩` locks the query in so `n`/`N` start navigating instead of being treated as more query characters; `Esc` cancels. After commit, `f` toggles a filter view that shows only lines containing the search term (press `f` again to restore the full view); n/N still navigates inside the filtered view. New log lines arriving while a search is in progress are scanned and the `[k/n]` counter updates automatically.
+
+`d` is destructive — it removes container volumes (Postgres data, Redis
+state, etc.). With one configured `[[dev.docker_compose]]` entry the TUI
+opens a confirm modal directly; with multiple entries it shows a numbered
+modal first. `y` confirms; any other key cancels. The same wipe action is
+exposed in the browser dev panel (`/__hamr/docker/{name}/wipe`) so the two
+surfaces stay in sync.
+
+`--tui` is preview-quality. The legacy stdout shell is the default and
+remains supported.
+
 ### hamr add skill
 
 > Install an AI agent skill describing the HAMR framework.

@@ -95,6 +95,81 @@ func TestProcessManager_StopAll_Empty(t *testing.T) {
 	pm.StopAll() // should not panic
 }
 
+// safeBuf is a thread-safe bytes.Buffer for collecting subprocess output
+// from goroutines spawned by exec.Command.
+type safeBuf struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *safeBuf) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *safeBuf) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func TestProcessManager_SetOutputSinks_RedirectsStdout(t *testing.T) {
+	pm := NewProcessManager(testLogger())
+	var stdout, stderr safeBuf
+	pm.SetOutputSinks(&stdout, &stderr)
+
+	rule := &WatchRule{Name: "redir", Cmd: "echo hello-from-redir"}
+	_, err := pm.RunCommand(context.Background(), rule)
+	require.NoError(t, err)
+
+	// prefixWriter prepends "[name] " and emits "\r\n" terminators.
+	if !strings.Contains(stdout.String(), "hello-from-redir") {
+		t.Fatalf("stdout sink should have captured subprocess output, got %q", stdout.String())
+	}
+	if stderr.String() != "" {
+		t.Fatalf("stderr sink should be empty for echo, got %q", stderr.String())
+	}
+}
+
+func TestProcessManager_SetOutputSinks_FileLogStillFansIn(t *testing.T) {
+	pm := NewProcessManager(testLogger())
+	var sink, file safeBuf
+	pm.SetOutputSinks(&sink, &sink)
+	pm.SetFileLog(&file)
+
+	rule := &WatchRule{Name: "tee", Cmd: "echo line"}
+	_, err := pm.RunCommand(context.Background(), rule)
+	require.NoError(t, err)
+
+	if !strings.Contains(sink.String(), "line") {
+		t.Fatalf("sink should still receive output when file log is also configured, got %q", sink.String())
+	}
+	if !strings.Contains(file.String(), "line") {
+		t.Fatalf("file log fan-out must remain active, got %q", file.String())
+	}
+}
+
+func TestProcessManager_SetOutputSinks_RoutesStderrSeparately(t *testing.T) {
+	pm := NewProcessManager(testLogger())
+	var stdout, stderr safeBuf
+	pm.SetOutputSinks(&stdout, &stderr)
+
+	rule := &WatchRule{Name: "split", Cmd: "echo go-out; echo go-err >&2"}
+	_, err := pm.RunCommand(context.Background(), rule)
+	require.NoError(t, err)
+
+	if !strings.Contains(stdout.String(), "go-out") {
+		t.Fatalf("stdout sink missing stdout payload, got %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "go-err") {
+		t.Fatalf("stderr sink missing stderr payload, got %q", stderr.String())
+	}
+	if strings.Contains(stdout.String(), "go-err") {
+		t.Fatalf("stderr payload must not bleed into stdout sink, got %q", stdout.String())
+	}
+}
+
 func TestProcessManager_StartProcess_Restart(t *testing.T) {
 	pm := NewProcessManager(testLogger())
 

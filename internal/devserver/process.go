@@ -96,6 +96,8 @@ type ProcessManager struct {
 	logBuf        *LogBuffer
 	logBroker     *SSEBroker
 	fileLog       io.Writer // rolling file logger (nil if disabled)
+	stdoutSink    io.Writer // overrides os.Stdout when set (TUI mode)
+	stderrSink    io.Writer // overrides os.Stderr when set (TUI mode)
 	stdinR        *os.File  // read end of pipe, given to child processes
 	stdinW        *os.File  // write end, kept open to prevent EOF
 	injectedEnv   []string  // hamr-injected vars (e.g. HAMR_STRIPE_MOCK_URL); rule.Env wins on conflicts
@@ -110,6 +112,17 @@ func (pm *ProcessManager) SetLogOutput(buf *LogBuffer, broker *SSEBroker) {
 // SetFileLog enables writing prefixed process output to a rolling file logger.
 func (pm *ProcessManager) SetFileLog(w io.Writer) {
 	pm.fileLog = w
+}
+
+// SetOutputSinks redirects subprocess stdout/stderr away from the terminal
+// (os.Stdout / os.Stderr) into the given writers. The file logger fan-out
+// configured via SetFileLog is preserved on top. Pass nil writers to clear.
+//
+// Used by the TUI runtime so child output flows into a bubbletea-managed
+// viewport instead of corrupting the rendered frame.
+func (pm *ProcessManager) SetOutputSinks(stdout, stderr io.Writer) {
+	pm.stdoutSink = stdout
+	pm.stderrSink = stderr
 }
 
 // SetInjectedEnv configures vars hamr will inject into every spawned rule
@@ -328,13 +341,23 @@ func buildEnv(ruleEnv []string) []string {
 	return result
 }
 
-// prefixDests returns the stdout and stderr destinations for prefixWriters,
-// wrapping with the file logger if configured.
+// prefixDests returns the stdout and stderr destinations for prefixWriters.
+// Defaults are os.Stdout / os.Stderr; SetOutputSinks overrides them (TUI
+// mode). The file logger, if configured, is fanned in regardless so dev logs
+// continue to be persisted in either mode.
 func (pm *ProcessManager) prefixDests() (stdout, stderr io.Writer) {
-	if pm.fileLog != nil {
-		return io.MultiWriter(os.Stdout, pm.fileLog), io.MultiWriter(os.Stderr, pm.fileLog)
+	out := io.Writer(os.Stdout)
+	if pm.stdoutSink != nil {
+		out = pm.stdoutSink
 	}
-	return os.Stdout, os.Stderr
+	errW := io.Writer(os.Stderr)
+	if pm.stderrSink != nil {
+		errW = pm.stderrSink
+	}
+	if pm.fileLog != nil {
+		return io.MultiWriter(out, pm.fileLog), io.MultiWriter(errW, pm.fileLog)
+	}
+	return out, errW
 }
 
 // prefixWriter implements io.Writer, prepending a colored tag to each line

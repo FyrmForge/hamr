@@ -28,13 +28,18 @@ var ErrConfigReload = errors.New("config changed, reloading")
 
 // Runner is the top-level dev server orchestrator.
 type Runner struct {
-	cfg        *Config
-	configPath string
-	logger     *slog.Logger
-	verbose    bool
-	noProxy    bool
-	hotkeys    *HotkeyReader
-	statusBar  *StatusBar
+	cfg            *Config
+	configPath     string
+	logger         *slog.Logger
+	logWriter      io.Writer            // base writer for the slog handler; defaults to os.Stderr
+	procStdout     io.Writer            // override for child stdout (TUI mode); nil = os.Stdout
+	procStderr     io.Writer            // override for child stderr (TUI mode); nil = os.Stderr
+	dockerLogSinks map[string]io.Writer // per-compose-entry sinks for `compose logs -f`
+	verbose        bool
+	noProxy        bool
+	hotkeys        HotkeySource
+	statusBar      *StatusBar
+	actionsHook    func(*DevActions)
 }
 
 // Option configures a Runner.
@@ -43,6 +48,38 @@ type Option func(*Runner)
 // WithLogger sets the logger for the runner.
 func WithLogger(l *slog.Logger) Option {
 	return func(r *Runner) { r.logger = l }
+}
+
+// WithLogWriter overrides the base writer used by the runner's default slog
+// handler (defaults to os.Stderr). The file logger fan-out, when enabled,
+// remains on top. TUI mode wires this to a viewport-backed sink so the
+// runner's own log lines render inside the TUI instead of corrupting the
+// frame.
+func WithLogWriter(w io.Writer) Option {
+	return func(r *Runner) { r.logWriter = w }
+}
+
+// WithProcessOutput redirects child-process stdout/stderr away from the
+// terminal into the given writers. Internally calls SetOutputSinks on the
+// ProcessManager once it's constructed inside Run. Used by the TUI runtime.
+func WithProcessOutput(stdout, stderr io.Writer) Option {
+	return func(r *Runner) {
+		r.procStdout = stdout
+		r.procStderr = stderr
+	}
+}
+
+// WithDockerLogSinks subscribes one writer per `[[dev.docker_compose]]`
+// entry to that stack's `docker compose logs -f` output. Keys in the map
+// are the same `name` field hamr.toml uses; entries without a writer are
+// skipped (no follower spawned).
+//
+// The runner manages follower lifetime: started once an entry has been
+// brought up, restarted automatically if the follower exits early
+// (typically because `docker compose down -v` from a wipe killed it),
+// stopped on shutdown via the runner ctx.
+func WithDockerLogSinks(sinks map[string]io.Writer) Option {
+	return func(r *Runner) { r.dockerLogSinks = sinks }
 }
 
 // WithVerbose enables verbose logging.
@@ -60,11 +97,21 @@ func WithConfigPath(path string) Option {
 	return func(r *Runner) { r.configPath = path }
 }
 
-// WithHotkeys provides an externally managed HotkeyReader.
-// When set, Run() uses this reader instead of creating its own,
-// and does not stop it on return — the caller owns its lifecycle.
-func WithHotkeys(h *HotkeyReader) Option {
+// WithHotkeys provides an externally managed HotkeySource (e.g. a raw-stdin
+// HotkeyReader for CLI mode or a bubbletea-backed source for TUI mode).
+// When set, Run() reads from this source instead of creating its own, and
+// does not stop it on return — the caller owns its lifecycle.
+func WithHotkeys(h HotkeySource) Option {
 	return func(r *Runner) { r.hotkeys = h }
+}
+
+// WithActionsHook registers a callback that fires once Run has constructed
+// its DevActions object. The TUI uses this to capture a reference for
+// dispatching actions (e.g. docker wipe) that aren't expressible through the
+// scalar HotkeyAction enum. The hook fires on the runner goroutine; copy the
+// pointer and return — do not block.
+func WithActionsHook(fn func(*DevActions)) Option {
+	return func(r *Runner) { r.actionsHook = fn }
 }
 
 // WithStatusBar provides an externally managed StatusBar.
@@ -81,9 +128,17 @@ func NewRunner(cfg *Config, opts ...Option) *Runner {
 		opt(r)
 	}
 	if r.logger == nil {
-		r.logger = newDevLogger(os.Stderr, r.verbose)
+		r.logger = newDevLogger(r.baseLogWriter(), r.verbose)
 	}
 	return r
+}
+
+// baseLogWriter returns the writer the slog handler should use.
+func (r *Runner) baseLogWriter() io.Writer {
+	if r.logWriter != nil {
+		return r.logWriter
+	}
+	return os.Stderr
 }
 
 // buildHamrInjectedEnv returns env-var KEY=VALUE pairs that hamr dev sets
@@ -133,11 +188,14 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 	if fileLog != nil {
 		defer func() { _ = fileLog.Close() }()
-		r.logger = newDevLogger(io.MultiWriter(os.Stderr, fileLog), r.verbose)
+		r.logger = newDevLogger(io.MultiWriter(r.baseLogWriter(), fileLog), r.verbose)
 	}
 
 	graph := NewGraph(r.cfg.Dev.Watch)
 	pm := NewProcessManager(r.logger)
+	if r.procStdout != nil || r.procStderr != nil {
+		pm.SetOutputSinks(r.procStdout, r.procStderr)
+	}
 	broker := NewSSEBroker(r.cfg.Dev.Watch, r.cfg.Dev.Daemons, r.cfg.Dev.DockerCompose, r.cfg.Dev.Email.Enabled, r.cfg.Dev.Stripe.Enabled)
 	errorState := NewErrorState()
 	logBuf := NewLogBuffer(1000)
@@ -151,6 +209,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		broker.Broadcast(buildErrorEvent(rule, output))
 	}
 	var schedulerWG sync.WaitGroup
+	var followersWG sync.WaitGroup
 	var watcher *Watcher
 	configReloadCh := make(chan struct{}, 1)
 	var configReload bool
@@ -178,6 +237,9 @@ func (r *Runner) Run(ctx context.Context) error {
 			watcher.Stop()
 		}
 		schedulerWG.Wait()
+		// Followers are tied to runCtx (exec.CommandContext), so cancel
+		// above already triggered SIGKILL — just drain.
+		followersWG.Wait()
 		pm.StopAll()
 		for i := range r.cfg.Dev.DockerCompose {
 			dc := &r.cfg.Dev.DockerCompose[i]
@@ -193,6 +255,9 @@ func (r *Runner) Run(ctx context.Context) error {
 	actions := &DevActions{
 		ctx: runCtx, cfg: r.cfg, pm: pm, broker: broker,
 		errorState: errorState, graph: graph, logger: r.logger,
+	}
+	if r.actionsHook != nil {
+		r.actionsHook(actions)
 	}
 
 	// Initialize hotkey reader early so quit works during startup
@@ -320,6 +385,15 @@ func (r *Runner) Run(ctx context.Context) error {
 			broker.Broadcast(buildErrorEvent(dc.Name, output))
 		} else {
 			errorState.Clear(dc.Name)
+		}
+		// Spawn the per-entry `compose logs -f` follower after the up
+		// has been issued. The follower self-restarts on early exit
+		// (typically because dockerWipe ran `down -v`) until runCtx
+		// closes. Subscribers without a sink (CLI mode, or entries the
+		// TUI didn't register) are skipped silently.
+		if sink, ok := r.dockerLogSinks[dc.Name]; ok && sink != nil {
+			followersWG.Add(1)
+			go r.followDockerLogs(runCtx, dc, sink, &followersWG)
 		}
 	}
 
@@ -542,9 +616,10 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 }
 
-// hotkeyReader returns the externally provided HotkeyReader if set,
-// otherwise creates and starts a local one tied to the given context.
-func (r *Runner) hotkeyReader(ctx context.Context) *HotkeyReader {
+// hotkeyReader returns the externally provided HotkeySource if set,
+// otherwise creates and starts a local raw-stdin HotkeyReader tied to the
+// given context.
+func (r *Runner) hotkeyReader(ctx context.Context) HotkeySource {
 	if r.hotkeys != nil {
 		return r.hotkeys
 	}
@@ -737,6 +812,57 @@ func (r *Runner) ensureDockerCompose(ctx context.Context, dc *DockerCompose) (st
 		return buf.String(), fmt.Errorf("docker compose up failed: %w", err)
 	}
 	return "", nil
+}
+
+// followDockerLogs streams `docker compose logs -f` for one entry into
+// the supplied sink for as long as runCtx is alive. It auto-restarts on
+// unexpected exit so a `down -v` from a wipe doesn't permanently sever
+// the stream — once `up -d` brings containers back, the next iteration
+// of the loop re-attaches.
+//
+// `--ansi=always` is the top-level compose flag (must precede the
+// subcommand) that forces ANSI colour codes through even though we're
+// piping into a Go writer rather than attaching a TTY — without it,
+// compose auto-detects no-TTY and strips colour, leaving the docker
+// tab a wall of grey. The bubbles viewport renders ANSI content
+// correctly, so the per-service colour prefixes and any container ANSI
+// pass through to the screen unchanged. `--tail=50` gives a useful
+// backlog without flooding the buffer on attach.
+func (r *Runner) followDockerLogs(runCtx context.Context, dc *DockerCompose, sink io.Writer, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	args := []string{"compose", "--ansi=always", "-f", dc.File, "logs", "-f", "--tail=50"}
+	if len(dc.Services) > 0 {
+		args = append(args, dc.Services...)
+	}
+
+	const restartBackoff = 2 * time.Second
+	for runCtx.Err() == nil {
+		cmd := exec.CommandContext(runCtx, "docker", args...)
+		cmd.Stdout = sink
+		cmd.Stderr = sink
+		cmd.Env = buildEnv(dc.Env)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.WaitDelay = 2 * time.Second
+
+		if err := cmd.Start(); err != nil {
+			r.logger.Warn("docker logs follower start failed", "name", dc.Name, "err", err)
+		} else {
+			_ = cmd.Wait()
+		}
+		if runCtx.Err() != nil {
+			return
+		}
+		// The follower exited but we're still alive — back off briefly
+		// then retry. Common cause: a wipe just brought the project
+		// down; up -d is in flight, the next attempt will pick up the
+		// new containers.
+		select {
+		case <-runCtx.Done():
+			return
+		case <-time.After(restartBackoff):
+		}
+	}
 }
 
 // stopDockerCompose runs "docker compose down" for a compose entry during shutdown.

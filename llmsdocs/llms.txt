@@ -31,7 +31,16 @@
   `[dev]`; set `log_file = "none"` to disable. Refuses to start (released
   builds only) when `[hamr] version` in `hamr.toml` is newer than the CLI;
   bypass with `--skip-version-check`. A CLI *newer* than the scaffold only
-  warns and continues.
+  warns and continues. Hotkeys while running: `r` rebuild, `o` open browser,
+  `c` clear, `q`/Ctrl+C quit. `--tui` opts into an experimental
+  bubbletea-based shell that adds `d` to wipe a docker compose stack
+  (`down -v` + `up -d`) with a confirm modal, `Tab`/`Shift+Tab` to cycle
+  between the hamr log tab and one tab per `[[dev.docker_compose]]`
+  entry (each fed by `docker compose logs -f`), `/` for case-insensitive
+  per-tab live (incremental) substring search with `n`/`N` next/prev,
+  `f` to toggle a filter view that hides non-matching lines, and `Esc`
+  to clear, `?` to toggle a help overlay, and arrows / PgUp / PgDn /
+  mouse wheel to scroll the log viewport.
 - **hamr new**: Project scaffolder. On released builds, queries GitHub for the
   latest release and refuses to run when the local CLI is out of date so
   scaffolds never lag the template; bypass with `--skip-version-check`.

@@ -19,11 +19,21 @@ const (
 	HotkeyQuit
 )
 
+// HotkeySource emits hotkey actions for the dev runner to consume. The CLI
+// path uses HotkeyReader (raw stdin); the TUI path uses a bubbletea-backed
+// adapter. Receivers must select on Actions(); a nil channel means no source
+// is attached and the loop should never fire on it.
+type HotkeySource interface {
+	Actions() <-chan HotkeyAction
+}
+
 // HotkeyReader reads single key presses from stdin in raw terminal mode.
 type HotkeyReader struct {
 	ch     chan HotkeyAction
 	cancel context.CancelFunc
 }
+
+var _ HotkeySource = (*HotkeyReader)(nil)
 
 // Start begins reading hotkeys. It puts the terminal into raw mode and reads
 // single bytes in a goroutine. The caller should select on Actions().

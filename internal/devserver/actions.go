@@ -33,6 +33,22 @@ func (a *DevActions) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/__hamr/docker/", a.handleDocker)
 }
 
+// ErrorState returns the underlying error state so non-HTTP consumers (the
+// TUI runtime) can subscribe to error changes.
+func (a *DevActions) ErrorState() *ErrorState { return a.errorState }
+
+// DockerComposes returns the configured docker compose entries the runner
+// is managing.
+func (a *DevActions) DockerComposes() []DockerCompose { return a.cfg.Dev.DockerCompose }
+
+// DockerWipe triggers a "down -v + up -d" cycle for the given compose entry,
+// removing volumes. When service is "" the whole entry is wiped; otherwise
+// only that service. Runs synchronously on the calling goroutine — TUI
+// callers should dispatch in a goroutine to keep the UI responsive.
+func (a *DevActions) DockerWipe(dc *DockerCompose, service string) {
+	a.dockerWipe(dc, service)
+}
+
 func (a *DevActions) handleRule(w http.ResponseWriter, r *http.Request) {
 	// Path: /__hamr/rule/{name}/run
 	if r.Method != http.MethodPost {
