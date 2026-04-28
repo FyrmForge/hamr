@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Size constants.
@@ -41,6 +43,18 @@ var (
 	ErrUnknownType    = errors.New("media: unsupported file type")
 	ErrVideoTooLong   = errors.New("media: video exceeds maximum duration")
 	ErrFFmpegNotFound = errors.New("media: ffmpeg not found in PATH")
+	// ErrInvalidID is returned by *FromReaderWithID methods when the
+	// caller-supplied id is not a canonical UUID. The check is deliberately
+	// strict: the id is interpolated into storage paths, so allowing free-form
+	// strings opens path-traversal and collision footguns. Callers using a
+	// non-UUID identifier scheme should generate a UUID for storage and
+	// keep their own id as a separate column.
+	ErrInvalidID = errors.New("media: invalid id (must be a canonical UUID)")
+	// ErrIDExists is returned by *FromReaderWithID methods when storage
+	// already holds bytes under the given id and overwrite=false. Pass
+	// overwrite=true to clobber an existing prefix (e.g. retrying after a
+	// failed partial write).
+	ErrIDExists = errors.New("media: id already exists")
 )
 
 // ImageSize defines a named output dimension.
@@ -79,13 +93,13 @@ var (
 
 // ImageStoreConfig configures an image store.
 type ImageStoreConfig struct {
-	Category    string
-	Sizes       []ImageSize
-	Quality     int
-	Format      string
-	MaxSize     int64
+	Category     string
+	Sizes        []ImageSize
+	Quality      int
+	Format       string
+	MaxSize      int64
 	SignedExpiry time.Duration
-	BaseURL     string
+	BaseURL      string
 }
 
 func (c *ImageStoreConfig) validate() error {
@@ -117,7 +131,7 @@ type VideoStoreConfig struct {
 	GenerateThumbnail bool
 	ThumbnailWidth    int
 	BaseURL           string
-	SignedExpiry       time.Duration
+	SignedExpiry      time.Duration
 }
 
 func (c *VideoStoreConfig) validate() error {
@@ -194,10 +208,10 @@ var imageTypes = map[string]bool{
 }
 
 var videoTypes = map[string]bool{
-	"video/mp4":        true,
-	"video/quicktime":  true,
-	"video/webm":       true,
-	"video/x-msvideo":  true,
+	"video/mp4":       true,
+	"video/quicktime": true,
+	"video/webm":      true,
+	"video/x-msvideo": true,
 }
 
 // DetectType sniffs the MIME type from the file header and returns the media
@@ -240,6 +254,24 @@ func DetectType(fh *multipart.FileHeader) (mediaType string, mimeType string, er
 	}
 
 	return "", "", ErrUnknownType
+}
+
+// validateCanonicalUUID enforces the contract for *FromReaderWithID: the
+// id must be in the 36-character canonical form
+// `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`. uuid.Parse is permissive — it
+// also accepts the hyphenless 32-char form, urn:uuid:..., and {…} braced
+// forms — and accepting any of those would let the same logical UUID
+// land at two different storage keys (silent bifurcation). Strict
+// canonical aligns exactly with what uuid.New().String() produces, which
+// is what every realistic caller mints.
+func validateCanonicalUUID(id string) error {
+	if len(id) != 36 {
+		return ErrInvalidID
+	}
+	if _, err := uuid.Parse(id); err != nil {
+		return ErrInvalidID
+	}
+	return nil
 }
 
 // formatExt returns the file extension for the given format.

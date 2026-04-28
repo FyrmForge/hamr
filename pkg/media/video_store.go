@@ -20,9 +20,9 @@ import (
 
 // VideoStore handles video upload, processing, serving, and deletion.
 type VideoStore struct {
-	storage  storage.FileStorage
-	signable storage.SignableStorage
-	config   VideoStoreConfig
+	storage   storage.FileStorage
+	signable  storage.SignableStorage
+	config    VideoStoreConfig
 	urlPrefix string
 	logger    *slog.Logger
 	isLocal   bool
@@ -79,7 +79,94 @@ func (s *VideoStore) Upload(ctx context.Context, fh *multipart.FileHeader) (*Vid
 	}
 	defer func() { _ = f.Close() }()
 
-	mimeType, raw, err := detectMIME(f)
+	return s.upload(ctx, f, "", false)
+}
+
+// UploadFromReader processes and stores a video from an io.Reader. The id
+// is generated internally as a fresh UUID.
+func (s *VideoStore) UploadFromReader(ctx context.Context, r io.Reader, size int64) (*VideoUploadResult, error) {
+	if size > s.config.MaxSize {
+		return nil, ErrFileTooLarge
+	}
+	return s.upload(ctx, r, "", false)
+}
+
+// UploadFromReaderWithID processes and stores a video using the supplied
+// id as the storage path component instead of generating one internally.
+//
+// The id MUST be in the 36-char canonical UUID form
+// `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`. Other forms accepted by
+// uuid.Parse (hyphenless, urn, braced) and the empty string are
+// rejected with ErrInvalidID — same contract as the image variant; see
+// ImageStore.UploadFromReaderWithID for the rationale.
+//
+// If storage already holds bytes under the id, the call returns
+// ErrIDExists unless overwrite=true. Workers retrying a failed transcode
+// typically want overwrite=true so the retry replaces any residue.
+// ErrIDExists is a best-effort precheck — see ImageStore.UploadFromReaderWithID
+// for the concurrent-callers caveat.
+//
+// On ErrFileTooLarge (size pre-check), ErrInvalidID, and ErrIDExists the
+// reader r is NOT consumed — all three errors are detected before
+// detectMIME / ffprobe run, so the rejection path doesn't drain the
+// payload. Callers relying on the upload to drain a network or pipe
+// reader must discard or reuse r explicitly on these errors.
+// (ErrFileTooLarge can also fire after the MIME sniff against the
+// actual buffered byte count; in that case r has been drained.)
+//
+// Thumbnail generation/save failures are logged and ignored — the video
+// bytes are still stored, and result.ThumbnailPath stays empty when this
+// branch fails. There is no partial-write window because the video Save
+// is the only step that can fail after the id is fixed.
+func (s *VideoStore) UploadFromReaderWithID(ctx context.Context, id string, r io.Reader, size int64, overwrite bool) (*VideoUploadResult, error) {
+	if size > s.config.MaxSize {
+		return nil, ErrFileTooLarge
+	}
+	if err := validateCanonicalUUID(id); err != nil {
+		return nil, err
+	}
+	return s.upload(ctx, r, id, overwrite)
+}
+
+// upload is the shared core for the three public upload methods. id is
+// the caller-supplied canonical UUID for *WithID variants (validated at
+// the entry point AND defensively re-validated below to fence the
+// invariant against future entry points); pass "" to have one generated
+// internally. overwrite is meaningful only when id is non-empty.
+func (s *VideoStore) upload(ctx context.Context, r io.Reader, id string, overwrite bool) (*VideoUploadResult, error) {
+	// captured before the UUID-fill below mutates id — `external` answers
+	// "did the caller supply this id?" which the existence-check and
+	// validation paths both branch on.
+	external := id != ""
+
+	// Defensive re-validation — see the matching note in
+	// ImageStore.upload re: future entry points.
+	if external {
+		if err := validateCanonicalUUID(id); err != nil {
+			return nil, err
+		}
+	}
+
+	// Existence precheck — runs BEFORE detectMIME / ffprobe to
+	// short-circuit the retry-after-failure hot path: if the id is
+	// already taken, we don't want to slurp the whole payload AND fork
+	// ffprobe just to return ErrIDExists. Storage path is computable
+	// from config + id alone.
+	//
+	// Only meaningful when an external id was supplied; internal IDs
+	// are fresh UUIDs with astronomical non-collision odds.
+	if external && !overwrite {
+		probePath := fmt.Sprintf("%s/%s/video.mp4", s.config.Category, id)
+		exists, err := s.storage.Exists(ctx, probePath)
+		if err != nil {
+			return nil, fmt.Errorf("media: check existing %q: %w", probePath, err)
+		}
+		if exists {
+			return nil, ErrIDExists
+		}
+	}
+
+	mimeType, raw, err := detectMIME(r)
 	if err != nil {
 		return nil, err
 	}
@@ -101,8 +188,12 @@ func (s *VideoStore) Upload(ctx context.Context, fh *multipart.FileHeader) (*Vid
 		return nil, ErrVideoTooLong
 	}
 
-	id := uuid.New().String()
+	if !external {
+		id = uuid.New().String()
+	}
+
 	videoPath := fmt.Sprintf("%s/%s/video.mp4", s.config.Category, id)
+	thumbPath := fmt.Sprintf("%s/%s/thumb.jpg", s.config.Category, id)
 
 	if err := s.storage.Save(ctx, videoPath, bytes.NewReader(raw)); err != nil {
 		return nil, fmt.Errorf("media: save video: %w", err)
@@ -117,13 +208,15 @@ func (s *VideoStore) Upload(ctx context.Context, fh *multipart.FileHeader) (*Vid
 		category:  s.config.Category,
 	}
 
-	// Generate thumbnail if configured.
+	// Generate thumbnail if configured. Thumbnail generation/save failures
+	// are logged and ignored — the video bytes are already stored, so we
+	// don't unwind the video save. ThumbnailPath stays empty when this
+	// branch fails.
 	if s.config.GenerateThumbnail {
 		thumbData, err := generateThumbnail(ctx, raw, s.config.ThumbnailWidth)
 		if err != nil {
 			s.logger.Warn("thumbnail generation failed", "id", id, "error", err)
 		} else {
-			thumbPath := fmt.Sprintf("%s/%s/thumb.jpg", s.config.Category, id)
 			if err := s.storage.Save(ctx, thumbPath, bytes.NewReader(thumbData)); err != nil {
 				s.logger.Warn("thumbnail save failed", "id", id, "error", err)
 			} else {

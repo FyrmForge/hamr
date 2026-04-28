@@ -108,14 +108,29 @@ store, err := media.NewLocalImageStore(localStorage, "/uploads", media.ImageStor
 ### Upload
 
 ```go
-// From a multipart file header (typical in Echo handler)
+// From a multipart file header (typical in Echo handler).
 result, err := store.Upload(ctx, fileHeader)
 
-// From an io.Reader
+// From an io.Reader. The id is generated internally as a fresh UUID.
 result, err := store.UploadFromReader(ctx, reader, size)
+
+// From an io.Reader, using the caller's pre-minted UUID for the storage
+// path. Useful when the caller already has a row in its DB referencing
+// `id` (async-processing worker, etc.). Pass overwrite=true to clobber
+// an existing prefix — typical for retry-after-failure.
+result, err := store.UploadFromReaderWithID(ctx, id, reader, size, overwrite)
 ```
 
-Upload validates file size, detects MIME type, generates all configured size variants via `ffmpeg`, and saves each variant.
+`Upload` / `UploadFromReader` validate file size, detect MIME type, generate all configured size variants via `ffmpeg`, and save each variant.
+
+`UploadFromReaderWithID` adds two contracts:
+
+- `id` MUST be the **36-char canonical UUID** (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`). Other `uuid.Parse`-valid forms (hyphenless, urn, braced) and the empty string are rejected with `ErrInvalidID` — accepting them would let the same logical UUID land at two different storage keys, or silently auto-generate an id and defeat the method's purpose.
+- With `overwrite=false`, returns `ErrIDExists` if bytes already live under `id`. The check is **best-effort** — concurrent `*WithID` callers can race on Save, and a failed upload's `cleanupPartial` can erase a concurrent winner's writes. Use a DB-level unique constraint for hard exclusion.
+
+On `ErrFileTooLarge` (size pre-check), `ErrInvalidID`, and `ErrIDExists` the reader is **not consumed** (rejection happens before any read). Callers relying on the upload to drain a network/pipe reader must discard or reuse it explicitly.
+
+On any error after the first save, the method best-effort deletes any variants already written.
 
 ### URL Construction
 
@@ -145,6 +160,16 @@ store, err := media.NewLocalVideoStore(localStorage, "/uploads", media.VideoStor
     ThumbnailWidth:    640,
 }, media.WithLogger(logger))
 ```
+
+Video stores expose the same three upload entry points as images:
+
+```go
+result, err := store.Upload(ctx, fileHeader)
+result, err := store.UploadFromReader(ctx, reader, size)
+result, err := store.UploadFromReaderWithID(ctx, id, reader, size, overwrite)
+```
+
+`UploadFromReaderWithID` follows the same UUID-validation and existence-check rules as the image variant.
 
 ### Preset Sizes
 

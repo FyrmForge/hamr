@@ -9,7 +9,7 @@ type ImageRef struct {
 	category string
 	format   string
 	sizes    []ImageSize
-	baseURL  string            // includes URL prefix or CDN base
+	baseURL  string              // includes URL prefix or CDN base
 	signFn   func(string) string // if non-nil, produces signed URLs
 }
 

@@ -11,11 +11,13 @@ import (
 	"io"
 	"mime/multipart"
 	"net/textproto"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
 
 	"github.com/FyrmForge/hamr/pkg/storage"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -601,6 +603,334 @@ func TestNormalizeMIME(t *testing.T) {
 	pngData := testPNG(t, 2, 2)
 	mime = normalizeMIME(pngData)
 	assert.Equal(t, "image/png", mime)
+}
+
+// ---------------------------------------------------------------------------
+// UploadFromReaderWithID tests — image
+// ---------------------------------------------------------------------------
+
+func TestImageStore_UploadFromReaderWithID_HappyPath(t *testing.T) {
+	if !hasFFmpeg() {
+		t.Skip("ffmpeg not available")
+	}
+
+	store, err := storage.NewLocalStorage(t.TempDir())
+	require.NoError(t, err)
+	is, err := NewLocalImageStore(store, "/uploads", ImageStoreConfig{
+		Category: "headshots",
+		Sizes:    SizeOriginal,
+		Quality:  85,
+		Format:   FormatJPEG,
+		MaxSize:  4 * MB,
+	})
+	require.NoError(t, err)
+
+	data := testJPEG(t, 200, 200)
+	id := uuid.New().String()
+	ctx := context.Background()
+	storagePath := "headshots/" + id + "/original.jpeg"
+
+	result, err := is.UploadFromReaderWithID(ctx, id, bytes.NewReader(data), int64(len(data)), false)
+	require.NoError(t, err)
+	// The supplied id MUST be the result id — the whole point of the
+	// *WithID variant is that the caller's row + storage path agree.
+	assert.Equal(t, id, result.ID)
+
+	// Bytes are at the path the caller can predict from `id`. Read them
+	// back for symmetry with the exists/overwrite tests — proves the
+	// happy path actually wrote *something* rather than just succeeding
+	// with empty output.
+	exists, err := store.Exists(ctx, storagePath)
+	require.NoError(t, err)
+	assert.True(t, exists)
+	bytesAfter := readAll(t, store, ctx, storagePath)
+	assert.NotEmpty(t, bytesAfter, "happy-path upload must produce non-empty bytes")
+}
+
+func TestImageStore_UploadFromReaderWithID_InvalidID(t *testing.T) {
+	store, err := storage.NewLocalStorage(t.TempDir())
+	require.NoError(t, err)
+	is, err := NewLocalImageStore(store, "/uploads", ImageStoreConfig{
+		Category: "headshots",
+		Sizes:    SizeOriginal,
+		Quality:  85,
+		Format:   FormatJPEG,
+		MaxSize:  4 * MB,
+	})
+	require.NoError(t, err)
+
+	// Strict canonical (36-char `8-4-4-4-12`) — anything else is rejected.
+	cases := []struct {
+		name string
+		id   string
+	}{
+		{"empty", ""},
+		{"whitespace-only", "                                    "}, // 36 spaces — len OK, parse fails
+		{"path-traversal", "../etc/passwd"},
+		{"slashed", "a/b"},
+		{"control-char", "abc\x00def"},
+		{"plain-string", "not-a-uuid"},
+		{"truncated-uuid", "12345678-1234-1234-1234-1234567890"}, // 35 chars
+		{"hyphenless-32", "12345678123412341234123456789012"},     // valid uuid.Parse but not canonical
+		{"braced", "{12345678-1234-1234-1234-123456789012}"},      // accepted by uuid.Parse, rejected here
+		{"urn-form", "urn:uuid:12345678-1234-1234-1234-123456789012"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data := testJPEG(t, 8, 8)
+			_, err := is.UploadFromReaderWithID(context.Background(), tc.id, bytes.NewReader(data), int64(len(data)), false)
+			assert.ErrorIs(t, err, ErrInvalidID)
+		})
+	}
+}
+
+func TestImageStore_UploadFromReaderWithID_ExistsRejection(t *testing.T) {
+	if !hasFFmpeg() {
+		t.Skip("ffmpeg not available")
+	}
+
+	store, err := storage.NewLocalStorage(t.TempDir())
+	require.NoError(t, err)
+	is, err := NewLocalImageStore(store, "/uploads", ImageStoreConfig{
+		Category: "headshots",
+		Sizes:    SizeOriginal,
+		Quality:  85,
+		Format:   FormatJPEG,
+		MaxSize:  4 * MB,
+	})
+	require.NoError(t, err)
+
+	id := uuid.New().String()
+	first := testJPEG(t, 200, 200)
+	second := testJPEG(t, 50, 50) // distinguishably-sized — proves bytes if non-clobbered
+
+	ctx := context.Background()
+	storagePath := "headshots/" + id + "/original.jpeg"
+
+	_, err = is.UploadFromReaderWithID(ctx, id, bytes.NewReader(first), int64(len(first)), false)
+	require.NoError(t, err)
+	bytesBefore := readAll(t, store, ctx, storagePath)
+
+	// Second call with overwrite=false → rejected.
+	_, err = is.UploadFromReaderWithID(ctx, id, bytes.NewReader(second), int64(len(second)), false)
+	assert.ErrorIs(t, err, ErrIDExists)
+
+	// Crucially: the original bytes must still be intact. Without this
+	// read-back the test would pass even if the rejection happened AFTER
+	// a clobber.
+	bytesAfter := readAll(t, store, ctx, storagePath)
+	assert.Equal(t, bytesBefore, bytesAfter, "rejected write must not have clobbered the original bytes")
+}
+
+func TestImageStore_UploadFromReaderWithID_OverwriteAllowed(t *testing.T) {
+	if !hasFFmpeg() {
+		t.Skip("ffmpeg not available")
+	}
+
+	store, err := storage.NewLocalStorage(t.TempDir())
+	require.NoError(t, err)
+	is, err := NewLocalImageStore(store, "/uploads", ImageStoreConfig{
+		Category: "headshots",
+		Sizes:    SizeOriginal,
+		Quality:  85,
+		Format:   FormatJPEG,
+		MaxSize:  4 * MB,
+	})
+	require.NoError(t, err)
+
+	id := uuid.New().String()
+	first := testJPEG(t, 200, 200)
+	second := testJPEG(t, 50, 50) // smaller — output will differ
+
+	ctx := context.Background()
+	storagePath := "headshots/" + id + "/original.jpeg"
+
+	_, err = is.UploadFromReaderWithID(ctx, id, bytes.NewReader(first), int64(len(first)), false)
+	require.NoError(t, err)
+	bytesBefore := readAll(t, store, ctx, storagePath)
+
+	// overwrite=true succeeds even though the prefix is populated.
+	_, err = is.UploadFromReaderWithID(ctx, id, bytes.NewReader(second), int64(len(second)), true)
+	require.NoError(t, err)
+
+	// And the bytes actually changed — without this assertion the test
+	// would pass even if overwrite=true were a no-op.
+	bytesAfter := readAll(t, store, ctx, storagePath)
+	assert.NotEqual(t, bytesBefore, bytesAfter, "overwrite=true must actually replace the bytes")
+}
+
+// readAll opens a storage path and returns the full contents. Test helper
+// used by the *WithID exists/overwrite assertions.
+func readAll(t *testing.T, store storage.FileStorage, ctx context.Context, path string) []byte {
+	t.Helper()
+	rc, err := store.Open(ctx, path)
+	require.NoError(t, err)
+	defer func() { _ = rc.Close() }()
+	out, err := io.ReadAll(rc)
+	require.NoError(t, err)
+	return out
+}
+
+// ---------------------------------------------------------------------------
+// UploadFromReader / UploadFromReaderWithID tests — video
+// ---------------------------------------------------------------------------
+
+func TestVideoStore_UploadFromReader_FileTooLarge(t *testing.T) {
+	store, err := storage.NewLocalStorage(t.TempDir())
+	require.NoError(t, err)
+	vs, err := NewLocalVideoStore(store, "/uploads", VideoStoreConfig{
+		Category:    "intros",
+		MaxSize:     1 * KB,
+		MaxDuration: 60,
+	})
+	require.NoError(t, err)
+
+	// A reader claiming a size larger than MaxSize is rejected before any
+	// bytes are read — that's the cheap pre-check.
+	_, err = vs.UploadFromReader(context.Background(), bytes.NewReader([]byte("x")), 2*KB)
+	assert.ErrorIs(t, err, ErrFileTooLarge)
+}
+
+func TestVideoStore_UploadFromReaderWithID_InvalidID(t *testing.T) {
+	store, err := storage.NewLocalStorage(t.TempDir())
+	require.NoError(t, err)
+	vs, err := NewLocalVideoStore(store, "/uploads", VideoStoreConfig{
+		Category:    "intros",
+		MaxSize:     1 * MB,
+		MaxDuration: 60,
+	})
+	require.NoError(t, err)
+
+	cases := []string{
+		"",                                              // empty — rejected at WithID entry
+		"../etc/passwd",                                 // path traversal
+		"not-a-uuid",                                    // garbage
+		"12345678123412341234123456789012",              // hyphenless 32-char
+		"{12345678-1234-1234-1234-123456789012}",        // braced
+		"urn:uuid:12345678-1234-1234-1234-123456789012", // urn
+	}
+	for _, id := range cases {
+		_, err := vs.UploadFromReaderWithID(context.Background(), id, bytes.NewReader([]byte("x")), 1, false)
+		assert.ErrorIs(t, err, ErrInvalidID, "id=%q", id)
+	}
+}
+
+// generateTestMP4 produces a tiny valid MP4 by shelling out to ffmpeg.
+// Skips the test if ffmpeg isn't available. We use the `testsrc` lavfi
+// pattern (ffmpeg's canonical synthetic video for testing) at 128×128 —
+// small enough to keep the test fast, big enough that the mjpeg
+// thumbnail extraction succeeds across ffmpeg versions (a solid-color
+// fill at <64×64 trips encoder thread-init quirks on some builds).
+//
+// duration is the clip length in seconds; pass different values across
+// successive calls in the same test when you need byte-distinguishable
+// payloads (e.g. proving non-clobber on a rejected overwrite).
+func generateTestMP4(t *testing.T, duration int) []byte {
+	t.Helper()
+	if !hasFFmpeg() {
+		t.Skip("ffmpeg not available")
+	}
+	tmp := t.TempDir() + "/test.mp4"
+	cmd := exec.Command("ffmpeg", "-y", "-loglevel", "error",
+		"-f", "lavfi", "-i", fmt.Sprintf("testsrc=size=128x128:duration=%d:rate=25", duration),
+		"-c:v", "libx264", "-pix_fmt", "yuv420p",
+		tmp,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Skipf("ffmpeg fixture generation failed: %v\n%s", err, out)
+	}
+	data, err := os.ReadFile(tmp)
+	require.NoError(t, err)
+	return data
+}
+
+func TestVideoStore_UploadFromReaderWithID_HappyPath(t *testing.T) {
+	// duration ≥2s — thumbnail extraction seeks to the 1s mark and a
+	// 1-second clip lands at end-of-stream, so the seek fails and the
+	// thumbnail-success assertion below would be flaky.
+	data := generateTestMP4(t, 2)
+
+	store, err := storage.NewLocalStorage(t.TempDir())
+	require.NoError(t, err)
+	vs, err := NewLocalVideoStore(store, "/uploads", VideoStoreConfig{
+		Category:          "intros",
+		MaxSize:           10 * MB,
+		MaxDuration:       60,
+		GenerateThumbnail: true,
+		ThumbnailWidth:    64,
+	})
+	require.NoError(t, err)
+
+	id := uuid.New().String()
+	result, err := vs.UploadFromReaderWithID(context.Background(), id, bytes.NewReader(data), int64(len(data)), false)
+	require.NoError(t, err)
+
+	// Caller-supplied id IS the result id — same contract as image.
+	assert.Equal(t, id, result.ID)
+	exists, err := store.Exists(context.Background(), "intros/"+id+"/video.mp4")
+	require.NoError(t, err)
+	assert.True(t, exists)
+	// Thumbnail still generated unchanged in the WithID path. This
+	// side-channel is the regression risk the test guards.
+	assert.NotEmpty(t, result.ThumbnailPath, "thumbnail must still be generated when WithID is used")
+	thumbExists, err := store.Exists(context.Background(), "intros/"+id+"/thumb.jpg")
+	require.NoError(t, err)
+	assert.True(t, thumbExists)
+}
+
+func TestVideoStore_UploadFromReaderWithID_ExistsRejection(t *testing.T) {
+	// Two distinguishably-sized payloads — without this, the equality
+	// assertion below would be vacuous (bytesBefore == bytesAfter
+	// trivially when both writes carry identical bytes). Both ≥2s so
+	// thumbnail extraction works in either case (see HappyPath note).
+	first := generateTestMP4(t, 2)
+	second := generateTestMP4(t, 3)
+	require.NotEqual(t, first, second, "fixture sanity: 2s vs 3s clips must differ")
+
+	store, err := storage.NewLocalStorage(t.TempDir())
+	require.NoError(t, err)
+	vs, err := NewLocalVideoStore(store, "/uploads", VideoStoreConfig{
+		Category:    "intros",
+		MaxSize:     10 * MB,
+		MaxDuration: 60,
+	})
+	require.NoError(t, err)
+
+	id := uuid.New().String()
+	ctx := context.Background()
+	storagePath := "intros/" + id + "/video.mp4"
+
+	_, err = vs.UploadFromReaderWithID(ctx, id, bytes.NewReader(first), int64(len(first)), false)
+	require.NoError(t, err)
+	bytesBefore := readAll(t, store, ctx, storagePath)
+
+	// Second call carries different bytes — if rejection happened AFTER
+	// a clobber, the read-back below would diverge from bytesBefore.
+	_, err = vs.UploadFromReaderWithID(ctx, id, bytes.NewReader(second), int64(len(second)), false)
+	assert.ErrorIs(t, err, ErrIDExists)
+
+	bytesAfter := readAll(t, store, ctx, storagePath)
+	assert.Equal(t, bytesBefore, bytesAfter, "rejected video write must not have clobbered the original bytes")
+}
+
+// TestProcessImage_PreservesSizeOrder locks the invariant that the
+// existence-precheck and cleanup-on-failure paths in ImageStore.upload
+// rely on: processImage must return its results in the same order as
+// the input `sizes` slice. The probe uses `s.config.Sizes[0]` to find
+// the first variant on disk, and cleanupPartial walks the same order
+// the save loop wrote in. A future refactor that reorders silently
+// would break both paths — this test is the cheap guard against that.
+func TestProcessImage_PreservesSizeOrder(t *testing.T) {
+	if !hasFFmpeg() {
+		t.Skip("ffmpeg not available")
+	}
+	raw := testJPEG(t, 64, 64)
+	processed, err := processImage(context.Background(), raw, SizesAvatar, FormatJPEG, 85)
+	require.NoError(t, err)
+	require.Len(t, processed, len(SizesAvatar), "one result per input size")
+	for i, p := range processed {
+		assert.Equal(t, SizesAvatar[i].Name, p.size.Name, "variant %d order mismatch", i)
+	}
 }
 
 // Ensure unused import suppression.

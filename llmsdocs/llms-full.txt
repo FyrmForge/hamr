@@ -1642,6 +1642,9 @@ var (
     ErrUnknownType    = errors.New("media: unsupported file type")
     ErrVideoTooLong   = errors.New("media: video exceeds maximum duration")
     ErrFFmpegNotFound = errors.New("media: ffmpeg not found in PATH")
+    // *FromReaderWithID variants
+    ErrInvalidID = errors.New("media: invalid id (must be a canonical UUID)")
+    ErrIDExists  = errors.New("media: id already exists")
 )
 ```
 
@@ -1727,12 +1730,15 @@ func NewS3ImageStore(store *storage.S3Storage, cfg ImageStoreConfig, opts ...Opt
 
 func (s *ImageStore) Upload(ctx context.Context, fh *multipart.FileHeader) (*ImageUploadResult, error)
 func (s *ImageStore) UploadFromReader(ctx context.Context, r io.Reader, size int64) (*ImageUploadResult, error)
+func (s *ImageStore) UploadFromReaderWithID(ctx context.Context, id string, r io.Reader, size int64, overwrite bool) (*ImageUploadResult, error)
 func (s *ImageStore) Delete(ctx context.Context, id string) error
 func (s *ImageStore) GetMedia(id string) ImageRef
 func (s *ImageStore) GetMediaCtx(ctx context.Context, id string) ImageRef  // may use signed URLs
 func (s *ImageStore) SignedURL(ctx context.Context, path string, expiry time.Duration) (string, error)
 func (s *ImageStore) ServeHandler() echo.HandlerFunc
 ```
+
+`UploadFromReaderWithID` stores bytes under the caller-supplied id instead of generating one. The id MUST be the **36-char canonical UUID form**; hyphenless 32-char, urn:uuid:..., {...} braced, and the empty string are all rejected with `ErrInvalidID` (canonical-only avoids silent bifurcation where the same logical UUID lands at two different storage keys). With `overwrite=false`, returns `ErrIDExists` if the prefix is already populated; pass `overwrite=true` for retry-after-failure paths. `ErrIDExists` is a best-effort precheck — concurrent `*WithID` callers can race on Save, and a losing call's `cleanupPartial` can erase a concurrent winner's writes; use DB-level unique constraints for hard exclusion. On `ErrFileTooLarge` (size pre-check), `ErrInvalidID`, and `ErrIDExists` the reader is not consumed (rejection happens before any read). Best-effort cleanup of any partial writes on error.
 
 #### Image Upload Result
 
@@ -1766,12 +1772,16 @@ func NewLocalVideoStore(store *storage.LocalStorage, urlPrefix string, cfg Video
 func NewS3VideoStore(store *storage.S3Storage, cfg VideoStoreConfig, opts ...Option) (*VideoStore, error)
 
 func (s *VideoStore) Upload(ctx context.Context, fh *multipart.FileHeader) (*VideoUploadResult, error)
+func (s *VideoStore) UploadFromReader(ctx context.Context, r io.Reader, size int64) (*VideoUploadResult, error)
+func (s *VideoStore) UploadFromReaderWithID(ctx context.Context, id string, r io.Reader, size int64, overwrite bool) (*VideoUploadResult, error)
 func (s *VideoStore) Delete(ctx context.Context, id string) error
 func (s *VideoStore) GetMedia(id string) VideoRef
 func (s *VideoStore) GetMediaCtx(ctx context.Context, id string) VideoRef
 func (s *VideoStore) SignedURL(ctx context.Context, path string, expiry time.Duration) (string, error)
 func (s *VideoStore) ServeHandler() echo.HandlerFunc
 ```
+
+`UploadFromReaderWithID` follows the same UUID-validation and existence-check rules as the image variant (strict 36-char canonical only; `ErrIDExists` is best-effort). Thumbnail generation/save failures are logged and ignored — the video bytes are stored regardless, and `result.ThumbnailPath` stays empty when this branch fails.
 
 #### Video Upload Result
 

@@ -263,7 +263,10 @@ Pluggable file storage (local filesystem + S3-compatible).
 Image/video upload, processing, serving on top of storage.
 - `NewLocalImageStore(store, urlPrefix, cfg, opts...)` / `NewS3ImageStore(store, cfg, opts...)`
 - `NewLocalVideoStore(store, urlPrefix, cfg, opts...)` / `NewS3VideoStore(store, cfg, opts...)`
-- `Upload(ctx, fileHeader)`, `Delete(ctx, id)`, `GetMedia(id)`, `ServeHandler()`
+- Image upload: `Upload(ctx, fileHeader)`, `UploadFromReader(ctx, r, size)`, `UploadFromReaderWithID(ctx, id, r, size, overwrite)` — id MUST be the 36-char canonical UUID (hyphenless/urn/braced/empty rejected); `overwrite=false` returns `ErrIDExists` (best-effort precheck — concurrent callers can race on Save and on cleanup-after-failure; use DB-level uniqueness for hard exclusion) if the prefix is already populated.
+- Video upload: same three methods (`Upload`, `UploadFromReader`, `UploadFromReaderWithID`) with the same UUID/overwrite contract. Thumbnail save failures are logged and ignored.
+- `Delete(ctx, id)`, `GetMedia(id)`, `ServeHandler()`
+- Sentinels: `ErrFileTooLarge`, `ErrUnknownType`, `ErrVideoTooLong`, `ErrInvalidID`, `ErrIDExists`, `ErrFFmpegNotFound`
 - Preset sizes: `SizesAvatar`, `SizesCard`, `SizesIcon`, `SizeOriginal`
 
 ### websocket

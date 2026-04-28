@@ -107,22 +107,63 @@ sizes := []media.ImageSize{
 ### Images
 
 ```go
-// From a multipart file header (typical in an Echo handler)
+// From a multipart file header (typical in an Echo handler).
 result, err := store.Upload(ctx, fileHeader)
 
-// From an io.Reader
+// From an io.Reader. The id is generated internally as a fresh UUID.
 result, err := store.UploadFromReader(ctx, reader, size)
+
+// From an io.Reader, using the caller's pre-minted UUID for the storage
+// path. Useful when the caller already wrote a row in its own DB and
+// needs the bytes stored under that same id (e.g. an async-processing
+// worker pulling jobs off a queue). Pass overwrite=true to allow
+// clobbering an existing prefix — typical for retry-after-failure.
+result, err := store.UploadFromReaderWithID(ctx, id, reader, size, overwrite)
 ```
 
-`Upload` validates the file size, detects the MIME type, generates all configured size variants via `ffmpeg`, and saves each variant to storage. It returns an `*ImageUploadResult` containing the generated `ID`, `MediaType`, and `MimeType`.
+`Upload` / `UploadFromReader` validate the file size, detect the MIME type, generate all configured size variants via `ffmpeg`, and save each variant to storage. They return an `*ImageUploadResult` containing the generated `ID`, `MediaType`, and `MimeType`.
+
+`UploadFromReaderWithID` adds two contracts on top:
+
+- The supplied `id` MUST be in the **36-character canonical UUID form** (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`). Other forms accepted by `uuid.Parse` (32-char hyphenless, `urn:uuid:...`, `{...}` braced) and the empty string are deliberately rejected — they'd let the same logical UUID land at two different storage keys (silent bifurcation), and the empty string would defeat the method's whole purpose by silently auto-generating an id. All bad inputs return `ErrInvalidID`.
+- With `overwrite=false`, the call returns `ErrIDExists` if storage already holds bytes under `id`. Workers retrying a failed job typically pass `overwrite=true` so the retry replaces any residue from a partial write.
+
+`ErrIDExists` is a **best-effort precheck**, not a hard guarantee. Two concurrent `*WithID` calls with the same id and `overwrite=false` can both pass the existence check and race on Save (last-write-wins on S3, clobber on local FS). The same race exists for `cleanupPartial` on a failed upload — variant deletes from a losing call can erase a concurrent winner's writes. Callers that need hard exclusion should serialize at the source-of-truth layer — typically a unique constraint on the DB row that owns the id.
+
+On `ErrFileTooLarge` (size pre-check), `ErrInvalidID`, and `ErrIDExists` the reader `r` is **not consumed** — all three are detected before `detectMIME` runs. Callers relying on the upload to drain a network or pipe reader must discard or reuse `r` explicitly on these errors. (`ErrFileTooLarge` can also fire after the MIME sniff against the actual buffered byte count; in that case `r` has been drained.)
+
+On any error after the first variant has been written, the method makes a best-effort attempt to delete the variants it has already saved. Cleanup failures are logged via the configured `slog` logger and do not mask the original error.
 
 ### Videos
 
 ```go
+// From a multipart file header.
 result, err := store.Upload(ctx, fileHeader)
+
+// From an io.Reader (id generated internally).
+result, err := store.UploadFromReader(ctx, reader, size)
+
+// From an io.Reader using the caller's UUID; same contract as the
+// image variant.
+result, err := store.UploadFromReaderWithID(ctx, id, reader, size, overwrite)
 ```
 
-`Upload` validates the file size, detects the MIME type, probes the duration via `ffprobe`, saves the video, and optionally generates a thumbnail. It returns a `*VideoUploadResult` containing the `ID`, `MediaType`, `MimeType`, `Duration`, `FileSize`, and `ThumbnailPath`.
+`Upload` / `UploadFromReader` validate the file size, detect the MIME type, probe the duration via `ffprobe`, save the video, and optionally generate a thumbnail. They return a `*VideoUploadResult` containing the `ID`, `MediaType`, `MimeType`, `Duration`, `FileSize`, and `ThumbnailPath`.
+
+`UploadFromReaderWithID` follows the same UUID-validation and existence-check rules as the image variant (strict canonical only; `ErrIDExists` is best-effort, not a hard concurrency guarantee).
+
+Thumbnail generation/save failures are **logged and ignored** — the video bytes are still stored, and `result.ThumbnailPath` stays empty when this branch fails. There is no partial-write window after the video Save because that's the only step that can fail once the id is fixed.
+
+### Sentinel errors
+
+| Error | When |
+|---|---|
+| `ErrFileTooLarge` | `size > MaxSize` (cheap pre-check) or buffered bytes exceed `MaxSize` after MIME sniff |
+| `ErrUnknownType` | sniffed MIME isn't in the package's allow list |
+| `ErrVideoTooLong` | `ffprobe` duration > `MaxDuration` |
+| `ErrInvalidID` | `*WithID` variants: `id` is empty or not in 36-char canonical UUID form |
+| `ErrIDExists` | `*WithID` variants with `overwrite=false`: storage already holds bytes under `id` (best-effort precheck — see TOCTOU caveat above) |
+| `ErrFFmpegNotFound` | required ffmpeg/ffprobe binary missing from `PATH` |
 
 ## Delete
 
