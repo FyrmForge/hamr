@@ -24,11 +24,17 @@ type composePortBinding struct {
 }
 
 // composeService is the subset of one compose service definition we read
-// for port walking — only the name and ports list. Everything else in the
-// service is left to the original compose file.
+// for port walking — name, ports list, and profiles. Everything else in
+// the service is left to the original compose file.
 type composeService struct {
-	Name  string
-	Ports []composePortBinding
+	Name string
+	// Profiles is the parsed `profiles:` list. Non-empty means compose
+	// won't start the service unless one of those profiles is enabled
+	// via `--profile` or COMPOSE_PROFILES. hamr doesn't pass either, so
+	// non-empty Profiles → service is inactive in this dev session →
+	// excluded from adoption checks.
+	Profiles []string
+	Ports    []composePortBinding
 }
 
 // parseComposePorts loads path, reads the top-level `services:` map, and
@@ -70,6 +76,14 @@ func parseComposePorts(path string) ([]composeService, error) {
 			continue
 		}
 		svc := composeService{Name: nameNode.Value}
+		profilesNode := findChildNode(valNode, "profiles")
+		if profilesNode != nil && profilesNode.Kind == yaml.SequenceNode {
+			for _, item := range profilesNode.Content {
+				if item.Kind == yaml.ScalarNode && item.Value != "" {
+					svc.Profiles = append(svc.Profiles, item.Value)
+				}
+			}
+		}
 		portsNode := findChildNode(valNode, "ports")
 		if portsNode != nil && portsNode.Kind == yaml.SequenceNode {
 			for _, item := range portsNode.Content {
@@ -248,11 +262,18 @@ type portShift struct {
 // actually moved). Services with no walking required come back with their
 // Ports unchanged.
 //
+// owned carries normalised host:port keys (see hostPortKey) for ports
+// already published by this compose project's running containers. When
+// a base port appears in owned the walk treats it as available — no
+// probe, no shift, port stays unchanged. This prevents the walk from
+// shifting away from a port held by the project's own keep_running
+// stack on restart, which would otherwise force a recreate.
+//
 // Probe-then-bind has a tiny race window where docker compose itself
 // could lose to another binder between probe and `up`; in practice the
 // window is microseconds and `compose up` will surface its own error if
 // it loses, which the user can react to.
-func walkComposeServices(services []composeService, maxAttempts int, log *slog.Logger) ([]composeService, []portShift) {
+func walkComposeServices(services []composeService, owned map[string]bool, maxAttempts int, log *slog.Logger) ([]composeService, []portShift) {
 	if maxAttempts < 1 {
 		maxAttempts = 1
 	}
@@ -268,6 +289,11 @@ func walkComposeServices(services []composeService, maxAttempts int, log *slog.L
 			host := p.HostIP
 			if host == "" {
 				host = "127.0.0.1"
+			}
+			if owned[hostPortKey(host, p.HostPort)] {
+				// Port already held by one of our own running containers
+				// — treat as available, leave unchanged, record no shift.
+				continue
 			}
 			actual, err := probeFreePort(host, p.HostPort, maxAttempts, log)
 			if err != nil {

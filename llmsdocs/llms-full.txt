@@ -41,6 +41,15 @@
 
 ---
 
+## Directives
+
+How hamr is meant to be used. Lean rules with rationale, do/don't examples, and tracked gaps where the codebase doesn't yet match.
+
+- `docs/guide/directives/` — directory of directives, one per file
+- `docs/guide/directives/gaps.md` — known drifts between code and directives
+
+---
+
 ## Core Packages
 
 ### config
@@ -2602,6 +2611,53 @@ when no walks are needed. It's gitignored under the existing `.hamr/`
 rule. When `hamr dev` exits but the compose stack stays up
 (`keep_running = true`), the file persists so `make migrate` invocations
 that come later still resolve the right ports.
+
+### Compose adoption path
+
+On startup `hamr dev` queries each `[[dev.docker_compose]]` entry with
+`docker compose ps --format json` before doing anything else. Failures
+(daemon down, missing compose subcommand, parse errors) hard-fail
+`hamr dev` with the underlying error — running with stale or unknown
+state risks recreating containers the user wanted preserved.
+
+Per entry, hamr decides between two paths:
+
+- **Adopt** — every expected service (`dc.Services` if set; otherwise
+  every service in the compose file) is `running` AND ready (`healthy`
+  or no healthcheck defined). hamr skips `compose up -d` entirely and
+  leaves the override file alone. Shifts for env injection come from
+  diffing the `compose ps` published ports against the base compose
+  file, so `DATABASE_URL` on the spawned app still points at whatever
+  port a prior session walked the db to.
+- **Apply** — at least one expected service is missing, exited,
+  `unhealthy`, or `starting`. hamr walks only the non-running services
+  (peers stay on whatever ports they're already bound to), passes the
+  project's already-published ports as an "owned" set so the walk
+  doesn't shift away from a port held by one of our own running
+  containers, then runs `compose up -d`. The override file is rewritten
+  to capture every running service's actual published port plus the
+  walked ports for missing services. Running-unhealthy / starting peers
+  fall in the "running" bucket too: their published port is preserved
+  in the override so `compose up -d` doesn't see drift and recreate
+  them — env injection still points consumers at where the container
+  actually is. The user wipes the stack to force a recreate of an
+  unhealthy peer.
+
+Override management is state-aware: a stale `.hamr/compose.<name>.override.yaml`
+is only auto-removed when the project has zero running containers AND
+nothing drifted. Anything running → leave the override alone. This
+keeps `keep_running` containers from bouncing on the next session.
+
+Adoption applies regardless of `keep_running` — that flag governs
+shutdown only. If a `keep_running = false` stack is somehow already up
+at startup (manual `docker compose up`, prior crash recovery), hamr
+adopts it just as it would a `keep_running = true` stack.
+
+Adoption does not reconcile compose-file edits. If the user changes a
+base port (or any other compose-file content) while a stack is still
+up, the running containers keep their old config; hamr logs a `WARN`
+per adopted-on-non-base-port service. To apply edits, wipe the stack
+(TUI `d` hotkey, or `docker compose down`).
 
 The file is the contract surface between the writer (hamr dev) and the
 readers (`hamr env`, `hamr sync`, scaffold Makefile, scaffold

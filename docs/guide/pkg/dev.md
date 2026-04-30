@@ -235,7 +235,12 @@ Match rules and limitations are documented in the [`hamr.toml` reference](../ham
 ```
 hamr dev starts
     ↓
-docker compose up -d          ← ensure containers running
+docker compose ps             ← inspect each entry's running state
+    ↓                           (hard-fail if docker is unavailable)
+adopt or apply per entry      ← all expected services running + ready → adopt
+                                anything missing/unhealthy → apply
+    ↓
+docker compose up -d          ← apply path only; skipped on adopt
     ↓
 initial build (topological order)
     ↓
@@ -250,6 +255,8 @@ shutdown event → browser notified
 stop processes and daemons
 docker compose down           ← unless keep_running = true
 ```
+
+`keep_running = true` plus the adoption path means a stack you left up at the end of the last session is reattached on the next `hamr dev` without recreating containers. Port walking respects this too: a port held by one of the project's own containers is treated as available, so the walk doesn't shift away from a port that's already serving the running stack.
 
 ## Browser Dev Panel
 
@@ -584,3 +591,12 @@ reload = "full"
 `keep_running = true` on `infra` means Postgres and Redis stay up when you Ctrl+C hamr,
 avoiding slow container restarts between dev sessions. Auxiliary services like mailhog
 are torn down with hamr since they start quickly.
+
+On the next `hamr dev`, hamr inspects each entry via `docker compose ps`: if every
+expected service is running and ready (`healthy` or no healthcheck), the stack is
+**adopted** — no `compose up -d`, no recreate, and the host ports already bound by
+those containers are excluded from port-walk probing so they aren't shifted off.
+Adoption applies to both `keep_running = true` and `keep_running = false` entries —
+the flag governs shutdown, adoption governs startup. A service that's missing,
+exited, `starting`, or `unhealthy` triggers the apply path for that entry: walk
+the missing services (peers stay put), then `compose up -d` to bring them in.

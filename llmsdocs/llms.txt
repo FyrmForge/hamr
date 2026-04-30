@@ -59,6 +59,16 @@
   warns. Rewritten port values are injected into spawned children's env
   AND persisted to `.hamr/walks.json` for `hamr env` / `hamr sync`
   consumers. The scaffold's `.env` is never modified on disk.
+- **Compose adoption**: On startup `hamr dev` runs `docker compose ps`
+  per `[[dev.docker_compose]]` entry. If every expected service is
+  running + ready (healthy or no healthcheck), hamr adopts the stack —
+  skips `compose up -d`, leaves the override file alone, and treats
+  the project's already-published ports as "owned" so port-walk doesn't
+  shift away from them. Anything missing/exited/unhealthy/starting
+  triggers the apply path for that entry (walk only the missing
+  services, then `compose up -d`). Applies regardless of
+  `keep_running` (that flag governs shutdown). Hard-fails on docker
+  errors.
 - **hamr ai capture**: Browser screenshot capture with HTML/text/metadata sidecars.
   Supports viewport, full-page, and tiled (`--tiles`) capture modes. Tiled mode
   produces viewport-sized PNGs from top to bottom with configurable overlap
@@ -74,6 +84,13 @@
 - **hamr add skill <target>**: Installs an AI agent skill describing the hamr framework. Target selects the AI tool (currently `claude`). Writes to `./.claude/skills/hamr/` by default; `--global` writes to `~/.claude/skills/hamr/`. Requires `hamr.toml` in CWD for project installs. `--force` overwrites.
 - **respond.Redirect**: HTMX-aware redirect that sets HX-Redirect for HTMX
   requests and falls back to HTTP 303.
+
+## Directives
+
+How hamr is meant to be used. Lean rules with rationale, do/don't examples, and tracked gaps where the codebase doesn't yet match.
+
+- `docs/guide/directives/` — directory of directives, one per file
+- `docs/guide/directives/gaps.md` — known drifts between code and directives
 
 ## Core Packages
 

@@ -944,11 +944,7 @@ func (r *Runner) findRule(name string) *WatchRule {
 }
 
 func composeArgs(dc *DockerCompose) []string {
-	projectDir := filepath.Dir(dc.File)
-	if projectDir == "" {
-		projectDir = "."
-	}
-	args := []string{"compose", "--project-directory", projectDir, "-f", dc.File}
+	args := composeArgsForInspect(dc)
 	override := composeOverridePath(dc.Name)
 	if info, err := os.Stat(override); err == nil && !info.IsDir() {
 		args = append(args, "-f", override)
@@ -956,40 +952,120 @@ func composeArgs(dc *DockerCompose) []string {
 	return args
 }
 
-// ensureDockerCompose runs "docker compose up -d" for a compose entry.
-// Returns combined output (for error display) and the list of port shifts
-// the walk performed for this entry — caller threads them into walks.json
-// + dotenv injection so spawned processes and `hamr env` consumers see the
-// rewritten URLs.
+// composeArgsForInspect returns base-only compose args (no generated
+// override). Used for the preflight `compose ps` so a stale override
+// referencing services that have since been renamed or removed in the
+// base file can't poison config-merge before we get a chance to
+// reconcile it. Project identity comes from --project-directory, which
+// is what compose uses to label and find the project's containers.
+func composeArgsForInspect(dc *DockerCompose) []string {
+	projectDir := filepath.Dir(dc.File)
+	if projectDir == "" {
+		projectDir = "."
+	}
+	return []string{"compose", "--project-directory", projectDir, "-f", dc.File}
+}
+
+// ensureDockerCompose ensures a compose entry's services are running,
+// adopting the existing stack when it's already up + ready and only
+// running `compose up -d` when something is missing or unhealthy.
+// Returns combined output (for error display) and the list of port
+// shifts (walk-driven for missing services + drift-derived for adopted
+// peers) — callers thread them into walks.json + dotenv injection so
+// spawned processes and `hamr env` consumers see the rewritten URLs.
+//
+// Decision tree:
+//
+//   - inspect via `docker compose ps --format json` (hard-fail on docker
+//     errors so a missing daemon aborts hamr dev with a surfaced error
+//     instead of silently rebuilding state)
+//   - if every expected service is running + ready → adopt: derive
+//     shifts from actual published ports vs. base compose; do NOT touch
+//     the override file; do NOT run `up -d`
+//   - otherwise → apply: walk only the non-adopted services (peers'
+//     ports stay unchanged), pass the project's owned ports into the
+//     walk so probes against our own ports return as-is, run `up -d`
+//
+// Override file management is state-aware: an existing override is only
+// removed when the project has zero running containers AND walk
+// produced no shifts. With anything running we leave it alone — auto-
+// removing risks recreating peers that are already up on walked ports.
 func (r *Runner) ensureDockerCompose(ctx context.Context, dc *DockerCompose) (string, []portShift, error) {
-	override := composeOverridePath(dc.Name)
-	var shifts []portShift
-	if !r.cfg.Dev.PortWalkEnabled() {
-		_ = os.Remove(override)
-	} else {
-		services, err := parseComposePorts(dc.File)
-		if err != nil {
+	state, err := r.inspectRunningCompose(ctx, dc)
+	if err != nil {
+		return "", nil, err
+	}
+
+	services, err := parseComposePorts(dc.File)
+	if err != nil {
+		return "", nil, err
+	}
+	expected := expectedServiceNames(dc, services)
+
+	if len(expected) > 0 && allServicesAdopted(expected, state.Adopted) {
+		// Adopt path: stack is up + ready. Compose ps is the source of
+		// truth for actual published ports; derive shifts vs. base for
+		// env injection.
+		shifts := stateShiftsForServices(services, state.Publishers, nil)
+		r.logger.Info("docker compose adopted (services already running)",
+			"name", dc.Name, "services", expected)
+		// Each shift here is a divergence between the running container
+		// and the current base compose declaration. It can be a leftover
+		// walk from a prior session (benign, env injection rewrites
+		// consumers) OR a config edit the user made since the stack was
+		// started (their change won't take effect until they wipe). Warn
+		// so a config-edit case isn't silently swallowed.
+		for _, s := range shifts {
+			r.logger.Warn("docker compose adopted on non-base port (declared port unused; wipe stack to apply)",
+				"name", dc.Name, "service", s.Service, "declared", s.Old, "running", s.New)
+		}
+		// Reconcile the override file even though we won't run `up -d`:
+		// downstream TUI/CLI actions (logs, restart, wipe, down) call
+		// composeArgs(dc) which includes the override. Without
+		// reconciliation here:
+		//   - a stale override referencing services dropped from the
+		//     base file would break those follow-up commands' config
+		//     merge (compose ps doesn't see the override but everything
+		//     else does);
+		//   - an adopted stack running on walked ports with the
+		//     override missing (e.g. cleaned .hamr/, switched worktrees)
+		//     would have wipe/restart fall back to base ports and clash.
+		override := composeOverridePath(dc.Name)
+		if err := manageComposeOverride(override, services, state, shifts, nil); err != nil {
 			return "", nil, err
 		}
-		updated, walked := walkComposeServices(services, portWalkAttempts(r.cfg), r.logger)
-		shifts = walked
-		if len(shifts) == 0 {
-			_ = os.Remove(override)
-		} else {
-			affected := make(map[string]bool, len(shifts))
-			for _, shift := range shifts {
-				affected[shift.Service] = true
-				r.logger.Warn("docker compose port walked",
-					"name", dc.Name,
-					"service", shift.Service,
-					"from", shift.Old,
-					"to", shift.New,
-				)
-			}
-			if err := writeComposeOverride(override, updated, affected); err != nil {
-				return "", nil, err
-			}
+		return "", shifts, nil
+	}
+
+	// Apply path: at least one expected service is missing or unhealthy.
+	override := composeOverridePath(dc.Name)
+	var walkShifts []portShift
+	walkedByService := make(map[string]composeService)
+	running := runningServiceSet(state)
+	if r.cfg.Dev.PortWalkEnabled() {
+		toWalk := servicesNeedingWalk(services, running)
+		walked, shifts := walkComposeServices(toWalk, state.Owned, portWalkAttempts(r.cfg), r.logger)
+		walkShifts = shifts
+		for _, svc := range walked {
+			walkedByService[svc.Name] = svc
 		}
+		for _, shift := range walkShifts {
+			r.logger.Warn("docker compose port walked",
+				"name", dc.Name,
+				"service", shift.Service,
+				"from", shift.Old,
+				"to", shift.New,
+			)
+		}
+	}
+
+	// Combine shifts: walk-driven (for non-adopted services) + drift-
+	// derived (for adopted peers, so env injection reflects ports they
+	// were walked to in a prior session).
+	combined := combinedComposeShifts(services, state, walkShifts)
+
+	if err := manageComposeOverride(override, services, state, combined, walkedByService); err != nil {
+		return "", nil, err
 	}
 
 	args := append(composeArgs(dc), "up", "-d")
@@ -1005,9 +1081,139 @@ func (r *Runner) ensureDockerCompose(ctx context.Context, dc *DockerCompose) (st
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 	if err := cmd.Run(); err != nil {
-		return buf.String(), shifts, fmt.Errorf("docker compose up failed: %w", err)
+		return buf.String(), combined, fmt.Errorf("docker compose up failed: %w", err)
 	}
-	return "", shifts, nil
+	return "", combined, nil
+}
+
+// combinedComposeShifts merges walk-derived shifts (for services we
+// just walked because they weren't running) with drift-derived shifts
+// (for any running peer — adopted, unhealthy, or starting — whose
+// actual published port differs from base compose). The result is what
+// env injection consumes; every service whose host port differs from
+// its base compose declaration appears once.
+//
+// Drift derivation keys off "service is running" (has a publisher),
+// not "is adopted". A running-unhealthy peer holds a real port and the
+// app env must reflect it — the alternative (filtering to Adopted only)
+// would silently drop its shift and leave consumers pointed at the
+// base port while the actual container sits elsewhere.
+func combinedComposeShifts(services []composeService, state composeStackState, walkShifts []portShift) []portShift {
+	if len(state.Publishers) == 0 {
+		return walkShifts
+	}
+	out := append([]portShift(nil), walkShifts...)
+	out = append(out, stateShiftsForServices(services, state.Publishers, runningServiceSet(state))...)
+	return out
+}
+
+// runningServiceSet collapses state.Publishers into the set of service
+// names that have at least one publisher. Used as the "only" filter for
+// stateShiftsForServices so drift derivation considers every running
+// peer, not just the adopted subset.
+func runningServiceSet(state composeStackState) map[string]bool {
+	out := make(map[string]bool, len(state.Publishers))
+	for _, p := range state.Publishers {
+		out[p.Service] = true
+	}
+	return out
+}
+
+// servicesNeedingWalk returns the subset of services whose ports the
+// apply path should attempt to walk. Running services (adopted, unhealthy,
+// or starting) are excluded — their ports are held by the container
+// regardless of health, so a walk would diff against base and emit a
+// shift for the same service that combinedComposeShifts already covers
+// from compose ps. Two shifts for one service would land in walks.json
+// and the rewrite map would resolve last-write-wins.
+func servicesNeedingWalk(services []composeService, running map[string]bool) []composeService {
+	out := make([]composeService, 0, len(services))
+	for _, svc := range services {
+		if running[svc.Name] {
+			continue
+		}
+		out = append(out, svc)
+	}
+	return out
+}
+
+// manageComposeOverride decides whether to write or remove the per-
+// entry override file based on the apply-path's combined shift set.
+//
+//   - If anything drifts from base (walk shifts OR running peers on
+//     non-base ports), write an override capturing every drifted
+//     service. This includes running peers so `compose up -d` doesn't
+//     see drift and recreate them.
+//   - If nothing drifts, remove any stale override. Running peers on
+//     base ports don't need an override; running peers on non-base
+//     ports always produce a state-derived shift (non-empty combined),
+//     so the empty-combined branch can never strand a real running
+//     mapping. A stale override left on disk would otherwise force
+//     `compose up -d` to recreate a stopped service on the previously-
+//     walked port instead of returning it to base.
+func manageComposeOverride(override string, services []composeService, state composeStackState, combined []portShift, walkedByService map[string]composeService) error {
+	if len(combined) > 0 {
+		updated := overrideServices(services, state, walkedByService)
+		affected := make(map[string]bool, len(combined))
+		for _, s := range combined {
+			affected[s.Service] = true
+		}
+		return writeComposeOverride(override, updated, affected)
+	}
+	_ = os.Remove(override)
+	return nil
+}
+
+// overrideServices builds the services list that the override file
+// emits. Per service, the rendered HostPort comes from the first
+// applicable source:
+//
+//  1. **Running** (has a publisher in state.Publishers — adopted,
+//     unhealthy, or starting): use the actual published port. This
+//     preserves the running container's binding so `compose up -d`
+//     doesn't see drift and recreate it. Running-unhealthy stays put;
+//     the user wipes to force a rebuild.
+//  2. **Walked**: use the walk result. Walk only operates on non-
+//     running services (adopted services are excluded from toWalk;
+//     non-adopted-but-running services have their ports in the owned
+//     set so the walk wouldn't shift them anyway).
+//  3. **Base compose**: fallback when neither running nor walked.
+//
+// Per-binding port resolution for case (1) goes through
+// resolvedPortsForService so services with ambiguous container-port
+// mappings (or older compose ps output) still get sensible per-binding
+// ports rather than dropping to base.
+//
+// Services without published ports (workers, etc.) round-trip via case
+// (3) but never appear in the override emission — writeComposeOverride
+// filters by `affected`, which is keyed off shift records that only
+// exist for ported services.
+func overrideServices(services []composeService, state composeStackState, walkedByService map[string]composeService) []composeService {
+	running := runningServiceSet(state)
+
+	out := make([]composeService, len(services))
+	for i, svc := range services {
+		if running[svc.Name] {
+			ports := append([]composePortBinding(nil), svc.Ports...)
+			resolved := resolvedPortsForService(svc.Name, svc.Ports, state.Publishers)
+			for j, p := range ports {
+				if p.HostPort == 0 {
+					continue
+				}
+				if got, ok := resolved[j]; ok {
+					ports[j].HostPort = got
+				}
+			}
+			out[i] = composeService{Name: svc.Name, Ports: ports}
+			continue
+		}
+		if walked, ok := walkedByService[svc.Name]; ok {
+			out[i] = composeService{Name: svc.Name, Ports: append([]composePortBinding(nil), walked.Ports...)}
+			continue
+		}
+		out[i] = composeService{Name: svc.Name, Ports: append([]composePortBinding(nil), svc.Ports...)}
+	}
+	return out
 }
 
 // followDockerLogs streams `docker compose logs -f` for one entry into

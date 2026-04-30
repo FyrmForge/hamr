@@ -159,7 +159,9 @@ services = ["postgres", "redis"]
 keep_running = true
 ```
 
-`keep_running = true` means the containers stay up when you Ctrl+C hamr, avoiding slow restarts between dev sessions.
+`keep_running = true` means the containers stay up when you Ctrl+C hamr, avoiding slow restarts between dev sessions. On the next `hamr dev`, hamr inspects the running stack first via `docker compose ps`: if every expected service is up and ready (healthy, or no healthcheck), hamr **adopts** it — no recreate, no `compose up -d`, no port-walk shift on already-bound ports. If anything is missing, exited, unhealthy, or `starting`, hamr falls through to the apply path and runs `compose up -d` to bring missing services up. Running-but-unhealthy peers are preserved on their current ports (compose up doesn't bounce them) so env injection points consumers at where the container actually is — wipe the stack to force a recreate.
+
+Adoption deliberately does not reconcile config edits against running containers. If you change a base port (or anything else) in the compose file while the stack is still up, the running container keeps its old config and hamr logs a `WARN` per adopted-on-non-base-port service. Wipe the stack with the TUI's `d` hotkey (or `docker compose down`) to make the edit take effect.
 
 ---
 
