@@ -1684,7 +1684,27 @@ type VideoStoreConfig struct {
     ThumbnailWidth    int
     BaseURL           string
     SignedExpiry       time.Duration
+    Transcode         VideoTranscodeOptions
 }
+
+// Activation by population: zero-valued struct = no transcode (save raw
+// bytes); any non-zero field flips the store into "re-encode every
+// upload to H.264/AAC MP4 with +faststart, -pix_fmt yuv420p,
+// -profile:v high" mode. validate() fills in defaults — CRF=23,
+// Preset="medium", AudioBitrate="128k", MaxWidth/MaxHeight=0 (no clamp).
+// MaxSize is checked against the input bytes (pre-transcode); thumbnail
+// still extracted from raw upload. Note: setting only MaxWidth/MaxHeight
+// also activates the full re-encode — there is no "clamp size, don't
+// re-encode" mode.
+type VideoTranscodeOptions struct {
+    CRF          int    // effective 1..51, default 23; CRF=0 is treated as "use default", NOT lossless
+    Preset       string // x264 preset; default "medium"
+    AudioBitrate string // ffmpeg -b:a, default "128k"
+    MaxWidth     int    // 0 = no clamp (preserve source)
+    MaxHeight    int    // 0 = no clamp (preserve source)
+}
+
+func (o VideoTranscodeOptions) IsZero() bool
 
 type Option func(*options)
 ```
@@ -1791,6 +1811,8 @@ func (s *VideoStore) ServeHandler() echo.HandlerFunc
 ```
 
 `UploadFromReaderWithID` follows the same UUID-validation and existence-check rules as the image variant (strict 36-char canonical only; `ErrIDExists` is best-effort). Thumbnail generation/save failures are logged and ignored — the video bytes are stored regardless, and `result.ThumbnailPath` stays empty when this branch fails.
+
+When `VideoStoreConfig.Transcode` is populated, every `Upload*` call re-encodes the upload to H.264/AAC MP4 (with `+faststart` so the moov atom is at the front for progressive streaming, `-pix_fmt yuv420p` and `-profile:v high` for browser/QuickTime/smart-TV compatibility) before persisting. `result.FileSize` reflects whatever was actually saved — encoded bytes when transcoding, raw bytes otherwise. `result.MimeType` reports `video/mp4` when transcoding ran (regardless of input container) and the source MIME otherwise. The transcode pass is slow (tens of seconds for a one-minute clip on `medium` preset); call `Upload*` from a worker pool such as `pkg/async.Group` rather than from the request goroutine. Internally, transcoding writes to an `os.TempDir()` file and reads it back rather than streaming through stdout, because `+faststart` requires a seekable output. The scale filter uses a chained `scale=...,scale=trunc(iw/2)*2:trunc(ih/2)*2` pattern to satisfy libx264's even-dimension requirement on all ffmpeg versions, sidestepping `force_divisible_by` which only landed in ffmpeg 4.4.
 
 #### Video Upload Result
 

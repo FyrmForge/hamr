@@ -179,7 +179,10 @@ Image/video upload, processing, serving.
 
 - `NewLocalImageStore(store, urlPrefix, cfg, opts...)` / `NewS3ImageStore(...)`
 - `NewLocalVideoStore(store, urlPrefix, cfg, opts...)` / `NewS3VideoStore(...)`
-- `Upload(ctx, fileHeader)`, `Delete(ctx, id)`, `GetMedia(id)`, `ServeHandler()`
+- Upload entry points: `Upload(ctx, fileHeader)`, `UploadFromReader(ctx, r, size)`, `UploadFromReaderWithID(ctx, id, r, size, overwrite)` — `*WithID` requires the 36-char canonical UUID; `overwrite=false` returns `ErrIDExists` (best-effort precheck)
+- `Delete(ctx, id)`, `GetMedia(id)`, `ServeHandler()`
+- Video transcode (opt-in): set `VideoStoreConfig.Transcode VideoTranscodeOptions{Preset: "medium"}` (or any non-zero field) and every upload is re-encoded to H.264/AAC MP4 with `+faststart` before saving; zero-valued struct preserves the upload bytes verbatim. Transcoding is slow — call `Upload*` from a worker pool (`pkg/async.Group`).
+- Sentinels: `ErrFileTooLarge`, `ErrUnknownType`, `ErrVideoTooLong`, `ErrInvalidID`, `ErrIDExists`, `ErrFFmpegNotFound`
 - Preset sizes: `SizesAvatar`, `SizesCard`, `SizesIcon`, `SizeOriginal`
 
 ### `websocket` (`--websocket`)

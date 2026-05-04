@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -77,4 +79,97 @@ func checkFFprobe() error {
 		return ErrFFmpegNotFound
 	}
 	return nil
+}
+
+// transcodeVideoToMP4 re-encodes the input bytes to an H.264/AAC MP4
+// container with the moov atom at the front (+faststart) so the result
+// can be progressively streamed by browsers.
+//
+// The output is written to a temp file rather than stdout because
+// +faststart requires a seekable destination to relocate the moov atom
+// after writing — ffmpeg cannot do that on a non-seekable stdout pipe.
+// The temp file is removed before this function returns.
+func transcodeVideoToMP4(ctx context.Context, data []byte, opts VideoTranscodeOptions) ([]byte, error) {
+	if err := checkFFmpeg(); err != nil {
+		return nil, err
+	}
+
+	tmpDir, err := os.MkdirTemp("", "media-transcode-*")
+	if err != nil {
+		return nil, fmt.Errorf("media: transcode tempdir: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+	outPath := filepath.Join(tmpDir, "out.mp4")
+
+	args := []string{
+		"-loglevel", "error",
+		"-i", "pipe:0",
+		"-c:v", "libx264",
+		"-preset", opts.Preset,
+		"-crf", strconv.Itoa(opts.CRF),
+		"-pix_fmt", "yuv420p",
+		"-profile:v", "high",
+	}
+	if vf := buildScaleFilter(opts.MaxWidth, opts.MaxHeight); vf != "" {
+		args = append(args, "-vf", vf)
+	}
+	args = append(args,
+		"-c:a", "aac",
+		"-b:a", opts.AudioBitrate,
+		"-movflags", "+faststart",
+		"-f", "mp4",
+		"-y",
+		outPath,
+	)
+
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	cmd.Stdin = bytes.NewReader(data)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("ffmpeg transcode: %w: %s", err, stderr.String())
+	}
+
+	out, err := os.ReadFile(outPath)
+	if err != nil {
+		return nil, fmt.Errorf("media: read transcoded output: %w", err)
+	}
+	return out, nil
+}
+
+// buildScaleFilter produces the -vf argument that clamps output
+// dimensions while preserving aspect ratio and never upscales the
+// source. Empty string means "do not pass -vf" (preserve source dims).
+//
+// libx264 requires even dimensions on both axes. We enforce that with a
+// two-pass scale chain: the first scale applies the user's clamp (with
+// `-2` for any unconstrained axis to maintain aspect), the second scale
+// truncates both axes to even via `trunc(iw/2)*2`/`trunc(ih/2)*2`. The
+// chained form works on every ffmpeg version that has the scale filter
+// (i.e. all of them) — the alternative `force_divisible_by=2` argument
+// only landed in libavfilter ~ffmpeg 4.4 and would silently fail on
+// older distros (Debian buster, RHEL 8 base, Ubuntu 18.04 without
+// backports).
+//
+// The second pass is also what fixes the single-axis-with-odd-source
+// case: e.g. `MaxWidth=1920` against a 1281×720 source would otherwise
+// pass through the odd width unchanged and trip libx264's "width not
+// divisible by 2" reject.
+func buildScaleFilter(maxW, maxH int) string {
+	const evenize = ",scale=w='trunc(iw/2)*2':h='trunc(ih/2)*2'"
+	switch {
+	case maxW > 0 && maxH > 0:
+		return fmt.Sprintf(
+			"scale=w='min(iw,%d)':h='min(ih,%d)':force_original_aspect_ratio=decrease",
+			maxW, maxH,
+		) + evenize
+	case maxW > 0:
+		return fmt.Sprintf("scale=w='min(iw,%d)':h=-2", maxW) + evenize
+	case maxH > 0:
+		return fmt.Sprintf("scale=w=-2:h='min(ih,%d)'", maxH) + evenize
+	default:
+		return ""
+	}
 }

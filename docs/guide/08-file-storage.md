@@ -149,7 +149,7 @@ e.GET("/uploads/*", imageStore.ServeHandler())
 
 ### VideoStore
 
-Handles video upload, duration validation, and optional thumbnail extraction (requires `ffmpeg`/`ffprobe`):
+Handles video upload, duration validation, optional H.264/AAC transcoding, and optional thumbnail extraction (requires `ffmpeg`/`ffprobe`):
 
 ```go
 store, err := media.NewLocalVideoStore(localStorage, "/uploads", media.VideoStoreConfig{
@@ -158,6 +158,9 @@ store, err := media.NewLocalVideoStore(localStorage, "/uploads", media.VideoStor
     MaxDuration:       120, // seconds
     GenerateThumbnail: true,
     ThumbnailWidth:    640,
+    // Optional: re-encode every upload to H.264/AAC MP4 before saving.
+    // Leave the struct zero-valued to store bytes verbatim.
+    Transcode: media.VideoTranscodeOptions{Preset: "medium"},
 }, media.WithLogger(logger))
 ```
 
@@ -170,6 +173,8 @@ result, err := store.UploadFromReaderWithID(ctx, id, reader, size, overwrite)
 ```
 
 `UploadFromReaderWithID` follows the same UUID-validation and existence-check rules as the image variant.
+
+When `Transcode` is configured, every upload is re-encoded with `+faststart` for progressive playback. The pass is slow — call `Upload*` from a worker pool such as `pkg/async.Group` rather than from the request goroutine. See [pkg/media](pkg/media.md) for the full set of transcode knobs and details.
 
 ### Preset Sizes
 

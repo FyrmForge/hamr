@@ -195,16 +195,36 @@ func (s *VideoStore) upload(ctx context.Context, r io.Reader, id string, overwri
 	videoPath := fmt.Sprintf("%s/%s/video.mp4", s.config.Category, id)
 	thumbPath := fmt.Sprintf("%s/%s/thumb.jpg", s.config.Category, id)
 
-	if err := s.storage.Save(ctx, videoPath, bytes.NewReader(raw)); err != nil {
+	// When Transcode is configured we re-encode to H.264/AAC MP4 before
+	// persisting; otherwise the upload is stored verbatim. Thumbnail
+	// extraction (below) intentionally runs against `raw` regardless,
+	// so a transcode failure mode does not couple to thumbnail success
+	// and the thumbnail frame matches the original timeline exactly.
+	toSave := raw
+	storedMIME := mimeType
+	if !s.config.Transcode.IsZero() {
+		encoded, err := transcodeVideoToMP4(ctx, raw, s.config.Transcode)
+		if err != nil {
+			return nil, fmt.Errorf("media: transcode: %w", err)
+		}
+		toSave = encoded
+		// The bytes on disk are now H.264/AAC MP4 regardless of input
+		// container — reporting the source MIME would mislabel the
+		// stored asset and break callers that persist MimeType to a DB
+		// or plumb it into Content-Type when serving.
+		storedMIME = "video/mp4"
+	}
+
+	if err := s.storage.Save(ctx, videoPath, bytes.NewReader(toSave)); err != nil {
 		return nil, fmt.Errorf("media: save video: %w", err)
 	}
 
 	result := &VideoUploadResult{
 		ID:        id,
 		MediaType: TypeVideo,
-		MimeType:  mimeType,
+		MimeType:  storedMIME,
 		Duration:  duration,
-		FileSize:  int64(len(raw)),
+		FileSize:  int64(len(toSave)),
 		category:  s.config.Category,
 	}
 
@@ -228,9 +248,9 @@ func (s *VideoStore) upload(ctx context.Context, r io.Reader, id string, overwri
 	s.logger.Debug("video uploaded",
 		"id", id,
 		"category", s.config.Category,
-		"mime", mimeType,
+		"mime", storedMIME,
 		"duration", duration,
-		"size", len(raw),
+		"size", len(toSave),
 	)
 
 	return result, nil
