@@ -855,6 +855,9 @@
         source.addEventListener("config", function(e) {
             try {
                 config = JSON.parse(e.data);
+                if (config && config.console_capture) {
+                    startConsoleCapture();
+                }
             } catch (err) {
                 console.warn("[hamr] bad config payload", err);
             }
@@ -1055,6 +1058,178 @@
 
         // Re-initialize htmx on new DOM.
         if (typeof htmx !== "undefined") htmx.process(document.body);
+    }
+
+    // --- Browser Console Transport ---
+    //
+    // Wrap window.console.* and listen for window error / unhandled rejection
+    // / CSP violation events; pipe them up to /__hamr/console over a
+    // WebSocket so the dev server logs them as [site:console] entries
+    // alongside its own backend output.
+    //
+    // Gated by SSE config: the SSE "config" event carries a console_capture
+    // flag (driven by [dev].hamr_console_capture in hamr.toml, default true).
+    // Until the first config event arrives capture is dormant — no console
+    // wrapping, no listeners, no WS. When the flag is false the init never
+    // runs at all; zero overhead.
+    //
+    // Filtering of hamr's own [hamr] logs is server-side (controlled by
+    // [dev].hamr_console_filter). The client sends everything.
+
+    var consoleStarted = false;
+    var consoleWS = null;
+    var consoleQueue = [];
+    var CONSOLE_QUEUE_MAX = 500;
+    var CONSOLE_FLUSH_MS = 100;
+    var consoleFlushTimer = null;
+    var consoleDelay = MIN_DELAY;
+    var ARG_MAX = 2048;
+
+    function consoleEnqueue(frame) {
+        consoleQueue.push(frame);
+        if (consoleQueue.length > CONSOLE_QUEUE_MAX) {
+            consoleQueue = consoleQueue.slice(-CONSOLE_QUEUE_MAX);
+        }
+        if (consoleFlushTimer === null) {
+            consoleFlushTimer = setTimeout(function() {
+                consoleFlushTimer = null;
+                consoleFlush();
+            }, CONSOLE_FLUSH_MS);
+        }
+    }
+
+    function consoleFlush() {
+        if (!consoleWS || consoleWS.readyState !== 1) return;
+        if (consoleQueue.length === 0) return;
+        try {
+            consoleWS.send(JSON.stringify(consoleQueue));
+            consoleQueue = [];
+        } catch(e) {
+            // Socket died mid-send; the close handler will run and we'll reconnect.
+        }
+    }
+
+    function consoleConnect() {
+        var scheme = location.protocol === "https:" ? "wss:" : "ws:";
+        var url = scheme + "//" + location.host + "/__hamr/console";
+        try {
+            consoleWS = new WebSocket(url);
+        } catch(e) {
+            consoleReconnect();
+            return;
+        }
+        consoleWS.onopen = function() {
+            consoleDelay = MIN_DELAY;
+            consoleFlush();
+        };
+        consoleWS.onclose = function() {
+            consoleWS = null;
+            consoleReconnect();
+        };
+        consoleWS.onerror = function() {
+            try { consoleWS.close(); } catch(e) {}
+        };
+    }
+
+    function consoleReconnect() {
+        var wait = consoleDelay + Math.random() * 500;
+        setTimeout(consoleConnect, wait);
+        consoleDelay = Math.min(consoleDelay * 2, MAX_DELAY);
+    }
+
+    function serializeArg(arg) {
+        if (typeof arg === "string") {
+            return arg.length > ARG_MAX ? arg.slice(0, ARG_MAX) + "…" : arg;
+        }
+        if (arg === null || arg === undefined) return String(arg);
+        if (typeof arg !== "object") return String(arg);
+        var seen = [];
+        try {
+            var s = JSON.stringify(arg, function(_k, v) {
+                if (typeof v === "object" && v !== null) {
+                    if (seen.indexOf(v) >= 0) return "[Circular]";
+                    seen.push(v);
+                }
+                return v;
+            });
+            if (s === undefined) s = String(arg);
+            return s.length > ARG_MAX ? s.slice(0, ARG_MAX) + "…" : s;
+        } catch(e) {
+            try { return String(arg); } catch(e2) { return "[Unserializable]"; }
+        }
+    }
+
+    function joinArgs(args) {
+        var parts = [];
+        for (var i = 0; i < args.length; i++) {
+            parts.push(serializeArg(args[i]));
+        }
+        return parts.join(" ");
+    }
+
+    function patchConsole() {
+        var levels = ["log", "info", "debug", "warn", "error"];
+        for (var i = 0; i < levels.length; i++) {
+            (function(level) {
+                var orig = console[level];
+                if (typeof orig !== "function") return;
+                console[level] = function() {
+                    try {
+                        consoleEnqueue({level: level, msg: joinArgs(arguments)});
+                    } catch(e) {}
+                    return orig.apply(console, arguments);
+                };
+            })(levels[i]);
+        }
+    }
+
+    function installEventCaptures() {
+        // Capture phase so resource-load errors (<img>/<script>/<link> 404s)
+        // bubble here — they don't bubble in the normal phase.
+        window.addEventListener("error", function(e) {
+            try {
+                if (e.error || e.message) {
+                    var msg = e.error && e.error.message ? e.error.message : String(e.message || "Error");
+                    var src = "";
+                    if (e.filename) src = e.filename + ":" + (e.lineno || 0) + ":" + (e.colno || 0);
+                    consoleEnqueue({level: "error", msg: msg, src: src});
+                } else if (e.target && e.target !== window && e.target.tagName) {
+                    var t = e.target;
+                    var url = t.src || t.href || "";
+                    var tag = String(t.tagName).toLowerCase();
+                    consoleEnqueue({level: "resource", msg: "Failed to load <" + tag + "> " + url});
+                }
+            } catch(err) {}
+        }, true);
+
+        window.addEventListener("unhandledrejection", function(e) {
+            try {
+                consoleEnqueue({level: "rejection", msg: "Unhandled rejection: " + serializeArg(e.reason)});
+            } catch(err) {}
+        });
+
+        document.addEventListener("securitypolicyviolation", function(e) {
+            try {
+                var d = e.effectiveDirective || e.violatedDirective || "?";
+                var b = e.blockedURI || "?";
+                consoleEnqueue({level: "csp", msg: "CSP violation: " + d + " blocked " + b});
+            } catch(err) {}
+        });
+
+        // Best-effort tail flush. WS frames may still drop during unload —
+        // sendBeacon would be safer but isn't applicable to the WS
+        // transport. Tail loss is accepted as a limitation.
+        window.addEventListener("pagehide", function() {
+            consoleFlush();
+        });
+    }
+
+    function startConsoleCapture() {
+        if (consoleStarted) return;
+        consoleStarted = true;
+        patchConsole();
+        installEventCaptures();
+        consoleConnect();
     }
 
     connect();

@@ -48,6 +48,11 @@ type sseConfig struct {
 	// StripeMock indicates the /__hamr/stripe dashboard UI is mounted. The
 	// dev panel uses this to render the Stripe-mock shortcut.
 	StripeMock bool `json:"stripe_mock,omitempty"`
+	// ConsoleCapture indicates the /__hamr/console WS endpoint is mounted.
+	// The injected reload script reads this on the SSE config event and
+	// only patches window.console + opens the upstream WS when true. When
+	// false (capture disabled), the script skips all of it — zero overhead.
+	ConsoleCapture bool `json:"console_capture,omitempty"`
 }
 
 // SSEBroker manages SSE client connections and broadcasts events.
@@ -61,13 +66,16 @@ type SSEBroker struct {
 // NewSSEBroker creates a new SSE broker. The provided watch rules, daemons, and
 // docker compose entries are serialized once and sent to each client on connect
 // as a "config" event. The two mock flags decide which mock-shortcut buttons
-// the dev panel renders.
-func NewSSEBroker(rules []WatchRule, daemons []Daemon, dockerCompose []DockerCompose, mailMockEnabled, stripeMockEnabled bool) *SSEBroker {
+// the dev panel renders. consoleCaptureEnabled toggles the browser-console
+// transport client-side: true tells the injected reload script to patch
+// console + open /__hamr/console; false tells it to do nothing.
+func NewSSEBroker(rules []WatchRule, daemons []Daemon, dockerCompose []DockerCompose, mailMockEnabled, stripeMockEnabled, consoleCaptureEnabled bool) *SSEBroker {
 	cfg := sseConfig{
-		Rules:      make([]sseRule, len(rules)),
-		Daemons:    make([]sseDaemon, len(daemons)),
-		MailMock:   mailMockEnabled,
-		StripeMock: stripeMockEnabled,
+		Rules:          make([]sseRule, len(rules)),
+		Daemons:        make([]sseDaemon, len(daemons)),
+		MailMock:       mailMockEnabled,
+		StripeMock:     stripeMockEnabled,
+		ConsoleCapture: consoleCaptureEnabled,
 	}
 	for i, r := range rules {
 		cfg.Rules[i] = sseRule{

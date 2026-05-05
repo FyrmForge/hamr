@@ -27,6 +27,8 @@ package = "components"
 proxy_listen = ":3000"
 proxy_target = "$PORT"
 inject_reload = true
+hamr_console_capture = true
+hamr_console_filter = false
 {{if .IncludeEmailMock}}
 [dev.email]
 enabled = true

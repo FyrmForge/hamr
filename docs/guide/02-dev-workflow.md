@@ -205,6 +205,19 @@ log_file = ".hamr/dev_logs.txt"      # path (set "none" to disable)
 log_file_max_lines = 200             # rolling window size
 ```
 
+The injected reload script also pipes the browser's `console.*` output, uncaught JS errors, unhandled promise rejections, resource-load failures, and CSP violations back to the dev server over a WebSocket at `/__hamr/console`. They appear in the same TUI tab and `dev_logs.txt` tagged `[site:console]`:
+
+```
+[site:console] hello world
+[site:console] WARN deprecated API call
+[site:console] ERROR TypeError: x is undefined @ app.js:42:7
+[site:console] Failed to load <img> /missing.png
+```
+
+Browser-engine warnings printed directly to DevTools (deprecations, mixed-content, autoplay blocked, the formatted "Failed to load resource" lines) and `fetch`/`XHR` network errors aren't observable from page JS, so they aren't captured.
+
+Set `hamr_console_capture = false` in `[dev]` to disable the whole transport — no WS endpoint, no console patching. Default `true`. Independently, set `hamr_console_filter = true` to drop frames whose message contains `[hamr]` (the reload script's own chatter — `[hamr] page swapped`, `[hamr] CSS reloaded`, etc.). Default `false` shows everything.
+
 ---
 
 ## Common Configurations

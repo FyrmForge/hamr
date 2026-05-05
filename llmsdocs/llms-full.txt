@@ -25,7 +25,28 @@
   Mirrors its recent output to a rolling log file (default
   `.hamr/dev_logs.txt`, 200 lines) for LLM consumption. The file contains
   `[hamr dev]` messages plus watched command/daemon stdout-stderr with terminal
-  escapes stripped. Configure via `log_file` and `log_file_max_lines` in
+  escapes stripped. The injected reload script also pipes browser
+  `window.console.*` calls + uncaught JS errors + unhandled promise
+  rejections + resource-load failures (`<img>`/`<script>`/`<link>` 404s)
+  + CSP violations back to the dev server over a WebSocket at
+  `/__hamr/console`; the dev server logs them tagged `[site:console]`
+  in the same TUI tab and `dev_logs.txt` as backend output, in arrival
+  order. Wire format is JSON `{level, msg, src?}` per frame, batched
+  client-side every ~100ms (`level` ∈ `log`/`info`/`debug`/`warn`/
+  `error`/`rejection`/`resource`/`csp`; `src` populated only for
+  uncaught errors with file:line:col). Browser-engine warnings printed
+  directly to DevTools (deprecation notices, mixed-content, autoplay
+  blocked, the formatted "Failed to load resource" lines) and
+  `fetch`/`XHR` network errors are not catchable from page JS, so they
+  aren't captured. Gated by `[dev].hamr_console_capture` (default
+  true): the SSE config payload carries a `console_capture` flag and
+  the JS patches console + opens the WS only when true; setting
+  `[dev].hamr_console_capture = false` also prevents the server from
+  mounting the `/__hamr/console` endpoint. Set
+  `[dev].hamr_console_filter = true` to drop frames whose message
+  contains `[hamr]` (the reload script's own chatter — `[hamr] page
+  swapped`, `[hamr] CSS reloaded`, etc.); default false shows
+  everything. Configure via `log_file` and `log_file_max_lines` in
   `[dev]`; set `log_file = "none"` to disable.
 - **hamr ai capture**: Browser screenshot capture with HTML/text/metadata sidecars.
 - **hamr ai upgrade**: Git-based scaffold upgrade report. Clones the HAMR repo and diffs between version tags to produce a unified diff and stat summary of all changes between the project's baseline and current HAMR.

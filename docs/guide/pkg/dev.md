@@ -211,8 +211,29 @@ log_file_max_lines = 200            # max lines before old entries are pruned
 |-------|------|---------|-------------|
 | `log_file` | string | `".hamr/dev_logs.txt"` | Path to the rolling log file. Set to `"none"` to disable. |
 | `log_file_max_lines` | int | `200` | Maximum number of lines kept in the file. |
+| `hamr_console_capture` | bool | `true` | Pipe browser console + uncaught errors into the dev TUI/log. Set `false` to disable the whole transport. |
+| `hamr_console_filter` | bool | `false` | Drop browser-console frames containing `[hamr]` (the reload script's own chatter). Default `false` shows everything. No effect when `hamr_console_capture = false`. |
 
 The `.hamr/` directory is created automatically and is included in the generated `.gitignore`.
+
+### Browser Console Transport
+
+The injected reload script also pipes the browser's `window.console.*` calls, uncaught JS errors, unhandled promise rejections, resource-load failures (`<img>`/`<script>`/`<link>` 404s), and CSP violations back to the dev server over a WebSocket at `/__hamr/console`. They land in the same TUI tab and `dev_logs.txt` tagged `[site:console]`, interleaved with backend events in arrival order:
+
+```
+[site:console] hello world
+[site:console] WARN deprecated API call
+[site:console] ERROR TypeError: x is undefined @ app.js:42:7
+[site:console] Failed to load <img> /missing.png
+```
+
+Wire format is JSON `{level, msg, src?}` per frame, batched client-side every ~100ms. `level` is one of `log` / `info` / `debug` / `warn` / `error` / `rejection` / `resource` / `csp`. Only `warn` and `error` get a colored level label in the rendered line; `src` is appended as `@ file:line:col` and is populated only for uncaught errors.
+
+Browser-engine warnings printed directly to DevTools (deprecation notices, mixed-content warnings, autoplay blocked, the formatted "Failed to load resource" lines) and `fetch`/`XHR` network errors aren't observable from page JS, so they aren't captured.
+
+Set `hamr_console_capture = false` to disable the entire transport: the server doesn't mount the WS endpoint, the JS reads the flag from the SSE config payload and skips the console patch, the error/rejection/CSP listeners, and the WS connection. Default `true`. Toggling this while a tab is open only takes effect on the next reload — a browser that already started capture keeps reconnect-backoff'ing against the removed endpoint until you refresh.
+
+Independently, set `hamr_console_filter = true` to drop frames whose message *contains* `[hamr]` anywhere in the text — the reload script's own logs (`[hamr] page swapped`, `[hamr] CSS reloaded`, etc.). Substring match is intentional; if app code legitimately logs the literal string `[hamr]` it will be dropped too. Default `false` keeps them; the duplication during normal use is mild and the visibility when hamr's own JS misbehaves is high-value.
 
 ## Port Walks
 

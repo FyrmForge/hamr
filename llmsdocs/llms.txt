@@ -27,8 +27,21 @@
   Mirrors its recent output to a rolling log file (default
   `.hamr/dev_logs.txt`, 200 lines) for LLM consumption. The file contains
   `[hamr dev]` messages plus watched command/daemon stdout-stderr with terminal
-  escapes stripped. Configure via `log_file` and `log_file_max_lines` in
-  `[dev]`; set `log_file = "none"` to disable. Refuses to start (released
+  escapes stripped. The injected reload script also pipes browser
+  `console.*` + uncaught errors + unhandled rejections + resource-load
+  failures + CSP violations back to the dev server over a WebSocket at
+  `/__hamr/console`; they appear in the same TUI tab and `dev_logs.txt`
+  tagged `[site:console]`. Gated by `[dev].hamr_console_capture`
+  (default true): when false the WS endpoint isn't mounted and the JS
+  doesn't patch console — zero overhead. Browser-engine warnings
+  printed directly to DevTools (deprecations, mixed content, autoplay
+  blocked, the formatted "Failed to load resource" lines) and
+  `fetch`/`XHR` network errors are not catchable from page JS, so they
+  aren't captured. Set `[dev].hamr_console_filter = true` to drop
+  frames whose message contains `[hamr]` (the reload script's own
+  chatter); default false shows everything. Configure via `log_file`
+  and `log_file_max_lines` in `[dev]`; set `log_file = "none"` to
+  disable. Refuses to start (released
   builds only) when `[hamr] version` in `hamr.toml` is newer than the CLI;
   bypass with `--skip-version-check`. A CLI *newer* than the scaffold only
   warns and continues. Hotkeys while running: `r` rebuild, `o` open browser,

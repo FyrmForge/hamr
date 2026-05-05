@@ -212,9 +212,24 @@ func (r *Runner) Run(ctx context.Context) error {
 			r.logger.Error("failed to create dev log file", "path", r.cfg.Dev.LogFile, "err", err)
 		}
 	}
+	// devOut is the writer the slog handler emits through (terminal or
+	// TUI sink) plus the rolling file fan-out when enabled. The browser-
+	// console sink shares it so [site:console] lines interleave with
+	// backend events in arrival order, in both TUI tab 0 and dev_logs.txt.
+	devOut := io.Writer(r.baseLogWriter())
 	if fileLog != nil {
 		defer func() { _ = fileLog.Close() }()
-		r.logger = newDevLogger(io.MultiWriter(r.baseLogWriter(), fileLog), r.verbose)
+		devOut = io.MultiWriter(r.baseLogWriter(), fileLog)
+		r.logger = newDevLogger(devOut, r.verbose)
+	}
+	// Browser-console transport is opt-out via [dev].hamr_console_capture.
+	// When disabled, we leave consoleSink nil so NewProxyHandler skips the
+	// /__hamr/console route — the JS side reads the same flag from the
+	// SSE config payload and won't attempt to connect.
+	consoleCapture := r.cfg.Dev.HamrConsoleCaptureEnabled()
+	var consoleSink *ConsoleSink
+	if consoleCapture {
+		consoleSink = NewConsoleSink(devOut, r.cfg.Dev.HamrConsoleFilter)
 	}
 
 	graph := NewGraph(r.cfg.Dev.Watch)
@@ -222,7 +237,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	if r.procStdout != nil || r.procStderr != nil {
 		pm.SetOutputSinks(r.procStdout, r.procStderr)
 	}
-	broker := NewSSEBroker(r.cfg.Dev.Watch, r.cfg.Dev.Daemons, r.cfg.Dev.DockerCompose, r.cfg.Dev.Email.Enabled, r.cfg.Dev.Stripe.Enabled)
+	broker := NewSSEBroker(r.cfg.Dev.Watch, r.cfg.Dev.Daemons, r.cfg.Dev.DockerCompose, r.cfg.Dev.Email.Enabled, r.cfg.Dev.Stripe.Enabled, consoleCapture)
 	errorState := NewErrorState()
 	logBuf := NewLogBuffer(1000)
 	pm.SetLogOutput(logBuf, broker)
@@ -455,7 +470,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 
 		inject := r.cfg.Proxy.InjectReload != nil && *r.cfg.Proxy.InjectReload
-		handler := NewProxyHandler(r.cfg.Proxy.Target, broker, errorState, logBuf, actions, mailMock, stripeMock, inject)
+		handler := NewProxyHandler(r.cfg.Proxy.Target, broker, errorState, logBuf, actions, mailMock, stripeMock, consoleSink, inject)
 		proxySrv = serveProxy(ln, handler)
 
 		// Single-line banner that surfaces the actual reachable URL +

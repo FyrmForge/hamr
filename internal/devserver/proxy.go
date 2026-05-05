@@ -34,7 +34,10 @@ func init() {
 // when there are active build errors.
 // If mailMock is non-nil, the mail inbox UI and ingest endpoint are mounted
 // under /__hamr/mail.
-func NewProxyHandler(target string, broker *SSEBroker, errorState *ErrorState, logBuf *LogBuffer, actions *DevActions, mailMock *MailMock, stripeMock *StripeMock, injectReload bool) http.Handler {
+// If console is non-nil, the browser console transport is mounted as a
+// WebSocket at /__hamr/console; the injected reload script connects to it
+// and pipes window.console.* + uncaught errors back into the dev TUI/log.
+func NewProxyHandler(target string, broker *SSEBroker, errorState *ErrorState, logBuf *LogBuffer, actions *DevActions, mailMock *MailMock, stripeMock *StripeMock, console *ConsoleSink, injectReload bool) http.Handler {
 	targetURL := &url.URL{
 		Scheme: "http",
 		Host:   normalizeHost(target),
@@ -114,6 +117,9 @@ func NewProxyHandler(target string, broker *SSEBroker, errorState *ErrorState, l
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(logBuf.Lines()) //nolint:errcheck
 		})
+	}
+	if console != nil {
+		mux.Handle("/__hamr/console", console.Handler())
 	}
 	mux.Handle("/", rootHandler)
 

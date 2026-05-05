@@ -119,6 +119,8 @@ present.
 | `log_file`           | string | `.hamr/dev_logs.txt`    | Rolling log file (also consumed by `hamr ai`). |
 | `log_file_max_lines` | int    | `200`                   | Lines retained. Must be > 0. |
 | `port_walk`          | bool   | `true`                  | When a hamr-managed port is busy, walk +1 up to a small cap and warn (see below). Set `false` to fail fast on EADDRINUSE. |
+| `hamr_console_capture`| bool  | `true`                  | Pipe browser `console.*` + uncaught errors + unhandled rejections + resource-load failures + CSP violations into the dev TUI/log over `/__hamr/console` WebSocket. Set `false` to disable: the WS endpoint isn't mounted, the injected reload script doesn't patch console, and there's zero overhead. See [browser console transport](#browser-console-transport-siteconsole) below. |
+| `hamr_console_filter`| bool   | `false`                 | Drop browser-console frames whose message contains `[hamr]` (i.e. hamr's own injected reload-script chatter like `[hamr] page swapped`). Default `false` shows everything; flip `true` if the per-save chatter drowns out app logs. No effect when `hamr_console_capture = false`. |
 
 #### `port_walk` — collision-tolerant port binding
 
@@ -172,6 +174,51 @@ project happen to bind on the same number. Use distinct ports per binder.
 Set `port_walk = false` to disable the shift entirely and fail fast on
 EADDRINUSE — useful in CI or anywhere external tooling pins specific
 ports and would mis-target if hamr silently shifted.
+
+#### Browser console transport (`[site:console]`)
+
+The injected reload script also pipes the browser's `window.console.*`
+output, uncaught JS errors, unhandled promise rejections, resource-load
+failures (`<img>`/`<script>`/`<link>` 404s), and CSP violations back to
+the dev server over a WebSocket at `/__hamr/console`. They land in the
+TUI main tab and `dev_logs.txt` tagged `[site:console]`, interleaved
+with backend events in arrival order:
+
+```
+[site:console] hello world
+[site:console] WARN deprecated API call
+[site:console] ERROR TypeError: x is undefined @ app.js:42:7
+[site:console] Failed to load <img> /missing.png
+```
+
+Levels render uppercase + coloured for `warn`/`error` only, matching
+the existing `[hamr dev]` slog convention. Source location (`@ file:line:col`)
+is appended only for uncaught errors — plain `console.*` calls leave
+it off because most don't carry useful frame info.
+
+**Limitations.** Browser-engine warnings printed directly to DevTools
+(deprecation notices, mixed-content, autoplay blocked, the formatted
+"Failed to load resource" lines) aren't observable from page JS, so they
+can't be captured. `fetch`/`XHR` network errors aren't wrapped either.
+
+**Disable entirely.** Set `hamr_console_capture = false` to skip the
+whole transport: the server doesn't mount the WS endpoint, and the
+injected reload script (which reads the flag from the SSE config
+payload) skips console patching, the error/rejection/CSP listeners,
+and the WS connection. Default `true`.
+
+> Toggling this *while a tab is open* applies on the next page reload —
+> a browser that already started capture keeps trying to reach the
+> (now-removed) WS endpoint with reconnect backoff until you refresh.
+
+**Filtering.** Set `hamr_console_filter = true` in `[dev]` to drop
+frames whose message *contains* `[hamr]` anywhere in the text — this
+catches the reload script's own `[hamr] live reload connected`,
+`[hamr] page swapped`, `[hamr] CSS reloaded`, etc. Default `false`
+keeps them — the duplication during normal use is mild and the
+visibility when hamr's own JS misbehaves is high-value. Substring
+match is intentional; if app code legitimately logs the literal
+string `[hamr]` it will be dropped too.
 
 ### `[dev.email]` — Mail mock
 

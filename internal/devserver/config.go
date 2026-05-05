@@ -35,6 +35,24 @@ type DevConfig struct {
 	Email           EmailConfig     `toml:"email"`
 	Stripe          StripeConfig    `toml:"stripe"`
 
+	// HamrConsoleCapture toggles the entire browser-console transport
+	// (window.console.* + uncaught errors + unhandled rejections +
+	// resource-load failures + CSP violations → /__hamr/console WS →
+	// `[site:console]` lines in the dev TUI / log file). Default true
+	// (nil pointer): on by default in fresh scaffolds. Set false to skip
+	// mounting the WS endpoint and to tell the injected reload script
+	// not to patch console or open a connection — zero overhead.
+	HamrConsoleCapture *bool `toml:"hamr_console_capture"`
+
+	// HamrConsoleFilter, when true, drops browser console frames whose
+	// message contains "[hamr]" — i.e. logs emitted by hamr's own injected
+	// reload script. Default false: show everything the browser sees,
+	// including hamr's own chatter. Flip true if the per-save chatter
+	// (`[hamr] live reload connected`, `[hamr] page swapped`, etc.) is
+	// noisy enough to drown out app-side logs. No effect when
+	// HamrConsoleCapture is false.
+	HamrConsoleFilter bool `toml:"hamr_console_filter"`
+
 	// PortWalk toggles the +1-on-busy walk for hamr-managed ports
 	// (proxy.listen, proxy.target / spawned-app PORT, and docker-compose
 	// host-port publishes). Default true: when a port is busy hamr walks +1
@@ -53,6 +71,16 @@ func (c DevConfig) PortWalkEnabled() bool {
 		return true
 	}
 	return *c.PortWalk
+}
+
+// HamrConsoleCaptureEnabled returns whether the browser-console transport
+// is on. Defaults to true when the field is unset (nil) — opt-out, not
+// opt-in.
+func (c DevConfig) HamrConsoleCaptureEnabled() bool {
+	if c.HamrConsoleCapture == nil {
+		return true
+	}
+	return *c.HamrConsoleCapture
 }
 
 // EmailConfig holds the [dev.email] table for the mail mock. When Enabled
