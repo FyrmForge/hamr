@@ -40,7 +40,9 @@
   per-tab live (incremental) substring search with `n`/`N` next/prev,
   `f` to toggle a filter view that hides non-matching lines, and `Esc`
   to clear, `?` to toggle a help overlay, and arrows / PgUp / PgDn /
-  mouse wheel to scroll the log viewport.
+  mouse wheel to scroll the log viewport. Long lines soft-wrap to the
+  viewport width and re-wrap on terminal resize. `q`/Ctrl+C quit even
+  when the dev server is parked on a config parse error.
 - **hamr new**: Project scaffolder. On released builds, queries GitHub for the
   latest release and refuses to run when the local CLI is out of date so
   scaffolds never lag the template; bypass with `--skip-version-check`.

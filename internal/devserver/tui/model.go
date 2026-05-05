@@ -183,12 +183,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.ready {
 			m.view = viewport.New(msg.Width, viewportH)
 			m.view.KeyMap = scrollKeyMap()
-			m.view.SetContent(strings.Join(m.currentLogs(), "\n"))
+			m.setViewContent(strings.Join(m.currentLogs(), "\n"))
 			m.view.GotoBottom()
 			m.ready = true
 		} else {
+			atBottom := m.view.AtBottom()
 			m.view.Width = msg.Width
 			m.view.Height = viewportH
+			m.refreshViewport()
+			if atBottom {
+				m.view.GotoBottom()
+			}
 		}
 		return m, nil
 
@@ -379,6 +384,15 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// setViewContent wraps content to the current viewport width before
+// handing it to the bubbles viewport. Centralising the wrap here keeps
+// every render path (initial paint, refresh, tab cycle, clear) in
+// sync — bubbletea's viewport doesn't soft-wrap, so without this long
+// log lines get clipped at the right edge.
+func (m *Model) setViewContent(content string) {
+	m.view.SetContent(wrapForView(content, m.view.Width))
+}
+
 // appendCapped pushes a line into a bounded buffer, dropping the oldest
 // entries once the limit is reached.
 func appendCapped(buf []string, line string, max int) []string {
@@ -467,10 +481,10 @@ func (m *Model) refreshViewport() {
 	atBottom := m.view.AtBottom()
 	logs := m.currentLogs()
 	if s := m.activeSearch(); s.active() {
-		m.view.SetContent(renderHighlights(logs, s))
+		m.setViewContent(renderHighlights(logs, s))
 		return
 	}
-	m.view.SetContent(strings.Join(logs, "\n"))
+	m.setViewContent(strings.Join(logs, "\n"))
 	if atBottom {
 		m.view.GotoBottom()
 	}
@@ -664,7 +678,7 @@ func (m *Model) clearActiveLog() {
 		m.dockerLogs[m.dockerTabs[ix]] = nil
 	}
 	if m.ready {
-		m.view.SetContent("")
+		m.setViewContent("")
 	}
 }
 
@@ -692,7 +706,7 @@ func (m *Model) cycleTab(forward bool) {
 		m.onSearchCursorChange()
 		return
 	}
-	m.view.SetContent(strings.Join(m.currentLogs(), "\n"))
+	m.setViewContent(strings.Join(m.currentLogs(), "\n"))
 	m.view.GotoBottom()
 }
 

@@ -175,8 +175,12 @@ func runDevTUILoop(ctx context.Context, rt *tui.Runtime, configPath string, noPr
 		cfg, err := devserver.LoadConfig(configPath)
 		if err != nil {
 			rt.Log(fmt.Sprintf("%s config error: %v", devserver.HamrDevTag(), err))
-			rt.Log(fmt.Sprintf("%s waiting for config fix...", devserver.HamrDevTag()))
-			if waitErr := devserver.WaitForConfigChange(ctx, configPath); waitErr != nil {
+			rt.Log(fmt.Sprintf("%s waiting for config fix... (q to quit)", devserver.HamrDevTag()))
+			waitErr := devserver.WaitForConfigChangeOrQuit(ctx, configPath, rt.HotkeyActions())
+			if waitErr != nil {
+				if errors.Is(waitErr, context.Canceled) {
+					return nil
+				}
 				return waitErr
 			}
 			rt.Log(fmt.Sprintf("%s --- config changed, retrying ---", devserver.HamrDevTag()))

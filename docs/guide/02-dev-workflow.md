@@ -44,9 +44,11 @@ On startup, `hamr dev` compares `[hamr].version` in `hamr.toml` against the CLI.
 `hamr dev --tui` runs a bubbletea-based shell instead of the legacy stdout output. The dev server itself is identical — same watchers, builds, proxy, mocks — only the terminal UI changes:
 
 - Status bar at the top with build state and any failing rules.
-- A scrollable log viewport in the middle (`PgUp`/`PgDn`/arrows to scroll).
+- A scrollable log viewport in the middle (`PgUp`/`PgDn`/arrows to scroll). Long log lines soft-wrap to the viewport width so nothing gets clipped at the right edge; resizing the terminal re-wraps in place.
 - Hotkey hints at the bottom.
 - Modal overlays for actions that need confirmation.
+
+`q` / `Ctrl+C` work even when the dev server is parked on a `hamr.toml` parse error — the TUI quits cleanly instead of getting stuck on "waiting for config fix...".
 
 Hotkeys mirror the legacy shell, plus a wipe action, a help overlay, and per-stack log tabs:
 

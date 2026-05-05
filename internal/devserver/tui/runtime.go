@@ -115,6 +115,14 @@ func (r *Runtime) Quit() {
 	r.program.Quit()
 }
 
+// HotkeyActions exposes the underlying hotkey channel so the dev runner
+// can react to q / Ctrl+C while parked outside Run() — e.g. waiting for
+// a config fix, where bubbletea owns the keyboard but the runner-side
+// loop has nothing else to select on.
+func (r *Runtime) HotkeyActions() <-chan devserver.HotkeyAction {
+	return r.hotkeys.Actions()
+}
+
 // Log writes a single line to the TUI viewport. Intended for the dev
 // command's own status messages (config errors, "config changed,
 // retrying...") that don't flow through the runner's slog handler.

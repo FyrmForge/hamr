@@ -2746,6 +2746,8 @@ modal first. `y` confirms; any other key cancels. The same wipe action is
 exposed in the browser dev panel (`/__hamr/docker/{name}/wipe`) so the two
 surfaces stay in sync.
 
+In TUI mode, long log lines soft-wrap to the viewport width (CSI escapes are passed through and don't count toward width); resizing the terminal re-wraps in place while preserving scroll-bottom-tracking. `q` and `Ctrl+C` quit cleanly even when the dev server is parked on a `hamr.toml` parse error — the config-error wait selects on the hotkey channel as well as fsnotify, so the user is never stuck on "waiting for config fix...".
+
 `--tui` is preview-quality. The legacy stdout shell is the default and
 remains supported.
 
