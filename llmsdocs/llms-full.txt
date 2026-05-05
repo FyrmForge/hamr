@@ -2700,7 +2700,9 @@ Adoption does not reconcile compose-file edits. If the user changes a
 base port (or any other compose-file content) while a stack is still
 up, the running containers keep their old config; hamr logs a `WARN`
 per adopted-on-non-base-port service. To apply edits, wipe the stack
-(TUI `d` hotkey, or `docker compose down`).
+from the browser dev panel, run `docker compose down -v` directly, or
+wire it into a Makefile target and trigger it via the TUI's `m`
+fuzzy palette.
 
 The file is the contract surface between the writer (hamr dev) and the
 readers (`hamr env`, `hamr sync`, scaffold Makefile, scaffold
@@ -2736,15 +2738,17 @@ this automatically.
 `hamr dev` runs a single-key hotkey reader on stdin while the dev server is
 running. The default shell uses an ANSI scroll-region status bar at the
 bottom of the terminal; `--tui` swaps that for an experimental
-bubbletea-driven shell with a scrollable log viewport, modal overlays, and
-an extra `d` hotkey for wiping docker compose deps.
+bubbletea-driven shell with a scrollable log viewport, modal overlays,
+and an extra `m` hotkey opening a fuzzy palette over the project's
+`./Makefile` targets so docker wipes, migrations, and any other
+project-defined scripts can be triggered from inside dev.
 
 | Key                | Action                                                 | Mode      |
 |--------------------|--------------------------------------------------------|-----------|
 | `r`                | Rebuild all watch rules in topological order           | both      |
 | `o`                | Open the proxy URL in the default browser              | both      |
 | `c`                | Clear the active tab's log buffer / terminal           | both      |
-| `d`                | Wipe a docker compose stack (`down -v` + `up -d`)      | `--tui`   |
+| `m`                | Run a Makefile target (fuzzy palette over `./Makefile`)| `--tui`   |
 | `Tab` / Shift+Tab  | Cycle log tabs (hamr ↔ docker stacks)                  | `--tui`   |
 | `/`                | Search active tab (case-insensitive substring, live)   | `--tui`   |
 | `n` / `N`          | Next / previous search match                           | `--tui`   |
@@ -2760,12 +2764,22 @@ In TUI mode the runner also spawns one `docker compose --ansi=always -f <file> l
 
 Search (`/`) is per-tab, case-insensitive substring, and incremental — matches recompute on every keystroke and the viewport jumps to the first hit as you type, with yellow highlights for matches and a brighter orange for the cursored one. `↩` locks the query in so `n`/`N` start navigating instead of being treated as more query characters; `Esc` cancels. After commit, `f` toggles a filter view that shows only lines containing the search term (press `f` again to restore the full view); n/N still navigates inside the filtered view. New log lines arriving while a search is in progress are scanned and the `[k/n]` counter updates automatically.
 
-`d` is destructive — it removes container volumes (Postgres data, Redis
-state, etc.). With one configured `[[dev.docker_compose]]` entry the TUI
-opens a confirm modal directly; with multiple entries it shows a numbered
-modal first. `y` confirms; any other key cancels. The same wipe action is
-exposed in the browser dev panel (`/__hamr/docker/{name}/wipe`) so the two
-surfaces stay in sync.
+`m` opens a fuzzy palette listing every target in the project-root
+`./Makefile` (parsed lazily on press; targets appear in declaration
+order on empty query, ranked by `sahilm/fuzzy` as the user types).
+The hotkey is hidden from the hint bar and ignored when no Makefile
+exists. Selecting a target closes the palette, opens a small floating
+"running" box, and runs `make <target>` from the project root with
+stdout/stderr piped into the hamr tab line-prefixed `[make:<target>] `.
+Only one target runs at a time. While running, every key is suppressed
+except `q` (sends `SIGINT` to the make process) and `Ctrl+C` (cancels
+the run and quits the TUI so children aren't orphaned). On exit the box
+switches to a `Done ✓` / `Failed ✗ (exit N)` summary that stays until
+the user dismisses it with any key. The earlier dedicated `d` docker
+wipe hotkey was removed in favour of letting projects define their own
+`docker-wipe`, `migrate`, etc. Makefile targets and chain whatever
+recovery they need — the browser dev panel's `/__hamr/docker/{name}/wipe`
+HTTP route still exists for projects that prefer that surface.
 
 In TUI mode, long log lines soft-wrap to the viewport width (CSI escapes are passed through and don't count toward width); resizing the terminal re-wraps in place while preserving scroll-bottom-tracking. `q` and `Ctrl+C` quit cleanly even when the dev server is parked on a `hamr.toml` parse error — the config-error wait selects on the hotkey channel as well as fsnotify, so the user is never stuck on "waiting for config fix...".
 

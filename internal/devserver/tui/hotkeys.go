@@ -6,8 +6,9 @@ import "github.com/FyrmForge/hamr/internal/devserver"
 // devserver.HotkeySource. The model dispatches r/o/q keys to Send; the
 // runner's hotkey loop consumes them via Actions().
 //
-// c (clear) and d (wipe) are handled inside the model and never enter this
-// channel — c clears the viewport, d opens the wipe modal.
+// c (clear) and m (run) are handled inside the model and never enter
+// this channel — c clears the viewport, m opens the Makefile-target
+// fuzzy palette.
 type HotkeySource struct {
 	ch chan devserver.HotkeyAction
 }

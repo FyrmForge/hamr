@@ -1,9 +1,15 @@
 package tui
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"os/exec"
 	"strings"
-	"sync/atomic"
+	"sync"
 
 	"github.com/FyrmForge/hamr/internal/devserver"
 	"github.com/charmbracelet/bubbles/key"
@@ -11,6 +17,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
+
+// makefilePath is the path the run-overlay reads. Project-root relative —
+// hamr dev is always invoked from the project root, so an unqualified
+// "Makefile" resolves to the right file.
+const makefilePath = "Makefile"
 
 // Reserved rows for the chrome: status bar (1) + hint bar (1). The view
 // renders status, the viewport, and hint joined by single newlines, so
@@ -22,10 +33,9 @@ const chromeRows = 2
 
 // scrollKeyMap is the viewport key map we install in place of the bubbles
 // default. The defaults bind d/b/f/u/j/k for half/page navigation, which
-// would either collide (d = wipe) or surprise users who haven't read
-// vim/less docs. We keep arrow keys for line-by-line scroll and
-// PgUp/PgDn for page scroll, and disable the rest by handing back empty
-// bindings.
+// would surprise users who haven't read vim/less docs. We keep arrow
+// keys for line-by-line scroll and PgUp/PgDn for page scroll, and
+// disable the rest by handing back empty bindings.
 func scrollKeyMap() viewport.KeyMap {
 	return viewport.KeyMap{
 		PageDown:     key.NewBinding(key.WithKeys("pgdown")),
@@ -43,14 +53,14 @@ type errorChangedMsg struct {
 	rules []string
 }
 
-// actionsReadyMsg fires once Runner.Run has constructed its DevActions
-// object. The model captures it for wipe dispatch.
-type actionsReadyMsg struct {
-	actions *devserver.DevActions
+// runFinishedMsg fires when the goroutine running `make <target>`
+// returns. The model transitions runState to runFinished so the post-
+// run box stays visible until the user dismisses it with any key.
+type runFinishedMsg struct {
+	exitCode int
+	failed   bool
+	msg      string // populated when start/exec failed without an exit code
 }
-
-// wipeFinishedMsg closes the wipe modal once the goroutine returns.
-type wipeFinishedMsg struct{}
 
 // versionStatusMsg updates the persistent version indicator on the status
 // bar. Mirrors devserver.StatusBar's SetVersionStatus contract.
@@ -106,9 +116,25 @@ type Model struct {
 	dockerLogs map[string][]string // capped per entry
 
 	hotkeys *HotkeySource
-	actions atomic.Pointer[devserver.DevActions]
 
-	wipe wipeState
+	run runState
+	// makeOut is the writer to which `make <target>` stdout/stderr is
+	// piped, line-prefixed with [make:<target>]. The runtime sets this
+	// to the hamr Sink so output appears in the hamr log tab.
+	makeOut io.Writer
+	// targetColors assigns each Makefile target a stable ANSI colour
+	// for its prefix tag, so re-running the same target keeps a
+	// consistent visual cue across the session. nextTargetColor walks
+	// the makeTargetColors palette round-robin for unseen targets.
+	targetColors    map[string]string
+	nextTargetColor int
+	// runProc holds the running `make` process so the cancel hotkey can
+	// signal it. Cleared once the goroutine waiting on the process
+	// returns. Guarded by runProcMu — both the bubbletea goroutine
+	// (Update) and the dispatch goroutine (cmd.Wait) touch it.
+	runProcMu sync.Mutex
+	runProc   *exec.Cmd
+
 	help helpState
 
 	// Search state lives per-tab. Keyed by stable identifiers so a
@@ -135,6 +161,12 @@ func NewModel(hotkeys *HotkeySource) *Model {
 		dockerSearches: make(map[string]*searchState),
 	}
 }
+
+// SetMakeOutput wires the writer that receives `make <target>` output.
+// In the TUI runtime this is the hamr Sink so make logs land in the
+// hamr tab. Tests that don't exercise the run feature can leave it nil
+// — dispatchRun fails gracefully with an explanatory message.
+func (m *Model) SetMakeOutput(w io.Writer) { m.makeOut = w }
 
 // activeSearch returns the search state for the current tab, lazily
 // allocating it. Per-tab so cycling away and back preserves the query
@@ -213,12 +245,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.errors = msg.rules
 		return m, nil
 
-	case actionsReadyMsg:
-		m.actions.Store(msg.actions)
-		return m, nil
-
-	case wipeFinishedMsg:
-		m.wipe.finish()
+	case runFinishedMsg:
+		m.runProcMu.Lock()
+		m.runProc = nil
+		m.runProcMu.Unlock()
+		m.run.markFinished(msg.exitCode, msg.failed, msg.msg)
 		return m, nil
 
 	case versionStatusMsg:
@@ -247,7 +278,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		// Modal overlays own input — wheel under a modal would otherwise
 		// scroll the log pane behind it, which is disorienting.
-		if m.help.active() || m.wipe.active() {
+		if m.help.active() || m.run.active() {
 			return m, nil
 		}
 		if !m.ready {
@@ -264,8 +295,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
 	// Help is the outermost modal — always closeable on any key, never
-	// blocks ctrl+c. Take it before wipe so '?' inside a wipe doesn't
-	// accidentally toggle help.
+	// blocks ctrl+c. Take it before the run modal so '?' inside the run
+	// palette doesn't accidentally toggle help.
 	if m.help.active() {
 		if key == "ctrl+c" {
 			m.hotkeys.Send(devserver.HotkeyQuit)
@@ -275,18 +306,36 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Wipe modal owns the keyboard while open. Ctrl+C is the one
-	// exception — a wipe can take up to 120s (compose down -v + up -d),
-	// so the user must always be able to bail out gracefully without
-	// waiting for it to finish.
-	if m.wipe.active() {
+	// Run overlay owns the keyboard while open. Ctrl+C is the one
+	// exception — a long-running target shouldn't trap the user inside
+	// the modal with no escape hatch. `q` is rebound to "cancel running
+	// target" while a process is in flight; quit goes through Ctrl+C
+	// in that case.
+	if m.run.active() {
 		if key == "ctrl+c" {
+			// Cancel any running process before quitting so children
+			// aren't orphaned (the runner shutdown will also kill them
+			// but signalling first lets graceful handlers run).
+			m.signalRunCancel()
 			m.hotkeys.Send(devserver.HotkeyQuit)
 			return m, nil
 		}
-		decision := m.wipe.handleKey(key)
-		if decision.trigger {
-			return m, m.dispatchWipe(decision.triggerIx)
+		switch {
+		case m.run.overlayActive():
+			decision := m.run.handleOverlayKey(key, printableRune(msg))
+			if decision.trigger {
+				return m, m.dispatchRun(decision.triggerTgt)
+			}
+			return m, nil
+		case m.run.stage == runRunning:
+			decision := m.run.handleRunningKey(key)
+			if decision.cancel {
+				m.signalRunCancel()
+			}
+			return m, nil
+		case m.run.stage == runFinished:
+			m.run.handleFinishedKey(key)
+			return m, nil
 		}
 		return m, nil
 	}
@@ -341,18 +390,19 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// codes that would corrupt the bubbletea frame).
 		m.clearActiveLog()
 		return m, nil
-	case "d":
-		actions := m.actions.Load()
-		if actions == nil {
-			// Runner hasn't booted yet — silently ignore.
+	case "m":
+		// Read the Makefile lazily on press: this picks up newly added
+		// targets without restart and skips the keypress entirely if
+		// no Makefile is present (matches the hint-bar gating).
+		targets, err := devserver.MakefileTargetsFromPath(makefilePath)
+		if err != nil {
+			m.appendHamrLog("[hamr:tui] makefile: " + err.Error())
 			return m, nil
 		}
-		composes := actions.DockerComposes()
-		if len(composes) == 0 {
-			m.appendHamrLog("[hamr:tui] no docker compose entries to wipe")
+		if len(targets) == 0 {
 			return m, nil
 		}
-		m.wipe.open(composes)
+		m.run.openOverlay(targets)
 		return m, nil
 	case "?":
 		m.help.toggle()
@@ -710,24 +760,194 @@ func (m *Model) cycleTab(forward bool) {
 	m.view.GotoBottom()
 }
 
-// dispatchWipe runs the wipe in a goroutine so the bubbletea Update loop
-// stays responsive, then sends wipeFinishedMsg back to close the modal.
-func (m *Model) dispatchWipe(ix int) tea.Cmd {
-	actions := m.actions.Load()
-	if actions == nil {
-		m.wipe.finish()
-		return nil
+// dispatchRun launches `make <target>` in a goroutine, piping output
+// (line-prefixed) into the hamr log sink and returning runFinishedMsg
+// when the process exits. The state machine has already been moved to
+// runRunning by the caller; on start failure we transition straight to
+// runFinished so the user sees the error and can dismiss with any key.
+func (m *Model) dispatchRun(target string) tea.Cmd {
+	if m.makeOut == nil {
+		// No sink wired — surface in the post-run box rather than silently
+		// hanging. Tests that don't inject a sink shouldn't be triggering
+		// the run path anyway.
+		m.run.markRunning(target)
+		return func() tea.Msg {
+			return runFinishedMsg{exitCode: -1, failed: true, msg: "internal: make output sink not wired"}
+		}
 	}
-	composes := actions.DockerComposes()
-	if ix < 0 || ix >= len(composes) {
-		m.wipe.finish()
-		return nil
+
+	pw := newMakePrefixWriter(m.makeOut, target, m.colorForTarget(target))
+	cmd := exec.Command("make", target)
+	cmd.Stdout = pw
+	cmd.Stderr = pw
+
+	if err := cmd.Start(); err != nil {
+		m.run.markRunning(target)
+		failMsg := err.Error()
+		return func() tea.Msg {
+			return runFinishedMsg{exitCode: -1, failed: true, msg: failMsg}
+		}
 	}
-	dc := composes[ix]
+
+	m.run.markRunning(target)
+	m.runProcMu.Lock()
+	m.runProc = cmd
+	m.runProcMu.Unlock()
+
 	return func() tea.Msg {
-		actions.DockerWipe(&dc, "")
-		return wipeFinishedMsg{}
+		err := cmd.Wait()
+		pw.Flush()
+		exitCode := 0
+		failed := false
+		var msg string
+		if err != nil {
+			failed = true
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) {
+				exitCode = exitErr.ExitCode()
+			} else {
+				exitCode = -1
+				msg = err.Error()
+			}
+		}
+		return runFinishedMsg{exitCode: exitCode, failed: failed, msg: msg}
 	}
+}
+
+// signalRunCancel sends SIGINT to the in-flight `make` process if any,
+// so the cancel hotkey lets graceful shutdown handlers run before the
+// goroutine's cmd.Wait returns. Safe to call when no process is running.
+func (m *Model) signalRunCancel() {
+	m.runProcMu.Lock()
+	cmd := m.runProc
+	m.runProcMu.Unlock()
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	_ = cmd.Process.Signal(os.Interrupt)
+}
+
+// printableRune extracts a single printable rune from a tea.KeyMsg if
+// the key represents a typed character. Control keys, function keys,
+// and named keys (esc/enter/etc.) return 0. Used by the run overlay to
+// append to its query without having to special-case every key string.
+func printableRune(msg tea.KeyMsg) rune {
+	switch msg.Type {
+	case tea.KeyRunes:
+		for _, r := range msg.Runes {
+			if r >= 0x20 && r != 0x7f {
+				return r
+			}
+		}
+	case tea.KeySpace:
+		return ' '
+	}
+	return 0
+}
+
+// makeTargetColors is the rotation used to colour [make:<target>]
+// prefix tags. Same five-colour set as the rule prefix writer
+// (process.go) so the hamr tab reads as one visual family. Reset
+// follows the tag so the body of each line renders in the terminal's
+// default fg colour.
+var makeTargetColors = []string{
+	"\033[36m", // cyan
+	"\033[33m", // yellow
+	"\033[35m", // magenta
+	"\033[32m", // green
+	"\033[34m", // blue
+}
+
+const makeColorReset = "\033[0m"
+
+// colorForTarget returns the ANSI start sequence for a target's
+// prefix, assigning a fresh colour on first sight and reusing it on
+// re-runs so the same target always looks the same within a session.
+// Called from dispatchRun on the bubbletea Update goroutine — no
+// locking required.
+func (m *Model) colorForTarget(target string) string {
+	if m.targetColors == nil {
+		m.targetColors = make(map[string]string)
+	}
+	if c, ok := m.targetColors[target]; ok {
+		return c
+	}
+	c := makeTargetColors[m.nextTargetColor%len(makeTargetColors)]
+	m.nextTargetColor++
+	m.targetColors[target] = c
+	return c
+}
+
+// makePrefixWriter is a line-buffered io.Writer that prefixes every
+// completed line with a coloured "[make:<target>] " tag before
+// forwarding to the hamr Sink. The Sink itself splits on '\n', so we
+// forward each prefixed line including its newline terminator. Flush
+// emits any trailing partial line at process exit.
+type makePrefixWriter struct {
+	mu     sync.Mutex
+	out    io.Writer
+	prefix []byte
+	buf    []byte
+}
+
+func newMakePrefixWriter(out io.Writer, target, color string) *makePrefixWriter {
+	return &makePrefixWriter{
+		out:    out,
+		prefix: []byte(color + "[make:" + target + "]" + makeColorReset + " "),
+	}
+}
+
+func (w *makePrefixWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.buf = append(w.buf, p...)
+	for {
+		i := bytes.IndexByte(w.buf, '\n')
+		if i < 0 {
+			break
+		}
+		line := w.buf[:i+1] // include '\n' so Sink emits a complete line
+		out := make([]byte, 0, len(w.prefix)+len(line))
+		out = append(out, w.prefix...)
+		out = append(out, line...)
+		if _, err := w.out.Write(out); err != nil {
+			return 0, err
+		}
+		w.buf = w.buf[i+1:]
+	}
+	return len(p), nil
+}
+
+// Flush emits any unterminated trailing bytes as a final prefixed line.
+// Called once after `make` exits so the user sees the last partial
+// chunk (e.g. an error message without a trailing newline).
+func (w *makePrefixWriter) Flush() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.buf) == 0 {
+		return
+	}
+	out := make([]byte, 0, len(w.prefix)+len(w.buf)+1)
+	out = append(out, w.prefix...)
+	out = append(out, w.buf...)
+	out = append(out, '\n')
+	_, _ = w.out.Write(out)
+	w.buf = w.buf[:0]
+}
+
+// makefileExists reports whether the project-root Makefile is present.
+// Cheap stat, called from the hint bar each render. We don't cache —
+// stat is microseconds and uncached makes "user added a Makefile mid-
+// session" Just Work without restart.
+func makefileExists() bool {
+	_, err := os.Stat(makefilePath)
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		return false
+	}
+	return false
 }
 
 // View implements tea.Model.
@@ -746,8 +966,8 @@ func (m *Model) View() string {
 	if m.help.active() {
 		return overlay(b.String(), m.helpView(), m.width, m.height)
 	}
-	if m.wipe.active() {
-		return overlay(b.String(), m.wipeView(), m.width, m.height)
+	if m.run.active() {
+		return overlay(b.String(), m.runView(), m.width, m.height)
 	}
 	return b.String()
 }
@@ -981,7 +1201,9 @@ func (m *Model) hintBar() string {
 		statusKey.Render("r") + statusDim.Render(" rebuild"),
 		statusKey.Render("o") + statusDim.Render(" open"),
 		statusKey.Render("c") + statusDim.Render(" clear"),
-		statusKey.Render("d") + statusDim.Render(" wipe deps"),
+	}
+	if makefileExists() {
+		left = append(left, statusKey.Render("m")+statusDim.Render(" make"))
 	}
 	if len(m.dockerTabs) > 0 {
 		left = append(left, statusKey.Render("Tab")+statusDim.Render(" tabs"))
@@ -1010,49 +1232,109 @@ func (m *Model) hintBar() string {
 	return leftContent + hintPad(gap) + right + hintPad(rightTrailing)
 }
 
-func (m *Model) wipeView() string {
-	switch m.wipe.stage {
-	case wipeSelecting:
-		var lines []string
-		lines = append(lines, modalTitle.Render("Wipe which compose stack?"))
-		for i, dc := range m.wipe.composes {
-			services := strings.Join(dc.Services, ", ")
-			if services == "" {
-				services = "all services"
-			}
-			lines = append(lines, fmt.Sprintf("  %s) %s  %s",
-				statusKey.Render(fmt.Sprintf("%d", i+1)),
-				dc.Name,
-				statusDim.Render(services),
-			))
-		}
-		lines = append(lines, "")
-		lines = append(lines, statusDim.Render("any other key to cancel"))
-		return modalStyle.Render(strings.Join(lines, "\n"))
-
-	case wipeConfirming:
-		dc := m.wipe.composes[m.wipe.pickedIx]
-		services := strings.Join(dc.Services, ", ")
-		if services == "" {
-			services = "all services"
-		}
-		body := strings.Join([]string{
-			modalTitle.Render("Wipe " + dc.Name + "?"),
-			statusDim.Render("compose file: ") + dc.File,
-			statusDim.Render("services:     ") + services,
-			"",
-			modalDanger.Render("This runs `docker compose down -v` and removes volumes."),
-			modalWarn.Render("All data in those volumes will be lost."),
-			"",
-			statusKey.Render("y") + statusDim.Render(" confirm   ") +
-				statusKey.Render("any other key") + statusDim.Render(" cancel"),
-		}, "\n")
-		return modalStyle.Render(body)
-
-	case wipeRunning:
-		return modalStyle.Render(modalTitle.Render(m.wipe.status))
+// runView renders whichever surface the run state machine is in: the
+// fuzzy palette, the in-flight "running" box, or the post-run dismiss
+// box. Returns "" when closed (View checks active() first, but defending
+// against a stale call is cheap).
+func (m *Model) runView() string {
+	switch m.run.stage {
+	case runOverlay:
+		return m.runOverlayView()
+	case runRunning:
+		return m.runRunningView()
+	case runFinished:
+		return m.runFinishedView()
 	}
 	return ""
+}
+
+// runOverlayView renders the fuzzy palette: prompt at top, list of
+// matches below with the cursor row highlighted. Limited to a sane
+// height so very large Makefiles don't push the modal past the
+// viewport.
+func (m *Model) runOverlayView() string {
+	const maxRows = 12
+	filtered := m.run.filtered()
+
+	prompt := statusKey.Render("›") + " " + statusDim.Render(m.run.query) + statusKey.Render("_")
+
+	lines := []string{
+		modalTitle.Render("Run a Makefile target"),
+		"",
+		prompt,
+		"",
+	}
+
+	if len(filtered) == 0 {
+		lines = append(lines, statusDim.Render("  no matches"))
+	} else {
+		// Slide the visible window so the cursor stays in view.
+		start := 0
+		if m.run.cursor >= maxRows {
+			start = m.run.cursor - maxRows + 1
+		}
+		end := start + maxRows
+		if end > len(filtered) {
+			end = len(filtered)
+		}
+		for i := start; i < end; i++ {
+			name := filtered[i]
+			row := "  " + name
+			if i == m.run.cursor {
+				row = statusKey.Render("› ") + searchCurrent.Render(name)
+			}
+			lines = append(lines, row)
+		}
+		if len(filtered) > maxRows {
+			lines = append(lines,
+				statusDim.Render(fmt.Sprintf("  …showing %d of %d", end-start, len(filtered))))
+		}
+	}
+
+	lines = append(lines, "")
+	lines = append(lines,
+		statusKey.Render("↑/↓")+statusDim.Render(" move  ")+
+			statusKey.Render("↩")+statusDim.Render(" run  ")+
+			statusKey.Render("esc")+statusDim.Render(" cancel"))
+	return modalStyle.Render(strings.Join(lines, "\n"))
+}
+
+// runRunningView renders the floating "running" box. While visible all
+// keys are suppressed except `q` (cancel) and ctrl+c (quit TUI).
+func (m *Model) runRunningView() string {
+	body := strings.Join([]string{
+		modalTitle.Render("Running: " + m.run.running),
+		"",
+		statusDim.Render("output streaming to the hamr tab"),
+		"",
+		statusKey.Render("q") + statusDim.Render(" cancel"),
+	}, "\n")
+	return modalStyle.Render(body)
+}
+
+// runFinishedView renders the post-run box, distinguishing success and
+// failure visually so a 0 vs non-zero exit is unmistakable.
+func (m *Model) runFinishedView() string {
+	var title, status string
+	switch {
+	case m.run.failed && m.run.failedMsg != "":
+		title = "Failed: " + m.run.running
+		status = modalDanger.Render(m.run.failedMsg)
+	case m.run.failed:
+		title = "Failed: " + m.run.running
+		status = modalDanger.Render(fmt.Sprintf("exit %d", m.run.exitCode))
+	default:
+		title = "Done: " + m.run.running
+		status = modalTitle.Render("✓")
+	}
+	body := strings.Join([]string{
+		modalTitle.Render(title),
+		"",
+		status,
+		"",
+		statusDim.Render("any key to dismiss"),
+	}, "\n")
+	return modalStyle.Render(body)
 }
 
 // overlay places the modal in the centre of the base view by replacing

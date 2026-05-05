@@ -50,14 +50,14 @@ On startup, `hamr dev` compares `[hamr].version` in `hamr.toml` against the CLI.
 
 `q` / `Ctrl+C` work even when the dev server is parked on a `hamr.toml` parse error — the TUI quits cleanly instead of getting stuck on "waiting for config fix...".
 
-Hotkeys mirror the legacy shell, plus a wipe action, a help overlay, and per-stack log tabs:
+Hotkeys mirror the legacy shell, plus a Makefile-target runner, a help overlay, and per-stack log tabs:
 
 | Key | Action |
 |-----|--------|
 | `r` | Rebuild all watch rules |
 | `o` | Open the proxy URL in the browser |
 | `c` | Clear the active tab's log buffer |
-| `d` | **Wipe a docker compose stack** — runs `docker compose down -v` and brings it back up. With one stack a confirm modal opens; with multiple, pick a number first. |
+| `m` | **Run a Makefile target** — opens a fuzzy palette listing every target in the project's `./Makefile` (in declaration order). Type to filter, `↑/↓` to move, `↩` to run, `Esc` to cancel. Hidden when no `Makefile` is present. |
 | `Tab` / `Shift+Tab` | Cycle log tabs — `hamr dev` plus one tab per `[[dev.docker_compose]]` entry, fed by `docker compose logs -f` |
 | `/` | Search the active tab — incremental: matches highlight in yellow as you type, the first hit jumps into view, `[k/n]` counter updates per keystroke. `↩` locks the query in for navigation, `Esc` cancels. |
 | `n` / `N` | Jump to next / previous match (after committing a search). Wraps at the ends. |
@@ -73,7 +73,7 @@ The status bar's left side reflects the active tab: 🔨 `hamr dev` for the fram
 
 Search state is **per tab** — committing a query on the docker stack tab and cycling away to hamr keeps both searches alive independently; cycle back and the highlights and `n`/`N` cursor are right where you left them. New log lines arriving while a search is active are scanned and the match counter updates without you having to re-commit.
 
-`d` is destructive: it removes container volumes, so you lose Postgres data, Redis state, and anything else stored there. The confirm modal exists to prevent accidental wipes — `y` proceeds, any other key cancels.
+While a `make` target is running the floating "running" box swallows every key except `q` (cancel — sends `SIGINT` to `make`) and `Ctrl+C` (quits the TUI, taking children with it). Stdout and stderr stream into the hamr tab, prefixed `[make:<target>] ` per line. On exit the box switches to a `Done ✓` / `Failed ✗ (exit N)` summary that stays until you press any key. Define `docker-wipe`, `migrate`, or whatever else you need as Makefile targets and chain them however you like — `m` then becomes the single front door for project-specific scripts.
 
 The TUI is still under active development and runs alongside the legacy shell. Stick with the default unless you want to try the new flow; report rough edges as you find them.
 
@@ -163,7 +163,7 @@ keep_running = true
 
 `keep_running = true` means the containers stay up when you Ctrl+C hamr, avoiding slow restarts between dev sessions. On the next `hamr dev`, hamr inspects the running stack first via `docker compose ps`: if every expected service is up and ready (healthy, or no healthcheck), hamr **adopts** it — no recreate, no `compose up -d`, no port-walk shift on already-bound ports. If anything is missing, exited, unhealthy, or `starting`, hamr falls through to the apply path and runs `compose up -d` to bring missing services up. Running-but-unhealthy peers are preserved on their current ports (compose up doesn't bounce them) so env injection points consumers at where the container actually is — wipe the stack to force a recreate.
 
-Adoption deliberately does not reconcile config edits against running containers. If you change a base port (or anything else) in the compose file while the stack is still up, the running container keeps its old config and hamr logs a `WARN` per adopted-on-non-base-port service. Wipe the stack with the TUI's `d` hotkey (or `docker compose down`) to make the edit take effect.
+Adoption deliberately does not reconcile config edits against running containers. If you change a base port (or anything else) in the compose file while the stack is still up, the running container keeps its old config and hamr logs a `WARN` per adopted-on-non-base-port service. Wipe the stack from the browser dev panel (or run `docker compose down -v` directly, or wire it into a Makefile target and trigger it from the TUI's `m` palette) to make the edit take effect.
 
 ---
 

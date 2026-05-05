@@ -64,7 +64,5 @@ var (
 			Bold(true).
 			MarginBottom(1)
 
-	modalWarn = lipgloss.NewStyle().Foreground(colorWarn).Bold(true)
-
 	modalDanger = lipgloss.NewStyle().Foreground(colorErr).Bold(true)
 )

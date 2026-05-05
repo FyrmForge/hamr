@@ -84,7 +84,7 @@ hamr dev [flags]
 | `--no-proxy` | `false` | Skip the reverse proxy, just run watchers |
 | `--verbose`, `-v` | `false` | Enable verbose (debug) logging |
 | `--skip-version-check` | `false` | Skip the "scaffold newer than CLI" guard |
-| `--tui` | `false` | Run the experimental bubbletea TUI shell (preview; adds a `d` hotkey to wipe docker compose deps) |
+| `--tui` | `false` | Run the experimental bubbletea TUI shell (preview; adds an `m` hotkey opening a fuzzy palette over `./Makefile` targets so docker wipes, migrations, etc. can be triggered from inside dev) |
 
 ```bash
 hamr dev                    # reads hamr.toml from current directory

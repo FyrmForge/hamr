@@ -32,6 +32,11 @@ func NewRuntime() *Runtime {
 	hotkeys := NewHotkeySource()
 	model := NewModel(hotkeys)
 	sink := NewSink()
+	// The run-overlay's `make <target>` output flows through the same
+	// hamr Sink as the runner's slog handler, so a single tab carries
+	// every line tagged for the user (slog lines from hamr itself,
+	// `[make:<target>]`-prefixed lines from on-demand make runs).
+	model.SetMakeOutput(sink)
 
 	prog := tea.NewProgram(
 		model,
@@ -88,12 +93,9 @@ func (r *Runtime) RegisterDockerStacks(names []string) map[string]io.Writer {
 	return out
 }
 
-// onActions runs on the runner goroutine; it captures the actions pointer
-// for wipe dispatch and subscribes to error-state changes so the status
-// bar updates without polling.
+// onActions runs on the runner goroutine; it subscribes to error-state
+// changes so the status bar updates without polling.
 func (r *Runtime) onActions(a *devserver.DevActions) {
-	r.program.Send(actionsReadyMsg{actions: a})
-
 	es := a.ErrorState()
 	push := func() {
 		r.program.Send(errorChangedMsg{rules: es.RuleNames()})

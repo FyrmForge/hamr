@@ -48,7 +48,7 @@ func TestHelp_EntriesIncludeAllHotkeys(t *testing.T) {
 	// Sanity check that the help table covers every keybind the model
 	// dispatches in handleKey. If we add a binding without listing it
 	// here, this test fails — keeping the help table honest.
-	wantKeys := []string{"r", "o", "c", "d", "/", "f", "?", "esc"}
+	wantKeys := []string{"r", "o", "c", "m", "/", "f", "?", "esc"}
 	have := map[string]bool{}
 	for _, e := range helpEntries {
 		have[e.keys] = true

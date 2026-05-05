@@ -2,7 +2,7 @@ package tui
 
 // helpState is the (very) small state machine for the help modal. Only
 // two states (open/closed) but expressed as a struct for symmetry with
-// wipeState — keeps the model's modal handling uniform.
+// runState — keeps the model's modal handling uniform.
 type helpState struct {
 	open bool
 }
@@ -45,7 +45,7 @@ var helpEntries = []helpEntry{
 	{"r", "rebuild all watch rules"},
 	{"o", "open the proxy URL in browser"},
 	{"c", "clear the active tab's log buffer"},
-	{"d", "wipe a docker compose stack (down -v + up -d)"},
+	{"m", "run a Makefile target (fuzzy palette; q cancels in-flight target)"},
 	{"Tab / Shift+Tab", "cycle log tabs (hamr ↔ docker stacks)"},
 	{"/", "search the active tab — type live, ↩ commits, esc cancels"},
 	{"n / N", "next / previous match (after committing a search)"},

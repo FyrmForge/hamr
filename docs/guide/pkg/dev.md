@@ -323,7 +323,7 @@ Both the default shell and `--tui` mode bind the same keys for common actions:
 | `r` | Rebuild all watch rules in topological order | |
 | `o` | Open the proxy URL in the default browser | Requires `[proxy]` configured |
 | `c` | Clear the active tab's log buffer (TUI) / terminal (legacy) | |
-| `d` | Wipe a docker compose stack (`down -v` then `up -d`) | **TUI mode only.** Single-entry stacks confirm directly; multi-entry shows a numbered modal first. Removes volumes — confirm prompt prevents accidents. |
+| `m` | Run a Makefile target | **TUI mode only.** Opens a fuzzy palette listing every target in `./Makefile` (declaration order). Type to filter, `↑/↓` to move, `↩` to run, `Esc` to cancel. Hidden when no `Makefile` exists. Output streams to the hamr tab prefixed `[make:<target>]`. While running, only `q` (cancel — `SIGINT`) and `Ctrl+C` (quit TUI) work. On exit a Done/Failed summary stays until any key dismisses it. |
 | `Tab` / `Shift+Tab` | Cycle log tabs (hamr → docker stacks → ...) | **TUI mode only.** One tab per `[[dev.docker_compose]]` entry, fed by `docker compose logs -f --tail=50`. |
 | `/` | Search the active tab (case-insensitive substring) | **TUI mode only.** Live: highlights and `[k/n]` counter update as you type. `↩` locks in, `Esc` cancels; per-tab persistent. |
 | `n` / `N` | Jump to next / previous search match | **TUI mode only.** Wraps at ends. |
@@ -335,7 +335,7 @@ Both the default shell and `--tui` mode bind the same keys for common actions:
 | `PgUp` / `PgDn` | Scroll the log viewport by page | **TUI mode only.** |
 | Mouse wheel | Scroll the log viewport | **TUI mode only.** |
 
-The `d` hotkey is the one-key equivalent of the dev panel's "wipe & recreate" button on a docker compose entry. It runs the same path (`DevActions.DockerWipe`), so the dev panel and the TUI hotkey stay in sync.
+The TUI no longer ships a dedicated wipe hotkey. The browser dev panel still exposes "wipe & recreate" per compose entry (and any HTTP client can hit `DevActions`' `/__hamr/docker/{name}/wipe` route). To wipe from the TUI, define a Makefile target that runs `docker compose -f <file> down -v && docker compose -f <file> up -d` (or whatever recovery you prefer) and trigger it via `m` — the floating "running" box keeps you informed and `q` aborts mid-run.
 
 ### Docker log tabs (TUI)
 
@@ -343,9 +343,9 @@ When `[[dev.docker_compose]]` entries exist, the TUI spawns one
 `docker compose --ansi=always -f <file> logs -f --tail=50` follower per
 entry alongside the regular dev pipeline. Output streams into a
 per-entry buffer, surfaced as a tab the user cycles through with `Tab`.
-The follower self-restarts after a wipe (`down -v` from `d` kills the
-follower; the next attempt re-attaches once `up -d` brings the project
-back). Followers stop when the dev runner shuts down.
+The follower self-restarts after a wipe (`down -v` kills the follower;
+the next attempt re-attaches once `up -d` brings the project back).
+Followers stop when the dev runner shuts down.
 
 `--ansi=always` is set at the compose level so the per-service colour
 prefixes survive being piped through a Go writer instead of a TTY. The
