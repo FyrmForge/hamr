@@ -828,9 +828,9 @@
         for (var i = 0; i < keys.length; i++) {
             var rule = keys[i];
             var output = stripAnsi(ruleErrors[rule].output || "");
-            html += '<div class="card">' +
-                '<div class="card-header">' + esc(rule) + '</div>' +
-                '<div class="card-body"><pre>' + esc(output) + '</pre></div>' +
+            html += '<div class="__hamr-err-card">' +
+                '<div class="__hamr-err-card-header">' + esc(rule) + '</div>' +
+                '<div class="__hamr-err-card-body"><pre>' + esc(output) + '</pre></div>' +
                 '</div>';
         }
         container.innerHTML = html;
