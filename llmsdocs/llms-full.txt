@@ -2735,32 +2735,29 @@ this automatically.
 
 ### hamr dev (terminal hotkeys)
 
-`hamr dev` runs a single-key hotkey reader on stdin while the dev server is
-running. The default shell uses an ANSI scroll-region status bar at the
-bottom of the terminal; `--tui` swaps that for an experimental
-bubbletea-driven shell with a scrollable log viewport, modal overlays,
-and an extra `m` hotkey opening a fuzzy palette over the project's
-`./Makefile` targets so docker wipes, migrations, and any other
-project-defined scripts can be triggered from inside dev.
+`hamr dev` runs as a bubbletea-driven TUI with a scrollable log viewport,
+a status bar, modal overlays, and an `m` hotkey opening a fuzzy palette
+over the project's `./Makefile` targets so docker wipes, migrations,
+and any other project-defined scripts can be triggered from inside dev.
 
-| Key                | Action                                                 | Mode      |
-|--------------------|--------------------------------------------------------|-----------|
-| `r`                | Rebuild all watch rules in topological order           | both      |
-| `o`                | Open the proxy URL in the default browser              | both      |
-| `c`                | Clear the active tab's log buffer / terminal           | both      |
-| `m`                | Run a Makefile target (fuzzy palette over `./Makefile`)| `--tui`   |
-| `Tab` / Shift+Tab  | Cycle log tabs (hamr ↔ docker stacks)                  | `--tui`   |
-| `/`                | Search active tab (case-insensitive substring, live)   | `--tui`   |
-| `n` / `N`          | Next / previous search match                           | `--tui`   |
-| `f`                | Toggle filter view (only matching lines)               | `--tui`   |
-| `Esc`              | Clear the active search                                | `--tui`   |
-| `?`                | Toggle help overlay listing every binding              | `--tui`   |
-| `q` / Ctrl+C       | Quit gracefully                                        | both      |
-| ↑ / ↓              | Scroll log viewport line by line                       | `--tui`   |
-| PgUp / PgDn        | Scroll log viewport by page                            | `--tui`   |
-| mouse wheel        | Scroll log viewport                                    | `--tui`   |
+| Key                | Action                                                 |
+|--------------------|--------------------------------------------------------|
+| `r`                | Rebuild all watch rules in topological order           |
+| `o`                | Open the proxy URL in the default browser              |
+| `c`                | Clear the active tab's log buffer                      |
+| `m`                | Run a Makefile target (fuzzy palette over `./Makefile`)|
+| `Tab` / Shift+Tab  | Cycle log tabs (hamr ↔ docker stacks)                  |
+| `/`                | Search active tab (case-insensitive substring, live)   |
+| `n` / `N`          | Next / previous search match                           |
+| `f`                | Toggle filter view (only matching lines)               |
+| `Esc`              | Clear the active search                                |
+| `?`                | Toggle help overlay listing every binding              |
+| `q` / Ctrl+C       | Quit gracefully                                        |
+| ↑ / ↓              | Scroll log viewport line by line                       |
+| PgUp / PgDn        | Scroll log viewport by page                            |
+| mouse wheel        | Scroll log viewport                                    |
 
-In TUI mode the runner also spawns one `docker compose --ansi=always -f <file> logs -f --tail=50` follower per `[[dev.docker_compose]]` entry. Output flows into a dedicated per-entry buffer that Tab cycles through; the status bar's left badge switches between 🔨 `hamr dev` and 🐳 `<stack-name>` to indicate which buffer the viewport is showing. Followers self-restart after a wipe so the stream resumes once `up -d` brings the project back. `--ansi=always` is the top-level compose flag that forces colour through despite the no-TTY pipe target, so per-service prefix colours and any container ANSI render correctly inside the bubbles viewport.
+The runner also spawns one `docker compose --ansi=always -f <file> logs -f --tail=50` follower per `[[dev.docker_compose]]` entry. Output flows into a dedicated per-entry buffer that Tab cycles through; the status bar's left badge switches between 🔨 `hamr dev` and 🐳 `<stack-name>` to indicate which buffer the viewport is showing. Followers self-restart after a wipe so the stream resumes once `up -d` brings the project back. `--ansi=always` is the top-level compose flag that forces colour through despite the no-TTY pipe target, so per-service prefix colours and any container ANSI render correctly inside the bubbles viewport.
 
 Search (`/`) is per-tab, case-insensitive substring, and incremental — matches recompute on every keystroke and the viewport jumps to the first hit as you type, with yellow highlights for matches and a brighter orange for the cursored one. `↩` locks the query in so `n`/`N` start navigating instead of being treated as more query characters; `Esc` cancels. After commit, `f` toggles a filter view that shows only lines containing the search term (press `f` again to restore the full view); n/N still navigates inside the filtered view. New log lines arriving while a search is in progress are scanned and the `[k/n]` counter updates automatically.
 
@@ -2781,10 +2778,7 @@ wipe hotkey was removed in favour of letting projects define their own
 recovery they need — the browser dev panel's `/__hamr/docker/{name}/wipe`
 HTTP route still exists for projects that prefer that surface.
 
-In TUI mode, long log lines soft-wrap to the viewport width (CSI escapes are passed through and don't count toward width); resizing the terminal re-wraps in place while preserving scroll-bottom-tracking. `q` and `Ctrl+C` quit cleanly even when the dev server is parked on a `hamr.toml` parse error — the config-error wait selects on the hotkey channel as well as fsnotify, so the user is never stuck on "waiting for config fix...".
-
-`--tui` is preview-quality. The legacy stdout shell is the default and
-remains supported.
+Long log lines soft-wrap to the viewport width (CSI escapes are passed through and don't count toward width); resizing the terminal re-wraps in place while preserving scroll-bottom-tracking. `q` and `Ctrl+C` quit cleanly even when the dev server is parked on a `hamr.toml` parse error — the config-error wait selects on the hotkey channel as well as fsnotify, so the user is never stuck on "waiting for config fix...".
 
 ### hamr add skill
 

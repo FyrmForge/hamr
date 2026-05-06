@@ -44,9 +44,9 @@
   disable. Refuses to start (released
   builds only) when `[hamr] version` in `hamr.toml` is newer than the CLI;
   bypass with `--skip-version-check`. A CLI *newer* than the scaffold only
-  warns and continues. Hotkeys while running: `r` rebuild, `o` open browser,
-  `c` clear, `q`/Ctrl+C quit. `--tui` opts into an experimental
-  bubbletea-based shell that adds `m` to open a fuzzy palette over the
+  warns and continues. Runs as a bubbletea-based TUI. Hotkeys: `r`
+  rebuild, `o` open browser, `c` clear active tab's log buffer, `q`/Ctrl+C
+  quit, `m` opens a fuzzy palette over the
   project-root `./Makefile` targets (declaration order; type to filter,
   `↑/↓` navigate, `↩` runs, `Esc` cancels; hidden when no Makefile is
   present). Output streams to the hamr tab line-prefixed

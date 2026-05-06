@@ -12,7 +12,6 @@ import (
 	"github.com/FyrmForge/hamr/internal/devserver/tui"
 	"github.com/FyrmForge/hamr/internal/scaffold"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 var devCmd = &cobra.Command{
@@ -33,7 +32,6 @@ func init() {
 	devCmd.Flags().Bool("no-proxy", false, "skip the reverse proxy, just run watchers")
 	devCmd.Flags().BoolP("verbose", "v", false, "enable verbose (debug) logging")
 	devCmd.Flags().Bool("skip-version-check", false, "skip the \"scaffold newer than CLI\" guard")
-	devCmd.Flags().Bool("tui", false, "run the experimental bubbletea TUI instead of the legacy stdout dev shell")
 }
 
 func runDev(cmd *cobra.Command, _ []string) error {
@@ -41,7 +39,6 @@ func runDev(cmd *cobra.Command, _ []string) error {
 	noProxy, _ := cmd.Flags().GetBool("no-proxy")
 	verbose, _ := cmd.Flags().GetBool("verbose")
 	skipVersionCheck, _ := cmd.Flags().GetBool("skip-version-check")
-	tuiMode, _ := cmd.Flags().GetBool("tui")
 
 	if err := ensureCLINotBehindScaffold(configPath, skipVersionCheck); err != nil {
 		return err
@@ -50,100 +47,11 @@ func runDev(cmd *cobra.Command, _ []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if tuiMode {
-		return runDevTUI(ctx, configPath, noProxy, verbose)
-	}
-
-	// Save terminal state so we can always restore it, even after a panic
-	// (the hotkey reader puts the terminal into raw mode).
-	if fd := int(os.Stdin.Fd()); term.IsTerminal(fd) {
-		if oldState, err := term.GetState(fd); err == nil {
-			defer func() { _ = term.Restore(fd, oldState) }()
-		}
-	}
-
-	// Create hotkey reader and status bar once so they survive config reloads.
-	// Defer Stop immediately — both are safe on zero value.
-	// Only Start after the first successful config load so the terminal stays
-	// in cooked mode (Ctrl+C works, no staircase output) during config errors.
-	var hotkeys devserver.HotkeyReader
-	defer hotkeys.Stop()
-
-	var statusBar devserver.StatusBar
-	defer statusBar.Stop()
-
-	var started bool
-
-	for {
-		cfg, err := devserver.LoadConfig(configPath)
-		if err != nil {
-			fmt.Printf("%s config error: %v\r\n", devserver.HamrDevTag(), err)
-			fmt.Printf("%s waiting for config fix...\r\n", devserver.HamrDevTag())
-			var waitErr error
-			if started {
-				waitErr = devserver.WaitForConfigChangeOrQuit(ctx, configPath, hotkeys.Actions())
-			} else {
-				waitErr = devserver.WaitForConfigChange(ctx, configPath)
-			}
-			if waitErr != nil {
-				return waitErr
-			}
-			fmt.Printf("\r\n%s--- config changed, retrying ---\r\n", devserver.HamrDevTag())
-			continue
-		}
-
-		if !started {
-			hotkeys.Start(ctx)
-			statusBar.Start()
-			started = true
-
-			statusBar.SetVersion("v" + version)
-			checkVersionStatus(&statusBar, configPath)
-
-			// Check for newer hamr release in the background (non-blocking).
-			if releaseBuild {
-				devserver.CheckLatestVersion(ctx, version, func(latest string) {
-					if statusBar.SetVersionUpdateIfOK("v" + latest) {
-						fmt.Printf("%s \033[1;93mupdate available: v%s → v%s\033[0m\r\n", devserver.HamrDevTag(), version, latest)
-					}
-				})
-			}
-		}
-
-		runner := devserver.NewRunner(cfg,
-			devserver.WithConfigPath(configPath),
-			devserver.WithVerbose(verbose),
-			devserver.WithNoProxy(noProxy),
-			devserver.WithHotkeys(&hotkeys),
-			devserver.WithStatusBar(&statusBar),
-		)
-
-		err = runner.Run(ctx)
-		if errors.Is(err, devserver.ErrConfigReload) {
-			fmt.Printf("\r\n%s--- config changed, restarting ---\r\n", devserver.HamrDevTag())
-			continue
-		}
-		return err
-	}
-}
-
-// runDevTUI is the bubbletea-driven dev shell. The legacy raw-stdin path
-// stays the default; this runs only when --tui is passed.
-//
-// Layout: a bubbletea program owns the screen on the main goroutine; the
-// runner loop runs in a goroutine and writes all subprocess output, its
-// own slog lines, and the dev command's status messages into a viewport
-// sink that the program drains as LogLineMsg's. Hotkeys flow the other
-// way, via a HotkeySource the model writes to from its Update.
-//
-// Config reload is handled inside the runner goroutine — the bubbletea
-// program lives for the whole `hamr dev --tui` session.
-func runDevTUI(ctx context.Context, configPath string, noProxy, verbose bool) error {
 	rt := tui.NewRuntime()
 
 	runnerErrCh := make(chan error, 1)
 	go func() {
-		runnerErrCh <- runDevTUILoop(ctx, rt, configPath, noProxy, verbose)
+		runnerErrCh <- runDevLoop(ctx, rt, configPath, noProxy, verbose)
 		// Tell bubbletea to exit once the runner is fully unwound — Quit
 		// is safe to call multiple times and a no-op if the program has
 		// already returned (e.g. user hit q).
@@ -159,14 +67,10 @@ func runDevTUI(ctx context.Context, configPath string, noProxy, verbose bool) er
 	return <-runnerErrCh
 }
 
-// runDevTUILoop is the runner-side counterpart to runDevTUI. It mirrors
-// the CLI loop's config-reload behavior but writes status lines into the
-// TUI viewport instead of os.Stdout.
-func runDevTUILoop(ctx context.Context, rt *tui.Runtime, configPath string, noProxy, verbose bool) error {
-	// Status bar lives only in the legacy CLI shell. The TUI renders its
-	// own status bar from ErrorState (subscribed by Runtime.onActions).
-	var statusBar devserver.StatusBar
-
+// runDevLoop is the runner-side counterpart to the bubbletea program. It
+// owns the config-reload retry behavior and writes status lines into the
+// TUI viewport via rt.Log.
+func runDevLoop(ctx context.Context, rt *tui.Runtime, configPath string, noProxy, verbose bool) error {
 	// Fire the version check once: the result lives for the whole TUI
 	// session (a config reload doesn't change the CLI binary's version).
 	var versionChecked bool
@@ -195,9 +99,9 @@ func runDevTUILoop(ctx context.Context, rt *tui.Runtime, configPath string, noPr
 			}
 			rt.SetVersionStatus(status, msg)
 
-			// Background latest-release check: same logic as the legacy
-			// shell. The callback fires from a goroutine so it has to be
-			// goroutine-safe — Runtime.SetVersionUpdateIfOK is.
+			// Background latest-release check. The callback fires from a
+			// goroutine, so it has to be goroutine-safe — Runtime's
+			// SetVersionUpdateIfOK is.
 			if releaseBuild {
 				devserver.CheckLatestVersion(ctx, version, func(latest string) {
 					rt.Log(fmt.Sprintf("%s update available: v%s → v%s", devserver.HamrDevTag(), version, latest))
@@ -216,7 +120,6 @@ func runDevTUILoop(ctx context.Context, rt *tui.Runtime, configPath string, noPr
 			devserver.WithConfigPath(configPath),
 			devserver.WithVerbose(verbose),
 			devserver.WithNoProxy(noProxy),
-			devserver.WithStatusBar(&statusBar),
 			devserver.WithDockerLogSinks(dockerSinks),
 		}
 		opts = rt.Wire(opts)
@@ -262,13 +165,10 @@ func ensureCLINotBehindScaffold(configPath string, skip bool) error {
 }
 
 // computeVersionStatus inspects the CLI and project versions and returns:
-//   - status: the indicator the bar/TUI should show
+//   - status: the indicator the TUI should show
 //   - msg:    the persistent indicator text (e.g. "CLI is ahead (cli v0.1 proj v0.2)")
-//   - warning: a one-time human-readable line for log surfaces; "" when
+//   - warning: a one-time human-readable line for the log surface; "" when
 //     there's nothing to say
-//
-// Pure compute so both the legacy CLI bar and the TUI can share the
-// decision logic without one of them silently drifting.
 func computeVersionStatus(configPath string) (status devserver.VersionStatus, msg, warning string) {
 	if !releaseBuild {
 		return devserver.VersionDev, "", ""
@@ -303,18 +203,6 @@ func computeVersionStatus(configPath string) (status devserver.VersionStatus, ms
 	}
 
 	return devserver.VersionOK, "", ""
-}
-
-// checkVersionStatus compares the CLI version against the project's [hamr].version
-// and updates the legacy CLI status bar indicator accordingly. The TUI
-// path uses computeVersionStatus directly and routes the warning into
-// the viewport via rt.Log.
-func checkVersionStatus(sb *devserver.StatusBar, configPath string) {
-	status, msg, warning := computeVersionStatus(configPath)
-	if warning != "" {
-		fmt.Printf("%s %s\r\n", devserver.HamrDevTag(), warning)
-	}
-	sb.SetVersionStatus(status, msg)
 }
 
 // composeNames returns the compose entry names in config order — the

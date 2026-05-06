@@ -38,7 +38,6 @@ type Runner struct {
 	verbose        bool
 	noProxy        bool
 	hotkeys        HotkeySource
-	statusBar      *StatusBar
 	actionsHook    func(*DevActions)
 	proxyURLHook   func(string)
 
@@ -104,10 +103,8 @@ func WithConfigPath(path string) Option {
 	return func(r *Runner) { r.configPath = path }
 }
 
-// WithHotkeys provides an externally managed HotkeySource (e.g. a raw-stdin
-// HotkeyReader for CLI mode or a bubbletea-backed source for TUI mode).
-// When set, Run() reads from this source instead of creating its own, and
-// does not stop it on return — the caller owns its lifecycle.
+// WithHotkeys wires the bubbletea-backed HotkeySource that feeds q / r / o
+// into Run's event loop. The TUI runtime owns the source's lifecycle.
 func WithHotkeys(h HotkeySource) Option {
 	return func(r *Runner) { r.hotkeys = h }
 }
@@ -121,19 +118,11 @@ func WithActionsHook(fn func(*DevActions)) Option {
 	return func(r *Runner) { r.actionsHook = fn }
 }
 
-// WithStatusBar provides an externally managed StatusBar.
-// When set, Run() uses this bar instead of creating its own,
-// and does not stop it on return — the caller owns its lifecycle.
-func WithStatusBar(sb *StatusBar) Option {
-	return func(r *Runner) { r.statusBar = sb }
-}
-
 // WithProxyURLHook registers a callback that fires once the reverse proxy
 // has bound (after any +1-on-busy port walking) so the caller can publish
 // the actual reachable URL to its UI surface. The TUI runtime uses this to
-// push the URL into a bubbletea message; the legacy CLI bar gets the URL
-// directly via StatusBar.SetProxyURL inside Run. The hook fires on the
-// runner goroutine; copy the string and return — do not block.
+// push the URL into a bubbletea message. The hook fires on the runner
+// goroutine; copy the string and return — do not block.
 func WithProxyURLHook(fn func(string)) Option {
 	return func(r *Runner) { r.proxyURLHook = fn }
 }
@@ -146,6 +135,9 @@ func NewRunner(cfg *Config, opts ...Option) *Runner {
 	}
 	if r.logger == nil {
 		r.logger = newDevLogger(r.baseLogWriter(), r.verbose)
+	}
+	if r.hotkeys == nil {
+		r.hotkeys = noopHotkeySource{}
 	}
 	return r
 }
@@ -270,17 +262,7 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	// Start reverse proxy.
 	var proxySrv *http.Server
-	// Use externally provided status bar, or create a local one.
-	statusBar := r.statusBar
-	ownStatusBar := statusBar == nil
-	if ownStatusBar {
-		statusBar = &StatusBar{}
-	}
-	statusBar.SetErrorState(errorState)
 	defer func() {
-		if ownStatusBar {
-			statusBar.Stop()
-		}
 		r.logger.Info("shutting down")
 		if !configReload {
 			broker.Broadcast(SSEEvent{Type: "shutdown"})
@@ -314,21 +296,18 @@ func (r *Runner) Run(ctx context.Context) error {
 		r.actionsHook(actions)
 	}
 
-	// Initialize hotkey reader early so quit works during startup
-	// (docker compose, initial build). Without this, Ctrl+C in raw mode
-	// has nowhere to go — SIGINT is disabled and the event loop hasn't started.
-	hotkeyReader := r.hotkeyReader(runCtx)
-	if ownStatusBar {
-		statusBar.Start()
-	}
+	// Hotkey actions flow in from the TUI's bubbletea-backed source. We
+	// drain them during startup (docker compose, initial build) so q
+	// quits even before the main event loop is up.
+	hotkeys := r.hotkeys
 	startupDone := make(chan struct{})
 	startupExited := make(chan struct{})
 	go func() {
 		defer close(startupExited)
 		for {
 			select {
-			case action := <-hotkeyReader.Actions():
-				if r.handleHotkey(action, actions, statusBar, cancel) {
+			case action := <-hotkeys.Actions():
+				if r.handleHotkey(action, actions, cancel) {
 					return
 				}
 			case <-startupDone:
@@ -478,9 +457,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		// sees what hamr picked when something was busy.
 		r.logger.Info("hamr dev URL", "url", proxyOrigin, "app", normalizeHost(r.cfg.Proxy.Target))
 
-		// Publish the URL to the legacy CLI bar (no-op when the bar isn't
-		// running) and to the TUI runtime (when wired).
-		statusBar.SetProxyURL(proxyOrigin)
+		// Publish the URL to the TUI runtime (when wired).
 		if r.proxyURLHook != nil {
 			r.proxyURLHook(proxyOrigin)
 		}
@@ -512,8 +489,8 @@ func (r *Runner) Run(ctx context.Context) error {
 		// Spawn the per-entry `compose logs -f` follower after the up
 		// has been issued. The follower self-restarts on early exit
 		// (typically because dockerWipe ran `down -v`) until runCtx
-		// closes. Subscribers without a sink (CLI mode, or entries the
-		// TUI didn't register) are skipped silently.
+		// closes. Entries the TUI didn't register a sink for are
+		// skipped silently.
 		if sink, ok := r.dockerLogSinks[dc.Name]; ok && sink != nil {
 			followersWG.Add(1)
 			go r.followDockerLogs(runCtx, dc, sink, &followersWG)
@@ -626,8 +603,8 @@ func (r *Runner) Run(ctx context.Context) error {
 			case <-configReloadCh:
 				configReload = true
 				return ErrConfigReload
-			case action := <-hotkeyReader.Actions():
-				if r.handleHotkey(action, actions, statusBar, cancel) {
+			case action := <-hotkeys.Actions():
+				if r.handleHotkey(action, actions, cancel) {
 					return nil
 				}
 			}
@@ -753,8 +730,8 @@ func (r *Runner) Run(ctx context.Context) error {
 			r.logger.Info("config changed, reloading")
 			configReload = true
 			return ErrConfigReload
-		case action := <-hotkeyReader.Actions():
-			if r.handleHotkey(action, actions, statusBar, cancel) {
+		case action := <-hotkeys.Actions():
+			if r.handleHotkey(action, actions, cancel) {
 				return nil
 			}
 		case evt, ok := <-watcher.Events():
@@ -772,20 +749,8 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 }
 
-// hotkeyReader returns the externally provided HotkeySource if set,
-// otherwise creates and starts a local raw-stdin HotkeyReader tied to the
-// given context.
-func (r *Runner) hotkeyReader(ctx context.Context) HotkeySource {
-	if r.hotkeys != nil {
-		return r.hotkeys
-	}
-	h := &HotkeyReader{}
-	h.Start(ctx)
-	return h
-}
-
 // handleHotkey processes a hotkey action. Returns true if the server should exit.
-func (r *Runner) handleHotkey(action HotkeyAction, actions *DevActions, sb *StatusBar, cancel context.CancelFunc) bool {
+func (r *Runner) handleHotkey(action HotkeyAction, actions *DevActions, cancel context.CancelFunc) bool {
 	switch action {
 	case HotkeyRebuild:
 		r.logger.Info("rebuilding all rules")
@@ -806,9 +771,6 @@ func (r *Runner) handleHotkey(action HotkeyAction, actions *DevActions, sb *Stat
 		default:
 			r.logger.Warn("no proxy configured, cannot open browser")
 		}
-	case HotkeyClearTerminal:
-		clearTerminal()
-		sb.Redraw()
 	case HotkeyQuit:
 		r.logger.Info("quit requested")
 		cancel()

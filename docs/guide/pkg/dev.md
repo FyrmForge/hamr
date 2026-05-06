@@ -301,8 +301,9 @@ The visible line count is adjustable and persists across page loads.
 
 ## Terminal Status Bar
 
-The bottom row of the terminal shows a persistent status bar with hotkey hints and
-health indicators. The 🔨 emoji reflects overall state:
+The TUI renders a status bar at the top with the active tab badge and
+health indicators, and a hint bar at the bottom with hotkey reminders.
+The 🔨 emoji reflects overall state:
 
 | Color | Meaning |
 |-------|---------|
@@ -316,28 +317,26 @@ health indicators. The 🔨 emoji reflects overall state:
 
 ## Terminal Hotkeys
 
-Both the default shell and `--tui` mode bind the same keys for common actions:
-
 | Key | Action | Notes |
 |-----|--------|-------|
 | `r` | Rebuild all watch rules in topological order | |
 | `o` | Open the proxy URL in the default browser | Requires `[proxy]` configured |
-| `c` | Clear the active tab's log buffer (TUI) / terminal (legacy) | |
-| `m` | Run a Makefile target | **TUI mode only.** Opens a fuzzy palette listing every target in `./Makefile` (declaration order). Type to filter, `↑/↓` to move, `↩` to run, `Esc` to cancel. Hidden when no `Makefile` exists. Output streams to the hamr tab prefixed `[make:<target>]`. While running, only `q` (cancel — `SIGINT`) and `Ctrl+C` (quit TUI) work. On exit a Done/Failed summary stays until any key dismisses it. |
-| `Tab` / `Shift+Tab` | Cycle log tabs (hamr → docker stacks → ...) | **TUI mode only.** One tab per `[[dev.docker_compose]]` entry, fed by `docker compose logs -f --tail=50`. |
-| `/` | Search the active tab (case-insensitive substring) | **TUI mode only.** Live: highlights and `[k/n]` counter update as you type. `↩` locks in, `Esc` cancels; per-tab persistent. |
-| `n` / `N` | Jump to next / previous search match | **TUI mode only.** Wraps at ends. |
-| `f` | Toggle filter view (active search only) | **TUI mode only.** Hides every line that doesn't contain the search term; press again to restore. |
-| `Esc` | Clear the active search | **TUI mode only.** |
-| `?` | Toggle the help overlay | **TUI mode only.** Lists every binding including scroll keys. |
+| `c` | Clear the active tab's log buffer | |
+| `m` | Run a Makefile target | Opens a fuzzy palette listing every target in `./Makefile` (declaration order). Type to filter, `↑/↓` to move, `↩` to run, `Esc` to cancel. Hidden when no `Makefile` exists. Output streams to the hamr tab prefixed `[make:<target>]`. While running, only `q` (cancel — `SIGINT`) and `Ctrl+C` (quit TUI) work. On exit a Done/Failed summary stays until any key dismisses it. |
+| `Tab` / `Shift+Tab` | Cycle log tabs (hamr → docker stacks → ...) | One tab per `[[dev.docker_compose]]` entry, fed by `docker compose logs -f --tail=50`. |
+| `/` | Search the active tab (case-insensitive substring) | Live: highlights and `[k/n]` counter update as you type. `↩` locks in, `Esc` cancels; per-tab persistent. |
+| `n` / `N` | Jump to next / previous search match | Wraps at ends. |
+| `f` | Toggle filter view (active search only) | Hides every line that doesn't contain the search term; press again to restore. |
+| `Esc` | Clear the active search | |
+| `?` | Toggle the help overlay | Lists every binding including scroll keys. |
 | `q` / `Ctrl+C` | Quit gracefully | |
-| `↑` / `↓` | Scroll the log viewport line by line | **TUI mode only.** |
-| `PgUp` / `PgDn` | Scroll the log viewport by page | **TUI mode only.** |
-| Mouse wheel | Scroll the log viewport | **TUI mode only.** |
+| `↑` / `↓` | Scroll the log viewport line by line | |
+| `PgUp` / `PgDn` | Scroll the log viewport by page | |
+| Mouse wheel | Scroll the log viewport | |
 
-The TUI no longer ships a dedicated wipe hotkey. The browser dev panel still exposes "wipe & recreate" per compose entry (and any HTTP client can hit `DevActions`' `/__hamr/docker/{name}/wipe` route). To wipe from the TUI, define a Makefile target that runs `docker compose -f <file> down -v && docker compose -f <file> up -d` (or whatever recovery you prefer) and trigger it via `m` — the floating "running" box keeps you informed and `q` aborts mid-run.
+There is no dedicated wipe hotkey. The browser dev panel still exposes "wipe & recreate" per compose entry (and any HTTP client can hit `DevActions`' `/__hamr/docker/{name}/wipe` route). To wipe from the TUI, define a Makefile target that runs `docker compose -f <file> down -v && docker compose -f <file> up -d` (or whatever recovery you prefer) and trigger it via `m` — the floating "running" box keeps you informed and `q` aborts mid-run.
 
-### Docker log tabs (TUI)
+### Docker log tabs
 
 When `[[dev.docker_compose]]` entries exist, the TUI spawns one
 `docker compose --ansi=always -f <file> logs -f --tail=50` follower per
@@ -360,7 +359,7 @@ your app's own logger) shows through.
 When a build command fails, hamr:
 1. Shows a full-page error overlay with the build output
 2. Sets a red border on the widget
-3. Shows `ERR` with failing rule names in the terminal status bar
+3. Shows `ERR` with failing rule names in the TUI status bar
 4. Continues watching for changes
 5. Automatically reloads when the error is fixed
 

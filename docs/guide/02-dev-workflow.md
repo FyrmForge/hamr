@@ -34,14 +34,13 @@ hamr dev --config my.toml            # custom config path
 hamr dev --no-proxy                  # skip proxy, just run watchers (API-only projects)
 hamr dev --verbose                   # detailed watcher/rebuild logs
 hamr dev --skip-version-check        # bypass the scaffold/CLI version guard
-hamr dev --tui                       # experimental bubbletea TUI shell (preview)
 ```
 
 On startup, `hamr dev` compares `[hamr].version` in `hamr.toml` against the CLI. If the scaffold is newer than the CLI, it refuses to start — using an older CLI against a newer scaffold risks missing features it depends on. Upgrade the CLI or pass `--skip-version-check` to bypass. When the CLI is *newer* than the scaffold, dev still runs and the status bar flags the mismatch so you can plan an upgrade.
 
-### Experimental TUI mode (`--tui`)
+### TUI shell
 
-`hamr dev --tui` runs a bubbletea-based shell instead of the legacy stdout output. The dev server itself is identical — same watchers, builds, proxy, mocks — only the terminal UI changes:
+`hamr dev` runs as a bubbletea-based terminal UI:
 
 - Status bar at the top with build state and any failing rules.
 - A scrollable log viewport in the middle (`PgUp`/`PgDn`/arrows to scroll). Long log lines soft-wrap to the viewport width so nothing gets clipped at the right edge; resizing the terminal re-wraps in place.
@@ -50,7 +49,7 @@ On startup, `hamr dev` compares `[hamr].version` in `hamr.toml` against the CLI.
 
 `q` / `Ctrl+C` work even when the dev server is parked on a `hamr.toml` parse error — the TUI quits cleanly instead of getting stuck on "waiting for config fix...".
 
-Hotkeys mirror the legacy shell, plus a Makefile-target runner, a help overlay, and per-stack log tabs:
+Hotkeys include a Makefile-target runner, a help overlay, and per-stack log tabs:
 
 | Key | Action |
 |-----|--------|
@@ -74,8 +73,6 @@ The status bar's left side reflects the active tab: 🔨 `hamr dev` for the fram
 Search state is **per tab** — committing a query on the docker stack tab and cycling away to hamr keeps both searches alive independently; cycle back and the highlights and `n`/`N` cursor are right where you left them. New log lines arriving while a search is active are scanned and the match counter updates without you having to re-commit.
 
 While a `make` target is running the floating "running" box swallows every key except `q` (cancel — sends `SIGINT` to `make`) and `Ctrl+C` (quits the TUI, taking children with it). Stdout and stderr stream into the hamr tab, prefixed `[make:<target>] ` per line. On exit the box switches to a `Done ✓` / `Failed ✗ (exit N)` summary that stays until you press any key. Define `docker-wipe`, `migrate`, or whatever else you need as Makefile targets and chain them however you like — `m` then becomes the single front door for project-specific scripts.
-
-The TUI is still under active development and runs alongside the legacy shell. Stick with the default unless you want to try the new flow; report rough edges as you find them.
 
 ---
 

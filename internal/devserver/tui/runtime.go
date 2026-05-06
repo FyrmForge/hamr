@@ -25,7 +25,7 @@ type Runtime struct {
 // blocks). The recommended flow is in dev.go:
 //
 //	rt := tui.NewRuntime()
-//	go func() { runErr <- runRunnerLoop(ctx, rt, configPath) }()
+//	go func() { runErr <- runDevLoop(ctx, rt, configPath, ...) }()
 //	rt.Start()  // blocks until the model returns tea.Quit
 //	<-runErr
 func NewRuntime() *Runtime {
@@ -132,32 +132,28 @@ func (r *Runtime) Log(line string) {
 	r.program.Send(LogLineMsg(line))
 }
 
-// SetVersion sets the version label shown on the right of the status bar
-// (mirrors devserver.StatusBar.SetVersion). Safe from any goroutine.
+// SetVersion sets the version label shown on the right of the status
+// bar. Safe from any goroutine.
 func (r *Runtime) SetVersion(label string) {
 	r.program.Send(versionLabelMsg{label: label})
 }
 
-// SetVersionStatus updates the version indicator state and message
-// (mirrors devserver.StatusBar.SetVersionStatus).
+// SetVersionStatus updates the version indicator state and message.
 func (r *Runtime) SetVersionStatus(status devserver.VersionStatus, msg string) {
 	r.program.Send(versionStatusMsg{status: status, msg: msg})
 }
 
 // SetVersionUpdateIfOK promotes the indicator to VersionUpdate only when
-// the current status is VersionOK (mirrors
-// devserver.StatusBar.SetVersionUpdateIfOK). Returning a bool would
-// require synchronous access to the model state; for the TUI we instead
-// always send the message and let the model apply the same guard. The
-// caller logs the "update available" line unconditionally — slightly
-// chattier than the legacy bar, acceptable for the experimental flag.
+// the current status is VersionOK. Returning a bool would require
+// synchronous access to the model state; the message is always sent and
+// the model applies the guard. The caller logs the "update available"
+// line unconditionally.
 func (r *Runtime) SetVersionUpdateIfOK(msg string) {
 	r.program.Send(versionUpdateIfOKMsg{msg: msg})
 }
 
 // SetProxyURL publishes the actual reachable proxy URL to the model so
-// it can render in the status bar (mirrors
-// devserver.StatusBar.SetProxyURL). Wired via WithProxyURLHook so the
+// it can render in the status bar. Wired via WithProxyURLHook so the
 // runner calls it once the listener has bound. Safe from any goroutine.
 func (r *Runtime) SetProxyURL(url string) {
 	r.program.Send(proxyURLMsg{url: url})

@@ -62,8 +62,8 @@ type runFinishedMsg struct {
 	msg      string // populated when start/exec failed without an exit code
 }
 
-// versionStatusMsg updates the persistent version indicator on the status
-// bar. Mirrors devserver.StatusBar's SetVersionStatus contract.
+// versionStatusMsg updates the persistent version indicator on the
+// status bar.
 type versionStatusMsg struct {
 	status devserver.VersionStatus
 	msg    string
@@ -76,15 +76,14 @@ type versionLabelMsg struct {
 }
 
 // versionUpdateIfOKMsg promotes status to VersionUpdate only if the
-// current state is VersionOK — same guard as
-// StatusBar.SetVersionUpdateIfOK so a background release-check doesn't
+// current state is VersionOK, so a background release-check doesn't
 // overwrite a more important indicator.
 type versionUpdateIfOKMsg struct {
 	msg string
 }
 
 // dockerStacksMsg sets the ordered list of docker compose tab names.
-// The runtime sends one of these every time runDevTUILoop registers a
+// The runtime sends one of these every time runDevLoop registers a
 // fresh config — config reload may have added or removed entries.
 type dockerStacksMsg struct {
 	names []string
@@ -98,7 +97,7 @@ type proxyURLMsg struct {
 	url string
 }
 
-// Model is the top-level bubbletea model for hamr dev --tui.
+// Model is the top-level bubbletea model for hamr dev.
 type Model struct {
 	width   int
 	height  int
@@ -385,9 +384,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.hotkeys.Send(devserver.HotkeyOpenBrowser)
 		return m, nil
 	case "c":
-		// Clear the active tab's buffer in place; never forward to the
-		// runner (its HotkeyClearTerminal handler writes raw escape
-		// codes that would corrupt the bubbletea frame).
+		// Clear the active tab's buffer in place — entirely a TUI-side
+		// concern, no runner involvement.
 		m.clearActiveLog()
 		return m, nil
 	case "m":
@@ -998,9 +996,8 @@ func (m *Model) helpView() string {
 	return modalStyle.Render(strings.Join(lines, "\n"))
 }
 
-// hammerStyle returns the style for the 🔨 emoji using the same priority
-// the legacy ANSI bar applies: red errors > yellow dev/mismatch/update >
-// green ok.
+// hammerStyle returns the style for the 🔨 emoji using a fixed priority:
+// red errors > yellow dev/mismatch/update > green ok.
 func (m *Model) hammerStyle() lipgloss.Style {
 	if len(m.errors) > 0 {
 		return hammerErr
@@ -1013,8 +1010,8 @@ func (m *Model) hammerStyle() lipgloss.Style {
 }
 
 // versionTag returns the right-aligned version indicator and its visible
-// width. Mirrors the legacy bar: VER tag on mismatch, "label ➜ latest" on
-// update, plain label otherwise (DEV string for dev builds).
+// width: VER tag on mismatch, "label ➜ latest" on update, plain label
+// otherwise (DEV string for dev builds).
 func (m *Model) versionTag() (string, int) {
 	switch {
 	case m.versionStatus == devserver.VersionMismatch && m.versionMsg != "":

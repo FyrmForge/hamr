@@ -1,6 +1,7 @@
-// Package tui implements the experimental bubbletea-based dev runtime
-// (hamr dev --tui). The CLI counterpart lives in internal/devserver and
-// stays the default until the TUI reaches feature parity.
+// Package tui implements the bubbletea-based dev runtime that backs
+// `hamr dev`. The headless dev runner lives in internal/devserver; this
+// package owns the screen and adapts hotkeys, log output, and status
+// updates between the two.
 package tui
 
 import "github.com/charmbracelet/lipgloss"
@@ -30,7 +31,8 @@ var (
 	statusVer   = lipgloss.NewStyle().Background(statusBarBG).Foreground(colorDim)
 
 	// Emoji background lives on the bar; foreground tints the hammer to
-	// match the priority colour the legacy ANSI bar uses.
+	// match the worst current state (red errors > yellow dev/mismatch >
+	// green ok).
 	hammerOK   = lipgloss.NewStyle().Background(statusBarBG).Foreground(colorOK)
 	hammerWarn = lipgloss.NewStyle().Background(statusBarBG).Foreground(colorWarn)
 	hammerErr  = lipgloss.NewStyle().Background(statusBarBG).Foreground(colorErr)
