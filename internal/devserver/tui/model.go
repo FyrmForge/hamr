@@ -991,10 +991,10 @@ func (m *Model) helpView() string {
 			continue
 		}
 		pad := strings.Repeat(" ", keyW-lipgloss.Width(e.keys))
-		lines = append(lines, "  "+statusKey.Render(e.keys)+pad+"   "+statusDim.Render(e.desc))
+		lines = append(lines, "  "+modalKey.Render(e.keys)+pad+"   "+modalDim.Render(e.desc))
 	}
 	lines = append(lines, "")
-	lines = append(lines, statusDim.Render("any key closes"))
+	lines = append(lines, modalDim.Render("any key closes"))
 	return modalStyle.Render(strings.Join(lines, "\n"))
 }
 
@@ -1256,7 +1256,7 @@ func (m *Model) runOverlayView() string {
 	const maxRows = 12
 	filtered := m.run.filtered()
 
-	prompt := statusKey.Render("›") + " " + statusDim.Render(m.run.query) + statusKey.Render("_")
+	prompt := modalKey.Render("›") + " " + modalDim.Render(m.run.query) + modalKey.Render("_")
 
 	lines := []string{
 		modalTitle.Render("Run a Makefile target"),
@@ -1266,7 +1266,7 @@ func (m *Model) runOverlayView() string {
 	}
 
 	if len(filtered) == 0 {
-		lines = append(lines, statusDim.Render("  no matches"))
+		lines = append(lines, modalDim.Render("  no matches"))
 	} else {
 		// Slide the visible window so the cursor stays in view.
 		start := 0
@@ -1281,21 +1281,21 @@ func (m *Model) runOverlayView() string {
 			name := filtered[i]
 			row := "  " + name
 			if i == m.run.cursor {
-				row = statusKey.Render("› ") + searchCurrent.Render(name)
+				row = modalKey.Render("› ") + searchCurrent.Render(name)
 			}
 			lines = append(lines, row)
 		}
 		if len(filtered) > maxRows {
 			lines = append(lines,
-				statusDim.Render(fmt.Sprintf("  …showing %d of %d", end-start, len(filtered))))
+				modalDim.Render(fmt.Sprintf("  …showing %d of %d", end-start, len(filtered))))
 		}
 	}
 
 	lines = append(lines, "")
 	lines = append(lines,
-		statusKey.Render("↑/↓")+statusDim.Render(" move  ")+
-			statusKey.Render("↩")+statusDim.Render(" run  ")+
-			statusKey.Render("esc")+statusDim.Render(" cancel"))
+		modalKey.Render("↑/↓")+modalDim.Render(" move  ")+
+			modalKey.Render("↩")+modalDim.Render(" run  ")+
+			modalKey.Render("esc")+modalDim.Render(" cancel"))
 	return modalStyle.Render(strings.Join(lines, "\n"))
 }
 
@@ -1305,9 +1305,9 @@ func (m *Model) runRunningView() string {
 	body := strings.Join([]string{
 		modalTitle.Render("Running: " + m.run.running),
 		"",
-		statusDim.Render("output streaming to the hamr tab"),
+		modalDim.Render("output streaming to the hamr tab"),
 		"",
-		statusKey.Render("q") + statusDim.Render(" cancel"),
+		modalKey.Render("q") + modalDim.Render(" cancel"),
 	}, "\n")
 	return modalStyle.Render(body)
 }
@@ -1332,7 +1332,7 @@ func (m *Model) runFinishedView() string {
 		"",
 		status,
 		"",
-		statusDim.Render("any key to dismiss"),
+		modalDim.Render("any key to dismiss"),
 	}, "\n")
 	return modalStyle.Render(body)
 }
