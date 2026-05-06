@@ -983,7 +983,30 @@ func (m *Model) helpView() string {
 		}
 	}
 
+	// Modal chrome (border + padding = 4) plus title, leading blank,
+	// trailing blank, and "any key closes" footer (4) consume 8 rows
+	// regardless of entry count. The remaining rows are the entry budget.
+	const fixedChrome = 8
+	avail := m.availableModalHeight() - fixedChrome
+	budget := len(helpEntries)
+	if avail < budget {
+		budget = avail
+		// Reserve one row of the budget for the "+N more" indicator so
+		// the user knows the list was clipped.
+		if budget > 1 {
+			budget--
+		}
+	}
+	if budget < 1 {
+		budget = 1
+	}
+
+	shown := 0
 	for _, e := range helpEntries {
+		if shown >= budget {
+			break
+		}
+		shown++
 		if e.keys == "" && e.desc == "" {
 			lines = append(lines, "")
 			continue
@@ -991,9 +1014,24 @@ func (m *Model) helpView() string {
 		pad := strings.Repeat(" ", keyW-lipgloss.Width(e.keys))
 		lines = append(lines, "  "+modalKey.Render(e.keys)+pad+"   "+modalDim.Render(e.desc))
 	}
+	if shown < len(helpEntries) {
+		lines = append(lines,
+			modalDim.Render(fmt.Sprintf("  …+%d more (resize terminal)", len(helpEntries)-shown)))
+	}
 	lines = append(lines, "")
 	lines = append(lines, modalDim.Render("any key closes"))
 	return modalStyle.Render(strings.Join(lines, "\n"))
+}
+
+// availableModalHeight returns the number of rows a centered modal can
+// occupy without overlapping the top status bar (row 0) or the bottom
+// hint bar (row m.height-1).
+func (m *Model) availableModalHeight() int {
+	h := m.height - 2
+	if h < 1 {
+		return 1
+	}
+	return h
 }
 
 // hammerStyle returns the style for the 🔨 emoji using a fixed priority:
@@ -1250,7 +1288,18 @@ func (m *Model) runView() string {
 // height so very large Makefiles don't push the modal past the
 // viewport.
 func (m *Model) runOverlayView() string {
-	const maxRows = 12
+	// Modal chrome (border + padding = 4) plus title, two blanks,
+	// prompt, blank, hint (6) consume 10 rows. Reserve one more for the
+	// "...showing X of Y" indicator that appears when truncated, so the
+	// modal still fits even when the list overflows.
+	const fixedChrome = 11
+	maxRows := m.availableModalHeight() - fixedChrome
+	if maxRows > 12 {
+		maxRows = 12
+	}
+	if maxRows < 1 {
+		maxRows = 1
+	}
 	filtered := m.run.filtered()
 
 	prompt := modalKey.Render("›") + " " + modalDim.Render(m.run.query) + modalKey.Render("_")
@@ -1352,8 +1401,12 @@ func overlay(base, modal string, width, height int) string {
 	mh := len(modalLines)
 	mw := lipgloss.Width(modal)
 	startY := (height - mh) / 2
-	if startY < 0 {
-		startY = 0
+	// Never overlap the top status bar (row 0) or the bottom hint bar
+	// (row height-1). Modal renderers size themselves to fit between
+	// these two rows; this is a defensive clamp for edge cases like a
+	// very tiny terminal where even a minimum modal would overflow.
+	if startY < 1 {
+		startY = 1
 	}
 	startX := (width - mw) / 2
 	if startX < 0 {
@@ -1362,7 +1415,7 @@ func overlay(base, modal string, width, height int) string {
 
 	for i, line := range modalLines {
 		row := startY + i
-		if row >= len(baseLines) {
+		if row >= len(baseLines)-1 {
 			break
 		}
 		baseLines[row] = padOrTruncate(baseLines[row], startX) + line +
