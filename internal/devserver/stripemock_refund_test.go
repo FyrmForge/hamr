@@ -29,6 +29,14 @@ func TestStripeMock_CreateRefund_FullByPaymentIntent(t *testing.T) {
 		// Set up: create + succeed a PI so there's a Charge to refund.
 		pi := createAndSucceedPI(t, mock, 2000, "")
 
+		// Drain the PI cascade (pi.succeeded + charge.succeeded) before
+		// firing the refund. The cascade fires in its own goroutine and
+		// the refund fires in another; without this barrier, CI's slower
+		// scheduler under -race lets charge.refunded interleave between
+		// pi.succeeded and charge.succeeded, and the position-2 assertion
+		// below sees charge.succeeded instead of charge.refunded.
+		app.WaitFor(t, 2, 2*time.Second)
+
 		rf, err := refund.New(&stripe.RefundParams{
 			PaymentIntent: stripe.String(pi.ID),
 		})
