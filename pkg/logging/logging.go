@@ -9,7 +9,6 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"time"
 
 	"github.com/lmittmann/tint"
 )
@@ -27,7 +26,7 @@ func New(production bool) *slog.Logger {
 	}
 	return slog.New(tint.NewHandler(os.Stderr, &tint.Options{
 		Level:      slog.LevelDebug,
-		TimeFormat: time.Kitchen,
+		TimeFormat: "3:04:05PM",
 	}))
 }
 
