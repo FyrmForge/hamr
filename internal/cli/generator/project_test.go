@@ -250,11 +250,11 @@ func TestBuildProjectFileList_e2e(t *testing.T) {
 		dests[f.dest] = true
 	}
 
-	assert.True(t, dests["e2e-go/main_test.go"])
-	assert.True(t, dests["e2e-go/helpers.go"])
-	assert.True(t, dests["e2e-go/home_test.go"])
-	assert.True(t, dests["e2e-go/testdata/seed_e2e.sql"])
-	assert.True(t, dests["e2e-go/README.md"])
+	assert.True(t, dests["e2e/main_test.go"])
+	assert.True(t, dests["e2e/helpers.go"])
+	assert.True(t, dests["e2e/home_test.go"])
+	assert.True(t, dests["e2e/testdata/seed_e2e.sql"])
+	assert.True(t, dests["e2e/README.md"])
 }
 
 func TestBuildProjectFileList_noE2E(t *testing.T) {
@@ -266,7 +266,7 @@ func TestBuildProjectFileList_noE2E(t *testing.T) {
 		dests[f.dest] = true
 	}
 
-	assert.False(t, dests["e2e-go/main_test.go"])
+	assert.False(t, dests["e2e/main_test.go"])
 }
 
 func TestGenerateProject_createsFiles(t *testing.T) {
@@ -456,9 +456,9 @@ func TestGenerateProject_e2eFiles(t *testing.T) {
 
 	require.NoError(t, GenerateProject(dir, cfg))
 
-	assertFileExists(t, dir, "e2e-go/main_test.go")
-	assertFileExists(t, dir, "e2e-go/helpers.go")
-	assertFileExists(t, dir, "e2e-go/home_test.go")
+	assertFileExists(t, dir, "e2e/main_test.go")
+	assertFileExists(t, dir, "e2e/helpers.go")
+	assertFileExists(t, dir, "e2e/home_test.go")
 
 	// Makefile should have e2e targets.
 	makefile := readFile(t, dir, "Makefile")

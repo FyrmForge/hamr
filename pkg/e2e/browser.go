@@ -1,6 +1,6 @@
 // Package e2e provides reusable go-rod browser helpers for E2E testing.
 //
-// Projects import this package in their e2e-go/ test files. The package itself
+// Projects import this package in their e2e/ test files. The package itself
 // carries no //go:build tag — build-tag isolation happens in the consuming
 // project.
 package e2e

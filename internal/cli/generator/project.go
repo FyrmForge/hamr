@@ -359,14 +359,14 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 	// E2E files.
 	if cfg.IncludeE2E {
 		files = append(files,
-			templateFile{"templates/new/e2e-go/main_test.go.tmpl", "e2e-go/main_test.go"},
-			templateFile{"templates/new/e2e-go/testcontainers_setup.go.tmpl", "e2e-go/testcontainers_setup.go"},
-			templateFile{"templates/new/e2e-go/helpers.go.tmpl", "e2e-go/helpers.go"},
-			templateFile{"templates/new/e2e-go/accounts.go.tmpl", "e2e-go/accounts.go"},
-			templateFile{"templates/new/e2e-go/auth_test.go.tmpl", "e2e-go/auth_test.go"},
-			templateFile{"templates/new/e2e-go/home_test.go.tmpl", "e2e-go/home_test.go"},
-			templateFile{"templates/new/e2e-go/testdata/seed_e2e.sql.tmpl", "e2e-go/testdata/seed_e2e.sql"},
-			templateFile{"templates/new/e2e-go/README.md.tmpl", "e2e-go/README.md"},
+			templateFile{"templates/new/e2e/main_test.go.tmpl", "e2e/main_test.go"},
+			templateFile{"templates/new/e2e/testcontainers_setup.go.tmpl", "e2e/testcontainers_setup.go"},
+			templateFile{"templates/new/e2e/helpers.go.tmpl", "e2e/helpers.go"},
+			templateFile{"templates/new/e2e/accounts.go.tmpl", "e2e/accounts.go"},
+			templateFile{"templates/new/e2e/auth_test.go.tmpl", "e2e/auth_test.go"},
+			templateFile{"templates/new/e2e/home_test.go.tmpl", "e2e/home_test.go"},
+			templateFile{"templates/new/e2e/testdata/seed_e2e.sql.tmpl", "e2e/testdata/seed_e2e.sql"},
+			templateFile{"templates/new/e2e/README.md.tmpl", "e2e/README.md"},
 		)
 	}
 

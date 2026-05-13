@@ -200,7 +200,7 @@ For SQLite projects, prefer `:memory:` over testcontainers — it's faster and h
     E2E_HEADLESS: "true"
     E2E_TIMEOUT: "30s"
     E2E_ARTIFACT_DIR: "test-artifacts"
-  run: go test -v -tags=e2e ./e2e-go/ -timeout 10m
+  run: go test -v -tags=e2e ./e2e/ -timeout 10m
 
 - name: Upload failure artifacts
   if: failure()

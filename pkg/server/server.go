@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/FyrmForge/hamr/pkg/logging"
 	"github.com/FyrmForge/hamr/pkg/middleware"
 	"github.com/labstack/echo/v4"
 	echoMw "github.com/labstack/echo/v4/middleware"
@@ -83,7 +84,15 @@ func New(opts ...Option) (*Server, error) {
 	e.HidePort = true
 
 	// Production defaults — applied in order.
-	e.Use(echoMw.Recover())
+	e.Use(echoMw.RecoverWithConfig(echoMw.RecoverConfig{
+		LogErrorFunc: func(c echo.Context, err error, stack []byte) error {
+			logging.FromContext(c.Request().Context()).Error("panic recovered",
+				"error", err.Error(),
+				"stack", string(stack),
+			)
+			return err
+		},
+	}))
 	e.Use(echoMw.BodyLimit(s.maxBodySize))
 	e.Use(echoMw.ContextTimeoutWithConfig(echoMw.ContextTimeoutConfig{
 		Timeout: s.timeout,

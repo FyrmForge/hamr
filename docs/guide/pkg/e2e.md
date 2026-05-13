@@ -1,7 +1,7 @@
 # E2E — Reusable Go-Rod Browser Helpers
 
 `hamr/pkg/e2e` provides timeout-safe go-rod helpers for browser-based E2E testing.
-Projects import this package in their `e2e-go/` test files. The package itself has no
+Projects import this package in their `e2e/` test files. The package itself has no
 `//go:build` tag — it's a normal library. Build-tag isolation happens in the consuming
 project.
 
@@ -59,7 +59,7 @@ browser := e2e.SetupBrowser(t,
 Env vars let CI override behaviour without code changes:
 
 ```bash
-E2E_HEADLESS=true E2E_TIMEOUT=30s go test -tags=e2e ./e2e-go/
+E2E_HEADLESS=true E2E_TIMEOUT=30s go test -tags=e2e ./e2e/
 ```
 
 Config is stored per-test via `sync.Map` keyed by `testing.TB`, so helpers can retrieve
@@ -305,7 +305,7 @@ Override defaults via env vars in your CI pipeline:
     E2E_HEADLESS: "true"
     E2E_TIMEOUT: "30s"
     E2E_ARTIFACT_DIR: "test-artifacts"
-  run: go test -v -tags=e2e ./e2e-go/ -timeout 10m
+  run: go test -v -tags=e2e ./e2e/ -timeout 10m
 
 - name: Upload failure artifacts
   if: failure()

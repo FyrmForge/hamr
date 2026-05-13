@@ -31,7 +31,7 @@ HAMR is **two things**:
 - **Add services later** — `hamr add service <name>` scaffolds a new service
 - **HAMR provides tools, not opinions on project layout** — where shared types live, whether to restructure the monolith, shared DB vs separate DB — all project decisions
 - **Auth propagation**: Gateway forwards subject ID via trusted header
-- **E2E testing**: Go-rod + Testcontainers, fully containerized, `//go:build e2e` isolated. HAMR provides reusable helpers in `pkg/e2e`, generated projects get a ready-to-run `e2e-go/` scaffolding
+- **E2E testing**: Go-rod + Testcontainers, fully containerized, `//go:build e2e` isolated. HAMR provides reusable helpers in `pkg/e2e`, generated projects get a ready-to-run `e2e/` scaffolding
 
 ## Repository Structure
 
@@ -346,7 +346,7 @@ Response headers:
 ### 27. `pkg/e2e/` (browser.go, assert.go, htmx.go)
 
 Reusable go-rod helpers for E2E testing. Projects import `hamr/pkg/e2e` in their
-`e2e-go/` test files. All operations are timeout-safe — **no `Must*` methods**.
+`e2e/` test files. All operations are timeout-safe — **no `Must*` methods**.
 
 **Configuration** — `BrowserConfig` with functional options or env var overrides:
 
@@ -497,7 +497,7 @@ type ServiceConfig struct {
 │           └── form/
 │               ├── fields.templ    # FieldError, FieldErrorOOB, CSRFField
 │               └── helpers.go      # GetError, IsSelected
-├── e2e-go/                        # (if e2e) Go-rod E2E tests
+├── e2e/                        # (if e2e) Go-rod E2E tests
 │   ├── main_test.go               #   TestMain: setup/teardown shared environment
 │   ├── testcontainers_setup.go    #   Docker network, postgres, server containers
 │   ├── helpers.go                 #   Project-specific helpers (Login, seed data, etc.)
@@ -664,12 +664,12 @@ document.addEventListener('htmx:configRequest', function(evt) {
 
 All files use `//go:build e2e` build tag — excluded from normal `go test ./...`.
 
-**`e2e-go/main_test.go`** — TestMain entry point:
+**`e2e/main_test.go`** — TestMain entry point:
 - Parses `-local` flag (containerized vs local server)
 - Calls `SetupSharedEnvironment()` — single DB + server for all tests
 - Defers cleanup (Testcontainers Ryuk handles container teardown)
 
-**`e2e-go/testcontainers_setup.go`** — Fully containerized infrastructure:
+**`e2e/testcontainers_setup.go`** — Fully containerized infrastructure:
 - Creates isolated Docker network per test run (timestamped name)
 - PostgreSQL container (`postgres:18-alpine`) with network alias `postgres`
 - App server container (built from project's `cmd/site/Dockerfile`)
@@ -678,45 +678,45 @@ All files use `//go:build e2e` build tag — excluded from normal `go test ./...
 - Seeds test data: `//go:embed testdata/seed_e2e.sql`
 - Local mode alternative: reads `E2E_DATABASE_URL` / `E2E_SERVER_URL` env vars
 
-**`e2e-go/helpers.go`** — Project-specific test helpers:
+**`e2e/helpers.go`** — Project-specific test helpers:
 - Imports `hamr/pkg/e2e` for generic browser/assert/htmx helpers
 - `Login(t, page, email, password)` — project-specific login flow
 - `CreateTestUser(t, page, ...)` — project-specific signup flow
 - Any project-specific navigation helpers
 
-**`e2e-go/accounts.go`** — Test account definitions:
+**`e2e/accounts.go`** — Test account definitions:
 - `TestAccount` struct: Email, Password, Role, Name
 - Global `Accounts` map keyed by role (populated from seed SQL)
 - All use password `Test1234!` (Argon2id hash in seed)
 
-**`e2e-go/testdata/seed_e2e.sql`** — Deterministic test data:
+**`e2e/testdata/seed_e2e.sql`** — Deterministic test data:
 - Uses fixed UUIDs with prefixed ranges for test isolation
 - `ON CONFLICT (id) DO NOTHING` for idempotent re-runs
 - Test accounts matching `accounts.go` definitions
 - If auth+tables: users with hashed passwords, active sessions
 
-**`e2e-go/auth_test.go`** — Starter tests:
+**`e2e/auth_test.go`** — Starter tests:
 - Login with valid credentials → correct redirect
 - Login with invalid credentials → error message
 - Login page elements exist
 
-**`e2e-go/home_test.go`** — Starter tests:
+**`e2e/home_test.go`** — Starter tests:
 - Home page loads
 - Key elements present
 
 **Generated Makefile targets:**
 ```makefile
 e2e:                  ## Run E2E tests (containerized)
-    go test -v -tags=e2e ./e2e-go -timeout 10m
+    go test -v -tags=e2e ./e2e -timeout 10m
 
 e2e-local:            ## Run E2E tests against local server
-    go test -v -tags=e2e ./e2e-go -local -timeout 10m
+    go test -v -tags=e2e ./e2e -local -timeout 10m
 
 e2e-run:              ## Run specific E2E test: make e2e-run T=TestName
-    go test -v -tags=e2e ./e2e-go -run "$(T)" -timeout 5m
+    go test -v -tags=e2e ./e2e -run "$(T)" -timeout 5m
 
 e2e-run-local:        ## Run specific E2E test locally: make e2e-run-local T=TestName
-    go test -v -tags=e2e ./e2e-go -local -run "$(T)" -timeout 2m
+    go test -v -tags=e2e ./e2e -local -run "$(T)" -timeout 2m
 ```
 
 ## Phase 7: Post-MVP
@@ -886,7 +886,7 @@ docs/
 | `charmbracelet/bubbletea` | internal/cli | Interactive prompts |
 | `charmbracelet/lipgloss` | internal/cli | CLI styling |
 | `go-rod/rod` | e2e | Headless browser automation |
-| `testcontainers/testcontainers-go` | generated e2e-go | Container orchestration for E2E tests |
+| `testcontainers/testcontainers-go` | generated e2e | Container orchestration for E2E tests |
 
 ## Implementation Order
 
@@ -955,7 +955,7 @@ After Sprint 6 (CLI complete):
 - Verify `hamr.vendor.json` is created with correct versions and paths
 - Verify `hamr vendor htmx@2.0.4` pins a specific version
 - Verify `hamr vendor --update` re-downloads at latest versions
-- If e2e enabled: verify `e2e-go/` directory exists with all scaffolding files
+- If e2e enabled: verify `e2e/` directory exists with all scaffolding files
 - Verify `make e2e` runs containerized tests (requires Docker)
 - Verify `//go:build e2e` isolation: `go test ./...` does NOT run e2e tests
 - Verify testcontainers setup creates network, postgres, server containers

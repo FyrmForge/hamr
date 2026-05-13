@@ -124,19 +124,19 @@ docker-reload: docker-delete docker-up
 
 ## e2e: Run E2E tests (containerized)
 e2e:
-	go test -v -tags=e2e ./e2e-go -timeout 10m
+	go test -v -tags=e2e ./e2e -timeout 10m
 
 ## e2e-local: Run E2E tests against local server
 e2e-local:
-	$(ENV_LOAD) go test -v -tags=e2e ./e2e-go -local -timeout 10m
+	$(ENV_LOAD) go test -v -tags=e2e ./e2e -local -timeout 10m
 
 ## e2e-run: Run specific E2E test: make e2e-run T=TestName
 e2e-run:
-	go test -v -tags=e2e ./e2e-go -run "$(T)" -timeout 5m
+	go test -v -tags=e2e ./e2e -run "$(T)" -timeout 5m
 
 ## e2e-run-local: Run specific E2E test locally: make e2e-run-local T=TestName
 e2e-run-local:
-	$(ENV_LOAD) go test -v -tags=e2e ./e2e-go -local -run "$(T)" -timeout 2m
+	$(ENV_LOAD) go test -v -tags=e2e ./e2e -local -run "$(T)" -timeout 2m
 {{- end}}
 
 {{- if .IncludeLocale}}

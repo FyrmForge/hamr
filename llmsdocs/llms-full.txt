@@ -1253,7 +1253,7 @@ func HasErrors(diags []Diagnostic) bool
 ### e2e
 
 > Package e2e provides reusable go-rod browser helpers for E2E testing.
-> Projects import this package in their e2e-go/ test files.
+> Projects import this package in their e2e/ test files.
 
 #### Config & Options
 
