@@ -71,25 +71,38 @@ if user != nil {
 | `empty-class` | `class=""` empty class attributes |
 | `js-href` | `href="javascript:..."` links |
 
+### htmx / native form actions (severity: error)
+
+| ID | What it catches |
+|----|-----------------|
+| `no-native-form-actions` | `action=`, `method=`, or `formaction=` attribute on any element. Use `hx-post` / `hx-get` / `hx-put` etc. instead. |
+| `htmx-conflict` | Same element has both an `hx-*` attribute and a native form attribute (`action`/`method`/`formaction`). Pick one. |
+
 ## Configuration
 
-Add a `[lint.templ]` section to your `hamr.toml` (optional — all rules are enabled by default):
+A `[lint.templ]` section in your `hamr.toml` controls which rules run. Each
+entry maps a rule ID to `"warning"`, `"error"`, or `"off"`. **Rules omitted from
+the section are disabled.** `"off"` is equivalent to omitting the rule.
+
+Unknown rule IDs and invalid severity strings cause `hamr lint templ` to fail
+loudly — typos are surfaced, not silently ignored.
+
+The scaffold generates a `[lint.templ]` block enumerating every rule at its
+recommended severity, so a fresh project starts fully linted.
 
 ```toml
-[lint.templ.rules.inline-if]
-enabled = true
-severity = "error"
-
-[lint.templ.rules.inline-style]
-enabled = false
-
-[lint.templ.rules.img-alt]
-severity = "error"
+[lint.templ]
+inline-if              = "error"
+inline-for             = "error"
+inline-switch          = "error"
+no-native-form-actions = "error"
+htmx-conflict          = "error"
+img-alt                = "warning"
+no-href                = "warning"
+inline-style           = "warning"
+empty-class            = "warning"
+js-href                = "warning"
 ```
-
-Each rule accepts:
-- `enabled` — `true` (default) or `false`
-- `severity` — `"warning"` or `"error"`
 
 ## Makefile Integration
 
@@ -114,10 +127,12 @@ The generated CI workflow includes a templ lint step:
 ```go
 import "github.com/FyrmForge/hamr/pkg/templint"
 
-// Load config (returns nil if file not found — uses defaults)
+// Load config (returns nil if file missing or [lint.templ] empty;
+// returns an error on unknown rule ID or invalid severity)
 cfg, err := templint.LoadConfig("hamr.toml")
 
-// Create linter (nil config = all rules enabled)
+// Create linter. nil config = no rules enabled (reports nothing).
+// Only rules listed in cfg.Rules run, at the severity configured.
 linter := templint.New(cfg)
 
 // Lint a directory

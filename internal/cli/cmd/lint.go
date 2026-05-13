@@ -45,44 +45,29 @@ func runTemplLint(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	// --rule flag: disable all rules not in the filter list.
+	// --rule flag overrides config entirely: enable only the listed rules at
+	// their recommended default severity.
 	if len(ruleFilter) > 0 {
-		if cfg == nil {
-			cfg = &templint.Config{Rules: make(map[string]templint.RuleConfig)}
+		known := make(map[string]bool)
+		for _, id := range templint.AllRuleIDs() {
+			known[id] = true
 		}
-		if cfg.Rules == nil {
-			cfg.Rules = make(map[string]templint.RuleConfig)
-		}
-		allowed := make(map[string]bool)
-		allRules := []string{
-			"inline-if", "inline-for", "inline-switch",
-			"img-alt", "no-href",
-			"inline-style", "empty-class", "js-href",
-		}
-		ruleExists := make(map[string]bool, len(allRules))
-		for _, id := range allRules {
-			ruleExists[id] = true
-		}
+		rules := make(map[string]templint.Severity, len(ruleFilter))
 		for _, r := range ruleFilter {
-			if !ruleExists[r] {
+			if !known[r] {
 				return fmt.Errorf("unknown rule: %q", r)
 			}
-			allowed[r] = true
+			rules[r] = templint.DefaultSeverity(r)
 		}
-		f := false
-		t := true
-		for _, id := range allRules {
-			rc := cfg.Rules[id]
-			if allowed[id] {
-				rc.Enabled = &t
-			} else {
-				rc.Enabled = &f
-			}
-			cfg.Rules[id] = rc
-		}
+		cfg = &templint.Config{Rules: rules}
 	}
 
 	linter := templint.New(cfg)
+	if linter.RuleCount() == 0 {
+		fmt.Fprintf(os.Stderr,
+			"templint: no rules enabled (add a [lint.templ] block to %s or pass --rule); nothing to check\n",
+			configPath)
+	}
 	diags, err := linter.LintDir(".")
 	if err != nil {
 		return err

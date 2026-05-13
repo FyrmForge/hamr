@@ -95,3 +95,17 @@ dir = "locales"
 output = "internal/locale/locale.go"
 package = "locale"
 {{- end}}
+
+[lint.templ]
+# Each rule is enabled by listing it with "warning" or "error". Omit a rule or
+# set it to "off" to disable it. Unknown rule IDs fail with an error.
+inline-if              = "error"
+inline-for             = "error"
+inline-switch          = "error"
+no-native-form-actions = "error"
+htmx-conflict          = "error"
+img-alt                = "warning"
+no-href                = "warning"
+inline-style           = "warning"
+empty-class            = "warning"
+js-href                = "warning"

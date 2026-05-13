@@ -315,6 +315,140 @@ func TestJsHrefNormal(t *testing.T) {
 	}
 }
 
+// --- htmx / native form rules ---
+
+func TestNoNativeFormActionsDetected(t *testing.T) {
+	lines := []string{
+		`  <form action="/submit" method="post">`,
+	}
+	rule := &noNativeFormActionsRule{severity: Error}
+	diags := rule.Check("test.templ", lines)
+	if len(diags) != 2 {
+		t.Fatalf("expected 2 diagnostics (action + method), got %d: %+v", len(diags), diags)
+	}
+}
+
+func TestNoNativeFormActionsFormactionOnButton(t *testing.T) {
+	lines := []string{
+		`  <button formaction="/x" type="submit">Go</button>`,
+	}
+	rule := &noNativeFormActionsRule{severity: Error}
+	diags := rule.Check("test.templ", lines)
+	if len(diags) != 1 {
+		t.Fatalf("expected 1 diagnostic for formaction, got %d", len(diags))
+	}
+	assertDiag(t, diags[0], "test.templ", 1, "no-native-form-actions", Error)
+}
+
+func TestNoNativeFormActionsIgnoresDataAttrs(t *testing.T) {
+	lines := []string{
+		`  <div data-action="ignore" data-method="ignore">x</div>`,
+	}
+	rule := &noNativeFormActionsRule{severity: Error}
+	diags := rule.Check("test.templ", lines)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diagnostics for data-* attrs, got %d: %+v", len(diags), diags)
+	}
+}
+
+func TestNoNativeFormActionsClean(t *testing.T) {
+	lines := []string{
+		`  <form hx-post="/submit">`,
+	}
+	rule := &noNativeFormActionsRule{severity: Error}
+	diags := rule.Check("test.templ", lines)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diagnostics, got %d: %+v", len(diags), diags)
+	}
+}
+
+// hx-action="..." (the literal attribute name) must not trigger the native
+// rule: the attribute boundary regex requires whitespace or line start before
+// "action=", not a "-".
+func TestNoNativeFormActionsIgnoresHxAction(t *testing.T) {
+	lines := []string{
+		`  <button hx-action="x">Click</button>`,
+	}
+	rule := &noNativeFormActionsRule{severity: Error}
+	diags := rule.Check("test.templ", lines)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diagnostics for hx-action, got %d: %+v", len(diags), diags)
+	}
+}
+
+func TestNoNativeFormActionsMultiline(t *testing.T) {
+	lines := []string{
+		`  <form`,
+		`    action="/submit"`,
+		`    method="post"`,
+		`  >`,
+	}
+	rule := &noNativeFormActionsRule{severity: Error}
+	diags := rule.Check("test.templ", lines)
+	if len(diags) != 2 {
+		t.Fatalf("expected 2 diagnostics across multi-line tag, got %d", len(diags))
+	}
+}
+
+func TestHtmxConflictDetected(t *testing.T) {
+	lines := []string{
+		`  <form hx-post="/save" action="/submit" method="post">`,
+	}
+	rule := &htmxConflictRule{severity: Error}
+	diags := rule.Check("test.templ", lines)
+	if len(diags) != 1 {
+		t.Fatalf("expected 1 diagnostic, got %d: %+v", len(diags), diags)
+	}
+	assertDiag(t, diags[0], "test.templ", 1, "htmx-conflict", Error)
+}
+
+func TestHtmxConflictNoHtmxNoFlag(t *testing.T) {
+	lines := []string{
+		`  <form action="/submit" method="post">`,
+	}
+	rule := &htmxConflictRule{severity: Error}
+	diags := rule.Check("test.templ", lines)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diagnostics (no htmx attr present), got %d", len(diags))
+	}
+}
+
+func TestHtmxConflictNoNativeNoFlag(t *testing.T) {
+	lines := []string{
+		`  <form hx-post="/save">`,
+	}
+	rule := &htmxConflictRule{severity: Error}
+	diags := rule.Check("test.templ", lines)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diagnostics (no native form attr), got %d", len(diags))
+	}
+}
+
+func TestHtmxConflictMultiline(t *testing.T) {
+	lines := []string{
+		`  <form`,
+		`    hx-post="/save"`,
+		`    action="/legacy"`,
+		`  >`,
+	}
+	rule := &htmxConflictRule{severity: Error}
+	diags := rule.Check("test.templ", lines)
+	if len(diags) != 1 {
+		t.Fatalf("expected 1 diagnostic for multi-line conflict, got %d: %+v", len(diags), diags)
+	}
+}
+
+func TestHtmxConflictDataHxPrefix(t *testing.T) {
+	lines := []string{
+		`  <form data-hx-post="/save" action="/legacy">`,
+	}
+	rule := &htmxConflictRule{severity: Error}
+	diags := rule.Check("test.templ", lines)
+	if len(diags) != 1 {
+		t.Fatalf("expected 1 diagnostic for data-hx-* conflict, got %d: %+v", len(diags), diags)
+	}
+}
+
 // --- Linter engine ---
 
 func TestLintDir(t *testing.T) {
@@ -328,7 +462,11 @@ func TestLintDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	linter := New(nil)
+	cfg := &Config{Rules: map[string]Severity{
+		"inline-if": Error,
+		"img-alt":   Warning,
+	}}
+	linter := New(cfg)
 	diags, err := linter.LintDir(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -357,52 +495,59 @@ func TestLintFileNotFound(t *testing.T) {
 
 // --- Config ---
 
-func TestConfigDisablesRule(t *testing.T) {
+func TestNewNilDisablesEverything(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.templ")
 	if err := os.WriteFile(path, []byte("  if ok { <span>yes</span> }"), 0644); err != nil {
 		t.Fatal(err)
 	}
-
-	f := false
-	cfg := &Config{
-		Rules: map[string]RuleConfig{
-			"inline-if": {Enabled: &f},
-		},
+	linter := New(nil)
+	diags, err := linter.LintFile(path)
+	if err != nil {
+		t.Fatal(err)
 	}
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diagnostics from nil config, got %d", len(diags))
+	}
+}
+
+func TestConfigEnablesOnlyListedRules(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.templ")
+	content := "  if ok { <span>yes</span> }\n  <img src=\"x.png\">\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &Config{Rules: map[string]Severity{"img-alt": Warning}}
 	linter := New(cfg)
 	diags, err := linter.LintFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, d := range diags {
-		if d.Rule == "inline-if" {
-			t.Error("inline-if should be disabled")
+		if d.Rule != "img-alt" {
+			t.Errorf("unexpected rule %q reported when only img-alt was enabled", d.Rule)
 		}
+	}
+	if len(diags) != 1 {
+		t.Fatalf("expected 1 img-alt diagnostic, got %d", len(diags))
 	}
 }
 
-func TestConfigOverridesSeverity(t *testing.T) {
+func TestConfigSeverityIsApplied(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.templ")
 	if err := os.WriteFile(path, []byte("  <img src=\"x.png\">"), 0644); err != nil {
 		t.Fatal(err)
 	}
-
-	cfg := &Config{
-		Rules: map[string]RuleConfig{
-			"img-alt": {Severity: "error"},
-		},
-	}
+	cfg := &Config{Rules: map[string]Severity{"img-alt": Error}}
 	linter := New(cfg)
 	diags, err := linter.LintFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, d := range diags {
-		if d.Rule == "img-alt" && d.Severity != Error {
-			t.Errorf("expected error severity, got %s", d.Severity)
-		}
+	if len(diags) != 1 || diags[0].Severity != Error {
+		t.Fatalf("expected one error-severity diagnostic, got %+v", diags)
 	}
 }
 
@@ -419,7 +564,7 @@ func TestLoadConfigNotFound(t *testing.T) {
 func TestLoadConfigValid(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "hamr.toml")
-	content := "[lint.templ.rules.inline-if]\nenabled = false\nseverity = \"warning\"\n"
+	content := "[lint.templ]\ninline-if = \"error\"\nimg-alt = \"warning\"\ninline-for = \"off\"\n"
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -430,8 +575,72 @@ func TestLoadConfigValid(t *testing.T) {
 	if cfg == nil {
 		t.Fatal("expected non-nil config")
 	}
-	if cfg.IsEnabled("inline-if") {
-		t.Error("inline-if should be disabled")
+	if sev, ok := cfg.Rules["inline-if"]; !ok || sev != Error {
+		t.Errorf("inline-if: want Error, got ok=%v sev=%v", ok, sev)
+	}
+	if sev, ok := cfg.Rules["img-alt"]; !ok || sev != Warning {
+		t.Errorf("img-alt: want Warning, got ok=%v sev=%v", ok, sev)
+	}
+	if _, ok := cfg.Rules["inline-for"]; ok {
+		t.Error(`inline-for = "off" should be absent from cfg.Rules`)
+	}
+}
+
+func TestLoadConfigUnknownRule(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "hamr.toml")
+	content := "[lint.templ]\nbogus-rule = \"error\"\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("expected error for unknown rule ID")
+	}
+}
+
+func TestLoadConfigInvalidSeverity(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "hamr.toml")
+	content := "[lint.templ]\ninline-if = \"loud\"\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("expected error for invalid severity")
+	}
+}
+
+// --- Registry ---
+
+func TestAllRuleIDsCoversEveryRule(t *testing.T) {
+	ids := AllRuleIDs()
+	expected := []string{
+		"empty-class", "htmx-conflict", "img-alt", "inline-for", "inline-if",
+		"inline-style", "inline-switch", "js-href", "no-href", "no-native-form-actions",
+	}
+	if len(ids) != len(expected) {
+		t.Fatalf("AllRuleIDs returned %d entries, expected %d: %v", len(ids), len(expected), ids)
+	}
+	for i, want := range expected {
+		if ids[i] != want {
+			t.Errorf("AllRuleIDs()[%d] = %q, want %q (full: %v)", i, ids[i], want, ids)
+		}
+	}
+}
+
+func TestDefaultSeverityKnownAndUnknown(t *testing.T) {
+	cases := map[string]Severity{
+		"inline-if":              Error,
+		"no-native-form-actions": Error,
+		"htmx-conflict":          Error,
+		"img-alt":                Warning,
+		"js-href":                Warning,
+		"this-rule-does-not-exist": Warning, // fallback
+	}
+	for id, want := range cases {
+		if got := DefaultSeverity(id); got != want {
+			t.Errorf("DefaultSeverity(%q) = %s, want %s", id, got, want)
+		}
 	}
 }
 

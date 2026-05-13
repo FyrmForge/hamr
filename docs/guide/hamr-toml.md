@@ -304,35 +304,40 @@ reload = "full"
 
 ---
 
-## `[lint.templ]` — Templ linter rule overrides
+## `[lint.templ]` — Templ linter rules
 
-Read by `hamr lint templ` and the `templ` watch rule. All rules ship enabled
-by default; override per-rule.
+Read by `hamr lint templ` and the `templ` watch rule.
 
-| Field     | Type   | Values |
-|-----------|--------|--------|
-| `enabled` | bool   | Toggle the rule on/off. |
-| `severity`| string | `"error"` \| `"warning"` |
+Each entry is a rule ID mapped to one of `"warning"`, `"error"`, or `"off"`.
+Rules **not listed** are disabled; `"off"` is equivalent to omitting the rule.
+Unknown rule IDs and invalid severities cause `hamr lint templ` to fail.
 
-**Rules and default severities:**
+The scaffold writes a `[lint.templ]` block listing every rule at its
+recommended severity, so a freshly generated project starts fully linted.
 
-| Rule            | Default severity | Checks |
-|-----------------|------------------|--------|
-| `inline-if`     | error            | `if` must use braces, not inline `@` syntax |
-| `inline-for`    | error            | `for` must use braces, not inline `@` syntax |
-| `inline-switch` | error            | `switch` must use braces, not inline `@` syntax |
-| `img-alt`       | warning          | `<img>` tags require `alt` attribute |
-| `no-href`       | warning          | `<a>` tags require `href` attribute |
-| `inline-style`  | warning          | `style="..."` attributes flagged |
-| `empty-class`   | warning          | `class=""` flagged |
-| `js-href`       | warning          | `href="javascript:..."` flagged |
+**Recommended defaults (what the scaffold writes):**
+
+| Rule                     | Default  | Checks |
+|--------------------------|----------|--------|
+| `inline-if`              | error    | `if` must use braces, not inline `@` syntax |
+| `inline-for`             | error    | `for` must use braces, not inline `@` syntax |
+| `inline-switch`          | error    | `switch` must use braces, not inline `@` syntax |
+| `no-native-form-actions` | error    | `action=`, `method=`, `formaction=` flagged (use htmx) |
+| `htmx-conflict`          | error    | Same element with `hx-*` and a native form attribute |
+| `img-alt`                | warning  | `<img>` tags require `alt` attribute |
+| `no-href`                | warning  | `<a>` tags require `href` attribute |
+| `inline-style`           | warning  | `style="..."` attributes flagged |
+| `empty-class`            | warning  | `class=""` flagged |
+| `js-href`                | warning  | `href="javascript:..."` flagged |
 
 ```toml
-[lint.templ.rules.inline-style]
-enabled = false
-
-[lint.templ.rules.img-alt]
-severity = "error"
+[lint.templ]
+inline-if              = "error"
+no-native-form-actions = "error"
+htmx-conflict          = "error"
+img-alt                = "error"     # promote a warning to error
+inline-style           = "off"       # disable the rule
+# rules omitted entirely are also disabled
 ```
 
 ---

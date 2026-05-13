@@ -134,6 +134,9 @@ func findTagStart(line, tag string, from int) int {
 	if from < 0 {
 		from = 0
 	}
+	if tag == "" {
+		return findAnyTagStart(line, from)
+	}
 	needle := "<" + tag
 	for from < len(line) {
 		idx := strings.Index(line[from:], needle)
@@ -146,6 +149,23 @@ func findTagStart(line, tag string, from int) int {
 			return idx
 		}
 		from = idx + 1
+	}
+	return -1
+}
+
+// findAnyTagStart finds the next opening HTML element start (e.g. "<div", "<a")
+// by matching "<" followed by an ASCII letter. Closing tags "</foo>", comments
+// "<!--", and templ expressions "<{...}>" are skipped automatically because
+// their second character is not a letter.
+func findAnyTagStart(line string, from int) int {
+	for i := from; i < len(line)-1; i++ {
+		if line[i] != '<' {
+			continue
+		}
+		c := line[i+1]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') {
+			return i
+		}
 	}
 	return -1
 }

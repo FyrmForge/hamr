@@ -127,10 +127,11 @@ Concurrency primitives with built-in panic recovery.
 ### `templint`
 Library backing `hamr lint templ`. Also usable programmatically.
 
-- `New(cfg *Config) *Linter` — nil config = all rules at defaults
+- `New(cfg *Config) *Linter` — nil config = no rules run (must list rules in `[lint.templ]`)
 - `LintFile(path)`, `LintDir(dir)`
 - `FilterBySeverity(diags, minSev)`, `HasErrors(diags)`
-- `LoadConfig(path)` — reads `[lint.templ]` from `hamr.toml`
+- `LoadConfig(path)` — reads `[lint.templ]` from `hamr.toml`; flat `rule = "warning"|"error"|"off"` mapping; unknown rule IDs and invalid severities return an error
+- `AllRuleIDs() []string`, `DefaultSeverity(id) Severity` — registry helpers (used by the `--rule` CLI flag)
 
 ---
 

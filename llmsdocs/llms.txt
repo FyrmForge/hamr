@@ -246,12 +246,13 @@ Concurrency primitives with panic recovery.
 
 ### templint
 Static linter for .templ files.
-- `New(cfg *Config) *Linter` — creates linter (nil cfg = all rules, defaults)
+- `New(cfg *Config) *Linter` — creates linter (nil cfg or empty Rules = nothing runs)
 - `LintFile(path) ([]Diagnostic, error)`, `LintDir(dir) ([]Diagnostic, error)`
 - `FilterBySeverity(diags, minSev) []Diagnostic`, `HasErrors(diags) bool`
-- `LoadConfig(path) (*Config, error)` — reads [lint.templ] from hamr.toml
-- Rules: `inline-if`, `inline-for`, `inline-switch` (Error),
-  `img-alt`, `no-href`, `inline-style`, `empty-class`, `js-href` (Warning)
+- `LoadConfig(path) (*Config, error)` — reads [lint.templ] from hamr.toml as a flat `rule = "warning"|"error"|"off"` map; unknown rule IDs and invalid severities return an error
+- `AllRuleIDs() []string`, `DefaultSeverity(id) Severity` — registry helpers
+- Rules: `inline-if`, `inline-for`, `inline-switch`, `no-native-form-actions`, `htmx-conflict` (Error default),
+  `img-alt`, `no-href`, `inline-style`, `empty-class`, `js-href` (Warning default)
 
 ## Optional Packages
 

@@ -324,18 +324,22 @@ hamr lint templ --config my-hamr.toml    # use a custom config file
 
 **Exit codes:** `0` if no error-severity diagnostics, `1` if any errors found.
 
-**Available rules:**
+**Available rules** (default severity — what the scaffold writes):
 
 | ID | Severity | Description |
 |----|----------|-------------|
 | `inline-if` | error | Inline if with HTML body (silently dropped by templ) |
 | `inline-for` | error | Inline for with HTML body (silently dropped) |
 | `inline-switch` | error | Inline switch with HTML body (silently dropped) |
+| `no-native-form-actions` | error | `action=`, `method=`, `formaction=` (use `hx-*` instead) |
+| `htmx-conflict` | error | Same element has both `hx-*` and a native form attribute |
 | `img-alt` | warning | `<img>` missing `alt` attribute |
 | `no-href` | warning | `<a>` missing `href` attribute |
 | `inline-style` | warning | Inline `style` attributes |
 | `empty-class` | warning | Empty `class=""` attributes |
 | `js-href` | warning | `href="javascript:..."` links |
+
+Configure in `hamr.toml` under `[lint.templ]` — each rule mapped to `"warning"`, `"error"`, or `"off"`. Rules not listed are disabled. Unknown rule IDs and invalid severities fail loudly.
 
 **Guide:** [Templint](pkg/templint.md) covers rules, configuration, and library usage.
 

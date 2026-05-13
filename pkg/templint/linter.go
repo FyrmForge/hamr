@@ -12,43 +12,49 @@ type Linter struct {
 	rules []Rule
 }
 
-// New creates a Linter with rules configured by the given Config.
-// Pass nil for default configuration (all rules enabled).
-func New(cfg *Config) *Linter {
-	var rules []Rule
-
-	// Control flow rules (default: error)
-	if cfg.IsEnabled("inline-if") {
-		rules = append(rules, &inlineIfRule{severity: cfg.GetSeverity("inline-if", Error)})
-	}
-	if cfg.IsEnabled("inline-for") {
-		rules = append(rules, &inlineForRule{severity: cfg.GetSeverity("inline-for", Error)})
-	}
-	if cfg.IsEnabled("inline-switch") {
-		rules = append(rules, &inlineSwitchRule{severity: cfg.GetSeverity("inline-switch", Error)})
-	}
-
-	// Accessibility rules (default: warning)
-	if cfg.IsEnabled("img-alt") {
-		rules = append(rules, &imgAltRule{severity: cfg.GetSeverity("img-alt", Warning)})
-	}
-	if cfg.IsEnabled("no-href") {
-		rules = append(rules, &noHrefRule{severity: cfg.GetSeverity("no-href", Warning)})
-	}
-
-	// Style rules (default: warning)
-	if cfg.IsEnabled("inline-style") {
-		rules = append(rules, &inlineStyleRule{severity: cfg.GetSeverity("inline-style", Warning)})
-	}
-	if cfg.IsEnabled("empty-class") {
-		rules = append(rules, &emptyClassRule{severity: cfg.GetSeverity("empty-class", Warning)})
-	}
-	if cfg.IsEnabled("js-href") {
-		rules = append(rules, &jsHrefRule{severity: cfg.GetSeverity("js-href", Warning)})
-	}
-
-	return &Linter{rules: rules}
+// ruleDef holds the static metadata for a single lint rule.
+type ruleDef struct {
+	ctor       func(Severity) Rule
+	defaultSev Severity
 }
+
+// rules is the single registry of every known rule, keyed by ID. Both the
+// constructor and the recommended default severity live in one entry to
+// prevent the two from drifting out of sync.
+var rules = map[string]ruleDef{
+	"inline-if":              {func(s Severity) Rule { return &inlineIfRule{severity: s} }, Error},
+	"inline-for":             {func(s Severity) Rule { return &inlineForRule{severity: s} }, Error},
+	"inline-switch":          {func(s Severity) Rule { return &inlineSwitchRule{severity: s} }, Error},
+	"no-native-form-actions": {func(s Severity) Rule { return &noNativeFormActionsRule{severity: s} }, Error},
+	"htmx-conflict":          {func(s Severity) Rule { return &htmxConflictRule{severity: s} }, Error},
+	"img-alt":                {func(s Severity) Rule { return &imgAltRule{severity: s} }, Warning},
+	"no-href":                {func(s Severity) Rule { return &noHrefRule{severity: s} }, Warning},
+	"inline-style":           {func(s Severity) Rule { return &inlineStyleRule{severity: s} }, Warning},
+	"empty-class":            {func(s Severity) Rule { return &emptyClassRule{severity: s} }, Warning},
+	"js-href":                {func(s Severity) Rule { return &jsHrefRule{severity: s} }, Warning},
+}
+
+// New creates a Linter configured by the given Config. Only rules listed in
+// cfg.Rules are enabled; passing nil or an empty Config yields a linter that
+// reports nothing.
+func New(cfg *Config) *Linter {
+	if cfg == nil || len(cfg.Rules) == 0 {
+		return &Linter{}
+	}
+	var active []Rule
+	for _, id := range AllRuleIDs() {
+		sev, ok := cfg.Rules[id]
+		if !ok {
+			continue
+		}
+		active = append(active, rules[id].ctor(sev))
+	}
+	return &Linter{rules: active}
+}
+
+// RuleCount returns the number of rules registered on this Linter (the number
+// of rules that will run on each LintFile call).
+func (l *Linter) RuleCount() int { return len(l.rules) }
 
 // LintFile lints a single file and returns diagnostics.
 func (l *Linter) LintFile(path string) ([]Diagnostic, error) {

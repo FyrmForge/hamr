@@ -3,31 +3,29 @@ package templint
 import (
 	"fmt"
 	"os"
+	"sort"
 
 	"github.com/BurntSushi/toml"
 )
 
-// RuleConfig holds per-rule configuration.
-type RuleConfig struct {
-	Enabled  *bool  `toml:"enabled"`
-	Severity string `toml:"severity"`
-}
-
-// Config holds the linter configuration.
+// Config holds the linter configuration. Rules maps a rule ID to the
+// severity it should report at; rules not present in the map are disabled.
 type Config struct {
-	Rules map[string]RuleConfig `toml:"rules"`
+	Rules map[string]Severity
 }
 
-// tomlFile mirrors the hamr.toml structure so we can decode the
-// [lint.templ] section directly.
 type tomlFile struct {
 	Lint struct {
-		Templ Config `toml:"templ"`
+		Templ map[string]string `toml:"templ"`
 	} `toml:"lint"`
 }
 
 // LoadConfig reads a hamr.toml file and returns the parsed [lint.templ] Config.
-// Returns nil if the file does not exist (use defaults).
+// Returns nil if the file does not exist or the section is empty.
+//
+// Each entry is a rule ID mapped to one of "warning", "error", or "off".
+// An entry of "off" is equivalent to omitting the rule. Unknown rule IDs and
+// invalid severities are returned as errors.
 func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -41,41 +39,43 @@ func LoadConfig(path string) (*Config, error) {
 	if err := toml.Unmarshal(data, &f); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
-	if len(f.Lint.Templ.Rules) == 0 {
+	if len(f.Lint.Templ) == 0 {
 		return nil, nil
 	}
-	return &f.Lint.Templ, nil
+
+	cfg := &Config{Rules: make(map[string]Severity)}
+	for id, sevStr := range f.Lint.Templ {
+		if _, ok := rules[id]; !ok {
+			return nil, fmt.Errorf("unknown rule %q in [lint.templ] (known: %v)", id, AllRuleIDs())
+		}
+		if sevStr == "off" {
+			continue
+		}
+		sev, err := ParseSeverity(sevStr)
+		if err != nil {
+			return nil, fmt.Errorf("rule %q in [lint.templ]: %w", id, err)
+		}
+		cfg.Rules[id] = sev
+	}
+	return cfg, nil
 }
 
-// IsEnabled returns whether a rule is enabled in this config.
-// Returns true if the config is nil or the rule is not configured.
-func (c *Config) IsEnabled(ruleID string) bool {
-	if c == nil || c.Rules == nil {
-		return true
+// AllRuleIDs returns the sorted IDs of every rule registered with the linter.
+func AllRuleIDs() []string {
+	ids := make([]string, 0, len(rules))
+	for id := range rules {
+		ids = append(ids, id)
 	}
-	rc, ok := c.Rules[ruleID]
-	if !ok {
-		return true
-	}
-	if rc.Enabled == nil {
-		return true
-	}
-	return *rc.Enabled
+	sort.Strings(ids)
+	return ids
 }
 
-// GetSeverity returns the configured severity for a rule, falling back to
-// the provided default if not configured.
-func (c *Config) GetSeverity(ruleID string, defaultSev Severity) Severity {
-	if c == nil || c.Rules == nil {
-		return defaultSev
+// DefaultSeverity returns the recommended default severity for a rule, used
+// when callers need to enable a rule without an explicit severity (e.g. the
+// --rule CLI flag). Returns Warning for unknown rule IDs.
+func DefaultSeverity(id string) Severity {
+	if def, ok := rules[id]; ok {
+		return def.defaultSev
 	}
-	rc, ok := c.Rules[ruleID]
-	if !ok || rc.Severity == "" {
-		return defaultSev
-	}
-	sev, err := ParseSeverity(rc.Severity)
-	if err != nil {
-		return defaultSev
-	}
-	return sev
+	return Warning
 }

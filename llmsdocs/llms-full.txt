@@ -1206,18 +1206,27 @@ type Rule interface {
 #### Configuration
 
 ```go
-type RuleConfig struct {
-    Enabled  *bool  `toml:"enabled"`
-    Severity string `toml:"severity"`
-}
-
 type Config struct {
-    Rules map[string]RuleConfig `toml:"rules"`
+    Rules map[string]Severity  // rule ID -> severity to report at; rules absent from the map are disabled
 }
 
-func LoadConfig(path string) (*Config, error)  // reads [lint.templ] from hamr.toml; nil if missing
-func (c *Config) IsEnabled(ruleID string) bool // true if nil config or rule not configured
-func (c *Config) GetSeverity(ruleID string, defaultSev Severity) Severity
+func LoadConfig(path string) (*Config, error)
+// Reads [lint.templ] from hamr.toml as a flat `rule = "warning"|"error"|"off"` map.
+// Returns nil if the file is missing or [lint.templ] is empty.
+// Unknown rule IDs and invalid severities return an error.
+
+func AllRuleIDs() []string                     // sorted IDs of every known rule
+func DefaultSeverity(id string) Severity       // recommended default; Warning for unknown IDs
+```
+
+```toml
+# Example [lint.templ] block. Rules omitted from this section are disabled;
+# "off" is equivalent to omitting the rule.
+[lint.templ]
+inline-if              = "error"
+no-native-form-actions = "error"
+img-alt                = "warning"
+inline-style           = "off"
 ```
 
 #### Linter
@@ -1225,7 +1234,7 @@ func (c *Config) GetSeverity(ruleID string, defaultSev Severity) Severity
 ```go
 type Linter struct{ /* unexported */ }
 
-func New(cfg *Config) *Linter  // nil cfg = all rules enabled with defaults
+func New(cfg *Config) *Linter  // nil cfg or empty Rules = nothing runs; only listed rules are enabled
 func (l *Linter) LintFile(path string) ([]Diagnostic, error)
 func (l *Linter) LintDir(dir string) ([]Diagnostic, error)
 
@@ -1240,6 +1249,8 @@ func HasErrors(diags []Diagnostic) bool
 | `inline-if` | Error | `if cond { <html>` on same line (silently dropped by templ) |
 | `inline-for` | Error | `for expr { <html>` on same line |
 | `inline-switch` | Error | `switch expr { <html>` on same line |
+| `no-native-form-actions` | Error | `action=`, `method=`, or `formaction=` attribute on any element — use `hx-*` instead |
+| `htmx-conflict` | Error | Same element has both an `hx-*` attribute and a native form attribute |
 | `img-alt` | Warning | `<img>` tags missing `alt` attribute |
 | `no-href` | Warning | `<a>` tags missing `href` attribute |
 | `inline-style` | Warning | `style="..."` or `style={` attributes |
