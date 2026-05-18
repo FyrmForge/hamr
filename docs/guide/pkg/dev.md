@@ -327,14 +327,21 @@ The 🔨 emoji reflects overall state:
 | `/` | Search the active tab (case-insensitive substring) | Live: highlights and `[k/n]` counter update as you type. `↩` locks in, `Esc` cancels; per-tab persistent. |
 | `n` / `N` | Jump to next / previous search match | Wraps at ends. |
 | `f` | Toggle filter view (active search only) | Hides every line that doesn't contain the search term; press again to restore. |
-| `Esc` | Clear the active search | |
+| `Esc` | Clear the active search OR selection | If both are live, the first `Esc` drops the selection, a second clears the search. |
 | `?` | Toggle the help overlay | Lists every binding including scroll keys. |
 | `q` / `Ctrl+C` | Quit gracefully | |
 | `↑` / `↓` | Scroll the log viewport line by line | |
 | `PgUp` / `PgDn` | Scroll the log viewport by page | |
 | Mouse wheel | Scroll the log viewport | |
+| Click | Select a log line | Selects the whole logical line, even when soft-wrapped across visual rows. Replaces any previous selection. |
+| Click + drag | Extend selection across multiple lines | Press, drag down or up to grow the range. Dragging past the top or bottom edge auto-scrolls (one line per ~50 ms) so you can pick a range larger than the viewport. Stops at the buffer's scroll limits. |
+| Shift+Click | Extend selection to clicked line | Inclusive range from the anchor (the most recent plain or range click). |
+| Ctrl+Click | Toggle one line in/out of the selection | Anchor follows the click for subsequent shift-clicks. Drag motion under ctrl is ignored — ctrl is a single-line toggle, not a range gesture. |
+| `y` | Copy the selected lines to the clipboard | Joined with newlines, ANSI escapes stripped. Selection clears after copy. Clipboard errors surface as a `[hamr:tui] clipboard: ...` line on the hamr tab. |
 
 There is no dedicated wipe hotkey. The browser dev panel still exposes "wipe & recreate" per compose entry (and any HTTP client can hit `DevActions`' `/__hamr/docker/{name}/wipe` route). To wipe from the TUI, define a Makefile target that runs `docker compose -f <file> down -v && docker compose -f <file> up -d` (or whatever recovery you prefer) and trigger it via `m` — the floating "running" box keeps you informed and `q` aborts mid-run.
+
+While at least one log line is selected the bottom hint bar swaps to `[N selected]   y copy   esc clear` and log auto-scroll is paused — the lines you picked stay where they are even as new output streams in. Selection is intentionally **not** per-tab: `Tab` cycling drops it because the stored buffer indices wouldn't line up against the destination tab's buffer. Buffer eviction at the 5000-line cap shifts selection indices in lockstep, dropping anything that scrolls off the start.
 
 ### Docker log tabs
 

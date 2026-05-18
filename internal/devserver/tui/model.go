@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/FyrmForge/hamr/internal/devserver"
 	"github.com/charmbracelet/bubbles/key"
@@ -143,6 +144,18 @@ type Model struct {
 	hamrSearch     *searchState
 	dockerSearches map[string]*searchState
 
+	// Mouse-click line selection. Only one selection exists at a time
+	// — switching tabs clears it because the stored line indices refer
+	// to whichever buffer was active when the selection was made.
+	selection *selectionState
+
+	// Drag state for click-and-drag selection. Active between left
+	// press and left release; while active, motion events extend the
+	// selection. When the cursor is outside the viewport rows the
+	// auto-scroll loop scrolls one line per tick toward it and keeps
+	// extending so the user can pick a range larger than the viewport.
+	drag dragState
+
 	errors []string // current rule names with errors (for status bar)
 
 	versionStatus devserver.VersionStatus
@@ -166,6 +179,17 @@ func NewModel(hotkeys *HotkeySource) *Model {
 // hamr tab. Tests that don't exercise the run feature can leave it nil
 // — dispatchRun fails gracefully with an explanatory message.
 func (m *Model) SetMakeOutput(w io.Writer) { m.makeOut = w }
+
+// activeSelection returns the lazily-allocated selection state. A
+// single state covers the whole TUI because switching tabs clears
+// the selection — the stored buffer indices wouldn't be meaningful
+// against a different tab's buffer.
+func (m *Model) activeSelection() *selectionState {
+	if m.selection == nil {
+		m.selection = &selectionState{}
+	}
+	return m.selection
+}
 
 // activeSearch returns the search state for the current tab, lazily
 // allocating it. Per-tab so cycling away and back preserves the query
@@ -275,6 +299,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 
 	case tea.MouseMsg:
+		// Release ends an in-flight drag regardless of modal state, so a
+		// modal opening mid-drag can't leave the drag stuck active.
+		if msg.Action == tea.MouseActionRelease {
+			m.endDrag()
+		}
 		// Modal overlays own input — wheel under a modal would otherwise
 		// scroll the log pane behind it, which is disorienting.
 		if m.help.active() || m.run.active() {
@@ -283,9 +312,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.ready {
 			return m, nil
 		}
+		// Left button: press starts a drag (with modifier semantics),
+		// motion extends. Wheel and other buttons fall through to the
+		// viewport for normal scroll handling.
+		if msg.Button == tea.MouseButtonLeft {
+			switch msg.Action {
+			case tea.MouseActionPress:
+				return m, m.startDrag(msg)
+			case tea.MouseActionMotion:
+				return m, m.continueDrag(msg)
+			}
+		}
 		var cmd tea.Cmd
 		m.view, cmd = m.view.Update(msg)
 		return m, cmd
+
+	case dragScrollMsg:
+		return m, m.tickDrag()
 	}
 	return m, nil
 }
@@ -343,6 +386,22 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// query — no other binding can fire. Ctrl+C still quits.
 	if s := m.activeSearch(); s.prompting() {
 		return m.handleSearchPrompt(s, msg)
+	}
+
+	// Selection takes priority over the search-active esc handler so
+	// "esc clears the most recent thing the user did" reads naturally
+	// when both states are live: first esc drops the selection, a
+	// second esc clears the search.
+	if sel := m.activeSelection(); sel.hasAny() {
+		switch key {
+		case "y":
+			m.copySelection()
+			return m, nil
+		case "esc":
+			sel.clear()
+			m.refreshViewport()
+			return m, nil
+		}
 	}
 
 	// Active (committed) search adds n/N navigation, esc clears, f
@@ -455,8 +514,14 @@ func appendCapped(buf []string, line string, max int) []string {
 // active search's match list, and repaints the viewport when the hamr
 // tab is the one currently visible. Background tabs still update
 // their search counter so cycling back surfaces an accurate "[k/n]".
+// When the bounded buffer trims its head the active selection is
+// shifted in lockstep so its line indices stay aligned.
 func (m *Model) appendHamrLog(line string) {
+	before := len(m.hamrLogs)
 	m.hamrLogs = appendCapped(m.hamrLogs, line, m.maxLogs)
+	if evicted := before + 1 - len(m.hamrLogs); evicted > 0 && m.viewMode == 0 {
+		m.activeSelection().shiftEvicted(evicted)
+	}
 	if s := m.hamrSearch; s != nil && s.active() {
 		s.recompute(m.hamrLogs)
 	}
@@ -469,12 +534,19 @@ func (m *Model) appendHamrLog(line string) {
 // the same active/background semantics as appendHamrLog. A line for
 // an unregistered tab is still buffered: once dockerStacksMsg
 // announces the name, the existing content shows up on Tab cycle.
+// Selection-shift mirrors the hamr path — only the visible tab's
+// selection cares, since switching tabs clears it anyway.
 func (m *Model) appendDockerLog(name, line string) {
+	before := len(m.dockerLogs[name])
 	m.dockerLogs[name] = appendCapped(m.dockerLogs[name], line, m.maxLogs)
+	tabIx := m.dockerTabIndex(name)
+	if evicted := before + 1 - len(m.dockerLogs[name]); evicted > 0 && tabIx >= 0 && m.viewMode == tabIx+1 {
+		m.activeSelection().shiftEvicted(evicted)
+	}
 	if s, ok := m.dockerSearches[name]; ok && s.active() {
 		s.recompute(m.dockerLogs[name])
 	}
-	if ix := m.dockerTabIndex(name); ix >= 0 && m.viewMode == ix+1 {
+	if tabIx >= 0 && m.viewMode == tabIx+1 {
 		m.refreshViewport()
 	}
 }
@@ -515,27 +587,73 @@ func (m *Model) currentLogs() []string {
 	return m.dockerLogs[m.dockerTabs[ix]]
 }
 
-// refreshViewport repaints the viewport with the active tab's contents,
-// preserving scroll-bottom-tracking semantics: only auto-scroll when the
-// user is already at the bottom, so PgUp scrollback isn't yanked away.
-// When a search is in progress (prompting or active) on the tab the
-// matches are rendered with highlight ANSI and bottom-tracking is
-// suspended — searching the bottom of the buffer shouldn't tug the
-// cursor back to the latest line on every keystroke.
+// refreshViewport repaints the viewport with the active tab's contents.
+// Auto-scroll-to-bottom is preserved when the user is already at the
+// bottom — but suspended whenever a search OR a selection is active,
+// because either case implies the user is reading something specific
+// and shouldn't have their view yanked by incoming logs.
 func (m *Model) refreshViewport() {
 	if !m.ready {
 		return
 	}
 	atBottom := m.view.AtBottom()
-	logs := m.currentLogs()
-	if s := m.activeSearch(); s.active() {
-		m.setViewContent(renderHighlights(logs, s))
-		return
-	}
-	m.setViewContent(strings.Join(logs, "\n"))
-	if atBottom {
+	perLine, bufferIx := m.renderedLines()
+	sel := m.activeSelection()
+	content := renderWithSelection(perLine, bufferIx, sel, m.view.Width)
+	m.view.SetContent(content)
+	if atBottom && !m.activeSearch().active() && !sel.hasAny() {
 		m.view.GotoBottom()
 	}
+}
+
+// renderedLines returns the per-line strings the viewport should show
+// alongside the buffer-line index each entry corresponds to. The
+// parallel index slice is what selection rendering uses to know which
+// rendered rows belong to a selected logical buffer line — important
+// because filter mode reorders/omits lines, so a rendered row's
+// position is no longer the same as its buffer position.
+func (m *Model) renderedLines() ([]string, []int) {
+	logs := m.currentLogs()
+	s := m.activeSearch()
+	if !s.active() {
+		ix := identityIndex(len(logs))
+		return logs, ix
+	}
+	if s.filtering && s.stage == searchActive && len(s.matches) > 0 {
+		order := s.matchedLineOrder()
+		out := make([]string, 0, len(order))
+		ix := make([]int, 0, len(order))
+		byLine := groupMatchesByLine(s.matches)
+		cur := s.currentMatch()
+		for _, lineIx := range order {
+			if lineIx < 0 || lineIx >= len(logs) {
+				continue
+			}
+			out = append(out, renderHighlightLine(logs[lineIx], byLine[lineIx], cur))
+			ix = append(ix, lineIx)
+		}
+		return out, ix
+	}
+	// Inline highlight: every buffer line is emitted; lines without
+	// matches pass through unchanged so cost is bounded by hit count.
+	byLine := groupMatchesByLine(s.matches)
+	cur := s.currentMatch()
+	out := make([]string, len(logs))
+	for i, line := range logs {
+		out[i] = renderHighlightLine(line, byLine[i], cur)
+	}
+	return out, identityIndex(len(logs))
+}
+
+// identityIndex returns [0, 1, ..., n-1]. Used as the parallel
+// buffer-index slice when the rendered per-line slice is just the
+// buffer in order.
+func identityIndex(n int) []int {
+	ix := make([]int, n)
+	for i := range ix {
+		ix[i] = i
+	}
+	return ix
 }
 
 // handleSearchPrompt routes keystrokes while the user is typing a
@@ -625,61 +743,16 @@ func (m *Model) onSearchCursorChange() {
 	m.view.SetYOffset(target)
 }
 
-// renderHighlights returns a renderable view of logs given the search
-// state. With filtering off, every line is emitted with match ANSI
-// inserted in place; with filtering on, only lines that contain at
-// least one match are emitted. Lines without any matches pass through
-// unchanged in the inline path so the cost is bounded by the match
-// count, not the buffer size.
-func renderHighlights(logs []string, s *searchState) string {
-	if s == nil || s.stage == searchClosed {
-		return strings.Join(logs, "\n")
+// renderHighlightLine emits one log line with the search-match ANSI
+// inserted in place. Lines without matches return unchanged so the
+// caller can use this on every entry without paying for builders on
+// the no-hit case.
+func renderHighlightLine(line string, ms []searchMatch, cur searchMatch) string {
+	if len(ms) == 0 {
+		return line
 	}
-	if s.filtering && s.stage == searchActive {
-		return renderFiltered(logs, s)
-	}
-	return renderInline(logs, s)
-}
-
-func renderInline(logs []string, s *searchState) string {
-	if len(s.matches) == 0 {
-		return strings.Join(logs, "\n")
-	}
-	byLine := groupMatchesByLine(s.matches)
-	cur := s.currentMatch()
-
 	var b strings.Builder
-	for i, line := range logs {
-		if i > 0 {
-			b.WriteByte('\n')
-		}
-		writeLineWithHighlights(&b, line, byLine[i], cur)
-	}
-	return b.String()
-}
-
-// renderFiltered emits one rendered line per matched line in the
-// buffer, preserving the buffer's top-to-bottom order. Lines without
-// matches are omitted entirely. The cursor's source line is
-// highlighted with the brighter "current" style same as inline mode.
-func renderFiltered(logs []string, s *searchState) string {
-	if len(s.matches) == 0 {
-		return ""
-	}
-	byLine := groupMatchesByLine(s.matches)
-	cur := s.currentMatch()
-	order := s.matchedLineOrder()
-
-	var b strings.Builder
-	for i, lineIx := range order {
-		if i > 0 {
-			b.WriteByte('\n')
-		}
-		if lineIx < 0 || lineIx >= len(logs) {
-			continue
-		}
-		writeLineWithHighlights(&b, logs[lineIx], byLine[lineIx], cur)
-	}
+	writeLineWithHighlights(&b, line, ms, cur)
 	return b.String()
 }
 
@@ -718,16 +791,209 @@ func writeLineWithHighlights(b *strings.Builder, line string, ms []searchMatch, 
 }
 
 // clearActiveLog empties the buffer for the currently visible tab and
-// resets the viewport.
+// resets the viewport. Any line selection is dropped — the indices it
+// holds would point into a now-empty buffer.
 func (m *Model) clearActiveLog() {
 	if m.viewMode == 0 {
 		m.hamrLogs = m.hamrLogs[:0]
 	} else if ix := m.viewMode - 1; ix >= 0 && ix < len(m.dockerTabs) {
 		m.dockerLogs[m.dockerTabs[ix]] = nil
 	}
+	m.activeSelection().clear()
 	if m.ready {
 		m.setViewContent("")
 	}
+}
+
+// dragState tracks an in-flight click-and-drag selection. Active
+// runs from the left-press that started the drag through to the
+// release that ends it; extend gates whether motion events grow the
+// selection (true for plain/shift drag, false for ctrl drag — ctrl
+// is a one-shot toggle, not a range gesture). lastY is the most
+// recent reported screen Y, used by the auto-scroll tick to keep
+// extending toward the cursor between motion events.
+type dragState struct {
+	active bool
+	extend bool
+	lastY  int
+}
+
+// dragScrollMsg fires on a tea.Tick while the cursor sits past the
+// viewport edge during an active extending drag. Each firing scrolls
+// one line in the direction of the cursor and re-extends the
+// selection, then schedules another firing if the cursor is still
+// past the edge and the viewport hasn't hit its scroll limit.
+type dragScrollMsg struct{}
+
+// dragScrollInterval is the cadence of the auto-scroll loop. Fast
+// enough to feel responsive when dragging past the edge but slow
+// enough that 5000-line buffers don't blink past in half a second.
+const dragScrollInterval = 50 * time.Millisecond
+
+// startDrag responds to a left-press inside the viewport rows. The
+// modifier mapping mirrors VS Code / Finder: plain replaces the
+// selection with the clicked line, shift extends from the existing
+// anchor, ctrl toggles one line in/out. Press above the status bar or
+// below the hint bar is ignored. After the press the drag state is
+// armed so subsequent motion events extend the selection.
+func (m *Model) startDrag(msg tea.MouseMsg) tea.Cmd {
+	if msg.Y < 1 || msg.Y >= m.height-1 {
+		return nil
+	}
+	line := m.lineAtScreenY(msg.Y)
+	if line < 0 {
+		return nil
+	}
+	sel := m.activeSelection()
+	switch {
+	case msg.Shift:
+		sel.clickRange(line)
+	case msg.Ctrl:
+		sel.clickToggle(line)
+	default:
+		sel.clickPlain(line)
+	}
+	m.refreshViewport()
+	m.drag = dragState{active: true, extend: !msg.Ctrl, lastY: msg.Y}
+	return m.maybeAutoScroll()
+}
+
+// continueDrag responds to motion events with the left button held.
+// Plain/shift drags grow the selection to the line currently under
+// the cursor (clamped to the topmost/bottommost visible line when the
+// cursor is past the edge). Ctrl drags are no-ops — the ctrl gesture
+// is a single-line toggle, not a range.
+func (m *Model) continueDrag(msg tea.MouseMsg) tea.Cmd {
+	if !m.drag.active || !m.drag.extend {
+		return nil
+	}
+	m.drag.lastY = msg.Y
+	if line := m.lineAtScreenY(msg.Y); line >= 0 {
+		m.activeSelection().clickRange(line)
+		m.refreshViewport()
+	}
+	return m.maybeAutoScroll()
+}
+
+// endDrag clears the drag state. Called on left-release and also
+// pre-emptively when a modal opens — a stuck drag would surprise
+// the next click.
+func (m *Model) endDrag() {
+	m.drag = dragState{}
+}
+
+// tickDrag handles a dragScrollMsg: scroll one line toward the
+// cursor, extend the selection to the new edge line, and schedule
+// the next tick if the drag is still past the edge. Returns nil to
+// stop the loop when the drag has ended, the cursor moved back inside
+// the viewport, or the viewport hit its scroll limit.
+func (m *Model) tickDrag() tea.Cmd {
+	if !m.drag.active || !m.drag.extend {
+		return nil
+	}
+	switch m.dragEdge() {
+	case -1:
+		if m.view.AtTop() {
+			return nil
+		}
+		m.view.SetYOffset(m.view.YOffset - 1)
+	case 1:
+		if m.view.AtBottom() {
+			return nil
+		}
+		m.view.SetYOffset(m.view.YOffset + 1)
+	default:
+		return nil
+	}
+	if line := m.lineAtScreenY(m.drag.lastY); line >= 0 {
+		m.activeSelection().clickRange(line)
+		m.refreshViewport()
+	}
+	return m.maybeAutoScroll()
+}
+
+// maybeAutoScroll returns a tick command when the drag cursor is past
+// a viewport edge and the viewport can still scroll in that direction.
+// Returns nil when the cursor is inside the viewport (no auto-scroll
+// needed) or the scroll limit is hit (nothing more to reveal).
+func (m *Model) maybeAutoScroll() tea.Cmd {
+	if !m.drag.active || !m.drag.extend {
+		return nil
+	}
+	switch m.dragEdge() {
+	case -1:
+		if m.view.AtTop() {
+			return nil
+		}
+	case 1:
+		if m.view.AtBottom() {
+			return nil
+		}
+	default:
+		return nil
+	}
+	return tea.Tick(dragScrollInterval, func(time.Time) tea.Msg { return dragScrollMsg{} })
+}
+
+// dragEdge classifies the most recent drag Y: -1 if above the
+// viewport, +1 if below, 0 if inside.
+func (m *Model) dragEdge() int {
+	switch {
+	case m.drag.lastY < 1:
+		return -1
+	case m.drag.lastY >= m.height-1:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// lineAtScreenY converts a screen Y to a buffer line index. Y values
+// inside the viewport translate via the wrap-aware row map; values
+// outside are clamped to the topmost or bottommost visible line so a
+// drag past the edge keeps extending against the boundary line until
+// auto-scroll reveals more. Returns -1 when the buffer is empty.
+func (m *Model) lineAtScreenY(y int) int {
+	perLine, bufferIx := m.renderedLines()
+	if len(perLine) == 0 {
+		return -1
+	}
+	var visualRow int
+	switch {
+	case y < 1:
+		visualRow = m.view.YOffset
+	case y >= m.height-1:
+		visualRow = m.view.YOffset + m.view.Height - 1
+	default:
+		visualRow = (y - 1) + m.view.YOffset
+	}
+	pos := visualRowToLine(perLine, m.view.Width, visualRow)
+	if pos < 0 || pos >= len(bufferIx) {
+		// Past the rendered content (short buffer with empty viewport
+		// rows below) — clamp to the last line so a drag past the end
+		// still extends to it.
+		return bufferIx[len(bufferIx)-1]
+	}
+	return bufferIx[pos]
+}
+
+// copySelection writes the active selection's lines to the system
+// clipboard as plaintext. On error (xclip / wl-copy / pbcopy missing)
+// the failure surfaces as a hamr-tab log line so the user can see
+// what went wrong instead of a silent no-op. On success the selection
+// is cleared — keeping it would offer nothing the user couldn't
+// reproduce by re-clicking.
+func (m *Model) copySelection() {
+	sel := m.activeSelection()
+	if !sel.hasAny() {
+		return
+	}
+	if err := sel.copyToClipboard(m.currentLogs()); err != nil {
+		m.appendHamrLog("[hamr:tui] clipboard: " + err.Error())
+		return
+	}
+	sel.clear()
+	m.refreshViewport()
 }
 
 // cycleTab advances the viewMode forward or backward through the tab
@@ -735,12 +1001,14 @@ func (m *Model) clearActiveLog() {
 // preserving per-tab scroll position is a nice-to-have we can revisit.
 // If the destination tab has an active search, refreshViewport applies
 // its highlights and we don't auto-scroll, so the prior cursor match
-// stays in view.
+// stays in view. Any active line selection is dropped — its indices
+// referred to the previous tab's buffer.
 func (m *Model) cycleTab(forward bool) {
 	total := 1 + len(m.dockerTabs)
 	if total <= 1 {
 		return
 	}
+	m.activeSelection().clear()
 	if forward {
 		m.viewMode = (m.viewMode + 1) % total
 	} else {
@@ -754,7 +1022,7 @@ func (m *Model) cycleTab(forward bool) {
 		m.onSearchCursorChange()
 		return
 	}
-	m.setViewContent(strings.Join(m.currentLogs(), "\n"))
+	m.refreshViewport()
 	m.view.GotoBottom()
 }
 
@@ -1149,6 +1417,28 @@ func (m *Model) searchHintBar(s *searchState) string {
 	return leftContent + hintPad(gap) + right + hintPad(trail)
 }
 
+// selectionHintBar swaps the regular keybinding row for the
+// selection-mode prompt while one or more lines are selected. Same
+// width-fill rule as the regular hint bar so the bottom row stays
+// solid colour edge-to-edge.
+//
+//	[N selected]                           y copy   esc clear
+func (m *Model) selectionHintBar(sel *selectionState) string {
+	left := hintPad(1) +
+		statusDim.Render(fmt.Sprintf("[%d selected]", sel.count()))
+	right := statusKey.Render("y") + statusDim.Render(" copy  ") +
+		statusKey.Render("esc") + statusDim.Render(" clear")
+
+	leftW := lipgloss.Width(left)
+	rightW := lipgloss.Width(right)
+	const trail = 1
+	gap := m.width - leftW - rightW - trail
+	if gap < 1 {
+		return left + hintPad(m.width-leftW)
+	}
+	return left + hintPad(gap) + right + hintPad(trail)
+}
+
 // activeTabIcon returns the styled icon glyph for the current tab.
 func (m *Model) activeTabIcon() string {
 	if m.viewMode == 0 {
@@ -1229,7 +1519,17 @@ func (m *Model) hintBar() string {
 	if m.width <= 0 {
 		return ""
 	}
-	if s := m.activeSearch(); s.active() {
+	// Priority: search-prompting must win because every key is the
+	// query; then selection (its `y`/`esc` keys would otherwise be
+	// invisible); then ordinary search-active; then the default row.
+	s := m.activeSearch()
+	if s.prompting() {
+		return m.searchHintBar(s)
+	}
+	if sel := m.activeSelection(); sel.hasAny() {
+		return m.selectionHintBar(sel)
+	}
+	if s.active() {
 		return m.searchHintBar(s)
 	}
 	left := []string{

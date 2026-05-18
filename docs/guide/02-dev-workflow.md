@@ -61,16 +61,25 @@ Hotkeys include a Makefile-target runner, a help overlay, and per-stack log tabs
 | `/` | Search the active tab — incremental: matches highlight in yellow as you type, the first hit jumps into view, `[k/n]` counter updates per keystroke. `↩` locks the query in for navigation, `Esc` cancels. |
 | `n` / `N` | Jump to next / previous match (after committing a search). Wraps at the ends. |
 | `f` | Toggle filter view (only after committing) — hides every line that doesn't contain the search term. Press `f` again to restore the full view. |
-| `Esc` | Clear the active search highlights |
+| `Esc` | Clear the active search highlights — or, if a line selection is live, clear that first (one `Esc` per state) |
 | `?` | Toggle the help overlay (lists every binding) |
 | `q` / `Ctrl+C` | Quit |
 | `↑` / `↓` | Scroll the log viewport line by line |
 | `PgUp` / `PgDn` | Scroll the log viewport by page |
 | Mouse wheel | Scroll the log viewport |
+| Click | Select a log line (the whole logical line, even when soft-wrapped) |
+| Click + drag | Extend the selection across multiple lines; dragging past the top or bottom edge auto-scrolls so you can pick a range larger than the viewport |
+| Shift+Click | Extend the selection from the anchor to the clicked line |
+| Ctrl+Click | Toggle one line in or out of the selection |
+| `y` | Copy the selected lines to the system clipboard (raw text, ANSI stripped) |
 
 The status bar's left side reflects the active tab: 🔨 `hamr dev` for the framework view, 🐳 `<name>` for each docker stack (the `name` from `[[dev.docker_compose]]`). When more than one tab exists the status bar shows `[k/n]` so you know where in the cycle you are.
 
 Search state is **per tab** — committing a query on the docker stack tab and cycling away to hamr keeps both searches alive independently; cycle back and the highlights and `n`/`N` cursor are right where you left them. New log lines arriving while a search is active are scanned and the match counter updates without you having to re-commit.
+
+Line selection (click, then `y` to copy) is reverse-video and replaces the bottom hint row with `[N selected]   y copy   esc clear` while live. Selection is **not** per-tab — cycling tabs drops it because the buffer indices wouldn't translate. While a selection is held, log auto-scroll is paused so the lines you picked don't get yanked off-screen by incoming output. Clipboard copy uses the OS helper (`xclip`/`wl-copy` on Linux, `pbcopy` on macOS); if the helper is missing the failure surfaces as a `[hamr:tui] clipboard: ...` line on the hamr tab instead of failing silently.
+
+`Shift+Click` and `Ctrl+Click` rely on the terminal forwarding the modifier flag through its mouse encoding. Modern terminals (Alacritty, WezTerm, Kitty, Ghostty, iTerm2) do; some others (older gnome-terminal, certain PuTTY builds) intercept shift to trigger native text selection instead — if the modifier doesn't reach the TUI, those clicks behave as plain clicks. Plain click and `y`/`esc` work everywhere mouse capture itself works.
 
 While a `make` target is running the floating "running" box swallows every key except `q` (cancel — sends `SIGINT` to `make`) and `Ctrl+C` (quits the TUI, taking children with it). Stdout and stderr stream into the hamr tab, prefixed `[make:<target>] ` per line. On exit the box switches to a `Done ✓` / `Failed ✗ (exit N)` summary that stays until you press any key. Define `docker-wipe`, `migrate`, or whatever else you need as Makefile targets and chain them however you like — `m` then becomes the single front door for project-specific scripts.
 

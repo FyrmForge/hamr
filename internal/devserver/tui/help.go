@@ -50,7 +50,7 @@ var helpEntries = []helpEntry{
 	{"/", "search the active tab — type live, ↩ commits, esc cancels"},
 	{"n / N", "next / previous match (after committing a search)"},
 	{"f", "toggle filter view — show only lines containing the search"},
-	{"esc", "clear the active search"},
+	{"esc", "clear the active search OR selection (selection first)"},
 	{"?", "toggle this help"},
 	{"q / Ctrl+C", "quit"},
 	{"", ""},
@@ -58,4 +58,9 @@ var helpEntries = []helpEntry{
 	{"PgUp / PgDn", "scroll log viewport by page"},
 	{"↩", "jump back to bottom and resume tailing"},
 	{"mouse wheel", "scroll log viewport"},
+	{"click", "select a log line (whole logical line, even when wrapped)"},
+	{"click+drag", "extend the selection; drag past the edge auto-scrolls"},
+	{"shift+click", "extend selection from anchor to clicked line"},
+	{"ctrl+click", "toggle one line in/out of the selection"},
+	{"y", "copy selected lines to clipboard (raw text, ANSI stripped)"},
 }

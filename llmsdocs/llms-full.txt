@@ -2761,12 +2761,17 @@ and any other project-defined scripts can be triggered from inside dev.
 | `/`                | Search active tab (case-insensitive substring, live)   |
 | `n` / `N`          | Next / previous search match                           |
 | `f`                | Toggle filter view (only matching lines)               |
-| `Esc`              | Clear the active search                                |
+| `Esc`              | Clear active selection (if any), else clear search     |
 | `?`                | Toggle help overlay listing every binding              |
 | `q` / Ctrl+C       | Quit gracefully                                        |
 | ↑ / ↓              | Scroll log viewport line by line                       |
 | PgUp / PgDn        | Scroll log viewport by page                            |
 | mouse wheel        | Scroll log viewport                                    |
+| click              | Select a log line (whole logical line, even wrapped)   |
+| click + drag       | Extend selection across lines; auto-scrolls past edges |
+| Shift+click        | Extend selection from anchor to clicked line           |
+| Ctrl+click         | Toggle one line in/out of the selection                |
+| `y`                | Copy selected lines to clipboard (raw text)            |
 
 The runner also spawns one `docker compose --ansi=always -f <file> logs -f --tail=50` follower per `[[dev.docker_compose]]` entry. Output flows into a dedicated per-entry buffer that Tab cycles through; the status bar's left badge switches between 🔨 `hamr dev` and 🐳 `<stack-name>` to indicate which buffer the viewport is showing. Followers self-restart after a wipe so the stream resumes once `up -d` brings the project back. `--ansi=always` is the top-level compose flag that forces colour through despite the no-TTY pipe target, so per-service prefix colours and any container ANSI render correctly inside the bubbles viewport.
 
@@ -2790,6 +2795,8 @@ recovery they need — the browser dev panel's `/__hamr/docker/{name}/wipe`
 HTTP route still exists for projects that prefer that surface.
 
 Long log lines soft-wrap to the viewport width (CSI escapes are passed through and don't count toward width); resizing the terminal re-wraps in place while preserving scroll-bottom-tracking. `q` and `Ctrl+C` quit cleanly even when the dev server is parked on a `hamr.toml` parse error — the config-error wait selects on the hotkey channel as well as fsnotify, so the user is never stuck on "waiting for config fix...".
+
+Mouse-click selection: a left-press inside the viewport selects the whole logical line (reverse-video, including every wrap row of the same line). Holding the button and dragging extends the selection — and dragging past the top or bottom viewport edge auto-scrolls (one line per ~50 ms via tea.Tick) so the user can pick a range larger than the viewport. The auto-scroll loop stops once the cursor moves back inside or the viewport hits its scroll limit. Shift+click extends from the existing anchor; Ctrl+click toggles one line and disables drag-extend (ctrl is a single-line gesture, not a range). Selection is **global, not per-tab** — switching tabs drops it because the stored buffer indices wouldn't translate to the destination tab's buffer. While at least one line is selected, the bottom hint bar swaps to `[N selected]   y copy   esc clear` and log auto-scroll is paused so the picked lines aren't yanked off-screen by incoming output. `y` joins the selected lines (in original buffer order), strips ANSI escapes, and writes the result to the system clipboard via `atotto/clipboard` (`xclip`/`xsel`/`wl-copy` on Linux, `pbcopy` on macOS, `clip.exe` on Windows). On clipboard error the failure is appended as a `[hamr:tui] clipboard: <err>` line on the hamr tab so the user can see why instead of getting silence; otherwise the selection clears post-copy. The bounded log buffer eviction shifts selection indices in lockstep, dropping anything that scrolls off the start.
 
 ### hamr add skill
 

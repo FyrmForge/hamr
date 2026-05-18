@@ -398,53 +398,55 @@ func TestSearch_FilteredCursorLineZeroWhenFilterOff(t *testing.T) {
 	}
 }
 
-func TestRenderFiltered_OnlyMatchedLinesEmitted(t *testing.T) {
-	var s searchState
-	s.open()
-	for _, r := range "err" {
-		s.appendRune(r)
-	}
-	logs := []string{
+func TestRenderedLines_FilterOnlyEmitsMatchedLines(t *testing.T) {
+	m := NewModel(NewHotkeySource())
+	m.hamrLogs = []string{
 		"all good",
 		"got an error here",
 		"ok",
 		"another error",
 	}
-	s.recompute(logs)
+	s := m.activeSearch()
+	s.open()
+	for _, r := range "err" {
+		s.appendRune(r)
+	}
+	s.recompute(m.hamrLogs)
 	s.commit(nil)
 	s.toggleFilter()
 
-	out := renderFiltered(logs, &s)
-	// Should contain the two error lines and not the "all good"/"ok" lines.
-	if !strings.Contains(out, "got an error here") {
-		t.Fatalf("filtered output missing first match line, got %q", out)
+	lines, ix := m.renderedLines()
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 emitted lines, got %d (%v)", len(lines), lines)
 	}
-	if !strings.Contains(out, "another error") {
-		t.Fatalf("filtered output missing second match line, got %q", out)
+	if !strings.Contains(lines[0], "got an error here") || !strings.Contains(lines[1], "another error") {
+		t.Fatalf("filtered output content wrong: %v", lines)
 	}
-	if strings.Contains(out, "all good") || strings.Contains(out, "ok") {
-		t.Fatalf("filtered output must not include non-matching lines, got %q", out)
-	}
-	// Two match lines → exactly one newline between them, no trailing.
-	if strings.Count(out, "\n") != 1 {
-		t.Fatalf("expected one newline separator, got output %q", out)
+	// Buffer indices should map back to the matched lines' positions.
+	if ix[0] != 1 || ix[1] != 3 {
+		t.Fatalf("buffer indices wrong: got %v want [1 3]", ix)
 	}
 }
 
-func TestRenderHighlights_FilterOnlyAppliesInActiveStage(t *testing.T) {
-	// Even with filtering=true, prompting should still render inline
-	// (with highlights but all lines visible) so the user has buffer
-	// context while typing.
-	var s searchState
+func TestRenderedLines_FilterIgnoredDuringPrompting(t *testing.T) {
+	// Even with filtering=true, prompting should still render every
+	// line (with inline highlights) so the user has buffer context
+	// while typing.
+	m := NewModel(NewHotkeySource())
+	m.hamrLogs = []string{"foo", "bar", "foo"}
+	s := m.activeSearch()
 	s.open()
 	for _, r := range "foo" {
 		s.appendRune(r)
 	}
-	s.recompute([]string{"foo", "bar", "foo"})
-	s.filtering = true // simulate carryover, even though open() resets
+	s.recompute(m.hamrLogs)
+	s.filtering = true // carryover simulation; open() normally resets it
 
-	out := renderHighlights([]string{"foo", "bar", "foo"}, &s)
-	if !strings.Contains(out, "bar") {
-		t.Fatalf("during prompting, non-matching lines must remain visible (no filter), got %q", out)
+	lines, _ := m.renderedLines()
+	if len(lines) != 3 {
+		t.Fatalf("expected all 3 lines during prompting, got %d (%v)", len(lines), lines)
+	}
+	if !strings.Contains(lines[1], "bar") {
+		t.Fatalf("non-matching line must stay visible while prompting: %q", lines[1])
 	}
 }
