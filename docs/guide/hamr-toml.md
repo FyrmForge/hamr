@@ -64,7 +64,6 @@ that may want to compare against current state.
 | `stripe`      | bool   | |
 | `locale`      | bool   | |
 | `storage`     | string | `"local"` \| `"s3"` |
-| `pgadmin`     | bool   | Only meaningful with `database = "postgres"`. |
 | `alpine`      | bool   | |
 
 ---

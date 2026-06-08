@@ -28,7 +28,6 @@ type ProjectConfig struct {
 	IncludeStorage   bool   // true when StorageBackend != ""
 	StorageBackend   string // "" | "local" | "s3"
 	StaticS3         bool   // sync static/ to a dedicated S3 bucket
-	IncludePgAdmin   bool   // include pgAdmin in Docker Compose
 	IncludeWS        bool
 	IncludeE2E       bool
 	IncludeStripe    bool
@@ -72,8 +71,7 @@ func (cfg *ProjectConfig) Validate() error {
 		return fmt.Errorf("invalid --db-connector value %q: must be \"sqlx\" or \"gorm\"", cfg.DBConnector)
 	}
 	if cfg.Database == "sqlite" {
-		// pgAdmin is postgres-specific; E2E templates are postgres-specific.
-		cfg.IncludePgAdmin = false
+		// E2E templates are postgres-specific.
 		cfg.IncludeE2E = false
 	}
 	if cfg.GoVersion == "" {
@@ -346,13 +344,6 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 	if cfg.IncludeEmailMock {
 		files = append(files,
 			templateFile{"templates/new/internal/web/handler/devemail/handler.go.tmpl", "internal/web/handler/devemail/handler.go"},
-		)
-	}
-
-	// pgAdmin server config.
-	if cfg.IncludePgAdmin {
-		files = append(files,
-			templateFile{"templates/new/docker/pgadmin-servers.json.tmpl", "docker/pgadmin/servers.json"},
 		)
 	}
 

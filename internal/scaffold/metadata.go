@@ -40,7 +40,6 @@ type Options struct {
 	Stripe      bool   `toml:"stripe"`
 	Locale      bool   `toml:"locale"`
 	Storage     string `toml:"storage"`
-	PgAdmin     bool   `toml:"pgadmin"`
 	Alpine      bool   `toml:"alpine"`
 }
 

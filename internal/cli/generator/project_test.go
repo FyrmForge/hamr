@@ -843,7 +843,6 @@ func TestGenerateProject_dottedProjectName(t *testing.T) {
 		IncludeStorage: true,
 		StorageBackend: "s3",
 		StaticS3:       true,
-		IncludePgAdmin: true,
 	}
 
 	require.NoError(t, GenerateProject(dir, cfg))
@@ -862,9 +861,6 @@ func TestGenerateProject_dottedProjectName(t *testing.T) {
 	assert.Contains(t, mainGo, `config.GetEnvOrDefault("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/topleveluk-com?sslmode=disable")`)
 	assert.Contains(t, mainGo, `config.GetEnvOrDefault("S3_BUCKET", "topleveluk-com-uploads")`)
 
-	serversJSON := readFile(t, dir, "docker/pgadmin/servers.json")
-	assert.Contains(t, serversJSON, `"MaintenanceDB": "topleveluk-com"`)
-
 	hamrToml := readFile(t, dir, "hamr.toml")
 	assert.Contains(t, hamrToml, "hamr sync --watch --bucket topleveluk-com-static")
 
@@ -873,72 +869,6 @@ func TestGenerateProject_dottedProjectName(t *testing.T) {
 
 	gomod := readFile(t, dir, "go.mod")
 	assert.Contains(t, gomod, "module github.com/test/topleveluk.com")
-}
-
-func TestGenerateProject_pgAdmin(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "pgadminproj")
-
-	cfg := &ProjectConfig{
-		Name:           "pgadminproj",
-		Module:         "github.com/test/pgadminproj",
-		CSS:            "plain",
-		Database:       "postgres",
-		GoVersion:      "1.25.0",
-		IncludePgAdmin: true,
-	}
-
-	require.NoError(t, GenerateProject(dir, cfg))
-
-	// docker-compose should have pgAdmin service, volume, and server config mount.
-	compose := readFile(t, dir, "docker/docker-compose.yaml")
-	assert.Contains(t, compose, "pgadmin:")
-	assert.Contains(t, compose, "pgadmin_data:")
-	assert.Contains(t, compose, "dpage/pgadmin4:latest")
-	assert.Contains(t, compose, "pgadmin/servers.json:/pgadmin4/servers.json:ro")
-	assert.Contains(t, compose, `PGADMIN_CONFIG_SERVER_MODE: "False"`)
-	assert.Contains(t, compose, `PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"`)
-
-	// pgAdmin servers.json should exist with correct host and passfile.
-	serversJSON := readFile(t, dir, "docker/pgadmin/servers.json")
-	assert.Contains(t, serversJSON, `"Host": "postgres"`)
-	assert.Contains(t, serversJSON, `"Port": 5432`)
-	assert.Contains(t, serversJSON, `"PassFile": "/tmp/pgpass"`)
-
-	// .env.example should have pgAdmin env vars.
-	envFile := readFile(t, dir, ".env.example")
-	assert.Contains(t, envFile, "PGADMIN_EMAIL")
-	assert.Contains(t, envFile, "PGADMIN_PASSWORD")
-
-	// hamr.toml should have pgadmin = true.
-	hamrToml := readFile(t, dir, "hamr.toml")
-	assert.Contains(t, hamrToml, "pgadmin = true")
-}
-
-func TestGenerateProject_noPgAdmin(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "nopgadminproj")
-
-	cfg := &ProjectConfig{
-		Name:      "nopgadminproj",
-		Module:    "github.com/test/nopgadminproj",
-		CSS:       "plain",
-		Database:  "postgres",
-		GoVersion: "1.25.0",
-	}
-
-	require.NoError(t, GenerateProject(dir, cfg))
-
-	// docker-compose should NOT have pgAdmin.
-	compose := readFile(t, dir, "docker/docker-compose.yaml")
-	assert.NotContains(t, compose, "pgadmin:")
-	assert.NotContains(t, compose, "pgadmin_data:")
-
-	// .env.example should NOT have pgAdmin env vars.
-	envFile := readFile(t, dir, ".env.example")
-	assert.NotContains(t, envFile, "PGADMIN_EMAIL")
-
-	// hamr.toml should have pgadmin = false.
-	hamrToml := readFile(t, dir, "hamr.toml")
-	assert.Contains(t, hamrToml, "pgadmin = false")
 }
 
 func TestBuildProjectFileList_stripe(t *testing.T) {

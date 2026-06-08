@@ -271,9 +271,6 @@ func applyWizardResult(cmd *cobra.Command, name string, res *wizardResult, cfg *
 	if res.StorageBackend == "s3" {
 		cfg.StaticS3 = res.StaticS3 == "yes"
 	}
-	if res.Database == "postgres" {
-		cfg.IncludePgAdmin = res.PgAdmin == "yes"
-	}
 }
 
 // fetchLatestReleaseFn is a package var so tests can stub out the network call.
@@ -349,7 +346,6 @@ func init() {
 	newCmd.Flags().Bool("migrate-startup", false, "run migrations at server startup instead of separate command")
 	newCmd.Flags().String("location", "subfolder", "project location: \"subfolder\" or \"current\"")
 	newCmd.Flags().Bool("static-s3", false, "sync static assets to a dedicated S3 bucket")
-	newCmd.Flags().Bool("pgadmin", false, "include pgAdmin in Docker Compose")
 	newCmd.Flags().Bool("stripe", false, "wire stripe-go + the local Stripe mock (Connect-aware API at /v1/*, dashboard at /__hamr/stripe with replay/refund actions, signed webhooks, persistent state)")
 	newCmd.Flags().Bool("email-mock", false, "wire pkg/emailmock + the dev inbox at /__hamr/mail (mbox-persisted, Thunderbird-openable)")
 	newCmd.Flags().Bool("locale", false, "include localisation (i18n) support")

@@ -52,7 +52,6 @@ When called without flags, an interactive wizard asks for each option. When all 
 | `--db-connector` | `sqlx` | DB connector: `sqlx` or `gorm` |
 | `--location` | `subfolder` | Project location: `subfolder` or `current` |
 | `--static-s3` | `false` | Sync static assets to a dedicated S3 bucket |
-| `--pgadmin` | `false` | Include pgAdmin in Docker Compose |
 | `--stripe` | `false` | Include Stripe webhook handler |
 | `--alpine` | `false` | Include Alpine.js for local UI state |
 | `--skip-version-check` | `false` | Skip the "is a newer hamr release available" check |

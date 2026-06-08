@@ -93,7 +93,6 @@ func presets() []preset {
 				IncludeStripe:  true,
 				IncludeLocale:  true,
 				StorageBackend: "s3",
-				IncludePgAdmin: true,
 			},
 		},
 		{

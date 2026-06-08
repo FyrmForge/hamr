@@ -2911,7 +2911,6 @@ e2e = false
 stripe = false
 locale = false
 storage = "local"
-pgadmin = false
 alpine = false
 
 [ai]

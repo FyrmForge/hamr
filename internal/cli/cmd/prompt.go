@@ -22,7 +22,6 @@ type wizardResult struct {
 	MigrateAtStartup string // "yes" | "no"
 	StorageBackend   string // "local" | "s3"
 	StaticS3         string // "yes" | "no"
-	PgAdmin          string // "yes" | "no"
 	Locale           string // "yes" | "no"
 	WebSocket        string // "yes" | "no"
 	E2E              string // "yes" | "no"
@@ -56,7 +55,6 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 		MigrateAtStartup: "no",
 		StorageBackend:   "local",
 		StaticS3:         "yes",
-		PgAdmin:          "yes",
 		Locale:           "yes",
 		WebSocket:        "yes",
 		E2E:              "yes",
@@ -324,33 +322,6 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 			res.StaticS3 = "yes"
 		} else {
 			res.StaticS3 = "no"
-		}
-	}
-
-	// ── pgAdmin (Postgres only) ────────────────────────────
-	if res.Database == "postgres" && !cmd.Flags().Changed("pgadmin") {
-		if err := huh.NewForm(huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("pgAdmin").
-				Description("Adds a pgAdmin web UI container to Docker Compose for managing your local Postgres database.").
-				Options(
-					huh.NewOption("Yes", "yes"),
-					huh.NewOption("No", "no"),
-				).
-				Value(&res.PgAdmin),
-		)).Run(); err != nil {
-			return nil, err
-		}
-		if res.PgAdmin == "yes" {
-			fmt.Println("  pgAdmin: Yes")
-		} else {
-			fmt.Println("  pgAdmin: No")
-		}
-	} else if cmd.Flags().Changed("pgadmin") {
-		if v, _ := cmd.Flags().GetBool("pgadmin"); v {
-			res.PgAdmin = "yes"
-		} else {
-			res.PgAdmin = "no"
 		}
 	}
 
