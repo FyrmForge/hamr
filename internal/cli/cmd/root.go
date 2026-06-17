@@ -23,6 +23,7 @@ func init() {
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(lintCmd)
 	rootCmd.AddCommand(devCmd)
+	rootCmd.AddCommand(mcpCmd)
 	rootCmd.AddCommand(aiCmd)
 	rootCmd.AddCommand(localeCmd)
 	rootCmd.AddCommand(completionCmd)

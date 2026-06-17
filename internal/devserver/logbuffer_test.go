@@ -13,8 +13,11 @@ func TestLogBuffer_Append(t *testing.T) {
 
 	lines := lb.Lines()
 	assert.Len(t, lines, 2)
-	assert.Equal(t, LogLine{Rule: "go", Text: "building..."}, lines[0])
-	assert.Equal(t, LogLine{Rule: "go", Text: "done"}, lines[1])
+	assert.Equal(t, "go", lines[0].Rule)
+	assert.Equal(t, "building...", lines[0].Text)
+	assert.Equal(t, "done", lines[1].Text)
+	// Append stamps a timestamp when one isn't supplied.
+	assert.False(t, lines[0].Time.IsZero(), "Append should stamp Time")
 }
 
 func TestLogBuffer_Cap(t *testing.T) {

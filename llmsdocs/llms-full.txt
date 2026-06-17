@@ -47,7 +47,44 @@
   contains `[hamr]` (the reload script's own chatter — `[hamr] page
   swapped`, `[hamr] CSS reloaded`, etc.); default false shows
   everything. Configure via `log_file` and `log_file_max_lines` in
-  `[dev]`; set `log_file = "none"` to disable.
+  `[dev]`; set `log_file = "none"` to disable. The TUI adds an `M` hotkey to
+  toggle the MCP gateway (see **hamr mcp**); status bar shows `MCP on/<n>` or
+  `MCP off`.
+- **hamr mcp**: MCP (Model Context Protocol) bridge that lets an AI agent
+  (Claude Code, Codex, opencode) drive a running `hamr dev`. Two hops:
+  agent ⟷ `hamr mcp` over stdio, then `hamr mcp` ⟷ `hamr dev` over localhost
+  HTTP at `/__hamr/mcp/{tool}`. Enabled via `[dev.mcp]` (default off) + the `M`
+  runtime kill-switch in the TUI. When enabled the gateway writes a per-run
+  bearer token + resolved proxy URL to `.hamr/dev.json` (0600, gitignored); the
+  bridge reads it (resolving the project via `--project` or the nearest
+  `hamr.toml` from cwd) and authenticates each call. Auth is token-only and the
+  `/__hamr/mcp/*` namespace is separate from the browser `/__hamr/*` routes, so
+  the kill-switch and permissions never affect the dev panel. Permissions are
+  per-area in `[dev.mcp.access]` (`read`/`write`/omit=deny; `write` implies
+  `read`): `dev` (dev.info), `logs` (logs.read [ANSI-stripped, timestamped,
+  rule prefix-matched so rule="site" catches site:build/site:run], console.read
+  [structured timestamped frames: time/level/msg/src], http.read [dev-proxy
+  request log: method/path/status/durationMs incl /__hamr/*, static, SSE/WS —
+  the proxy-level view the app's own access log can't give]), `docker`
+  (logs/status read; restart/wipe write), `mail` (list/get read; clear/ingest
+  write), `build` (rule.run, rebuild.all, make.run — write-only), `stripe`
+  (list read; complete/expire/refund write). The gateway advertises only
+  granted tools and re-checks permission per call (the security boundary; the
+  bridge's filtering is UX). Async semantics: reads return immediately;
+  docker.restart/wipe and rule.run/rebuild.all dispatch (poll docker.status /
+  logs.read) — or pass `wait:true` (+ `wait_timeout`, default 60s) to
+  docker.restart/wipe to block until running/healthy and get final statuses;
+  make.run returns inline `output` for fast targets, else waits `make_wait`
+  (default 20s) and returns `status:running` for slow ones, and is constrained
+  by `make_targets` (empty=all allowed). Every call is audit-logged to `.hamr/mcp_logs.txt`
+  (`log_file`; `"none"` disables); a dedicated `mcp` TUI tab (last in the `Tab`
+  cycle) shows one line per request (reads included), and mutations are also
+  tagged `[mcp]` in the main log tab. Setup: `hamr mcp install --client claude|codex|opencode` (auto-detects
+  installed agents when omitted; `--dry-run` previews) writes the per-client
+  config, merging existing entries and idempotent — Claude `.mcp.json` and
+  opencode `opencode.json` are project-scoped; Codex `~/.codex/config.toml` is
+  global and gets `--project` pinned to this project. Requires `hamr` on PATH
+  and `[proxy]` configured (the gateway lives on the proxy mux).
 - **hamr ai capture**: Browser screenshot capture with HTML/text/metadata sidecars.
 - **hamr ai upgrade**: Git-based scaffold upgrade report. Clones the HAMR repo and diffs between version tags to produce a unified diff and stat summary of all changes between the project's baseline and current HAMR.
 - **.hamr/ai/**: Playground directory for all AI command artifacts (captures, upgrade reports). Gitignored. Configurable via `[ai] dir` in hamr.toml.

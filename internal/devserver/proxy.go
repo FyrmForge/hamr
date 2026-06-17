@@ -37,7 +37,7 @@ func init() {
 // If console is non-nil, the browser console transport is mounted as a
 // WebSocket at /__hamr/console; the injected reload script connects to it
 // and pipes window.console.* + uncaught errors back into the dev TUI/log.
-func NewProxyHandler(target string, broker *SSEBroker, errorState *ErrorState, logBuf *LogBuffer, actions *DevActions, mailMock *MailMock, stripeMock *StripeMock, console *ConsoleSink, injectReload bool) http.Handler {
+func NewProxyHandler(target string, broker *SSEBroker, errorState *ErrorState, logBuf *LogBuffer, actions *DevActions, mailMock *MailMock, stripeMock *StripeMock, console *ConsoleSink, gateway *mcpGateway, requestLog *RequestLog, injectReload bool) http.Handler {
 	targetURL := &url.URL{
 		Scheme: "http",
 		Host:   normalizeHost(target),
@@ -121,8 +121,17 @@ func NewProxyHandler(target string, broker *SSEBroker, errorState *ErrorState, l
 	if console != nil {
 		mux.Handle("/__hamr/console", console.Handler())
 	}
+	if gateway != nil {
+		gateway.RegisterRoutes(mux)
+	}
 	mux.Handle("/", rootHandler)
 
+	// Record every served request (incl. /__hamr/*, static, SSE/WS) for the
+	// MCP http.read tool. Wraps the whole mux so nothing is missed; recording
+	// no-ops until the gateway is enabled.
+	if requestLog != nil {
+		return recordRequests(mux, requestLog, gateway)
+	}
 	return mux
 }
 

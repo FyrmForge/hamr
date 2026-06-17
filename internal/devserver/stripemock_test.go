@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	stripe "github.com/stripe/stripe-go/v82"
-	checkoutsession "github.com/stripe/stripe-go/v82/checkout/session"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	stripe "github.com/stripe/stripe-go/v82"
+	checkoutsession "github.com/stripe/stripe-go/v82/checkout/session"
 )
 
 // TestStripeAPIVersionMatchesSDK guards against drift: hamr's pinned API
@@ -155,15 +155,15 @@ func TestStripeMock_RetrieveUnknownSession(t *testing.T) {
 // stripe-go's form encoder produces.
 func TestDecodeBracketForm(t *testing.T) {
 	values := url.Values{
-		"mode":                                 {"payment"},
-		"success_url":                          {"https://x"},
-		"line_items[0][price_data][currency]":  {"gbp"},
+		"mode":                                   {"payment"},
+		"success_url":                            {"https://x"},
+		"line_items[0][price_data][currency]":    {"gbp"},
 		"line_items[0][price_data][unit_amount]": {"2000"},
 		"line_items[0][price_data][product_data][name]": {"Pro"},
-		"line_items[0][quantity]":              {"1"},
-		"line_items[1][price_data][currency]":  {"gbp"},
-		"line_items[1][quantity]":              {"3"},
-		"metadata[user_id]":                    {"42"},
+		"line_items[0][quantity]":                       {"1"},
+		"line_items[1][price_data][currency]":           {"gbp"},
+		"line_items[1][quantity]":                       {"3"},
+		"metadata[user_id]":                             {"42"},
 	}
 	out, err := decodeBracketForm(values)
 	require.NoError(t, err)

@@ -55,4 +55,3 @@ func WaitForConfigChangeOrQuit(ctx context.Context, path string, hotkeys <-chan 
 		}
 	}
 }
-

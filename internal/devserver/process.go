@@ -156,8 +156,10 @@ func NewProcessManager(logger *slog.Logger) *ProcessManager {
 }
 
 // RunCommand runs a one-shot command to completion.
-// Stdout and stderr are streamed through the logger.
-// On failure the captured tail output is returned alongside the error.
+// Stdout and stderr are streamed through the logger, and the captured tail
+// output is returned regardless of exit status (alongside the error on
+// failure) — callers that only care about output on error can ignore it on
+// success, while one-shot tools (e.g. the MCP make.run) can surface it.
 func (pm *ProcessManager) RunCommand(ctx context.Context, rule *WatchRule) (string, error) {
 	pm.logger.Info("running", "rule", rule.Name, "cmd", rule.Cmd)
 
@@ -213,7 +215,7 @@ func (pm *ProcessManager) RunCommand(ctx context.Context, rule *WatchRule) (stri
 	if runErr != nil {
 		return capture.String(), fmt.Errorf("rule %q cmd failed: %w", rule.Name, runErr)
 	}
-	return "", nil
+	return capture.String(), nil
 }
 
 // StartProcess starts a long-running process, killing any previous instance.
@@ -412,10 +414,10 @@ func (pm *ProcessManager) prefixDests() (stdout, stderr io.Writer) {
 // while passing through the raw bytes (preserving ANSI colors from child
 // processes).
 type prefixWriter struct {
-	dest   io.Writer
-	tag    []byte // e.g. "\033[36m[site:build]\033[0m "
-	buf    []byte
-	mu     sync.Mutex
+	dest io.Writer
+	tag  []byte // e.g. "\033[36m[site:build]\033[0m "
+	buf  []byte
+	mu   sync.Mutex
 }
 
 var ruleColors = [...]string{

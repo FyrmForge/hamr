@@ -162,6 +162,28 @@ type Model struct {
 	versionMsg    string // e.g. "CLI is ahead of scaffold (cli v1 proj v2)"
 	versionLabel  string // e.g. "v0.6.7"
 	proxyURL      string // e.g. "http://localhost:3001"; empty until proxy binds
+
+	// MCP gateway indicator state, pushed via mcpStatusMsg. mcpKnown gates
+	// rendering: the indicator and the dedicated MCP tab only appear once the
+	// runner reports state (i.e. a proxy is up and the gateway exists).
+	mcpKnown   bool
+	mcpEnabled bool
+	mcpTools   int
+	// mcpLogs is the dedicated MCP tab's buffer — one line per agent request,
+	// fed by mcpLogMsg. mcpSearch is its per-tab search state.
+	mcpLogs   []string
+	mcpSearch *searchState
+}
+
+// mcpStatusMsg updates the MCP gateway indicator in the status bar.
+type mcpStatusMsg struct {
+	enabled bool
+	tools   int
+}
+
+// mcpLogMsg appends one request line to the dedicated MCP tab.
+type mcpLogMsg struct {
+	line string
 }
 
 // NewModel constructs a model that pushes hotkeys to the given source.
@@ -202,6 +224,12 @@ func (m *Model) activeSearch() *searchState {
 			m.hamrSearch = &searchState{}
 		}
 		return m.hamrSearch
+	}
+	if m.viewMode == m.mcpTabIndex() {
+		if m.mcpSearch == nil {
+			m.mcpSearch = &searchState{}
+		}
+		return m.mcpSearch
 	}
 	ix := m.viewMode - 1
 	if ix < 0 || ix >= len(m.dockerTabs) {
@@ -290,6 +318,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case proxyURLMsg:
 		m.proxyURL = msg.url
+		return m, nil
+
+	case mcpStatusMsg:
+		m.mcpKnown = true
+		m.mcpEnabled = msg.enabled
+		m.mcpTools = msg.tools
+		return m, nil
+
+	case mcpLogMsg:
+		m.appendMCPLog(msg.line)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -458,6 +496,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.run.openOverlay(targets)
 		return m, nil
+	case "M":
+		// Toggle the MCP gateway kill-switch (runtime only; doesn't touch
+		// hamr.toml). The runner flips the gateway and pushes new state back
+		// via mcpStatusMsg, so the indicator reflects the result.
+		m.hotkeys.Send(devserver.HotkeyMCPToggle)
+		return m, nil
 	case "?":
 		m.help.toggle()
 		return m, nil
@@ -550,6 +594,77 @@ func (m *Model) appendDockerLog(name, line string) {
 	}
 }
 
+// mcpTabIndex returns the viewMode index of the dedicated MCP tab, or -1 when
+// no MCP gateway is known. The MCP tab always sits last (after the docker
+// tabs), so docker indexing (viewMode-1) is unaffected.
+func (m *Model) mcpTabIndex() int {
+	if !m.mcpKnown {
+		return -1
+	}
+	return 1 + len(m.dockerTabs)
+}
+
+// tabCount is the total number of tabs: hamr + docker stacks + the MCP tab.
+func (m *Model) tabCount() int {
+	n := 1 + len(m.dockerTabs)
+	if m.mcpKnown {
+		n++
+	}
+	return n
+}
+
+// MCP-tab line styling mirrors the hamr text logger: a colored tag and a
+// colored level/outcome for problems, with the message left plain — not a
+// whole-line wash. Defined once to avoid re-allocating styles per line.
+var (
+	mcpTagStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#39c5cf")).Bold(true) // tag, bold cyan
+	mcpErrorStyle  = lipgloss.NewStyle().Foreground(colorWarn)
+	mcpDeniedStyle = lipgloss.NewStyle().Foreground(colorErr).Bold(true)
+)
+
+// styleMCPLine colors only the `[mcp]` tag and (for DENIED/ERROR) the outcome
+// segment after the final " → ", leaving the timestamp, tool, and args plain —
+// the same convention as the dev logger ([hamr:*] tag + warn/error level).
+// "ok" outcomes stay uncolored, matching the logger leaving Info uncolored. The
+// styled string is stored, matching how docker/hamr buffers hold ANSI; search
+// keywords stay contiguous so substring matching still works.
+func styleMCPLine(line string) string {
+	line = strings.Replace(line, "[mcp]", mcpTagStyle.Render("[mcp]"), 1)
+	const sep = " → "
+	i := strings.LastIndex(line, sep)
+	if i < 0 {
+		return line
+	}
+	head, outcome := line[:i+len(sep)], line[i+len(sep):]
+	switch {
+	case strings.HasPrefix(outcome, "DENIED"):
+		return head + mcpDeniedStyle.Render(outcome)
+	case strings.HasPrefix(outcome, "ERROR"):
+		return head + mcpErrorStyle.Render(outcome)
+	default:
+		return line
+	}
+}
+
+// appendMCPLog records a request line into the MCP buffer with the same
+// active/background refresh semantics as the docker tabs.
+func (m *Model) appendMCPLog(line string) {
+	line = styleMCPLine(line)
+	before := len(m.mcpLogs)
+	m.mcpLogs = appendCapped(m.mcpLogs, line, m.maxLogs)
+	evicted := before + 1 - len(m.mcpLogs)
+	active := m.viewMode == m.mcpTabIndex()
+	if evicted > 0 && active {
+		m.activeSelection().shiftEvicted(evicted)
+	}
+	if s := m.mcpSearch; s != nil && s.active() {
+		s.recompute(m.mcpLogs, evicted)
+	}
+	if active {
+		m.refreshViewport()
+	}
+}
+
 // dockerTabIndex returns the position of name inside dockerTabs or -1
 // if not registered.
 func (m *Model) dockerTabIndex(name string) int {
@@ -569,12 +684,24 @@ func (m *Model) dockerTabIndex(name string) int {
 // valid, same buffer), and only when the active stack is actually removed do we
 // fall back to the hamr tab and clear the now-meaningless selection.
 func (m *Model) setDockerTabs(names []string) {
+	// The MCP tab sits after the docker tabs, so changing the docker count
+	// shifts its index — follow it explicitly when it's the active tab.
+	wasMCP := m.viewMode == m.mcpTabIndex()
+
 	var activeName string
 	if m.viewMode > 0 && m.viewMode-1 < len(m.dockerTabs) {
 		activeName = m.dockerTabs[m.viewMode-1]
 	}
 
 	m.dockerTabs = append(m.dockerTabs[:0], names...)
+
+	if wasMCP {
+		m.viewMode = m.mcpTabIndex()
+		if m.ready {
+			m.refreshViewport()
+		}
+		return
+	}
 
 	if activeName == "" {
 		return // hamr tab is active; a docker reorder doesn't affect it
@@ -605,6 +732,9 @@ func (m *Model) setDockerTabs(names []string) {
 func (m *Model) currentLogs() []string {
 	if m.viewMode == 0 {
 		return m.hamrLogs
+	}
+	if m.viewMode == m.mcpTabIndex() {
+		return m.mcpLogs
 	}
 	ix := m.viewMode - 1
 	if ix < 0 || ix >= len(m.dockerTabs) {
@@ -826,6 +956,8 @@ func writeLineWithHighlights(b *strings.Builder, line string, ms []searchMatch, 
 func (m *Model) clearActiveLog() {
 	if m.viewMode == 0 {
 		m.hamrLogs = m.hamrLogs[:0]
+	} else if m.viewMode == m.mcpTabIndex() {
+		m.mcpLogs = m.mcpLogs[:0]
 	} else if ix := m.viewMode - 1; ix >= 0 && ix < len(m.dockerTabs) {
 		m.dockerLogs[m.dockerTabs[ix]] = nil
 	}
@@ -1099,7 +1231,7 @@ func (m *Model) copySelection() {
 // stays in view. Any active line selection is dropped — its indices
 // referred to the previous tab's buffer.
 func (m *Model) cycleTab(forward bool) {
-	total := 1 + len(m.dockerTabs)
+	total := m.tabCount()
 	if total <= 1 {
 		return
 	}
@@ -1553,16 +1685,23 @@ func (m *Model) selectionHintBar(sel *selectionState) string {
 
 // activeTabIcon returns the styled icon glyph for the current tab.
 func (m *Model) activeTabIcon() string {
-	if m.viewMode == 0 {
+	switch {
+	case m.viewMode == 0:
 		return m.hammerStyle().Render(" 🔨 ")
+	case m.viewMode == m.mcpTabIndex():
+		return dockerIcon.Render(" 🤖 ")
+	default:
+		return dockerIcon.Render(" 🐳 ")
 	}
-	return dockerIcon.Render(" 🐳 ")
 }
 
 // activeTabTitle returns the bold title text for the current tab.
 func (m *Model) activeTabTitle() string {
 	if m.viewMode == 0 {
 		return "hamr dev"
+	}
+	if m.viewMode == m.mcpTabIndex() {
+		return "mcp"
 	}
 	ix := m.viewMode - 1
 	if ix < 0 || ix >= len(m.dockerTabs) {
@@ -1571,14 +1710,27 @@ func (m *Model) activeTabTitle() string {
 	return m.dockerTabs[ix]
 }
 
-// tabPosition returns "[k/n]" for the active tab, or "" when there's
-// only the hamr tab. Gives the user a hint that Tab cycles when more
-// than one buffer exists.
+// tabPosition returns "[k/n]" for the active tab, or "" when the hamr tab is
+// the only one. Gives the user a hint that Tab cycles when more than one
+// buffer exists.
 func (m *Model) tabPosition() string {
-	if len(m.dockerTabs) == 0 {
+	if m.tabCount() <= 1 {
 		return ""
 	}
-	return fmt.Sprintf("[%d/%d]", m.viewMode+1, 1+len(m.dockerTabs))
+	return fmt.Sprintf("[%d/%d]", m.viewMode+1, m.tabCount())
+}
+
+// mcpIndicator renders the MCP gateway state: off (dim), on with its
+// exposed-tool count (green), or on-but-zero-tools (flagged, since that means
+// the access map exposes nothing).
+func (m *Model) mcpIndicator() string {
+	if !m.mcpEnabled {
+		return statusKey.Render("MCP") + statusDim.Render(" off")
+	}
+	if m.mcpTools == 0 {
+		return statusKey.Render("MCP") + statusErr.Render(" on/0 tools")
+	}
+	return statusKey.Render("MCP") + statusOK.Render(fmt.Sprintf(" on/%d", m.mcpTools))
 }
 
 func (m *Model) statusBar() string {
@@ -1604,6 +1756,9 @@ func (m *Model) statusBar() string {
 	// shifted the listener off the configured default.
 	if m.proxyURL != "" {
 		parts = append(parts, barPad(2), statusDim.Render(m.proxyURL))
+	}
+	if m.mcpKnown {
+		parts = append(parts, barPad(2), statusLabel.Render("•"), barPad(2), m.mcpIndicator())
 	}
 	left := strings.Join(parts, "")
 
@@ -1650,7 +1805,10 @@ func (m *Model) hintBar() string {
 	if makefileExists() {
 		left = append(left, statusKey.Render("m")+statusDim.Render(" make"))
 	}
-	if len(m.dockerTabs) > 0 {
+	if m.mcpKnown {
+		left = append(left, statusKey.Render("M")+statusDim.Render(" mcp"))
+	}
+	if m.tabCount() > 1 {
 		left = append(left, statusKey.Render("Tab")+statusDim.Render(" tabs"))
 	}
 	left = append(left, statusKey.Render("q")+statusDim.Render(" quit"))

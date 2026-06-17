@@ -68,12 +68,12 @@ func (m *StripeMock) handlePaymentIntentPage(w http.ResponseWriter, r *http.Requ
 
 	var buf bytes.Buffer
 	if err := stripePaymentIntentTmpl.Execute(&buf, struct {
-		PI              *stripePaymentIntent
-		AmountFmt       string
-		FeeFmt          string
-		TransferAmtFmt  string
-		IsDestCharge    bool
-		IsDirectCharge  bool
+		PI             *stripePaymentIntent
+		AmountFmt      string
+		FeeFmt         string
+		TransferAmtFmt string
+		IsDestCharge   bool
+		IsDirectCharge bool
 	}{
 		PI:             pi,
 		AmountFmt:      formatStripeAmount(pi.Amount, pi.Currency),

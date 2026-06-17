@@ -74,7 +74,7 @@ func runEnv(dir string, export bool, out io.Writer) error {
 }
 
 // shellSingleQuote wraps v in single quotes for safe shell sourcing,
-// escaping any embedded single quotes via the standard '\'' dance.
+// escaping any embedded single quotes via the standard '\” dance.
 // Single-quoted values aren't subject to $-expansion or backtick
 // substitution, so they preserve URLs, JSON, etc. byte-for-byte.
 func shellSingleQuote(v string) string {

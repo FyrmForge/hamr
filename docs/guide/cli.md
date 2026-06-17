@@ -99,6 +99,32 @@ By default, `hamr dev` also mirrors its recent log stream to `.hamr/dev_logs.txt
 
 **Guide:** [Dev Server](pkg/dev.md) covers configuration, watch rules, daemons, Docker Compose, and examples.
 
+The TUI shows an MCP indicator when `[dev.mcp]` is configured; press `M` to toggle the gateway on/off for the session (a runtime kill-switch that doesn't rewrite `hamr.toml`).
+
+---
+
+## hamr mcp
+
+```
+hamr mcp [--project <path>]
+```
+
+Runs the Model Context Protocol bridge over stdio so an AI agent (Claude Code, Codex, opencode) can drive a running `hamr dev`. The agent spawns this; it is not run by hand. The bridge:
+
+- resolves the project (the `--project` path, else the nearest `hamr.toml` from the working directory),
+- advertises exactly the tools the project's `[dev.mcp.access]` map exposes,
+- forwards each tool call to the dev server's `/__hamr/mcp/*` gateway, authenticated with the per-run token in `.hamr/dev.json`.
+
+`hamr dev` must be running with `[dev.mcp].enabled` (or toggled on with `M`); otherwise tool calls return a clear "dev not running / gateway off" error. See [`[dev.mcp]`](hamr-toml.md) for the config, tools, and security model.
+
+### hamr mcp install
+
+```
+hamr mcp install [--client claude|codex|opencode] [--dry-run]
+```
+
+Registers the bridge with an agent by writing its config (merging, never clobbering; idempotent). With no `--client`, auto-detects installed agents and configures each. Claude (`.mcp.json`) and opencode (`opencode.json`) are project-scoped; Codex (`~/.codex/config.toml`) is global, so its entry is pinned to this project with `--project`. `--dry-run` previews without writing. Requires `hamr` on your `PATH`.
+
 ---
 
 ## hamr add skill

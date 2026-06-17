@@ -41,6 +41,11 @@ type Runner struct {
 	hotkeys        HotkeySource
 	actionsHook    func(*DevActions)
 	proxyURLHook   func(string)
+	mcpStatusHook  func(enabled bool, tools int) // pushes MCP gateway state to the TUI indicator
+	mcpLogHook     func(line string)             // pushes each MCP request line to the TUI MCP tab
+
+	// mcpGateway is set by Run() when the proxy is up; the M hotkey toggles it.
+	mcpGateway *mcpGateway
 
 	// proxyURL is set by Run() after the proxy listener has bound to its
 	// (possibly walked) port. Read by the o-open hotkey so it always points
@@ -136,6 +141,20 @@ func WithActionsHook(fn func(*DevActions)) Option {
 // goroutine; copy the string and return — do not block.
 func WithProxyURLHook(fn func(string)) Option {
 	return func(r *Runner) { r.proxyURLHook = fn }
+}
+
+// WithMCPStatusHook registers a callback that receives the MCP gateway's state
+// (enabled, exposed-tool count) at startup and on every M-toggle, so the TUI
+// can render its indicator. Fires on the runner goroutine; do not block.
+func WithMCPStatusHook(fn func(enabled bool, tools int)) Option {
+	return func(r *Runner) { r.mcpStatusHook = fn }
+}
+
+// WithMCPLogHook registers a callback that receives a one-line summary of every
+// MCP request the gateway handles, so the TUI can render a dedicated MCP tab.
+// Fires on the gateway's request goroutine; do not block.
+func WithMCPLogHook(fn func(line string)) Option {
+	return func(r *Runner) { r.mcpLogHook = fn }
 }
 
 // NewRunner creates a new Runner with the given config and options.
@@ -243,6 +262,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	broker := NewSSEBroker(r.cfg.Dev.Watch, r.cfg.Dev.Daemons, r.cfg.Dev.DockerCompose, r.cfg.Dev.Email.Enabled, r.cfg.Dev.Stripe.Enabled, consoleCapture)
 	errorState := NewErrorState()
 	logBuf := NewLogBuffer(1000)
+	requestLog := NewRequestLog(1000)
 	pm.SetLogOutput(logBuf, broker)
 	// Injected env (PORT, HAMR_DEV_URL, HAMR_STRIPE_MOCK_URL) is set further
 	// down once the proxy listener has bound and we know the actual ports —
@@ -296,6 +316,11 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 		if proxySrv != nil {
 			_ = proxySrv.Close()
+		}
+		// Close the MCP audit log only after the proxy has stopped serving, so a
+		// late in-flight tool call can't write to an already-closed audit file.
+		if r.mcpGateway != nil {
+			r.mcpGateway.closeAudit()
 		}
 	}()
 
@@ -404,6 +429,9 @@ func (r *Runner) Run(ctx context.Context) error {
 		actualProxyPort   int
 		originalProxyPort int
 	)
+	if r.cfg.Dev.MCP.Enabled && (r.noProxy || !r.cfg.ProxyConfigured) {
+		r.logger.Warn("[dev.mcp] enabled but no reverse proxy will run (needs [proxy] and not --no-proxy); the MCP gateway is unavailable")
+	}
 	if !r.noProxy && r.cfg.ProxyConfigured {
 		if _, p, perr := splitListenAddr(r.cfg.Proxy.Listen); perr == nil {
 			originalProxyPort = p
@@ -475,8 +503,61 @@ func (r *Runner) Run(ctx context.Context) error {
 			)
 		}
 
+		// MCP gateway: the token-gated /__hamr/mcp/ namespace the `hamr mcp`
+		// bridge drives. Always constructed when the proxy is up so the TUI
+		// kill-switch (M) can flip it on at runtime; the handshake file (.hamr/
+		// dev.json) and audit log are only activated when enabled (initially
+		// from [dev.mcp].enabled).
+		// Resolve the project root from the config path so the handshake file
+		// lands next to hamr.toml — matching where the bridge looks for it,
+		// regardless of the dev server's working directory.
+		mcpProjectRoot := "."
+		if r.configPath != "" {
+			if abs, aerr := filepath.Abs(r.configPath); aerr == nil {
+				mcpProjectRoot = filepath.Dir(abs)
+			}
+		}
+		mcpGw, gwErr := newMCPGateway(mcpGatewayDeps{
+			cfg:         r.cfg,
+			ctx:         runCtx,
+			projectRoot: mcpProjectRoot,
+			actions:     actions,
+			logBuf:      logBuf,
+			mailMock:    mailMock,
+			stripeMock:  stripeMock,
+			errorState:  errorState,
+			auditPath:   r.cfg.Dev.MCP.ResolvedLogFile(),
+			logSink:     r.mcpLogHook,
+			proxyURL:    proxyOrigin,
+			appPort:     actualAppPort,
+			makefile:    "Makefile",
+			consoleSink: consoleSink,
+			requestLog:  requestLog,
+			logger:      r.logger,
+		})
+		if gwErr != nil {
+			_ = ln.Close()
+			return fmt.Errorf("start mcp gateway: %w", gwErr)
+		}
+		r.mcpGateway = mcpGw
+		// Remove the handshake on shutdown. The audit log is closed by the proxy
+		// shutdown defer instead (after the proxy stops serving) so an in-flight
+		// tool call can't write to a closed audit file.
+		defer mcpGw.removeHandshake()
+		if r.cfg.Dev.MCP.Enabled {
+			if err := mcpGw.SetActive(true); err != nil {
+				r.logger.Error("failed to activate mcp gateway", "err", err)
+			} else {
+				r.logger.Info("mcp gateway enabled", "tools", mcpGw.EnabledToolCount(), "audit", r.cfg.Dev.MCP.ResolvedLogFile())
+			}
+		}
+		// Publish initial MCP state to the TUI indicator.
+		if r.mcpStatusHook != nil {
+			r.mcpStatusHook(mcpGw.IsEnabled(), mcpGw.EnabledToolCount())
+		}
+
 		inject := r.cfg.Proxy.InjectReload != nil && *r.cfg.Proxy.InjectReload
-		handler := NewProxyHandler(r.cfg.Proxy.Target, broker, errorState, logBuf, actions, mailMock, stripeMock, consoleSink, inject)
+		handler := NewProxyHandler(r.cfg.Proxy.Target, broker, errorState, logBuf, actions, mailMock, stripeMock, consoleSink, mcpGw, requestLog, inject)
 		proxySrv = serveProxy(ln, handler)
 
 		// Single-line banner that surfaces the actual reachable URL +
@@ -660,7 +741,6 @@ func (r *Runner) Run(ctx context.Context) error {
 		go r.watchConfigFile(runCtx, configReloadCh)
 	}
 
-
 	// Single scheduler goroutine coalesces bursts and executes in topological
 	// order to preserve dependency semantics.
 	schedulerWG.Go(func() {
@@ -813,6 +893,20 @@ func (r *Runner) handleHotkey(action HotkeyAction, actions *DevActions, cancel c
 			openBrowser(url)
 		default:
 			r.logger.Warn("no proxy configured, cannot open browser")
+		}
+	case HotkeyMCPToggle:
+		if r.mcpGateway == nil {
+			r.logger.Warn("MCP unavailable (no reverse proxy running)")
+			return false
+		}
+		on, err := r.mcpGateway.Toggle()
+		if err != nil {
+			r.logger.Error("MCP toggle failed", "err", err)
+			return false
+		}
+		r.logger.Info("MCP gateway toggled", "enabled", on, "tools", r.mcpGateway.EnabledToolCount())
+		if r.mcpStatusHook != nil {
+			r.mcpStatusHook(on, r.mcpGateway.EnabledToolCount())
 		}
 	case HotkeyQuit:
 		r.logger.Info("quit requested")
