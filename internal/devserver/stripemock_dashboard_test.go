@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	stripe "github.com/stripe/stripe-go/v82"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	stripe "github.com/stripe/stripe-go/v82"
 )
 
 // TestStripeMock_Dashboard_RendersAllResources is the smoke test: seed
@@ -109,7 +109,7 @@ func TestStripeMock_Dashboard_Resend_RefundFiresChargeRefunded(t *testing.T) {
 
 	piID := seedPaymentIntent(t, mock, paymentIntentSeed{Amount: 1000, Currency: "gbp"})
 	resp := postPaymentIntentComplete(t, mock, piID, "succeed")
-	resp.Body.Close() //nolint:errcheck
+	resp.Body.Close()                //nolint:errcheck
 	app.WaitFor(t, 2, 2*time.Second) // pi.succeeded + charge.succeeded
 
 	rf, _, _, err := mock.applyRefund(refundInput{piID: piID, amount: 500})
@@ -170,7 +170,7 @@ func TestStripeMock_Dashboard_Resend_DeclinedPIFiresPaymentFailed(t *testing.T) 
 
 	piID := seedPaymentIntent(t, mock, paymentIntentSeed{Amount: 1000, Currency: "gbp"})
 	resp := postPaymentIntentComplete(t, mock, piID, "fail")
-	resp.Body.Close() //nolint:errcheck
+	resp.Body.Close()                //nolint:errcheck
 	app.WaitFor(t, 1, 2*time.Second) // original payment_intent.payment_failed
 
 	resp = postDashboardResend(t, mock, "payment_intent", piID)

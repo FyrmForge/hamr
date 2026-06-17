@@ -12,6 +12,7 @@ const (
 	HotkeyRebuild HotkeyAction = iota
 	HotkeyOpenBrowser
 	HotkeyQuit
+	HotkeyMCPToggle
 )
 
 // HotkeySource emits hotkey actions for the dev runner to consume. The TUI

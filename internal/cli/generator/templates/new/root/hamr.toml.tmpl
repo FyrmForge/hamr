@@ -23,7 +23,8 @@ manifest = "internal/web/components/staticmanifest.go"
 package = "components"
 
 [dev]
-proxy_listen = ":3000"
+# proxy_listen defaults to localhost:3000 (loopback only). To reach the dev app
+# from another device on your LAN (e.g. a phone), set it to ":3000" explicitly.
 proxy_target = "$PORT"
 inject_reload = true
 hamr_console_capture = true

@@ -70,8 +70,8 @@ const stripeAPIVersion = "2025-08-27.basil"
 type StripeMock struct {
 	baseURL     string // origin used to build user-facing checkout URLs (e.g. "http://localhost:3000")
 	logger      *slog.Logger
-	persistPath string         // empty = in-memory only
-	persistErr  func(error)    // callback for persist errors; nil = silent
+	persistPath string      // empty = in-memory only
+	persistErr  func(error) // callback for persist errors; nil = silent
 
 	mu             sync.RWMutex
 	sessions       map[string]*stripeSession

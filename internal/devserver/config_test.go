@@ -54,9 +54,10 @@ cmd = "go build ./cmd/site"
 	cfg, err := LoadConfig(path)
 	require.NoError(t, err)
 
-	// Empty [proxy] section → configured with defaults.
+	// Empty [proxy] section → configured with defaults. Listen defaults to
+	// loopback (localhost) — LAN exposure is an explicit opt-in.
 	assert.True(t, cfg.ProxyConfigured)
-	assert.Equal(t, ":3000", cfg.Proxy.Listen)
+	assert.Equal(t, "localhost:3000", cfg.Proxy.Listen)
 	assert.Equal(t, ":8080", cfg.Proxy.Target)
 	assert.True(t, *cfg.Proxy.InjectReload)
 }

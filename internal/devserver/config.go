@@ -35,6 +35,7 @@ type DevConfig struct {
 	InjectReload    *bool           `toml:"inject_reload"`
 	Email           EmailConfig     `toml:"email"`
 	Stripe          StripeConfig    `toml:"stripe"`
+	MCP             MCPConfig       `toml:"mcp"`
 
 	// HamrConsoleCapture toggles the entire browser-console transport
 	// (window.console.* + uncaught errors + unhandled rejections +
@@ -411,7 +412,10 @@ func readDotenvKey(path, key string) (string, bool) {
 func applyDefaults(cfg *Config) {
 	if cfg.ProxyConfigured {
 		if cfg.Proxy.Listen == "" {
-			cfg.Proxy.Listen = ":3000"
+			// Loopback by default: the dev app + the /__hamr/* control surface
+			// (incl. the MCP gateway) are reachable only from this machine.
+			// Set proxy_listen = ":3000" to expose on the LAN (device testing).
+			cfg.Proxy.Listen = "localhost:3000"
 		}
 		if cfg.Proxy.Target == "" {
 			cfg.Proxy.Target = ":8080"
@@ -442,6 +446,9 @@ func validate(cfg *Config) error {
 	}
 	if cfg.Dev.LogFileMaxLines < 0 {
 		return fmt.Errorf("[dev] log_file_max_lines must be greater than 0")
+	}
+	if err := cfg.Dev.MCP.validate(); err != nil {
+		return err
 	}
 
 	names := make(map[string]bool, len(cfg.Dev.Watch)+len(cfg.Dev.Daemons)+len(cfg.Dev.DockerCompose))

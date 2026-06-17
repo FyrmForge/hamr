@@ -53,12 +53,12 @@ Examples:
 		}
 
 		s3, err := storage.NewS3Storage(storage.S3Config{
-			Endpoint:       endpoint,
-			Bucket:         bucket,
-			Region:         region,
-			AccessKeyID:    accessKey,
+			Endpoint:        endpoint,
+			Bucket:          bucket,
+			Region:          region,
+			AccessKeyID:     accessKey,
 			SecretAccessKey: secretKey,
-			UsePathStyle:   pathStyle,
+			UsePathStyle:    pathStyle,
 		})
 		if err != nil {
 			return fmt.Errorf("init S3 storage: %w", err)

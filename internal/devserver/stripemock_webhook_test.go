@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	stripe "github.com/stripe/stripe-go/v82"
-	"github.com/stripe/stripe-go/v82/webhook"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	stripe "github.com/stripe/stripe-go/v82"
+	"github.com/stripe/stripe-go/v82/webhook"
 )
 
 // TestStripeMock_FireEvent_RoundTripsThroughConstructEvent proves the mock's

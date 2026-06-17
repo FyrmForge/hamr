@@ -70,7 +70,37 @@
   while held and is dropped on tab switch (indices wouldn't translate).
   Clipboard errors (e.g. missing `xclip`/`wl-copy`/`pbcopy`) surface as
   `[hamr:tui] clipboard: ...` lines on the hamr tab. `q`/Ctrl+C quit
-  even when the dev server is parked on a config parse error.
+  even when the dev server is parked on a config parse error. `M` toggles
+  the MCP gateway (see **hamr mcp**); the status bar shows `MCP on/<n>` or
+  `MCP off`.
+- **hamr mcp**: MCP (Model Context Protocol) bridge that lets an AI agent
+  (Claude Code, Codex, opencode) drive a running `hamr dev`. Two hops:
+  agent ⟷ `hamr mcp` over stdio, then `hamr mcp` ⟷ `hamr dev` over localhost
+  HTTP at `/__hamr/mcp/{tool}`. Enabled via `[dev.mcp]` (default off) + the
+  `M` runtime kill-switch. When enabled the gateway writes a per-run bearer
+  token + resolved proxy URL to `.hamr/dev.json` (0600, gitignored); the
+  bridge reads it (resolving the project via `--project` or the nearest
+  `hamr.toml` from cwd) and authenticates each call. Auth is token-only and
+  the namespace is separate from the browser `/__hamr/*` routes, so the
+  kill-switch and permissions never affect the dev panel. Permissions are
+  per-area in `[dev.mcp.access]` (`read`/`write`/omit=deny; `write` implies
+  `read`); areas: `dev` (dev.info), `logs` (logs.read [ANSI-stripped,
+  timestamped, rule prefix-matched], console.read [structured timestamped
+  frames], http.read [dev-proxy request log: method/path/status/latency,
+  incl /__hamr/*, static, SSE]),
+  `docker` (logs/status read; restart/wipe write), `mail` (list/get read;
+  clear/ingest write), `build` (rule.run, rebuild.all, make.run — write-only),
+  `stripe` (list read; complete/expire/refund write). The gateway advertises
+  only granted tools and re-checks permission per call. `make.run` is
+  constrained by `make_targets` (empty=all) and waits `make_wait` (default
+  20s) before returning "still running". Every call is audit-logged to
+  `.hamr/mcp_logs.txt` (`log_file`, `"none"` disables); mutations are tagged
+  `[mcp]` in the main log; the TUI also has a dedicated `mcp` tab (last in the
+  `Tab` cycle) showing one line per request. `hamr mcp install --client claude|codex|opencode`
+  (auto-detects when omitted; `--dry-run`) writes the per-client config,
+  merging and idempotent — Claude `.mcp.json` + opencode `opencode.json` are
+  project-scoped; Codex `~/.codex/config.toml` is global and gets `--project`
+  pinned.
 - **hamr new**: Project scaffolder. On released builds, queries GitHub for the
   latest release and refuses to run when the local CLI is out of date so
   scaffolds never lag the template; bypass with `--skip-version-check`.

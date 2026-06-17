@@ -349,8 +349,26 @@ func (a *DevActions) dockerStatus(dc *DockerCompose) ([]containerStatus, error) 
 }
 
 func (a *DevActions) dockerLogs(dc *DockerCompose) (string, error) {
-	args := append(composeArgs(dc), "logs", "--tail=100")
-	args = append(args, dc.Services...)
+	return a.dockerLogsOpts(dc, "", 100, "")
+}
+
+// dockerLogsOpts fetches compose logs with optional filters. service ""
+// follows all configured services; tail <= 0 defaults to 100; since "" omits
+// the --since flag. service/since are passed as exec args (no shell), so they
+// can't inject; callers should still validate service against safeServiceName.
+func (a *DevActions) dockerLogsOpts(dc *DockerCompose, service string, tail int, since string) (string, error) {
+	if tail <= 0 {
+		tail = 100
+	}
+	args := append(composeArgs(dc), "logs", fmt.Sprintf("--tail=%d", tail))
+	if since != "" {
+		args = append(args, "--since", since)
+	}
+	if service != "" {
+		args = append(args, service)
+	} else {
+		args = append(args, dc.Services...)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "docker", args...)

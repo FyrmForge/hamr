@@ -23,6 +23,7 @@ This is a schema reference. For tutorial-style usage see
 | `[dev]`                 | `hamr dev`                    | Watch rules, daemons, mocks |
 | `[dev.email]`           | `hamr dev`                    | Mail mock at `/__hamr/mail` |
 | `[dev.stripe]`          | `hamr dev`                    | Stripe mock at `/v1/*` + `/__hamr/stripe/*` |
+| `[dev.mcp]`             | `hamr dev` / `hamr mcp`       | MCP gateway for AI agents at `/__hamr/mcp/*` |
 | `[[dev.docker_compose]]`| `hamr dev`                    | Compose deps lifecycle |
 | `[[dev.daemon]]`        | `hamr dev`                    | Long-running background processes |
 | `[[dev.watch]]`         | `hamr dev`                    | File watch + build/run pipelines |
@@ -95,14 +96,14 @@ present; the scaffold sets them.
 `hamr dev` only starts the proxy when this section is present. With it absent,
 file watching still runs but the browser-side reload pipeline does not.
 
-| Field           | Type   | Default | Notes |
-|-----------------|--------|---------|-------|
-| `listen`        | string | `:3000` | Address the proxy listens on. |
-| `target`        | string | `:8080` | Where to forward requests. Must match your app's `PORT`. |
-| `inject_reload` | bool   | `true`  | Inject the SSE live-reload script into HTML responses. |
+| Field           | Type   | Default          | Notes |
+|-----------------|--------|------------------|-------|
+| `listen`        | string | `localhost:3000` | Address the proxy listens on. Loopback by default — the dev app and the `/__hamr/*` control surface are reachable only from this machine. Set `:3000` to expose on the LAN (e.g. testing from a phone). |
+| `target`        | string | `:8080`          | Where to forward requests. Must match your app's `PORT`. |
+| `inject_reload` | bool   | `true`           | Inject the SSE live-reload script into HTML responses. |
 
 Both `listen` and `target` must be `host:port` or `:port` form. Required by
-`[dev.email]` and `[dev.stripe]` (their UIs live on the proxy mux).
+`[dev.email]`, `[dev.stripe]`, and `[dev.mcp]` (their surfaces live on the proxy mux).
 
 ---
 
@@ -247,6 +248,64 @@ See [`pkg/stripemock`](pkg/stripemock.md).
 | `webhook_secret` | string | (required when enabled)     | Must equal the app's `STRIPE_WEBHOOK_SECRET`. |
 | `persist`        | bool   | `true`                      | Persist state across `hamr dev` restarts. |
 | `persist_path`   | string | `.hamr/stripe/state.json`   | State file path. |
+
+### `[dev.mcp]` — MCP gateway for AI agents
+
+When `enabled = true`, `hamr dev` exposes a token-gated MCP gateway at
+`/__hamr/mcp/*` on the proxy. An agent (Claude Code, Codex, opencode) spawns
+the `hamr mcp` bridge, which forwards tool calls to the gateway authenticated by
+a per-run token written to `.hamr/dev.json` (mode 0600). Requires `[proxy]`.
+See [`hamr mcp`](cli.md) and the security notes below.
+
+| Field          | Type              | Default               | Notes |
+|----------------|-------------------|-----------------------|-------|
+| `enabled`      | bool              | `false`               | Initial state at launch. Toggle at runtime with `M` in the TUI (doesn't rewrite this). |
+| `access`       | table             | (none → zero tools)   | Per-area grant: `read`, `write`, or omit (deny). `write` implies `read`. |
+| `make_targets` | list of string    | (empty → all allowed) | Restrict `make.run` to named targets — keep e.g. `make deploy` out of reach. |
+| `make_wait`    | duration          | `20s`                 | How long `make.run` waits before returning "still running, poll logs". |
+| `log_file`     | string            | `.hamr/mcp_logs.txt`  | Audit log of every agent tool call. `"none"` disables. |
+
+**Access areas** (each grants `read` / `write`):
+
+| Area     | `read` exposes                | `write` adds                          |
+|----------|-------------------------------|---------------------------------------|
+| `dev`    | `dev.info`                    | —                                     |
+| `logs`   | `logs.read`, `console.read`, `http.read` | —                          |
+| `docker` | `docker.logs`, `docker.status`| `docker.restart`, `docker.wipe`       |
+| `mail`   | `mail.list`, `mail.get`       | `mail.clear`, `mail.ingest`           |
+| `build`  | — (write-only)                | `rule.run`, `rebuild.all`, `make.run` |
+| `stripe` | `stripe.list`                 | `stripe.complete`, `stripe.expire`, `stripe.refund` |
+
+```toml
+[dev.mcp]
+enabled = true
+
+[dev.mcp.access]
+docker = "read"     # logs/status, not restart/wipe
+build  = "write"
+mail   = "write"
+```
+
+**Observability tools.** `logs.read` returns ANSI-stripped, timestamped lines
+and prefix-matches rule names (`rule="site"` catches `site:build`/`site:run`).
+`console.read` returns structured, timestamped browser-console frames
+(`{time, level, msg, src}`). `http.read` exposes the dev proxy's own request log
+(`{time, method, path, status, durationMs}`) — including `/__hamr/*`, static
+assets, and SSE/WS that the app's access log never sees — filterable by
+`method`/`path`/`min_status`; handy for verifying HTMX request/response flows.
+
+**Async + waits.** `docker.restart`/`docker.wipe` dispatch and return `{ok}` by
+default; pass `wait: true` (+ optional `wait_timeout`, default 60s) to block
+until containers are running/healthy and get the final statuses back. `make.run`
+returns inline `output` for fast targets, else `status:"running"` (poll
+`logs.read`).
+
+**Security.** Default-off and default-deny. The gateway is localhost-only (the
+proxy binds loopback by default), token-gated (per run, in a 0600 gitignored
+file), permission-enforced per call, and has a runtime kill-switch (`M`).
+Granting `build` lets the agent run any Makefile target unless `make_targets`
+constrains it. Residual risk: any local process running as you can read the
+token while the gateway is on — acceptable on a single-user dev box.
 
 ### `[[dev.docker_compose]]` — Compose deps
 

@@ -64,6 +64,8 @@ func (r *Runtime) Wire(opts []devserver.Option) []devserver.Option {
 		devserver.WithProcessOutput(r.sink, r.sink),
 		devserver.WithActionsHook(r.onActions),
 		devserver.WithProxyURLHook(r.SetProxyURL),
+		devserver.WithMCPStatusHook(r.SetMCPStatus),
+		devserver.WithMCPLogHook(r.AppendMCPLog),
 	)
 }
 
@@ -157,6 +159,20 @@ func (r *Runtime) SetVersionUpdateIfOK(msg string) {
 // runner calls it once the listener has bound. Safe from any goroutine.
 func (r *Runtime) SetProxyURL(url string) {
 	r.program.Send(proxyURLMsg{url: url})
+}
+
+// SetMCPStatus publishes the MCP gateway's state to the model's status-bar
+// indicator. Wired via WithMCPStatusHook; fires at startup and on each
+// M-toggle. Safe from any goroutine.
+func (r *Runtime) SetMCPStatus(enabled bool, tools int) {
+	r.program.Send(mcpStatusMsg{enabled: enabled, tools: tools})
+}
+
+// AppendMCPLog pushes one MCP request line to the model's dedicated MCP tab.
+// Wired via WithMCPLogHook; fires on each gateway request. Safe from any
+// goroutine.
+func (r *Runtime) AppendMCPLog(line string) {
+	r.program.Send(mcpLogMsg{line: line})
 }
 
 // Wait runs until ctx is done, then quits the program. Useful when the

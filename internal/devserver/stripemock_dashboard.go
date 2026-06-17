@@ -198,17 +198,10 @@ func (m *StripeMock) handleDashboardRefund(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "invalid amount", http.StatusBadRequest)
 		return
 	}
-	rf, _, eventObject, err := m.applyRefund(refundInput{
-		piID:            piID,
-		amount:          amount,
-		reverseTransfer: r.FormValue("reverse_transfer") == "true",
-		refundAppFee:    r.FormValue("refund_application_fee") == "true",
-	})
-	if err != nil {
+	if _, err := m.refundPayment(piID, amount, r.FormValue("reverse_transfer") == "true", r.FormValue("refund_application_fee") == "true"); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	m.fireEventAsync("charge.refunded", eventObject, "refund", rf.ID)
 	http.Redirect(w, r, "/__hamr/stripe", http.StatusSeeOther)
 }
 
@@ -226,26 +219,10 @@ func (m *StripeMock) handleDashboardExpire(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "missing session", http.StatusBadRequest)
 		return
 	}
-
-	m.mu.Lock()
-	sess, ok := m.sessions[id]
-	if !ok {
-		m.mu.Unlock()
-		http.Error(w, "session not found", http.StatusNotFound)
+	if err := m.expireSession(id); err != nil {
+		writeStripeOpError(w, err)
 		return
 	}
-	if sess.Status != "open" {
-		m.mu.Unlock()
-		http.Error(w, fmt.Sprintf("session already %s", sess.Status), http.StatusConflict)
-		return
-	}
-	sess.Status = "expired"
-	sess.PaymentStatus = "unpaid"
-	dataObject := m.serializeSession(sess)
-	m.persist()
-	m.mu.Unlock()
-
-	m.fireEventAsync("checkout.session.expired", dataObject, "session", id)
 	http.Redirect(w, r, "/__hamr/stripe", http.StatusSeeOther)
 }
 

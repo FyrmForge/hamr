@@ -197,6 +197,39 @@ view.
 See [emailmock](emailmock.md) for usage, magic-recipient failure simulation,
 and the HTTP ingest API.
 
+## MCP Gateway (AI agents)
+
+With `[dev.mcp].enabled` (or toggled on with `M`), `hamr dev` exposes a
+token-gated MCP gateway at `/__hamr/mcp/*` on the proxy. An agent drives it
+through the `hamr mcp` stdio bridge:
+
+```
+agent  ⟷  hamr mcp  ⟷  hamr dev
+        stdio (MCP)      localhost HTTP (/__hamr/mcp/*)
+```
+
+The bridge discovers the running dev server and its per-run token from
+`.hamr/dev.json` (written by an enabled gateway, mode 0600, gitignored) at call
+time — so the agent's config holds no secret and the wiring survives port walks
+and restarts.
+
+**Tools** mirror the dev panel's actions, gated by `[dev.mcp.access]`
+(per-area `read`/`write`): `dev.info` (discovery), `logs.read`, `console.read`,
+`docker.logs`/`status`/`restart`/`wipe`, `rule.run`, `rebuild.all`, `make.run`
+(bounded-wait), the mail-mock tools, and the stripe-mock lifecycle tools. Reads
+return immediately; `docker.restart`/`wipe` and `rule.run` dispatch async (poll
+`docker.status` / `logs.read`); `make.run` waits up to `make_wait` then returns
+"still running" for slow targets.
+
+Every agent call is recorded three ways: to `.hamr/mcp_logs.txt` (the audit
+log), to a dedicated **mcp** TUI tab (last in the `Tab` cycle — one line per
+request, reads included), and — for mutations only — tagged `[mcp]` in the main
+log tab. The status bar shows the gateway state; `M` is the kill-switch.
+
+Set up an agent with `hamr mcp install` (see [CLI](../cli.md)). Config,
+permissions, and the full security model are in
+[`[dev.mcp]`](../hamr-toml.md).
+
 ## File Logging
 
 By default, `hamr dev` mirrors its recent output to a rolling log file at `.hamr/dev_logs.txt`. The file contains `[hamr dev]` infrastructure messages plus stdout/stderr from watched commands and daemons, with terminal escape sequences stripped. This is designed for LLM consumption: an AI assistant can read the file to understand what happened during the dev session without scraping the terminal.
@@ -323,7 +356,8 @@ The 🔨 emoji reflects overall state:
 | `o` | Open the proxy URL in the default browser | Requires `[proxy]` configured |
 | `c` | Clear the active tab's log buffer | |
 | `m` | Run a Makefile target | Opens a fuzzy palette listing every target in `./Makefile` (declaration order). Type to filter, `↑/↓` to move, `↩` to run, `Esc` to cancel. Hidden when no `Makefile` exists. Output streams to the hamr tab prefixed `[make:<target>]`. While running, only `q` (cancel — `SIGINT`) and `Ctrl+C` (quit TUI) work. On exit a Done/Failed summary stays until any key dismisses it. |
-| `Tab` / `Shift+Tab` | Cycle log tabs (hamr → docker stacks → ...) | One tab per `[[dev.docker_compose]]` entry, fed by `docker compose logs -f --tail=50`. |
+| `M` | Toggle the MCP gateway | Runtime kill-switch for `[dev.mcp]` — flips the gateway on/off for the session without rewriting `hamr.toml`. The status bar shows `MCP on/<n>` (exposed tool count) or `MCP off`. Shown only when a proxy is running. |
+| `Tab` / `Shift+Tab` | Cycle log tabs (hamr → docker stacks → mcp) | One tab per `[[dev.docker_compose]]` entry, fed by `docker compose logs -f --tail=50`; plus a dedicated **mcp** tab (last) when `[dev.mcp]` is configured, showing one line per agent request. |
 | `/` | Search the active tab (case-insensitive substring) | Live: highlights and `[k/n]` counter update as you type. `↩` locks in, `Esc` cancels; per-tab persistent. |
 | `n` / `N` | Jump to next / previous search match | Wraps at ends. |
 | `f` | Toggle filter view (active search only) | Hides every line that doesn't contain the search term; press again to restore. |

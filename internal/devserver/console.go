@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	ws "github.com/coder/websocket"
 )
@@ -57,13 +58,72 @@ type ConsoleSink struct {
 	w          io.Writer
 	filterHamr bool
 	mu         sync.Mutex
+
+	// Frame ring buffer for the MCP console.read tool: structured frames with
+	// a server receive-timestamp, so an agent can correlate browser errors with
+	// timestamped logs.read entries. Separate lock from the write mutex.
+	framesMu  sync.Mutex
+	frames    []consoleFrameTS
+	maxFrames int
+	now       func() time.Time // injectable for tests
 }
+
+// consoleFrameTS is a captured browser frame tagged with its server receive time.
+type consoleFrameTS struct {
+	t     time.Time
+	level string
+	msg   string
+	src   string
+}
+
+// consoleBufferMax caps the console.read ring buffer.
+const consoleBufferMax = 1000
 
 // NewConsoleSink wires the sink to the same writer as the dev logger.
 // Pass filterHamr=true to drop frames whose msg contains "[hamr]" (i.e.
 // hamr's own reload-script chatter); default is to show everything.
 func NewConsoleSink(w io.Writer, filterHamr bool) *ConsoleSink {
-	return &ConsoleSink{w: w, filterHamr: filterHamr}
+	return &ConsoleSink{w: w, filterHamr: filterHamr, maxFrames: consoleBufferMax, now: time.Now}
+}
+
+// recordFrame appends a frame to the bounded ring buffer for console.read.
+func (c *ConsoleSink) recordFrame(f ConsoleFrame) {
+	// Tolerate a zero-valued sink (e.g. constructed directly in a test).
+	max := c.maxFrames
+	if max <= 0 {
+		max = consoleBufferMax
+	}
+	now := c.now
+	if now == nil {
+		now = time.Now
+	}
+	c.framesMu.Lock()
+	defer c.framesMu.Unlock()
+	c.frames = append(c.frames, consoleFrameTS{t: now(), level: f.Level, msg: f.Msg, src: f.Src})
+	if len(c.frames) > max {
+		c.frames = c.frames[len(c.frames)-max:]
+	}
+}
+
+// Snapshot returns up to tail recent frames matching the level (exact, case-
+// insensitive) and contains (substring on msg) filters, oldest first.
+func (c *ConsoleSink) Snapshot(level, contains string, tail int) []consoleLine {
+	c.framesMu.Lock()
+	defer c.framesMu.Unlock()
+	out := make([]consoleLine, 0, len(c.frames))
+	for _, f := range c.frames {
+		if level != "" && !strings.EqualFold(f.level, level) {
+			continue
+		}
+		if contains != "" && !strings.Contains(f.msg, contains) {
+			continue
+		}
+		out = append(out, consoleLine{Time: f.t.Format(time.RFC3339), Level: f.level, Msg: f.msg, Src: f.src})
+	}
+	if tail > 0 && len(out) > tail {
+		out = out[len(out)-tail:]
+	}
+	return out
 }
 
 // Write renders a single frame and emits it through the dev writer. Empty
@@ -76,6 +136,9 @@ func (c *ConsoleSink) Write(f ConsoleFrame) {
 	if c.filterHamr && strings.Contains(f.Msg, "[hamr]") {
 		return
 	}
+
+	// Capture for console.read (timestamped, structured) before rendering.
+	c.recordFrame(f)
 
 	var buf []byte
 	buf = append(buf, siteConsoleTag...)

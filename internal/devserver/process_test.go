@@ -27,7 +27,7 @@ func TestProcessManager_RunCommand(t *testing.T) {
 	rule := &WatchRule{Name: "test", Cmd: "echo hello"}
 	output, err := pm.RunCommand(context.Background(), rule)
 	require.NoError(t, err)
-	assert.Empty(t, output)
+	assert.Contains(t, output, "hello", "captured output is returned on success too")
 }
 
 func TestProcessManager_RunCommand_Failure(t *testing.T) {

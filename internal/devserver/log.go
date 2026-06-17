@@ -15,10 +15,10 @@ var hamrTag = []byte(tagColor + "[hamr dev]" + colorReset + " ")
 
 // levelColors maps slog levels to ANSI colors.
 var levelColors = map[slog.Level]string{
-	slog.LevelDebug: "\033[90m",  // gray
-	slog.LevelInfo:  "\033[37m",  // white (default)
-	slog.LevelWarn:  "\033[33m",  // yellow
-	slog.LevelError: "\033[31m",  // red
+	slog.LevelDebug: "\033[90m", // gray
+	slog.LevelInfo:  "\033[37m", // white (default)
+	slog.LevelWarn:  "\033[33m", // yellow
+	slog.LevelError: "\033[31m", // red
 }
 
 // devHandler is a compact slog.Handler that writes lines prefixed with

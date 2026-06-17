@@ -2,12 +2,12 @@ package devserver
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"html/template"
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 )
 
 // RegisterUIRoutes mounts the dev-facing checkout page + outcome handler on
@@ -122,101 +122,30 @@ func (m *StripeMock) handleComplete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing session form field", http.StatusBadRequest)
 		return
 	}
-	rule, ok := stripeOutcomes[outcome]
-	if !ok {
-		http.Error(w, fmt.Sprintf("unknown outcome %q (allowed: paid, failed, cancelled)", outcome), http.StatusBadRequest)
-		return
-	}
 
-	m.mu.Lock()
-	sess, exists := m.sessions[id]
-	if !exists {
-		m.mu.Unlock()
-		http.Error(w, "session not found", http.StatusNotFound)
+	redirect, leaveOpen, err := m.completeCheckout(id, outcome)
+	if err != nil {
+		writeStripeOpError(w, err)
 		return
 	}
-	if sess.Status != "open" {
-		m.mu.Unlock()
-		http.Error(w, fmt.Sprintf("session already %s", sess.Status), http.StatusConflict)
-		return
-	}
-
 	// Synchronous decline: the session stays open with no state change and no
 	// webhook. Send the buyer back to the hosted checkout page to retry.
-	if rule.leaveOpen {
-		m.mu.Unlock()
+	if leaveOpen {
 		http.Redirect(w, r, "/__hamr/stripe/checkout?session="+url.QueryEscape(id), http.StatusSeeOther)
 		return
 	}
-
-	sess.Status = rule.status
-	sess.PaymentStatus = rule.paymentStatus
-
-	// Build the ordered list of events to fire. For a paid session we also
-	// synthesize the PaymentIntent + Charge that real Stripe creates so the app
-	// can retrieve the PI, refund the charge, and receive the payment events —
-	// not just checkout.session.completed.
-	fires := []webhookFire{{rule.eventType, m.serializeSession(sess)}}
-
-	if rule.createPayment {
-		now := time.Now()
-		ch := &stripeCharge{
-			ID:              "ch_test_" + randomHex(24),
-			Amount:          sess.AmountTotal,
-			AmountCaptured:  sess.AmountTotal,
-			Currency:        sess.Currency,
-			Status:          "succeeded",
-			Paid:            true,
-			Captured:        true,
-			PaymentIntentID: sess.PaymentIntentID,
-			PaymentMethod:   "pm_card_visa",
-			Created:         now,
-			Metadata:        sess.Metadata,
-		}
-		pi := &stripePaymentIntent{
-			ID:                 sess.PaymentIntentID,
-			Amount:             sess.AmountTotal,
-			Currency:           sess.Currency,
-			Status:             "succeeded",
-			CaptureMethod:      "automatic",
-			ConfirmationMethod: "automatic",
-			LatestChargeID:     ch.ID,
-			PaymentMethod:      "pm_card_visa",
-			ClientSecret:       sess.PaymentIntentID + "_secret_" + randomHex(12),
-			Created:            now,
-			Metadata:           sess.Metadata,
-		}
-		m.paymentIntents[pi.ID] = pi
-		m.charges[ch.ID] = ch
-		fires = append(fires,
-			webhookFire{"payment_intent.succeeded", m.serializePaymentIntent(pi, ch)},
-			webhookFire{"charge.succeeded", m.serializeCharge(ch)},
-		)
-	}
-
-	// Capture the redirect target before releasing the lock so we don't race
-	// with concurrent retrieves. Real Stripe substitutes {CHECKOUT_SESSION_ID}
-	// in success_url before redirecting; mirror that here so apps using the
-	// documented placeholder pattern (`?session_id={CHECKOUT_SESSION_ID}`) get
-	// the actual ID and can call session.Get(...) on the success page.
-	redirect := sess.SuccessURL
-	if !rule.useSuccessURL {
-		redirect = sess.CancelURL
-	}
-	redirect = strings.ReplaceAll(redirect, "{CHECKOUT_SESSION_ID}", sess.ID)
-	if redirect == "" {
-		redirect = "/"
-	}
-	m.persist()
-	m.mu.Unlock()
-
-	// Fire-and-forget: mirror real Stripe (the user is redirected immediately
-	// while the webhook fans out independently). Events are delivered in order;
-	// a failure mid-list is logged but does not abort the rest (each event is
-	// its own retry surface in real Stripe).
-	m.fireEventsAsync(fires, "session", id)
-
 	http.Redirect(w, r, redirect, http.StatusSeeOther)
+}
+
+// writeStripeOpError maps a *stripeOpError to its HTTP status, falling back to
+// 500 for any other error type.
+func writeStripeOpError(w http.ResponseWriter, err error) {
+	var oe *stripeOpError
+	if errors.As(err, &oe) {
+		http.Error(w, oe.msg, oe.status)
+		return
+	}
+	http.Error(w, err.Error(), http.StatusInternalServerError)
 }
 
 // formatStripeAmount renders an amount in the smallest currency unit using
