@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -58,13 +59,16 @@ type Janitor struct {
 	preTick  []PreTickFunc
 	postTick []PostTickFunc
 
-	cron *cron.Cron
+	cron    *cron.Cron
+	wg      sync.WaitGroup  // tracks immediate-run goroutines (cron tracks scheduled)
+	running map[string]bool // task name → in-flight; guards immediate vs scheduled overlap
 }
 
 // New creates a Janitor. Options configure timeout, logger, and hooks.
 func New(opts ...Option) *Janitor {
 	j := &Janitor{
 		timeout: 30 * time.Second,
+		running: make(map[string]bool),
 	}
 	for _, o := range opts {
 		o(j)
@@ -107,7 +111,6 @@ func (j *Janitor) Start(ctx context.Context) error {
 	j.mu.Unlock()
 
 	for _, st := range j.tasks {
-		st := st // capture
 		_, err := cronRef.AddFunc(st.schedule, func() {
 			j.runTask(ctxRef, st.task)
 		})
@@ -122,8 +125,9 @@ func (j *Janitor) Start(ctx context.Context) error {
 
 	if j.runImmediately {
 		for _, st := range j.tasks {
-			st := st // capture
-			go j.runTask(ctxRef, st.task)
+			j.wg.Go(func() {
+				j.runTask(ctxRef, st.task)
+			})
 		}
 	}
 
@@ -143,7 +147,10 @@ func (j *Janitor) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop stops the cron scheduler. It is safe to call multiple times.
+// Stop stops the cron scheduler and waits for in-flight tasks to return, so a
+// caller can safely tear down shared resources (DB connections, etc.) once Stop
+// returns. It is safe to call multiple times. Tasks observe the cancelled
+// context, so well-behaved tasks return promptly.
 func (j *Janitor) Stop() {
 	j.mu.Lock()
 	cancel := j.cancel
@@ -157,13 +164,58 @@ func (j *Janitor) Stop() {
 		cancel()
 	}
 	if cronRef != nil {
-		cronRef.Stop()
+		// cron.Stop() returns a context that is Done once all in-flight
+		// scheduled jobs have returned — wait on it instead of discarding it.
+		<-cronRef.Stop().Done()
 	}
+	// Immediate-run goroutines bypass cron; drain them too.
+	j.wg.Wait()
+}
+
+// acquireRun marks a task as running, returning false if it already is.
+func (j *Janitor) acquireRun(name string) bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.running == nil {
+		j.running = make(map[string]bool)
+	}
+	if j.running[name] {
+		return false
+	}
+	j.running[name] = true
+	return true
+}
+
+// releaseRun clears a task's running marker.
+func (j *Janitor) releaseRun(name string) {
+	j.mu.Lock()
+	delete(j.running, name)
+	j.mu.Unlock()
 }
 
 // runTask executes a single task with pre/post hooks and timeout.
 func (j *Janitor) runTask(parent context.Context, t Task) {
 	name := t.Name()
+
+	// A panicking task must not crash the process. runTask is the single
+	// chokepoint for both scheduled runs (cron AddFunc) and immediate runs
+	// (the WithRunImmediately goroutines bypass the cron chain, so a
+	// chain-level cron.Recover would not cover them). On panic we log and
+	// return; pre/post hooks for this run are skipped.
+	defer func() {
+		if r := recover(); r != nil {
+			j.logger.Error("janitor: task panicked",
+				"task", name, "panic", r, "stack", string(debug.Stack()))
+		}
+	}()
+
+	// Skip if this task is already running. cron's SkipIfStillRunning only
+	// guards scheduled-vs-scheduled; this also covers a WithRunImmediately run
+	// overlapping the first scheduled tick (and vice versa).
+	if !j.acquireRun(name) {
+		return
+	}
+	defer j.releaseRun(name)
 
 	for _, fn := range j.preTick {
 		if err := fn(parent); err != nil {

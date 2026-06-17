@@ -60,9 +60,15 @@ func TestPhone(t *testing.T) {
 
 func TestURL(t *testing.T) {
 	check(t, "https", validate.URL("https://example.com"), "")
+	check(t, "http", validate.URL("http://example.com/path?q=1"), "")
 	check(t, "empty", validate.URL(""), validate.MsgURLInvalid)
 	check(t, "no-scheme", validate.URL("example.com"), validate.MsgURLInvalid)
 	check(t, "bare", validate.URL("not a url"), validate.MsgURLInvalid)
+	// Non-web schemes are rejected — they're XSS vectors in href/src.
+	check(t, "javascript-host", validate.URL("javascript://x/%0aalert(1)"), validate.MsgURLInvalid)
+	check(t, "javascript-bare", validate.URL("javascript:alert(1)"), validate.MsgURLInvalid)
+	check(t, "data", validate.URL("data:text/html,<script>alert(1)</script>"), validate.MsgURLInvalid)
+	check(t, "vbscript", validate.URL("vbscript:msgbox(1)"), validate.MsgURLInvalid)
 }
 
 // ---------------------------------------------------------------------------

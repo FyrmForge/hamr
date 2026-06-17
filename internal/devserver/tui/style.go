@@ -61,10 +61,14 @@ var (
 			BorderForeground(colorAccent).
 			Padding(1, 2)
 
+	// No MarginBottom: every modal renders an explicit blank line after the
+	// title, and that explicit blank is what the modals' fixedChrome budgets
+	// count. A MarginBottom(1) here would add a second, uncounted row, pushing
+	// the modal one row taller than budgeted so its bottom border is cropped at
+	// tight terminal heights.
 	modalTitle = lipgloss.NewStyle().
 			Foreground(colorAccent).
-			Bold(true).
-			MarginBottom(1)
+			Bold(true)
 
 	modalDanger = lipgloss.NewStyle().Foreground(colorErr).Bold(true)
 

@@ -87,10 +87,19 @@ func (tb *tailBuffer) Reset() {
 
 var _ io.Writer = (*tailBuffer)(nil)
 
+// managedProc is a tracked long-running process plus a done channel that the
+// process's single Wait goroutine (in StartProcess) closes when cmd.Wait()
+// returns. stopProcess observes done instead of calling Wait itself, so there
+// is exactly one reaper for each PID.
+type managedProc struct {
+	proc *os.Process
+	done chan struct{}
+}
+
 // ProcessManager handles running one-shot commands and long-running processes.
 type ProcessManager struct {
 	mu            sync.Mutex
-	procs         map[string]*os.Process
+	procs         map[string]*managedProc
 	logger        *slog.Logger
 	OnProcessExit func(rule string, err error, output string)
 	logBuf        *LogBuffer
@@ -139,7 +148,7 @@ func (pm *ProcessManager) SetInjectedEnv(env []string) {
 func NewProcessManager(logger *slog.Logger) *ProcessManager {
 	stdinR, stdinW, _ := os.Pipe()
 	return &ProcessManager{
-		procs:  make(map[string]*os.Process),
+		procs:  make(map[string]*managedProc),
 		logger: logger,
 		stdinR: stdinR,
 		stdinW: stdinW,
@@ -154,6 +163,23 @@ func (pm *ProcessManager) RunCommand(ctx context.Context, rule *WatchRule) (stri
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", rule.Cmd)
 	cmd.Env = buildEnv(append(append([]string(nil), pm.injectedEnv...), rule.Env...))
+	// Match StartProcess / compose invocations: put the child in its own
+	// process group, and bound the I/O wait on cancel. Without WaitDelay a
+	// compound command whose grandchildren inherit the stdout/stderr pipes
+	// keeps cmd.Run() blocked forever after ctx is cancelled, wedging the
+	// scheduler and shutdown.
+	cmd.WaitDelay = 2 * time.Second
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// exec.CommandContext's default Cancel only Kills the leader PID; with the
+	// child in its own process group its grandchildren (e.g. a compiler spawned
+	// by `sh -c`) would survive ctx cancel and keep holding ports/files. SIGKILL
+	// the whole group instead, mirroring stopProcess on the StartProcess path.
+	cmd.Cancel = func() error {
+		if pgid, err := syscall.Getpgid(cmd.Process.Pid); err == nil {
+			return syscall.Kill(-pgid, syscall.SIGKILL)
+		}
+		return cmd.Process.Kill()
+	}
 	color := nextColor()
 	capture := newTailBuffer()
 
@@ -164,24 +190,28 @@ func (pm *ProcessManager) RunCommand(ctx context.Context, rule *WatchRule) (stri
 	}
 
 	stdoutDest, stderrDest := pm.prefixDests()
+	psw := newPrefixWriter(stdoutDest, displayName, color)
+	pse := newPrefixWriter(stderrDest, displayName, color)
 	var lw *logWriter
 	if pm.logBuf != nil {
 		lw = newLogWriter(displayName, color, pm.logBuf, pm.logBroker)
-		cmd.Stdout = io.MultiWriter(newPrefixWriter(stdoutDest, displayName, color), capture, lw)
-		cmd.Stderr = io.MultiWriter(newPrefixWriter(stderrDest, displayName, color), capture, lw)
+		cmd.Stdout = io.MultiWriter(psw, capture, lw)
+		cmd.Stderr = io.MultiWriter(pse, capture, lw)
 	} else {
-		cmd.Stdout = io.MultiWriter(newPrefixWriter(stdoutDest, displayName, color), capture)
-		cmd.Stderr = io.MultiWriter(newPrefixWriter(stderrDest, displayName, color), capture)
+		cmd.Stdout = io.MultiWriter(psw, capture)
+		cmd.Stderr = io.MultiWriter(pse, capture)
 	}
 
-	if err := cmd.Run(); err != nil {
-		if lw != nil {
-			lw.Flush()
-		}
-		return capture.String(), fmt.Errorf("rule %q cmd failed: %w", rule.Name, err)
-	}
+	runErr := cmd.Run()
+	// Flush any newline-less trailing output (e.g. a crash message) before
+	// returning, so the last line of a failing command isn't dropped.
+	psw.Flush()
+	pse.Flush()
 	if lw != nil {
 		lw.Flush()
+	}
+	if runErr != nil {
+		return capture.String(), fmt.Errorf("rule %q cmd failed: %w", rule.Name, runErr)
 	}
 	return "", nil
 }
@@ -197,6 +227,12 @@ func (pm *ProcessManager) StartProcess(ctx context.Context, rule *WatchRule) err
 	cmd.Env = buildEnv(append(append([]string(nil), pm.injectedEnv...), rule.Env...))
 	cmd.Stdin = pm.stdinR
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Bound the post-exit I/O wait (same as RunCommand). A long-running Run
+	// process can spawn a grandchild that holds the stdout/stderr pipe open and
+	// escapes the process group, so after we SIGKILL the group cmd.Wait() would
+	// otherwise block forever copying from a pipe that never reaches EOF — which
+	// makes stopProcess's `<-mp.done` (and therefore quit) hang indefinitely.
+	cmd.WaitDelay = 2 * time.Second
 	color := nextColor()
 	capture := newTailBuffer()
 
@@ -207,33 +243,42 @@ func (pm *ProcessManager) StartProcess(ctx context.Context, rule *WatchRule) err
 	}
 
 	stdoutDest, stderrDest := pm.prefixDests()
+	psw := newPrefixWriter(stdoutDest, displayName, color)
+	pse := newPrefixWriter(stderrDest, displayName, color)
 	var lw *logWriter
 	if pm.logBuf != nil {
 		lw = newLogWriter(displayName, color, pm.logBuf, pm.logBroker)
-		cmd.Stdout = io.MultiWriter(newPrefixWriter(stdoutDest, displayName, color), capture, lw)
-		cmd.Stderr = io.MultiWriter(newPrefixWriter(stderrDest, displayName, color), capture, lw)
+		cmd.Stdout = io.MultiWriter(psw, capture, lw)
+		cmd.Stderr = io.MultiWriter(pse, capture, lw)
 	} else {
-		cmd.Stdout = io.MultiWriter(newPrefixWriter(stdoutDest, displayName, color), capture)
-		cmd.Stderr = io.MultiWriter(newPrefixWriter(stderrDest, displayName, color), capture)
+		cmd.Stdout = io.MultiWriter(psw, capture)
+		cmd.Stderr = io.MultiWriter(pse, capture)
 	}
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("rule %q start failed: %w", rule.Name, err)
 	}
 
+	mp := &managedProc{proc: cmd.Process, done: make(chan struct{})}
 	pm.mu.Lock()
-	pm.procs[rule.Name] = cmd.Process
+	pm.procs[rule.Name] = mp
 	pm.mu.Unlock()
 
-	// Wait in background so we can clean up the map entry.
+	// This is the single Wait owner for the process. It reaps via cmd.Wait()
+	// (which also closes the pipes), signals completion on mp.done so
+	// stopProcess can observe it without a second Wait, then cleans up the map.
 	ruleName := rule.Name
 	go func() {
 		err := cmd.Wait()
+		// Flush trailing newline-less output (e.g. a panic line) before exit.
+		psw.Flush()
+		pse.Flush()
 		if lw != nil {
 			lw.Flush()
 		}
+		close(mp.done)
 		pm.mu.Lock()
-		tracked := pm.procs[ruleName] == cmd.Process
+		tracked := pm.procs[ruleName] == mp
 		if tracked {
 			delete(pm.procs, ruleName)
 		}
@@ -275,7 +320,7 @@ func (pm *ProcessManager) StopAll() {
 
 func (pm *ProcessManager) stopProcess(name string) {
 	pm.mu.Lock()
-	proc, ok := pm.procs[name]
+	mp, ok := pm.procs[name]
 	if !ok {
 		pm.mu.Unlock()
 		return
@@ -286,30 +331,33 @@ func (pm *ProcessManager) stopProcess(name string) {
 	pm.logger.Info("stopping", "rule", name)
 
 	// Send SIGINT to the process group.
-	pgid, err := syscall.Getpgid(proc.Pid)
-	if err == nil {
+	proc := mp.proc
+	if pgid, err := syscall.Getpgid(proc.Pid); err == nil {
 		_ = syscall.Kill(-pgid, syscall.SIGINT)
 	} else {
 		_ = proc.Signal(syscall.SIGINT)
 	}
 
-	// Wait for graceful shutdown.
-	done := make(chan struct{})
-	go func() {
-		_, _ = proc.Wait()
-		close(done)
-	}()
-
+	// Observe the single Wait owner (StartProcess) reaping the process — do NOT
+	// call Wait here, or two goroutines race to reap the same PID.
 	select {
-	case <-done:
+	case <-mp.done:
 	case <-time.After(shutdownTimeout):
+		// The owner may have just finished; only escalate if it hasn't, so we
+		// never SIGKILL a PID that's already been reaped (and possibly reused by
+		// the OS for an unrelated process).
+		select {
+		case <-mp.done:
+			return
+		default:
+		}
 		pm.logger.Warn("force killing", "rule", name)
 		if pgid, err := syscall.Getpgid(proc.Pid); err == nil {
 			_ = syscall.Kill(-pgid, syscall.SIGKILL)
 		} else {
 			_ = proc.Kill()
 		}
-		<-done
+		<-mp.done
 	}
 }
 
@@ -431,6 +479,24 @@ func (w *prefixWriter) Write(p []byte) (int, error) {
 	termMu.Unlock()
 
 	return len(p), nil
+}
+
+// Flush emits any buffered partial (newline-less) line — e.g. the final line of
+// a process that crashed without a trailing newline, which Write would
+// otherwise hold forever. Call once the process has exited.
+func (w *prefixWriter) Flush() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.buf) == 0 {
+		return
+	}
+	out := append([]byte(nil), w.tag...)
+	out = append(out, w.buf...)
+	out = append(out, '\r', '\n')
+	w.buf = w.buf[:0]
+	termMu.Lock()
+	_, _ = w.dest.Write(out)
+	termMu.Unlock()
 }
 
 var _ io.Writer = (*prefixWriter)(nil)

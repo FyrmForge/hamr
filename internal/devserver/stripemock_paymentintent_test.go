@@ -330,6 +330,99 @@ func TestStripeMock_PaymentIntentComplete_DefaultsPaymentMethodWhenAbsent(t *tes
 		"Charge.payment_method must be defaulted (not empty) when PI was succeeded without explicit confirm")
 }
 
+// seedCapturablePI inserts a manual-capture PI already authorized and awaiting
+// capture (the state confirm() leaves a capture_method=manual PI in).
+func seedCapturablePI(t *testing.T, mock *StripeMock, amount int64) string {
+	t.Helper()
+	id := "pi_test_" + randomHex(16)
+	mock.mu.Lock()
+	mock.paymentIntents[id] = &stripePaymentIntent{
+		ID: id, Amount: amount, Currency: "gbp",
+		Status: "requires_capture", CaptureMethod: "manual",
+		ConfirmationMethod: "automatic", PaymentMethod: "pm_card_visa",
+		ClientSecret: id + "_secret_" + randomHex(8), Created: time.Now(),
+	}
+	mock.mu.Unlock()
+	return id
+}
+
+// TestStripeMock_CapturePaymentIntent_FullCapture guards the manual-capture
+// fix: a requires_capture PI exposes amount_capturable, and POST /capture
+// creates the Charge, advances to succeeded, and fires the payment events.
+func TestStripeMock_CapturePaymentIntent_FullCapture(t *testing.T) {
+	const secret = "whsec_test_devmock"
+	app := newOrderedWebhookSink(t, secret)
+	mock, srv, _ := newFullStripeStack(t, "")
+	mock.SetWebhookEndpoint(WebhookEndpoint{URL: app.URL, Secret: secret})
+
+	piID := seedCapturablePI(t, mock, 2000)
+
+	// Before capture: the authorized amount is capturable.
+	getResp, err := http.Get(srv.URL + "/v1/payment_intents/" + piID)
+	require.NoError(t, err)
+	var before map[string]any
+	require.NoError(t, json.NewDecoder(getResp.Body).Decode(&before))
+	getResp.Body.Close() //nolint:errcheck
+	assert.EqualValues(t, 2000, before["amount_capturable"])
+
+	resp, err := http.Post(srv.URL+"/v1/payment_intents/"+piID+"/capture",
+		"application/x-www-form-urlencoded", nil)
+	require.NoError(t, err)
+	defer resp.Body.Close() //nolint:errcheck
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	got := app.WaitFor(t, 2, 2*time.Second)
+	assert.Equal(t, "payment_intent.succeeded", string(got[0].Type))
+	assert.Equal(t, "charge.succeeded", string(got[1].Type))
+
+	mock.mu.RLock()
+	pi := mock.paymentIntents[piID]
+	ch := mock.charges[pi.LatestChargeID]
+	mock.mu.RUnlock()
+	assert.Equal(t, "succeeded", pi.Status)
+	assert.Equal(t, int64(2000), pi.AmountReceived)
+	require.NotNil(t, ch, "capture must create a Charge")
+	assert.Equal(t, int64(2000), ch.AmountCaptured)
+}
+
+// TestStripeMock_CapturePaymentIntent_PartialCapture captures less than the
+// authorized amount via amount_to_capture.
+func TestStripeMock_CapturePaymentIntent_PartialCapture(t *testing.T) {
+	mock, srv, _ := newFullStripeStack(t, "")
+	piID := seedCapturablePI(t, mock, 2000)
+
+	form := url.Values{"amount_to_capture": {"800"}}
+	resp, err := http.Post(srv.URL+"/v1/payment_intents/"+piID+"/capture",
+		"application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
+	require.NoError(t, err)
+	defer resp.Body.Close() //nolint:errcheck
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var body map[string]any
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	assert.Equal(t, "succeeded", body["status"])
+	assert.EqualValues(t, 800, body["amount_received"])
+
+	mock.mu.RLock()
+	ch := mock.charges[mock.paymentIntents[piID].LatestChargeID]
+	mock.mu.RUnlock()
+	require.NotNil(t, ch)
+	assert.Equal(t, int64(800), ch.AmountCaptured)
+}
+
+// TestStripeMock_CapturePaymentIntent_RejectsNonCapturable rejects a capture on
+// a PI that isn't awaiting capture.
+func TestStripeMock_CapturePaymentIntent_RejectsNonCapturable(t *testing.T) {
+	mock, srv, _ := newFullStripeStack(t, "")
+	piID := seedPaymentIntent(t, mock, paymentIntentSeed{Amount: 1000, Currency: "gbp"}) // requires_confirmation
+
+	resp, err := http.Post(srv.URL+"/v1/payment_intents/"+piID+"/capture",
+		"application/x-www-form-urlencoded", nil)
+	require.NoError(t, err)
+	defer resp.Body.Close() //nolint:errcheck
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
 // TestStripeMock_PaymentIntentComplete_DoubleSubmit is the same race-safety
 // guarantee as the other resources.
 func TestStripeMock_PaymentIntentComplete_DoubleSubmit(t *testing.T) {
@@ -548,4 +641,37 @@ func (s *orderedWebhookSink) Count() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.events)
+}
+
+// TestStripeMock_CapturePaymentIntent_PartialBelowFeeClampsTransfer guards
+// against a negative destination transfer: a partial capture smaller than the
+// application fee must clamp the transfer amount to 0, not go negative.
+func TestStripeMock_CapturePaymentIntent_PartialBelowFeeClampsTransfer(t *testing.T) {
+	mock, srv, _ := newFullStripeStack(t, "")
+
+	piID := "pi_test_" + randomHex(16)
+	mock.mu.Lock()
+	mock.paymentIntents[piID] = &stripePaymentIntent{
+		ID: piID, Amount: 1000, Currency: "gbp",
+		Status: "requires_capture", CaptureMethod: "manual", PaymentMethod: "pm_card_visa",
+		ApplicationFeeAmount:    600,
+		TransferDataDestination: "acct_test_dest",
+		ClientSecret:            piID + "_secret", Created: time.Now(),
+	}
+	mock.mu.Unlock()
+
+	form := url.Values{"amount_to_capture": {"300"}} // below the 600 fee
+	resp, err := http.Post(srv.URL+"/v1/payment_intents/"+piID+"/capture",
+		"application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
+	require.NoError(t, err)
+	defer resp.Body.Close() //nolint:errcheck
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	mock.mu.RLock()
+	pi := mock.paymentIntents[piID]
+	tr := mock.transfers[pi.TransferID]
+	mock.mu.RUnlock()
+	require.NotNil(t, tr, "a transfer should have been created")
+	assert.GreaterOrEqual(t, tr.Amount, int64(0), "transfer amount must not be negative")
+	assert.Equal(t, int64(0), tr.Amount, "capture below the fee clamps the transfer to 0")
 }

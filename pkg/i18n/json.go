@@ -3,6 +3,7 @@ package i18n
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"regexp"
 	"slices"
@@ -16,10 +17,18 @@ type localeMeta struct {
 	DisplayName string `json:"displayName"` // e.g. "English"
 }
 
+// Validation error kinds, used to classify the result of validateLocale.
+const (
+	validationMissingKey    = "missing_key"
+	validationExtraKey      = "extra_key"
+	validationInterpolation = "interpolation_mismatch"
+)
+
 // ValidationError describes a mismatch between locale files.
 type ValidationError struct {
 	Locale  string
 	Key     string
+	Kind    string // one of the validation* constants
 	Message string
 }
 
@@ -71,9 +80,7 @@ func flattenMessages(data map[string]any, prefix string) (map[string]message, er
 				if err != nil {
 					return nil, err
 				}
-				for nk, nv := range nested {
-					out[nk] = nv
-				}
+				maps.Copy(out, nested)
 			}
 		default:
 			return nil, fmt.Errorf("key %s: unsupported type %T", key, v)
@@ -149,6 +156,7 @@ func validateLocale(defaultMsgs, localeMsgs map[string]message, localeName strin
 			errs = append(errs, ValidationError{
 				Locale:  localeName,
 				Key:     k,
+				Kind:    validationMissingKey,
 				Message: "missing key (will fall back to default locale)",
 			})
 		}
@@ -161,6 +169,7 @@ func validateLocale(defaultMsgs, localeMsgs map[string]message, localeName strin
 			errs = append(errs, ValidationError{
 				Locale:  localeName,
 				Key:     k,
+				Kind:    validationExtraKey,
 				Message: "extra key not present in default locale",
 			})
 			continue
@@ -172,6 +181,7 @@ func validateLocale(defaultMsgs, localeMsgs map[string]message, localeName strin
 			errs = append(errs, ValidationError{
 				Locale:  localeName,
 				Key:     k,
+				Kind:    validationInterpolation,
 				Message: fmt.Sprintf("interpolation mismatch: default has %v, locale has %v", defVars, locVars),
 			})
 		}
@@ -179,4 +189,3 @@ func validateLocale(defaultMsgs, localeMsgs map[string]message, localeName strin
 
 	return errs
 }
-

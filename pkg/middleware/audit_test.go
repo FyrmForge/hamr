@@ -152,3 +152,31 @@ func TestAudit_logErrorNonFatal(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusCreated, rec.Code)
 }
+
+func TestAudit_redactsSensitiveParams(t *testing.T) {
+	logger := &mockAuditLogger{}
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/reset?token=abc123&email=a@b.com", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/reset/:reset_token")
+	c.SetParamNames("reset_token")
+	c.SetParamValues("supersecret")
+
+	handler := middleware.Audit(logger)(func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	})
+	require.NoError(t, handler(c))
+
+	entry := logger.lastEntry()
+	require.NotNil(t, entry)
+
+	q, _ := entry.Data["query"].(string)
+	assert.NotContains(t, q, "abc123", "sensitive token value must not be persisted")
+	assert.Contains(t, q, "REDACTED")
+	assert.Contains(t, q, "a%40b.com", "non-sensitive params preserved")
+
+	params, _ := entry.Data["path_params"].(map[string]string)
+	require.NotNil(t, params)
+	assert.Equal(t, "[REDACTED]", params["reset_token"])
+}

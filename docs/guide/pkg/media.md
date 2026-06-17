@@ -273,6 +273,10 @@ e.GET("/videos/*", videoStore.ServeHandler())
 
 Responses include `Cache-Control: public, max-age=31536000, immutable` headers.
 
+The handler only serves objects under the store's own `Category` prefix — requests for paths outside it (or outside the mounted URL prefix) return `404`, so one store can't be used to read another category's objects.
+
+A genuinely missing object returns `404`; any other storage backend failure (e.g. an S3 outage, throttle, or auth error) returns `500` rather than masking a real fault as a missing asset.
+
 ## DetectType helper
 
 Sniffs the MIME type from a multipart file header and returns the media type:
@@ -283,6 +287,10 @@ mediaType, mimeType, err := media.DetectType(fileHeader)
 // mimeType is e.g. "image/jpeg", "video/mp4"
 // err is ErrUnknownType if the file is not a supported image or video
 ```
+
+Detection is by **content sniffing only** — the multipart `Content-Type` header
+is attacker-controlled and is never trusted, so `DetectType` agrees with what the
+upload actually accepts (the upload gate is also sniff-only).
 
 Supported image types: JPEG, PNG, WebP, GIF, HEIC, HEIF.
 Supported video types: MP4, QuickTime, WebM, AVI.

@@ -69,6 +69,12 @@ func generateThumbnail(ctx context.Context, data []byte, width int) ([]byte, err
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("ffmpeg thumbnail: %w: %s", err, stderr.String())
 	}
+	// ffmpeg can exit 0 with no output when the seek point (-ss 1) is past the
+	// end of a sub-second clip. Treat empty output as a failure so the caller
+	// doesn't save a zero-byte thumbnail and report it as success.
+	if stdout.Len() == 0 {
+		return nil, fmt.Errorf("ffmpeg thumbnail: produced no output (clip shorter than the 1s seek point?)")
+	}
 	return stdout.Bytes(), nil
 }
 
@@ -132,6 +138,11 @@ func transcodeVideoToMP4(ctx context.Context, data []byte, opts VideoTranscodeOp
 		return nil, fmt.Errorf("ffmpeg transcode: %w: %s", err, stderr.String())
 	}
 
+	// NOTE: the input `data`, the ffmpeg output file on disk, and this in-memory
+	// `out` can all be resident at once — a memory amplification on top of the
+	// input. Inputs are bounded upstream by MaxSize (io.LimitReader); the output
+	// is not re-checked. Acceptable at the self-host/SMB scale this targets;
+	// flagged for awareness if very large transcodes become a use case.
 	out, err := os.ReadFile(outPath)
 	if err != nil {
 		return nil, fmt.Errorf("media: read transcoded output: %w", err)

@@ -493,3 +493,88 @@ func TestContextCancellation(t *testing.T) {
 	assert.Equal(t, countAfterCancel, task.callCount(),
 		"no more executions should happen after context cancellation")
 }
+
+// panicTask panics on every Run — used to verify the janitor recovers and
+// does not crash the process.
+type panicTask struct {
+	name  string
+	calls atomic.Int32
+}
+
+func (p *panicTask) Name() string { return p.name }
+
+func (p *panicTask) Run(_ context.Context) (int64, error) {
+	p.calls.Add(1)
+	panic("janitor boom")
+}
+
+// TestTask_panicDoesNotCrash verifies a panicking task is recovered on both
+// the immediate-run path (WithRunImmediately, which bypasses the cron chain)
+// and the scheduled path, and that a healthy task keeps running alongside it.
+// Without the recover() in runTask the unrecovered goroutine panic would
+// crash the test binary.
+func TestTask_panicDoesNotCrash(t *testing.T) {
+	bad := &panicTask{name: "panic"}
+	good := &stubTask{name: "good", affected: 1}
+
+	j := New(
+		WithLogger(discardLogger()),
+		WithRunImmediately(),
+	).AddTask("@every 1s", bad).AddTask("@every 1s", good)
+
+	require.NoError(t, j.Start(context.Background()))
+	defer j.Stop()
+
+	assert.Eventually(t, func() bool {
+		return bad.calls.Load() >= 1 && good.callCount() >= 1
+	}, 5*time.Second, 100*time.Millisecond)
+}
+
+// sleepTask sleeps for dur (ignoring ctx) and records completion. Used to prove
+// Stop waits for in-flight work.
+type sleepTask struct {
+	name string
+	dur  time.Duration
+	done *atomic.Bool
+}
+
+func (s *sleepTask) Name() string { return s.name }
+
+func (s *sleepTask) Run(context.Context) (int64, error) {
+	time.Sleep(s.dur) // deliberately ignores ctx to model a non-cooperative task
+	s.done.Store(true)
+	return 0, nil
+}
+
+// TestTask_immediateDoesNotOverlapScheduled verifies a WithRunImmediately run
+// does not overlap the first scheduled tick of the same task — cron's
+// SkipIfStillRunning only guards scheduled-vs-scheduled.
+func TestTask_immediateDoesNotOverlapScheduled(t *testing.T) {
+	task := &overlapTask{name: "no-overlap-immediate", delay: 1500 * time.Millisecond}
+	j := New(
+		WithLogger(discardLogger()),
+		WithRunImmediately(),
+	).AddTask("@every 1s", task)
+
+	require.NoError(t, j.Start(context.Background()))
+	defer j.Stop()
+
+	assert.Eventually(t, func() bool {
+		return task.calls.Load() >= 2
+	}, 6*time.Second, 100*time.Millisecond)
+	assert.Equal(t, int32(1), task.maxRunning.Load(),
+		"immediate and scheduled runs of the same task must not overlap")
+}
+
+// TestStop_drainsImmediateRun verifies Stop blocks until an in-flight
+// immediate-run goroutine returns, so callers can tear down resources safely.
+func TestStop_drainsImmediateRun(t *testing.T) {
+	var done atomic.Bool
+	task := &sleepTask{name: "drain", dur: 200 * time.Millisecond, done: &done}
+	j := New(WithLogger(discardLogger()), WithRunImmediately()).AddTask("@every 1h", task)
+	require.NoError(t, j.Start(context.Background()))
+
+	time.Sleep(20 * time.Millisecond) // let the immediate run start
+	j.Stop()
+	assert.True(t, done.Load(), "Stop must wait for the in-flight immediate run to finish")
+}

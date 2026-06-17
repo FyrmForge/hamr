@@ -101,3 +101,21 @@ func WithShutdownTimeout(d time.Duration) Option {
 func WithGeneratedDir(dir string) Option {
 	return func(s *Server) { s.generatedDir = dir }
 }
+
+// WithTrustedProxies configures which upstream proxy CIDRs are trusted to set
+// the X-Forwarded-For header, controlling how c.RealIP() (and therefore the
+// default rate-limit key) derives the client IP.
+//
+//   - Default (this option unset / no CIDRs): the client IP is the direct TCP
+//     peer; X-Forwarded-For / X-Real-IP are IGNORED. This is the safe default —
+//     a client cannot spoof its IP to evade rate limiting.
+//   - With one or more CIDRs: X-Forwarded-For is honored, but ONLY the configured
+//     ranges are trusted (loopback/link-local/private auto-trust is disabled), so
+//     the left-most untrusted hop is used as the client IP.
+//
+// Set this to your load balancer / reverse-proxy ranges when running behind one.
+// Empty or blank entries are ignored; non-empty entries must be valid CIDRs or
+// New returns an error.
+func WithTrustedProxies(cidrs ...string) Option {
+	return func(s *Server) { s.trustedProxies = append(s.trustedProxies, cidrs...) }
+}

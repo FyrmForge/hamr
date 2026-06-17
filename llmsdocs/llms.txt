@@ -103,7 +103,7 @@
   Supports viewport, full-page, and tiled (`--tiles`) capture modes. Tiled mode
   produces viewport-sized PNGs from top to bottom with configurable overlap
   (`--tile-overlap`), ideal for LLM consumption of long pages.
-- **hamr ai upgrade**: Git-based scaffold upgrade report. Clones the HAMR repo and diffs between version tags to produce a unified diff and stat summary of all changes between the project's baseline and current HAMR.
+- **hamr ai upgrade**: Git-based scaffold upgrade report. Clones the HAMR repo and diffs between version tags to produce a unified diff + stat summary. Scoped to the surface a project consumes or mirrors — `pkg/` (imported libs), `internal/cli/generator/templates/` (scaffold templates), `docs/` + `llmsdocs/` (the project's own docs/llms context it can bring up to date) — excluding only hamr's internal tooling (CLI/dev-server/generator-logic/binary) and tests.
 - **.hamr/ai/**: Playground directory for all AI command artifacts (captures, upgrade reports). Gitignored. Configurable via `[ai] dir` in hamr.toml.
 - **hamr locale gen**: Code generator for type-safe i18n accessors.
 - **hamr gen static**: Content-based static asset fingerprinting. Reads from
@@ -131,6 +131,7 @@ Typed accessors for environment variables.
 - `GetEnvOrDefaultInt(key string, def int) int`
 - `GetEnvOrDefaultBool(key string, def bool) bool`
 - `GetEnvOrDefaultDuration(key string, def time.Duration) time.Duration`
+- `GetEnvCSV(key string) []string` — comma-separated list, trimmed, empties dropped
 - `ParseBaseURL(raw string) (origin, hostname string, err error)`
 
 ### server
@@ -138,7 +139,7 @@ Echo wrapper with functional options, graceful shutdown.
 - `New(opts ...Option) (*Server, error)` — constructor
 - Options: `WithHost`, `WithPort`, `WithDevMode`, `WithMiddleware`, `WithStaticDir`,
   `WithStaticDistDir`, `WithEmbeddedStatic`, `WithErrorHandler`, `WithTimeout`, `WithMaxBodySize`,
-  `WithShutdownTimeout`, `WithGeneratedDir`
+  `WithShutdownTimeout`, `WithGeneratedDir`, `WithTrustedProxies` (proxy CIDRs trusted for X-Forwarded-For; unset ignores XFF — behind a proxy you MUST set it to the proxy's range or RealIP returns the proxy IP; never `0.0.0.0/0`)
 - Methods: `Echo()`, `Addr()`, `Start()`, `Shutdown(ctx)`, `GET/POST/PUT/DELETE/PATCH`,
   `Group(prefix, mw...)`, `StaticPage(path, handler)`, `GenerateStatic(dir)`
 
@@ -216,13 +217,13 @@ SQLite connection + migrations, pure-Go (modernc.org/sqlite). Mirrors pkg/db's A
 HTTP middleware for auth, CSRF, CORS, flash, security, RBAC, audit, rate limiting, error pages, locale.
 - Error Pages: `ErrorPages(defaultPage, overrides...)`, `Page(code, page)` — per-group error rendering
 - Auth: `NewBrowserAuth(sm, opts...)`, `Load()`, `RequireAuth()`, `RequireNotAuth()`
-- Subject: `GetSubjectID(c) string`, `GetSubject(c) any`, `TrustedSubject()`
-- CSRF: `CSRF()`, `CSRFWithConfig(cfg)`
-- CORS: `CORS()`, `CORSWithConfig(cfg)`
+- Subject: `GetSubjectID(c) string`, `GetSubject(c) any`, `TrustedSubject()` (unverified header; internal-only), `TrustedSubjectWithConfig(cfg)` (shared-secret/CIDR gated)
+- CSRF: `CSRF()`, `CSRFWithConfig(cfg)` (cookie defaults to `SameSite=Lax`)
+- CORS: `CORS()`, `CORSWithConfig(cfg)` (no `AllowOrigins` configured = cross-origin denied, not `*`)
 - Flash: `Flash()`, `FlashWithConfig(cfg)`, `SetFlash(c, message, flashType)`, `GetFlash(c)`
-- Security: `Secure()`, `SecureWithConfig(cfg)` (expanded `SecureConfig` with all header fields), `CacheControl(disableCaching)`, `CacheControlWithConfig(cfg)` (fingerprint-aware: `*.HASH.*` URLs get immutable headers)
+- Security: `Secure()`, `SecureWithConfig(cfg)` (expanded `SecureConfig` with all header fields), `CacheControl(disableCaching)`, `CacheControlWithConfig(cfg)` (fingerprint-aware: `*.HASH.*` URLs get immutable headers; dynamic responses default to `no-store, private` unless `AllowDynamicCaching`)
 - RBAC: `RequireRoles(checker, roles...)`, `RequireActive(checker)`
-- Audit: `Audit(logger)`, `AuditWithConfig(cfg)`
+- Audit: `Audit(logger)`, `AuditWithConfig(cfg)` (sensitive-named query/path param values redacted)
 - Rate Limit: `RateLimit(store)`, `RateLimitWithConfig(cfg)`,
   `NewMemoryStore(opts...)`, `NewPGStore(db)`
 - Locale: `LocaleFromPath(cfg)`, `LocaleFromPreference(cfg)`,
@@ -345,12 +346,12 @@ Local Stripe-compatible HTTP backend served on the same proxy mux as `/__hamr/*`
 - Mock pinned to API version `2025-08-27.basil` (matches stripe-go/v82); CI test asserts the constant equals `stripe.APIVersion`
 - Checkout sessions: `POST /v1/checkout/sessions` + `GET /v1/checkout/sessions/{id}`; rejects mixed-currency line items; dev UI at `/__hamr/stripe/checkout?session=<id>` with three outcome buttons (paid / failed / cancelled)
 - Connect accounts: `POST /v1/accounts` + `GET /v1/accounts/{id}` + `POST /v1/account_links`; new accounts start in pre-onboarding state (charges_enabled=false, requirements.currently_due populated); dev UI at `/__hamr/stripe/onboarding?account=<id>` with Complete button that flips enabled flags + clears requirements + fires `account.updated`
-- PaymentIntents (Connect-aware): `POST /v1/payment_intents` + `GET /v1/payment_intents/{id}` + `POST /v1/payment_intents/{id}/confirm`; supports `application_fee_amount`, `transfer_data[destination]`, `on_behalf_of`, `Stripe-Account` request header; rejects unknown destinations and `app_fee > amount`; dev UI at `/__hamr/stripe/payment_intent?id=<pi_id>` with Succeed/Fail buttons
+- PaymentIntents (Connect-aware): `POST /v1/payment_intents` + `GET /v1/payment_intents/{id}` + `POST /v1/payment_intents/{id}/confirm` + `POST /v1/payment_intents/{id}/capture` (manual capture: requires_capture→succeeded, creates Charge, fires pi.succeeded+charge.succeeded[+transfer.created], partial via `amount_to_capture`, exposes `amount_capturable`/`amount_received`); supports `application_fee_amount`, `transfer_data[destination]`, `on_behalf_of`, `Stripe-Account` request header; rejects unknown destinations and `app_fee > amount`; dev UI at `/__hamr/stripe/payment_intent?id=<pi_id>` with Succeed/Fail buttons
 - Refunds (Connect-aware): `POST /v1/refunds` (sync-success model matching card refunds) + `GET /v1/refunds/{id}`; caller passes exactly one of `payment_intent`/`charge`; optional `amount` defaults to remaining; `reverse_transfer` updates `Transfer.amount_reversed` and synthesises `source_transfer_reversal` id; `refund_application_fee` flag tracked; updates `Charge.amount_refunded` + `Charge.refunded`; fires `charge.refunded`
 - Payouts (Connect-aware): `POST /v1/payouts` + `GET /v1/payouts/{id}` + `GET /v1/payouts` (list scoped by Stripe-Account header — the marketplace dashboard query, honors `?limit=`); manually-triggered start in `pending` (automatic=false); rejects unknown destination accounts; dev UI at `/__hamr/stripe/payout?id=<po_id>` with Mark paid / Mark failed buttons
 - Bracket-form decoding for `line_items[0][price_data][currency]=gbp` etc.
 - Outcome → real signed webhook (HMAC-SHA256, `Stripe-Signature: t=...,v1=...`) delivered to `webhook_url`; app's existing `webhook.ConstructEvent` verifies as production
-- Checkout outcome mapping: paid → `checkout.session.completed` + success_url; failed → `checkout.session.async_payment_failed` + cancel_url; cancelled → `checkout.session.expired` + cancel_url
+- Checkout outcome mapping: paid → `checkout.session.completed` + `payment_intent.succeeded` + `charge.succeeded` (PI + Charge materialised), success_url; failed → synchronous decline, session stays open, no webhook, back to checkout page; cancelled → `checkout.session.expired` + cancel_url
 - Account outcome: Complete → `account.updated` event (charges_enabled=true, payouts_enabled=true, details_submitted=true)
 - PaymentIntent outcome cascades: succeed (destination charge) → `payment_intent.succeeded` + `charge.succeeded` + `transfer.created` (auto-creates Charge + Transfer; transfer amount = pi.amount - app_fee); succeed (no destination) → PI + charge events only; fail → `payment_intent.payment_failed` only (no synthesised charge, mirrors real sync card declines)
 - Refund cascade: synchronous success on POST → fires `charge.refunded` async with the post-refund Charge state; reverse_transfer increments the Transfer's amount_reversed (capped at remaining unreversed balance)

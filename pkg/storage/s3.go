@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"mime"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 )
 
 // Compile-time checks.
@@ -103,9 +105,12 @@ func (s *S3Storage) EnsureBucket(ctx context.Context) error {
 		return nil
 	}
 
-	// Only proceed to CreateBucket for not-found errors; surface others.
-	var notFound *s3types.NotFound
-	if !errors.As(err, &notFound) {
+	// Only proceed to CreateBucket for not-found errors; surface others. The
+	// typed *s3types.NotFound is what AWS S3 returns, but S3-compatible backends
+	// (R2, MinIO) often surface a generic API error with code NotFound /
+	// NoSuchBucket for HeadBucket — treat those as "create it" too, otherwise a
+	// missing bucket becomes a hard, backend-dependent error.
+	if !isBucketNotFound(err) {
 		return fmt.Errorf("storage: head bucket %q: %w", s.bucket, err)
 	}
 
@@ -128,6 +133,24 @@ func (s *S3Storage) EnsureBucket(ctx context.Context) error {
 		s.logger.Info("bucket policy set to public-read", "bucket", s.bucket)
 	}
 	return nil
+}
+
+// isBucketNotFound reports whether a HeadBucket error means the bucket does not
+// exist, across AWS S3 (typed *s3types.NotFound) and S3-compatible backends
+// that return a generic API error with a NotFound / NoSuchBucket code.
+func isBucketNotFound(err error) bool {
+	var notFound *s3types.NotFound
+	if errors.As(err, &notFound) {
+		return true
+	}
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.ErrorCode() {
+		case "NotFound", "NoSuchBucket", "404":
+			return true
+		}
+	}
+	return false
 }
 
 func (s *S3Storage) Save(ctx context.Context, path string, r io.Reader) error {
@@ -153,6 +176,14 @@ func (s *S3Storage) Open(ctx context.Context, path string) (io.ReadCloser, error
 		Key:    &path,
 	})
 	if err != nil {
+		// Map a genuine missing object to fs.ErrNotExist so callers can
+		// distinguish it (404) from a real backend fault — outage, auth, throttle
+		// — which must surface as a 500 rather than a misleading "not found".
+		var notFound *s3types.NotFound
+		var noSuchKey *s3types.NoSuchKey
+		if errors.As(err, &notFound) || errors.As(err, &noSuchKey) {
+			return nil, fmt.Errorf("storage: s3 get %q: %w", path, fs.ErrNotExist)
+		}
 		return nil, fmt.Errorf("storage: s3 get %q: %w", path, err)
 	}
 	return out.Body, nil

@@ -176,6 +176,32 @@ func TestWalkComposeServices_walksWhenPortBusyAndNotOwned(t *testing.T) {
 	assert.Equal(t, shifts[0].New, updated[0].Ports[0].HostPort)
 }
 
+// TestWalkComposeServices_distinctPortsForSharedBase guards the double-assign
+// bug: two services requesting the same free base port must be handed DIFFERENT
+// host ports. probeFreePort only checks OS bind availability (probe then
+// release), so without tracking ports assigned earlier in the same walk both
+// services would receive the same number and `compose up` would fail.
+func TestWalkComposeServices_distinctPortsForSharedBase(t *testing.T) {
+	// Discover a free base port, then release it so it's genuinely bindable.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	base := ln.Addr().(*net.TCPAddr).Port
+	require.NoError(t, ln.Close())
+
+	services := []composeService{
+		{Name: "db1", Ports: []composePortBinding{{HostPort: base, Container: 5432}}},
+		{Name: "db2", Ports: []composePortBinding{{HostPort: base, Container: 5432}}},
+	}
+
+	updated, _ := walkComposeServices(services, nil, 10, nil)
+	require.Len(t, updated, 2)
+	p1 := updated[0].Ports[0].HostPort
+	p2 := updated[1].Ports[0].HostPort
+	assert.Equal(t, base, p1, "first service should keep the free base port")
+	assert.NotEqual(t, p1, p2, "second service must not be assigned the same port")
+	assert.Greater(t, p2, base, "second service should walk past the taken base")
+}
+
 func TestEnsureDockerCompose_HardFailsOnDockerError(t *testing.T) {
 	cwd, err := os.Getwd()
 	require.NoError(t, err)

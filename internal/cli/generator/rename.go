@@ -33,6 +33,24 @@ func RenameModule(dir, newModule string, dryRun bool) (oldModule string, filesUp
 			return walkErr
 		}
 		if d.IsDir() {
+			// Skip directories that should never be rewritten: VCS metadata,
+			// third-party/vendored code, and Go test fixtures (the go toolchain
+			// ignores testdata/ for builds, and it routinely holds intentionally
+			// malformed .go files that would abort the walk on parse). The root
+			// dir is never skipped even if it happens to share one of these names.
+			if path != dir {
+				switch d.Name() {
+				case ".git", "vendor", "node_modules", "testdata":
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+
+		// Never write through a symlink: a .go/.templ entry that is actually a
+		// symlink could point outside the project (e.g. ~/.ssh/authorized_keys),
+		// and os.WriteFile would clobber the target.
+		if d.Type()&os.ModeSymlink != 0 {
 			return nil
 		}
 
@@ -125,20 +143,53 @@ func writeAST(fset *token.FileSet, f *ast.File, path string) error {
 	return os.WriteFile(path, buf.Bytes(), info.Mode())
 }
 
-// rewriteTemplImports does a text-based replacement of import paths in .templ
-// files, which cannot be parsed by go/parser. When dryRun is true, it detects
-// changes but does not write the file.
+// rewriteTemplImports rewrites import paths in .templ files, which can't be
+// parsed by go/parser. The rewrite is scoped to import lines only — a naive
+// whole-file replace would also rewrite the module path where it legitimately
+// appears in markup (a string literal, an href, displayed text). Templ imports
+// use Go syntax, so they're either inside an `import ( … )` block or on a single
+// `import "…"` line, all near the top of the file. When dryRun is true it
+// detects changes without writing.
 func rewriteTemplImports(path, oldModule, newModule string, dryRun bool) (bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return false, err
 	}
 
-	content := string(data)
-	updated := strings.ReplaceAll(content, `"`+oldModule+`"`, `"`+newModule+`"`)
-	updated = strings.ReplaceAll(updated, `"`+oldModule+"/", `"`+newModule+"/")
+	lines := strings.Split(string(data), "\n")
+	changed := false
+	inImportBlock := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		isImportLine := false
+		switch {
+		case inImportBlock:
+			isImportLine = true
+			// Exit on the block's closing paren, whether it's on its own line
+			// (`)`) or trailing the last import (`"…/pkg")`). Matching only a
+			// bare ")" would leave the block "open" for the unformatted-but-valid
+			// trailing-paren case and rewrite the rest of the file.
+			if strings.HasSuffix(trimmed, ")") {
+				inImportBlock = false
+			}
+		case strings.HasPrefix(trimmed, "import ("):
+			isImportLine = true // covers a one-liner `import ("x")` too
+			inImportBlock = !strings.HasSuffix(trimmed, ")")
+		case strings.HasPrefix(trimmed, "import "):
+			isImportLine = true
+		}
+		if !isImportLine {
+			continue
+		}
+		repl := strings.ReplaceAll(line, `"`+oldModule+`"`, `"`+newModule+`"`)
+		repl = strings.ReplaceAll(repl, `"`+oldModule+"/", `"`+newModule+"/")
+		if repl != line {
+			lines[i] = repl
+			changed = true
+		}
+	}
 
-	if updated == content {
+	if !changed {
 		return false, nil
 	}
 
@@ -150,7 +201,7 @@ func rewriteTemplImports(path, oldModule, newModule string, dryRun bool) (bool, 
 	if err != nil {
 		return false, err
 	}
-	return true, os.WriteFile(path, []byte(updated), info.Mode())
+	return true, os.WriteFile(path, []byte(strings.Join(lines, "\n")), info.Mode())
 }
 
 // rewriteGoMod replaces the module directive line in go.mod.

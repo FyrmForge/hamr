@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/FyrmForge/hamr/internal/scaffold"
@@ -314,25 +313,81 @@ func TestNormalizeHamrVersion(t *testing.T) {
 		assert.Equal(t, "0.5.0-dev", normalizeHamrVersion("0.5.0-dev"))
 	})
 
-	t.Run("dev resolves to tag-dev or 0.0.0-dev", func(t *testing.T) {
-		result := normalizeHamrVersion("dev")
-		assert.True(t, strings.HasSuffix(result, "-dev"), "expected -dev suffix, got %q", result)
+	t.Run("dev bakes 0.0.0-dev (never a git tag from the user's cwd)", func(t *testing.T) {
+		assert.Equal(t, "0.0.0-dev", normalizeHamrVersion("dev"))
 	})
 
-	t.Run("empty resolves to tag-dev or 0.0.0-dev", func(t *testing.T) {
-		result := normalizeHamrVersion("")
-		assert.True(t, strings.HasSuffix(result, "-dev"), "expected -dev suffix, got %q", result)
+	t.Run("empty bakes 0.0.0-dev", func(t *testing.T) {
+		assert.Equal(t, "0.0.0-dev", normalizeHamrVersion(""))
 	})
 }
 
-func TestLatestGitTag(t *testing.T) {
-	// This test runs inside the hamr repo which has tags, so it should return something.
-	tag := latestGitTag()
-	if tag == "" {
-		t.Skip("no git tags available")
+// TestUpgradeApplied_RefusesBackwards guards the regression: --applied with an
+// older CLI must not silently move the recorded baseline backwards.
+func TestUpgradeApplied_RefusesBackwards(t *testing.T) {
+	old := version
+	version = "0.3.0" // older than the baseline below
+	defer func() { version = old }()
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "hamr.toml"),
+		[]byte("[hamr]\nversion = \"0.5.0\"\n"), 0o644))
+	origDir, _ := os.Getwd()
+	defer func() { _ = os.Chdir(origDir) }() //nolint:errcheck
+	_ = os.Chdir(dir)
+
+	cmd := newUpgradeTestCmd()
+	require.NoError(t, cmd.Flags().Set("applied", "true"))
+	cmd.SetOut(&bytes.Buffer{})
+
+	err := cmd.RunE(cmd, nil)
+	require.Error(t, err, "should refuse to regress the baseline")
+
+	updated, err := os.ReadFile(filepath.Join(dir, "hamr.toml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(updated), `version = "0.5.0"`, "baseline must be unchanged")
+}
+
+// TestUpgradeApplied_HonorsFrom verifies --from explicitly sets the baseline
+// (instead of being silently ignored), even to an earlier version.
+func TestUpgradeApplied_HonorsFrom(t *testing.T) {
+	old := version
+	version = "0.5.0"
+	defer func() { version = old }()
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "hamr.toml"),
+		[]byte("[hamr]\nversion = \"0.5.0\"\n"), 0o644))
+	origDir, _ := os.Getwd()
+	defer func() { _ = os.Chdir(origDir) }() //nolint:errcheck
+	_ = os.Chdir(dir)
+
+	cmd := newUpgradeTestCmd()
+	require.NoError(t, cmd.Flags().Set("applied", "true"))
+	require.NoError(t, cmd.Flags().Set("from", "0.2.0"))
+	cmd.SetOut(&bytes.Buffer{})
+
+	require.NoError(t, cmd.RunE(cmd, nil))
+
+	updated, err := os.ReadFile(filepath.Join(dir, "hamr.toml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(updated), `version = "0.2.0"`, "--from must set the baseline explicitly")
+}
+
+// TestSanitizeVersionForFilename_StripsPathUnsafeChars guards the report-name
+// bug: a version containing '/' (a git ref like "release/0.1.0") or other unsafe
+// characters must not survive into the filename, where it would make WriteFile
+// fail after the expensive clone+diff.
+func TestSanitizeVersionForFilename_StripsPathUnsafeChars(t *testing.T) {
+	cases := map[string]string{
+		"0.3.2":         "0_3_2",     // normal semver unchanged in shape
+		"1.2.3-dev":     "1_2_3_dev", // pre-release
+		"release/0.1.0": "release_0_1_0",
+		"1.0.0+build.7": "1_0_0_build_7",
 	}
-	// Should be a valid semver base (digits and dots only, no "v" prefix).
-	assert.NotContains(t, tag, "v")
-	parts := strings.Split(tag, ".")
-	assert.Len(t, parts, 3, "expected major.minor.patch, got %q", tag)
+	for in, want := range cases {
+		got := sanitizeVersionForFilename(in)
+		assert.Equal(t, want, got, "input %q", in)
+		assert.NotContains(t, got, "/", "no path separator may survive (input %q)", in)
+	}
 }

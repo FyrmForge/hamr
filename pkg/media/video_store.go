@@ -7,9 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"mime/multipart"
-	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -166,7 +163,9 @@ func (s *VideoStore) upload(ctx context.Context, r io.Reader, id string, overwri
 		}
 	}
 
-	mimeType, raw, err := detectMIME(r)
+	// detectMIME bounds buffering to MaxSize+1 (see its doc); the size check
+	// below relies on that +1 to flag oversized uploads.
+	mimeType, raw, err := detectMIME(r, s.config.MaxSize)
 	if err != nil {
 		return nil, err
 	}
@@ -317,74 +316,19 @@ func (s *VideoStore) SignedURL(ctx context.Context, path string, expiry time.Dur
 
 // ServeHandler returns an Echo handler that serves video files from the store.
 func (s *VideoStore) ServeHandler() echo.HandlerFunc {
-	if s.isLocal {
-		return s.serveLocal()
-	}
-	return s.serveS3()
+	return serveStorageObject(s.storage, s.urlPrefix, s.config.Category, videoContentType)
 }
 
-func (s *VideoStore) serveLocal() echo.HandlerFunc {
-	return func(c echo.Context) error {
-		reqPath := c.Request().URL.Path
-		storagePath := strings.TrimPrefix(reqPath, s.urlPrefix+"/")
-		if storagePath == reqPath {
-			return echo.NewHTTPError(http.StatusNotFound)
-		}
-
-		rc, err := s.storage.Open(c.Request().Context(), storagePath)
-		if err != nil {
-			if os.IsNotExist(err) || strings.Contains(err.Error(), "not exist") {
-				return echo.NewHTTPError(http.StatusNotFound)
-			}
-			return echo.NewHTTPError(http.StatusInternalServerError)
-		}
-		defer func() { _ = rc.Close() }()
-
-		ext := filepath.Ext(storagePath)
-		ct := "application/octet-stream"
-		switch ext {
-		case ".mp4":
-			ct = "video/mp4"
-		case ".webm":
-			ct = "video/webm"
-		case ".jpg", ".jpeg":
-			ct = "image/jpeg"
-		}
-
-		c.Response().Header().Set("Content-Type", ct)
-		c.Response().Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		c.Response().WriteHeader(http.StatusOK)
-		_, err = io.Copy(c.Response(), rc)
-		return err
+// videoContentType maps a file extension (with leading dot) to the Content-Type
+// used when serving videos and their poster frames.
+func videoContentType(ext string) string {
+	switch ext {
+	case ".mp4":
+		return "video/mp4"
+	case ".webm":
+		return "video/webm"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
 	}
-}
-
-func (s *VideoStore) serveS3() echo.HandlerFunc {
-	return func(c echo.Context) error {
-		reqPath := c.Request().URL.Path
-		storagePath := strings.TrimPrefix(reqPath, "/")
-
-		rc, err := s.storage.Open(c.Request().Context(), storagePath)
-		if err != nil {
-			return echo.NewHTTPError(http.StatusNotFound)
-		}
-		defer func() { _ = rc.Close() }()
-
-		ext := filepath.Ext(storagePath)
-		ct := "application/octet-stream"
-		switch ext {
-		case ".mp4":
-			ct = "video/mp4"
-		case ".webm":
-			ct = "video/webm"
-		case ".jpg", ".jpeg":
-			ct = "image/jpeg"
-		}
-
-		c.Response().Header().Set("Content-Type", ct)
-		c.Response().Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		c.Response().WriteHeader(http.StatusOK)
-		_, err = io.Copy(c.Response(), rc)
-		return err
-	}
+	return "application/octet-stream"
 }

@@ -2,7 +2,6 @@ package devserver
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -19,10 +18,10 @@ import (
 //	POST /__hamr/stripe/refund                — issue refund on a PI from the dashboard
 //	POST /__hamr/stripe/expire                — mark an open session expired
 func (m *StripeMock) registerDashboardRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/__hamr/stripe", m.handleDashboard)
-	mux.HandleFunc("/__hamr/stripe/resend", m.handleResend)
-	mux.HandleFunc("/__hamr/stripe/refund", m.handleDashboardRefund)
-	mux.HandleFunc("/__hamr/stripe/expire", m.handleDashboardExpire)
+	mux.HandleFunc("/__hamr/stripe", guardUnsafe(m.handleDashboard))
+	mux.HandleFunc("/__hamr/stripe/resend", guardUnsafe(m.handleResend))
+	mux.HandleFunc("/__hamr/stripe/refund", guardUnsafe(m.handleDashboardRefund))
+	mux.HandleFunc("/__hamr/stripe/expire", guardUnsafe(m.handleDashboardExpire))
 }
 
 // dashboardLimit caps the number of rows shown per table. Plenty for dev;
@@ -73,9 +72,6 @@ func (m *StripeMock) handleResend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !checkSameOrigin(w, r) {
-		return
-	}
 	resource := r.FormValue("resource")
 	id := strings.TrimSpace(r.FormValue("id"))
 	if id == "" || resource == "" {
@@ -83,11 +79,7 @@ func (m *StripeMock) handleResend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	type fire struct {
-		eventType string
-		object    map[string]any
-	}
-	var fires []fire
+	var fires []webhookFire
 	var notFound bool
 
 	m.mu.RLock()
@@ -100,7 +92,7 @@ func (m *StripeMock) handleResend(w http.ResponseWriter, r *http.Request) {
 		}
 		evt := sessionResendEvent(sess)
 		if evt != "" {
-			fires = append(fires, fire{evt, m.serializeSession(sess)})
+			fires = append(fires, webhookFire{evt, m.serializeSession(sess)})
 		}
 	case "account":
 		acct, ok := m.accounts[id]
@@ -112,7 +104,7 @@ func (m *StripeMock) handleResend(w http.ResponseWriter, r *http.Request) {
 		// reached the post-onboarding state. Otherwise no-op (button
 		// shouldn't be rendered at all in that case).
 		if acct.DetailsSubmitted {
-			fires = append(fires, fire{"account.updated", m.serializeAccount(acct)})
+			fires = append(fires, webhookFire{"account.updated", m.serializeAccount(acct)})
 		}
 	case "payment_intent":
 		pi, ok := m.paymentIntents[id]
@@ -122,18 +114,26 @@ func (m *StripeMock) handleResend(w http.ResponseWriter, r *http.Request) {
 		}
 		switch pi.Status {
 		case "succeeded":
-			fires = append(fires, fire{"payment_intent.succeeded", m.serializePaymentIntent(pi)})
-			if ch, ok := m.charges[pi.LatestChargeID]; ok {
-				fires = append(fires, fire{"charge.succeeded", m.serializeCharge(ch)})
+			// Under RLock: passing the live charge pointer is safe because
+			// serialize only reads it (nil when there is no charge).
+			ch := m.charges[pi.LatestChargeID]
+			fires = append(fires, webhookFire{"payment_intent.succeeded", m.serializePaymentIntent(pi, ch)})
+			if ch != nil {
+				fires = append(fires, webhookFire{"charge.succeeded", m.serializeCharge(ch)})
 			}
 			if pi.TransferID != "" {
 				if tr, ok := m.transfers[pi.TransferID]; ok {
-					fires = append(fires, fire{"transfer.created", m.serializeTransfer(tr)})
+					fires = append(fires, webhookFire{"transfer.created", m.serializeTransfer(tr)})
 				}
 			}
 		case "requires_payment_method":
-			// PI was failed (status reset by handlePaymentIntentComplete on fail outcome).
-			fires = append(fires, fire{"payment_intent.payment_failed", m.serializePaymentIntent(pi)})
+			// requires_payment_method covers BOTH a freshly-created PI that was
+			// never attempted AND one whose confirmation was declined. Only the
+			// latter has a payment_failed event worth resending; a never-attempted
+			// PI leaves fires empty → "nothing to resend".
+			if pi.Failed {
+				fires = append(fires, webhookFire{"payment_intent.payment_failed", m.serializePaymentIntent(pi, nil)})
+			}
 		}
 	case "refund":
 		rf, ok := m.refunds[id]
@@ -144,7 +144,7 @@ func (m *StripeMock) handleResend(w http.ResponseWriter, r *http.Request) {
 		// Refund event payload is the post-refund Charge, not the Refund
 		// object — matches what real Stripe sends on charge.refunded.
 		if ch, ok := m.charges[rf.ChargeID]; ok {
-			fires = append(fires, fire{"charge.refunded", m.serializeCharge(ch)})
+			fires = append(fires, webhookFire{"charge.refunded", m.serializeCharge(ch)})
 		}
 	case "payout":
 		po, ok := m.payouts[id]
@@ -154,9 +154,9 @@ func (m *StripeMock) handleResend(w http.ResponseWriter, r *http.Request) {
 		}
 		switch po.Status {
 		case "paid":
-			fires = append(fires, fire{"payout.paid", m.serializePayout(po)})
+			fires = append(fires, webhookFire{"payout.paid", m.serializePayout(po)})
 		case "failed":
-			fires = append(fires, fire{"payout.failed", m.serializePayout(po)})
+			fires = append(fires, webhookFire{"payout.failed", m.serializePayout(po)})
 		}
 	default:
 		m.mu.RUnlock()
@@ -174,20 +174,7 @@ func (m *StripeMock) handleResend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		for _, f := range fires {
-			if err := m.FireEvent(ctx, f.eventType, f.object); err != nil {
-				m.logger.Warn("dashboard resend failed",
-					"resource", resource,
-					"id", id,
-					"event_type", f.eventType,
-					"err", err,
-				)
-			}
-		}
-	}()
+	m.fireEventsAsync(fires, "resource", resource, "id", id)
 
 	http.Redirect(w, r, "/__hamr/stripe", http.StatusSeeOther)
 }
@@ -201,17 +188,19 @@ func (m *StripeMock) handleDashboardRefund(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !checkSameOrigin(w, r) {
-		return
-	}
 	piID := strings.TrimSpace(r.FormValue("payment_intent"))
 	if piID == "" {
 		http.Error(w, "missing payment_intent", http.StatusBadRequest)
 		return
 	}
+	amount, ok := getInt64(map[string]any{"amount": r.FormValue("amount")}, "amount")
+	if !ok {
+		http.Error(w, "invalid amount", http.StatusBadRequest)
+		return
+	}
 	rf, _, eventObject, err := m.applyRefund(refundInput{
 		piID:            piID,
-		amount:          getInt64(map[string]any{"amount": r.FormValue("amount")}, "amount"),
+		amount:          amount,
 		reverseTransfer: r.FormValue("reverse_transfer") == "true",
 		refundAppFee:    r.FormValue("refund_application_fee") == "true",
 	})
@@ -219,16 +208,7 @@ func (m *StripeMock) handleDashboardRefund(w http.ResponseWriter, r *http.Reques
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := m.FireEvent(ctx, "charge.refunded", eventObject); err != nil {
-			m.logger.Warn("dashboard refund webhook delivery failed",
-				"refund", rf.ID,
-				"err", err,
-			)
-		}
-	}()
+	m.fireEventAsync("charge.refunded", eventObject, "refund", rf.ID)
 	http.Redirect(w, r, "/__hamr/stripe", http.StatusSeeOther)
 }
 
@@ -239,9 +219,6 @@ func (m *StripeMock) handleDashboardRefund(w http.ResponseWriter, r *http.Reques
 func (m *StripeMock) handleDashboardExpire(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if !checkSameOrigin(w, r) {
 		return
 	}
 	id := strings.TrimSpace(r.FormValue("session"))
@@ -268,16 +245,7 @@ func (m *StripeMock) handleDashboardExpire(w http.ResponseWriter, r *http.Reques
 	m.persist()
 	m.mu.Unlock()
 
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := m.FireEvent(ctx, "checkout.session.expired", dataObject); err != nil {
-			m.logger.Warn("dashboard expire webhook delivery failed",
-				"session", id,
-				"err", err,
-			)
-		}
-	}()
+	m.fireEventAsync("checkout.session.expired", dataObject, "session", id)
 	http.Redirect(w, r, "/__hamr/stripe", http.StatusSeeOther)
 }
 
@@ -298,9 +266,11 @@ func sessionResendEvent(s *stripeSession) string {
 
 // --- snapshot helpers ---
 //
-// Each snapshotter copies map values into a slice sorted newest-first and
-// caps at dashboardLimit. Pointer values share storage with the live state
-// — safe because the dashboard only reads, but callers must not mutate.
+// Each snapshotter sorts the live map values newest-first, caps at
+// dashboardLimit, then deep-clones only the survivors. Sorting reads immutable
+// fields (ID/Created) under m.mu.RLock (the caller holds it) and the clone runs
+// before the lock is released, so the template gets private copies that
+// concurrent writers can't mutate — without cloning entries that get discarded.
 
 func snapshotSessions(m map[string]*stripeSession) []*stripeSession {
 	out := make([]*stripeSession, 0, len(m))
@@ -310,6 +280,9 @@ func snapshotSessions(m map[string]*stripeSession) []*stripeSession {
 	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
 	if len(out) > dashboardLimit {
 		out = out[:dashboardLimit]
+	}
+	for i, v := range out {
+		out[i] = cloneSession(v)
 	}
 	return out
 }
@@ -323,6 +296,9 @@ func snapshotAccounts(m map[string]*stripeAccount) []*stripeAccount {
 	if len(out) > dashboardLimit {
 		out = out[:dashboardLimit]
 	}
+	for i, v := range out {
+		out[i] = cloneAccount(v)
+	}
 	return out
 }
 
@@ -334,6 +310,9 @@ func snapshotPaymentIntents(m map[string]*stripePaymentIntent) []*stripePaymentI
 	sort.Slice(out, func(i, j int) bool { return out[i].Created.After(out[j].Created) })
 	if len(out) > dashboardLimit {
 		out = out[:dashboardLimit]
+	}
+	for i, v := range out {
+		out[i] = clonePaymentIntent(v)
 	}
 	return out
 }
@@ -347,6 +326,9 @@ func snapshotRefunds(m map[string]*stripeRefund) []*stripeRefund {
 	if len(out) > dashboardLimit {
 		out = out[:dashboardLimit]
 	}
+	for i, v := range out {
+		out[i] = cloneRefund(v)
+	}
 	return out
 }
 
@@ -358,6 +340,9 @@ func snapshotPayouts(m map[string]*stripePayout) []*stripePayout {
 	sort.Slice(out, func(i, j int) bool { return out[i].Created.After(out[j].Created) })
 	if len(out) > dashboardLimit {
 		out = out[:dashboardLimit]
+	}
+	for i, v := range out {
+		out[i] = clonePayout(v)
 	}
 	return out
 }

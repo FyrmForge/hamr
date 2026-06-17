@@ -25,12 +25,42 @@ type DevActions struct {
 	errorState *ErrorState
 	graph      *Graph
 	logger     *slog.Logger
+	// requestRun enqueues a rule onto the dev server's single scheduler
+	// goroutine. Manual runs (POST /run, hotkey rebuild) must go through here so
+	// they are serialized with file-watch builds and respect dependency order —
+	// running a process directly would race the scheduler and could orphan a
+	// process on the same port. Nil outside a live Run() (e.g. in unit tests).
+	requestRun func(rule *WatchRule)
+	// restartFn/wipeFn are test seams for the docker actions. When nil the real
+	// docker compose commands run (production); tests set them to record the
+	// dispatch without executing docker (which would otherwise run real compose
+	// commands against the cwd in a detached goroutine that outlives the test).
+	restartFn func(dc *DockerCompose, service string)
+	wipeFn    func(dc *DockerCompose, service string)
+}
+
+// restart dispatches a docker restart, honoring the test seam if set.
+func (a *DevActions) restart(dc *DockerCompose, service string) {
+	if a.restartFn != nil {
+		a.restartFn(dc, service)
+		return
+	}
+	a.dockerRestart(dc, service)
+}
+
+// wipe dispatches a docker wipe, honoring the test seam if set.
+func (a *DevActions) wipe(dc *DockerCompose, service string) {
+	if a.wipeFn != nil {
+		a.wipeFn(dc, service)
+		return
+	}
+	a.dockerWipe(dc, service)
 }
 
 // RegisterRoutes registers the action API endpoints on the given mux.
 func (a *DevActions) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/__hamr/rule/", a.handleRule)
-	mux.HandleFunc("/__hamr/docker/", a.handleDocker)
+	mux.HandleFunc("/__hamr/rule/", guardUnsafe(a.handleRule))
+	mux.HandleFunc("/__hamr/docker/", guardUnsafe(a.handleDocker))
 }
 
 // ErrorState returns the underlying error state so non-HTTP consumers (the
@@ -76,54 +106,29 @@ func (a *DevActions) handleRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Run in background goroutine so HTTP returns immediately.
-	go a.runRule(rule)
+	// Enqueue onto the single scheduler goroutine rather than building here, so
+	// the run is serialized with file-watch builds and respects dependency order.
+	if a.requestRun == nil {
+		jsonError(w, "dev server not ready", http.StatusServiceUnavailable)
+		return
+	}
+	a.logger.Info("manual build triggered", "rule", rule.Name)
+	a.requestRun(rule)
 
 	jsonOK(w)
 }
 
-func (a *DevActions) runRule(rule *WatchRule) {
-	ctx := a.ctx
-	a.logger.Info("manual build triggered", "rule", rule.Name)
-	a.broker.Broadcast(SSEEvent{Type: "building", Data: rule.Name})
-
-	if rule.Cmd != "" {
-		if output, err := a.pm.RunCommand(ctx, rule); err != nil {
-			a.logger.Error("manual build failed", "rule", rule.Name, "err", err)
-			a.errorState.Set(rule.Name, output)
-			a.broker.Broadcast(buildErrorEvent(rule.Name, output))
-			return
-		}
-		a.errorState.Clear(rule.Name)
-		a.broker.Broadcast(SSEEvent{Type: "build_ok", Data: rule.Name})
-	}
-
-	if rule.Run != "" {
-		if err := a.pm.StartProcess(ctx, rule); err != nil {
-			a.logger.Error("manual restart failed", "rule", rule.Name, "err", err)
-		}
-	}
-}
-
-// RebuildAll runs every watch rule in topological order and broadcasts a
-// final reload event. It is used by the hotkey system to trigger a full rebuild.
+// RebuildAll enqueues every watch rule onto the scheduler, which resolves
+// topological order and dependency gating itself. Used by the hotkey system to
+// trigger a full rebuild.
 func (a *DevActions) RebuildAll() {
-	a.logger.Info("full rebuild triggered")
-	order := a.graph.TopologicalOrder()
-	for _, name := range order {
-		var rule *WatchRule
-		for i := range a.cfg.Dev.Watch {
-			if a.cfg.Dev.Watch[i].Name == name {
-				rule = &a.cfg.Dev.Watch[i]
-				break
-			}
-		}
-		if rule == nil {
-			continue
-		}
-		a.runRule(rule)
+	if a.requestRun == nil {
+		return
 	}
-	a.broker.Broadcast(SSEEvent{Type: "reload", Data: "full"})
+	a.logger.Info("full rebuild triggered")
+	for i := range a.cfg.Dev.Watch {
+		a.requestRun(&a.cfg.Dev.Watch[i])
+	}
 }
 
 func (a *DevActions) handleDocker(w http.ResponseWriter, r *http.Request) {
@@ -161,7 +166,7 @@ func (a *DevActions) handleDocker(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, "invalid service name", http.StatusBadRequest)
 			return
 		}
-		go a.dockerRestart(dc, service)
+		go a.restart(dc, service)
 		jsonOK(w)
 
 	case "wipe":
@@ -174,7 +179,7 @@ func (a *DevActions) handleDocker(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, "invalid service name", http.StatusBadRequest)
 			return
 		}
-		go a.dockerWipe(dc, service)
+		go a.wipe(dc, service)
 		jsonOK(w)
 
 	case "logs":
@@ -318,7 +323,7 @@ func (a *DevActions) dockerStatus(dc *DockerCompose) ([]containerStatus, error) 
 		}
 	} else {
 		// NDJSON format (one object per line).
-		for _, line := range bytes.Split(raw, []byte("\n")) {
+		for line := range bytes.SplitSeq(raw, []byte("\n")) {
 			line = bytes.TrimSpace(line)
 			if len(line) == 0 {
 				continue
@@ -360,7 +365,21 @@ func (a *DevActions) dockerLogs(dc *DockerCompose) (string, error) {
 }
 
 func dockerCmd(args []string) string {
-	return "docker " + strings.Join(args, " ")
+	// The result is run via `sh -c`, so each arg must be quoted — a compose
+	// file path with a space (or a shell metacharacter) would otherwise split
+	// into multiple words or be interpreted by the shell.
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = shellQuote(a)
+	}
+	return "docker " + strings.Join(quoted, " ")
+}
+
+// shellQuote wraps s in single quotes for safe use in `sh -c`. POSIX single
+// quotes preserve every byte literally except the single quote itself, which is
+// emitted as the standard '\” sequence.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 func jsonOK(w http.ResponseWriter) {

@@ -120,16 +120,21 @@ func (w *Watcher) loop(ctx context.Context) {
 	// Per-rule debounce timers.
 	timers := make(map[string]*time.Timer, len(w.rules))
 
+	// Cleanup runs on every exit path — context cancellation AND the
+	// fsnotify Events/Errors channels closing underneath us. Stopping the
+	// timers prevents pending debounces from firing, and closing w.done both
+	// releases any timer goroutine already blocked on w.events and signals
+	// consumers (Done()) that the watcher has stopped.
+	defer func() {
+		for _, t := range timers {
+			t.Stop()
+		}
+		close(w.done)
+	}()
+
 	for {
 		select {
 		case <-ctx.Done():
-			// Stop all timers so their goroutines don't fire.
-			for _, t := range timers {
-				t.Stop()
-			}
-			// Signal timer goroutines that may have already fired
-			// to bail out instead of sending on w.events.
-			close(w.done)
 			return
 
 		case event, ok := <-w.fsw.Events:

@@ -122,6 +122,21 @@ api.POST("/billing", billingHandler.Create, trusted)
 Reads `X-Subject-ID` header and sets it in context. Same `GetSubjectID(c)` API as
 session-based auth — handlers don't care how auth was resolved.
 
+> **Security:** bare `TrustedSubject()` trusts the header with **no verification** —
+> a single spoofed `X-Subject-ID` is a full auth bypass. Use it only where nothing
+> untrusted can reach the mount. Otherwise gate it:
+>
+> ```go
+> trusted := middleware.TrustedSubjectWithConfig(middleware.TrustedSubjectConfig{
+>     SharedSecret:   os.Getenv("INTERNAL_SECRET"), // required in X-Internal-Secret header
+>     TrustedProxies: []string{"10.0.0.0/8"},        // and/or restrict the source IP
+> })
+> ```
+>
+> When a configured gate fails, the header is ignored (subject left unset) so
+> downstream RBAC fails closed. The CIDR gate relies on `c.RealIP()` — configure
+> `server.WithTrustedProxies` so `X-Forwarded-For` can't be spoofed.
+
 ### Reading auth state
 
 ```go
@@ -241,7 +256,12 @@ siteGroup.Use(middleware.CacheControl(true))
 |-----------|------------|---------------|
 | Immutable | .webp, .jpg, .png, .gif, .svg, .ico, .woff2, .ttf, ... | `public, max-age=31536000, immutable` |
 | Static | .css, .js | `public, max-age=86400` |
-| Other | everything else | (no header set) |
+| Dynamic | everything else | `no-store, private` |
+
+Dynamic (non-static) responses default to `no-store, private` so authenticated
+pages aren't retained by the browser back-button or a shared proxy. A handler can
+override per-route by setting its own `Cache-Control`; set `AllowDynamicCaching:
+true` to opt the whole middleware out and serve cacheable public dynamic content.
 
 ### Custom cache config
 
@@ -265,6 +285,7 @@ siteGroup.Use(middleware.CacheControlWithConfig(middleware.CacheConfig{
 | `StaticExtensions` | `DefaultStaticExtensions` | File extensions with shorter TTL |
 | `StaticMaxAge` | `86400` (1 day) | Max-age in seconds for static assets |
 | `DisableCaching` | `false` | Set no-cache directives on every response |
+| `AllowDynamicCaching` | `false` | Disable the `no-store, private` default on dynamic responses |
 
 ## Security Headers
 
@@ -296,8 +317,12 @@ siteGroup.Use(middleware.CSRFWithConfig(middleware.CSRFConfig{
     CookieName:  "csrf",
     TokenLookup: "form:csrf_token,header:X-CSRF-Token",
     Secure:      true,
+    SameSite:    http.SameSiteStrictMode, // optional; defaults to Lax
 }))
 ```
+
+The CSRF cookie defaults to `SameSite=Lax` (defense-in-depth) rather than the
+browser default.
 
 ## CORS
 
@@ -313,6 +338,10 @@ apiGroup.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 ```
 
 Default headers include `HX-Request`, `HX-Target`, `HX-Trigger`, `X-CSRF-Token`.
+
+> **Secure default:** with no `AllowOrigins` configured, cross-origin requests are
+> **denied** (no `Access-Control-Allow-Origin`) rather than allowing `*`. Pass
+> explicit origins to enable CORS.
 
 ## Audit Logging
 
@@ -332,6 +361,11 @@ type AuditLogger interface {
 
 `AuditEntry` contains: `ActorID`, `Action` (HTTP method), `EntityType` (route path),
 `Data` (method, path, status, query, path params), `Timestamp`.
+
+Values of sensitive-named query/path params (`token`, `password`, `secret`, `key`,
+`code`, `otp`, `signature`, `auth`, `session`, `csrf`, …) are redacted to
+`[REDACTED]` before persisting, so reset/invite tokens and API keys in URLs aren't
+written to the audit sink.
 
 Customize actor ID extraction:
 

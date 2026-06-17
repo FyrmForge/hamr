@@ -25,8 +25,15 @@ func TestReadDotenvKey(t *testing.T) {
 			key+"="+val+"\n"+
 			"QUOTED=\"with spaces\"\n"+
 			"SINGLE_QUOTED='one'\n"+
+			"export EXPORTED=exp_value\n"+
 			"BAD_LINE_NO_EQUALS\n",
 	), 0o644))
+
+	t.Run("handles the export KEY=value form", func(t *testing.T) {
+		got, ok := readDotenvKey(envPath, "EXPORTED")
+		require.True(t, ok, "export-prefixed keys must be found")
+		assert.Equal(t, "exp_value", got)
+	})
 
 	t.Run("hits read return value", func(t *testing.T) {
 		got, ok := readDotenvKey(envPath, key)

@@ -636,6 +636,8 @@ func TestValidateAddr(t *testing.T) {
 		{":0", false},
 		{":65535", false},
 		{"localhost:3000", false},
+		{"[::1]:3000", false}, // IPv6 loopback — net.Listen accepts it
+		{"[::]:8080", false},  // IPv6 any
 		{"noport", true},
 		{":99999", true},
 		{":abc", true},

@@ -705,3 +705,29 @@ func assertDiag(t *testing.T, d Diagnostic, file string, line int, rule string, 
 		t.Errorf("severity: got %s, want %s", d.Severity, sev)
 	}
 }
+
+// TestInlineIf_NoFalsePositiveOnStringLiteral guards the control-flow fix: an
+// HTML-looking token inside a Go string literal must not be flagged as inline
+// markup by these Error-severity, CI-gating rules.
+func TestInlineIf_NoFalsePositiveOnStringLiteral(t *testing.T) {
+	lines := []string{
+		`  if ok { fmt.Println("a<b>c") }`, // <b> is inside a Go string, not markup
+	}
+	rule := &inlineIfRule{severity: Error}
+	if diags := rule.Check("test.templ", lines); len(diags) != 0 {
+		t.Fatalf("string-literal <b> must not be flagged as inline HTML, got %d diags", len(diags))
+	}
+}
+
+// TestImgAlt_QuotedGtInAttributeNotTagEnd guards the a11y fix: a '>' inside a
+// quoted attribute value must not be treated as the tag end, which would hide
+// the alt= attribute that follows and produce a false "missing alt".
+func TestImgAlt_QuotedGtInAttributeNotTagEnd(t *testing.T) {
+	lines := []string{
+		`  <img title="w > h" alt="diagram">`,
+	}
+	rule := &imgAltRule{severity: Warning}
+	if diags := rule.Check("test.templ", lines); len(diags) != 0 {
+		t.Fatalf("alt after a quoted '>' must be seen; got %d false diags", len(diags))
+	}
+}

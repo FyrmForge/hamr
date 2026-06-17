@@ -3,6 +3,7 @@ package devserver
 import (
 	"bufio"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -589,11 +590,13 @@ func detectCycles(rules []WatchRule) error {
 }
 
 func validateAddr(addr string) error {
-	if !strings.Contains(addr, ":") {
-		return fmt.Errorf("invalid address %q: must be host:port or :port", addr)
+	// net.SplitHostPort handles IPv6 literals ("[::1]:3000") and the bare
+	// ":port" form, unlike splitting on the first colon (which rejected every
+	// IPv6 address even though net.Listen accepts them).
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("invalid address %q: must be host:port or :port: %w", addr, err)
 	}
-	parts := strings.SplitN(addr, ":", 2)
-	port := parts[len(parts)-1]
 	n, err := strconv.Atoi(port)
 	if err != nil {
 		return fmt.Errorf("invalid port %q: %w", port, err)

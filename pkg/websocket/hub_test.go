@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -330,16 +331,18 @@ func TestHub_sendBufferFull_dropsMessage(t *testing.T) {
 	assert.Equal(t, sendBufferSize, len(c.send))
 }
 
-// waitFor polls a condition for up to 500ms.
+// waitFor polls a condition for up to 500ms, sleeping briefly between checks.
+// (A previous version looped on t.Context().Done(), which only fires at test
+// cleanup — so it never actually bounded at 500ms and busy-spun a core until
+// the global test timeout when the condition stayed false.)
 func waitFor(t *testing.T, cond func() bool) {
 	t.Helper()
-	deadline := t.Context()
+	deadline := time.Now().Add(500 * time.Millisecond)
 	for !cond() {
-		select {
-		case <-deadline.Done():
+		if time.Now().After(deadline) {
 			t.Fatal("waitFor timed out")
 			return
-		default:
 		}
+		time.Sleep(2 * time.Millisecond)
 	}
 }

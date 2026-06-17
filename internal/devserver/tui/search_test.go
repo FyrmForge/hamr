@@ -143,7 +143,7 @@ func TestSearch_RecomputeKeepsCursorOnSamePriorMatch(t *testing.T) {
 
 	// Append a fresh line; recompute should keep the cursor anchored to
 	// the original "line 1" hit, not jump to the new one.
-	s.recompute([]string{"foo a", "foo b", "foo c"})
+	s.recompute([]string{"foo a", "foo b", "foo c"}, 0)
 	if len(s.matches) != 3 {
 		t.Fatalf("expected 3 matches after grow, got %d", len(s.matches))
 	}
@@ -162,7 +162,7 @@ func TestSearch_RecomputeResetsCursorWhenMatchesGone(t *testing.T) {
 	s.next()
 
 	// Buffer rotation has dropped the matched lines (cap exceeded).
-	s.recompute([]string{"unrelated", "still no match"})
+	s.recompute([]string{"unrelated", "still no match"}, 0)
 	if len(s.matches) != 0 {
 		t.Fatalf("expected 0 matches, got %d", len(s.matches))
 	}
@@ -174,7 +174,7 @@ func TestSearch_RecomputeResetsCursorWhenMatchesGone(t *testing.T) {
 func TestSearch_RecomputeNoOpWhenClosed(t *testing.T) {
 	var s searchState
 	// stage closed: should ignore
-	s.recompute([]string{"foo"})
+	s.recompute([]string{"foo"}, 0)
 	if s.active() {
 		t.Fatal("recompute on closed state should not activate the search")
 	}
@@ -189,7 +189,7 @@ func TestSearch_RecomputeDuringPromptingUpdatesMatches(t *testing.T) {
 	for _, r := range "foo" {
 		s.appendRune(r)
 	}
-	s.recompute([]string{"foo a", "bar", "foo c"})
+	s.recompute([]string{"foo a", "bar", "foo c"}, 0)
 
 	if s.stage != searchPrompting {
 		t.Fatalf("recompute must not change stage, got %d", s.stage)
@@ -210,12 +210,40 @@ func TestSearch_RecomputeDuringPromptingResetsCursorEvenWithPrior(t *testing.T) 
 	for _, r := range "foo" {
 		s.appendRune(r)
 	}
-	s.recompute([]string{"foo", "foo"})
+	s.recompute([]string{"foo", "foo"}, 0)
 	s.cursor = 1 // simulate pre-existing position
 
-	s.recompute([]string{"foo", "foo", "foo"})
+	s.recompute([]string{"foo", "foo", "foo"}, 0)
 	if s.cursor != 0 {
 		t.Fatalf("cursor must reset on every prompt-stage recompute, got %d", s.cursor)
+	}
+}
+
+// TestSearch_RecomputeFollowsCursorAcrossEviction guards the maxLogs bug:
+// when the bounded buffer trims its head, every match line index shifts down.
+// recompute must realign the prior anchor by the evicted count so the active
+// cursor stays on the same logical match instead of snapping back to hit 0.
+func TestSearch_RecomputeFollowsCursorAcrossEviction(t *testing.T) {
+	var s searchState
+	s.open()
+	for _, r := range "foo" {
+		s.appendRune(r)
+	}
+	s.commit([]string{"foo0", "foo1", "foo2"}) // active, 3 matches, cursor 0
+
+	s.next()
+	s.next()
+	if got := s.currentMatch().line; got != 2 {
+		t.Fatalf("setup: expected cursor on line 2, got %d", got)
+	}
+
+	// One head line evicted: "foo0" gone, the rest shift down by 1, "foo3" added.
+	s.recompute([]string{"foo1", "foo2", "foo3"}, 1)
+
+	// The match the user was navigating ("foo2") is now at line 1 — the cursor
+	// must follow it, not reset to 0.
+	if got := s.currentMatch().line; got != 1 {
+		t.Fatalf("cursor should follow the matched line across eviction, got line %d", got)
 	}
 }
 
@@ -228,7 +256,7 @@ func TestSearch_CommitWithoutBufferKeepsLiveMatches(t *testing.T) {
 	for _, r := range "foo" {
 		s.appendRune(r)
 	}
-	s.recompute([]string{"foo a", "foo b"}) // simulates per-keystroke recompute
+	s.recompute([]string{"foo a", "foo b"}, 0) // simulates per-keystroke recompute
 	if len(s.matches) != 2 {
 		t.Fatalf("setup: expected 2 matches, got %d", len(s.matches))
 	}
@@ -251,7 +279,7 @@ func TestSearch_CurrentMatchAvailableDuringPrompting(t *testing.T) {
 	for _, r := range "foo" {
 		s.appendRune(r)
 	}
-	s.recompute([]string{"foo here", "and foo there"})
+	s.recompute([]string{"foo here", "and foo there"}, 0)
 
 	cur := s.currentMatch()
 	if cur.line != 0 {
@@ -349,7 +377,7 @@ func TestSearch_MatchedLineOrderIsUniqueAndSorted(t *testing.T) {
 	}
 	// "x" appears on lines 0, 1 (twice), and 3 — matchedLineOrder must
 	// dedupe line 1 and preserve top-down order.
-	s.recompute([]string{"x", "xx", "y", "x"})
+	s.recompute([]string{"x", "xx", "y", "x"}, 0)
 
 	got := s.matchedLineOrder()
 	want := []int{0, 1, 3}
@@ -369,7 +397,7 @@ func TestSearch_FilteredCursorLineMapsToFilteredIndex(t *testing.T) {
 	for _, r := range "x" {
 		s.appendRune(r)
 	}
-	s.recompute([]string{"x", "no", "x", "no", "x"})
+	s.recompute([]string{"x", "no", "x", "no", "x"}, 0)
 	s.commit(nil)
 	s.toggleFilter()
 
@@ -389,7 +417,7 @@ func TestSearch_FilteredCursorLineZeroWhenFilterOff(t *testing.T) {
 	for _, r := range "x" {
 		s.appendRune(r)
 	}
-	s.recompute([]string{"x"})
+	s.recompute([]string{"x"}, 0)
 	s.commit(nil)
 	// filtering is off → filteredCursorLine returns 0 (caller should
 	// use currentMatch().line instead).
@@ -411,7 +439,7 @@ func TestRenderedLines_FilterOnlyEmitsMatchedLines(t *testing.T) {
 	for _, r := range "err" {
 		s.appendRune(r)
 	}
-	s.recompute(m.hamrLogs)
+	s.recompute(m.hamrLogs, 0)
 	s.commit(nil)
 	s.toggleFilter()
 
@@ -439,7 +467,7 @@ func TestRenderedLines_FilterIgnoredDuringPrompting(t *testing.T) {
 	for _, r := range "foo" {
 		s.appendRune(r)
 	}
-	s.recompute(m.hamrLogs)
+	s.recompute(m.hamrLogs, 0)
 	s.filtering = true // carryover simulation; open() normally resets it
 
 	lines, _ := m.renderedLines()
@@ -448,5 +476,21 @@ func TestRenderedLines_FilterIgnoredDuringPrompting(t *testing.T) {
 	}
 	if !strings.Contains(lines[1], "bar") {
 		t.Fatalf("non-matching line must stay visible while prompting: %q", lines[1])
+	}
+}
+
+// TestFindMatches_UnicodeCaseChangesByteLength guards the highlight-offset bug:
+// İ (U+0130) lower-cases to a single 'i' (2 bytes → 1), shifting later byte
+// offsets in the lower-cased copy. Match offsets must map back to the original
+// line so highlight rendering slices the right bytes rather than garbling them.
+func TestFindMatches_UnicodeCaseChangesByteLength(t *testing.T) {
+	line := "İ foo" // İ before the match changes byte length under ToLower
+	matches := findMatches([]string{line}, "foo")
+	if len(matches) != 1 {
+		t.Fatalf("expected 1 match, got %d", len(matches))
+	}
+	m := matches[0]
+	if got := line[m.start:m.end]; got != "foo" {
+		t.Fatalf("offsets must slice the original to %q, got %q (start=%d end=%d)", "foo", got, m.start, m.end)
 	}
 }

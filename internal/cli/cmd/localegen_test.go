@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"go/format"
 	"os"
 	"path/filepath"
 	"strings"
@@ -166,9 +167,10 @@ func TestRunLocaleGenMissingExplicitConfig(t *testing.T) {
 }
 
 func TestExtractInterpolationParams(t *testing.T) {
-	// Count is excluded.
+	// All vars are returned (sorted), INCLUDING Count — the plural path strips
+	// Count, but a non-plural message needs it as a real parameter.
 	params := extractInterpolationParams("{{.Count}} items by {{.Author}}")
-	assert.Equal(t, []string{"Author"}, params)
+	assert.Equal(t, []string{"Author", "Count"}, params)
 
 	// No params.
 	params = extractInterpolationParams("Hello world")
@@ -189,4 +191,47 @@ func TestGenerateGoSourcePluralWithParams(t *testing.T) {
 
 	// Verify it contains the map construction.
 	assert.True(t, strings.Contains(src, `"User": user`))
+}
+
+func TestGenerateGoSource_sanitizesReservedParams(t *testing.T) {
+	// Interpolation names that are Go keywords or reserved identifiers must not
+	// become uncompilable parameter names ({{.Type}} -> "type", {{.T}} collides
+	// with the receiver).
+	keys := []localeKeyInfo{
+		{key: "x.kw", params: []string{"Type", "Range", "T", "String"}},
+	}
+	src := generateGoSource("locale", keys)
+
+	assert.Contains(t, src, "type_ string")
+	assert.Contains(t, src, "range_ string")
+	assert.Contains(t, src, "t_ string")
+	assert.Contains(t, src, "string_ string")
+	// The map key (the i18n variable name) keeps its original spelling.
+	assert.Contains(t, src, `"Type": type_`)
+	// Most important: the generated source is valid Go.
+	_, err := format.Source([]byte(src))
+	require.NoError(t, err, "generated source must compile")
+}
+
+func TestCheckMethodNames(t *testing.T) {
+	// "home.title" and "home_title" both map to HomeTitle.
+	err := checkMethodNames([]localeKeyInfo{{key: "home.title"}, {key: "home_title"}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "HomeTitle")
+
+	// A key with no letters/digits produces an empty method name.
+	err = checkMethodNames([]localeKeyInfo{{key: "..."}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "empty method name")
+
+	// Distinct keys are fine.
+	require.NoError(t, checkMethodNames([]localeKeyInfo{{key: "home.title"}, {key: "home.subtitle"}}))
+}
+
+func TestFlattenForGen_keepsCountForNonPlural(t *testing.T) {
+	out, err := flattenForGen(map[string]any{"credits": "You have {{.Count}} credits"}, "")
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	assert.False(t, out[0].isPlural)
+	assert.Equal(t, []string{"Count"}, out[0].params, "non-plural Count must be a real parameter")
 }

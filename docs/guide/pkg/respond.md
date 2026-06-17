@@ -25,6 +25,10 @@ func (h *Handler) Home(c echo.Context) error {
 }
 ```
 
+The component is rendered into a buffer before any status or body is written, so a
+render error is returned cleanly (reaching Echo's error handler) instead of leaving
+a committed `200` with a truncated body.
+
 ## JSON Responses
 
 ```go

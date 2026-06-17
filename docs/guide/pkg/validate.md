@@ -27,7 +27,7 @@ validation and `ValidationHandler(paramName)` for automatic HTMX per-field endpo
 validate.Required(value)             // non-empty check
 validate.Email(value)                // email format
 validate.Phone(value)                // optional +, 7-15 digits
-validate.URL(value)                  // valid absolute URL
+validate.URL(value)                  // absolute http/https URL (rejects javascript:, data:, etc.)
 validate.MinLength(value, 3)         // at least 3 runes
 validate.MaxLength(value, 100)       // at most 100 runes
 validate.OneOf(value, "a", "b", "c") // allowed values

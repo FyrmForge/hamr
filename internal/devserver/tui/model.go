@@ -231,10 +231,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		viewportH := msg.Height - chromeRows
-		if viewportH < 1 {
-			viewportH = 1
-		}
+		viewportH := max(msg.Height-chromeRows, 1)
 		if !m.ready {
 			m.view = viewport.New(msg.Width, viewportH)
 			m.view.KeyMap = scrollKeyMap()
@@ -519,11 +516,12 @@ func appendCapped(buf []string, line string, max int) []string {
 func (m *Model) appendHamrLog(line string) {
 	before := len(m.hamrLogs)
 	m.hamrLogs = appendCapped(m.hamrLogs, line, m.maxLogs)
-	if evicted := before + 1 - len(m.hamrLogs); evicted > 0 && m.viewMode == 0 {
+	evicted := before + 1 - len(m.hamrLogs)
+	if evicted > 0 && m.viewMode == 0 {
 		m.activeSelection().shiftEvicted(evicted)
 	}
 	if s := m.hamrSearch; s != nil && s.active() {
-		s.recompute(m.hamrLogs)
+		s.recompute(m.hamrLogs, evicted)
 	}
 	if m.viewMode == 0 {
 		m.refreshViewport()
@@ -540,11 +538,12 @@ func (m *Model) appendDockerLog(name, line string) {
 	before := len(m.dockerLogs[name])
 	m.dockerLogs[name] = appendCapped(m.dockerLogs[name], line, m.maxLogs)
 	tabIx := m.dockerTabIndex(name)
-	if evicted := before + 1 - len(m.dockerLogs[name]); evicted > 0 && tabIx >= 0 && m.viewMode == tabIx+1 {
+	evicted := before + 1 - len(m.dockerLogs[name])
+	if evicted > 0 && tabIx >= 0 && m.viewMode == tabIx+1 {
 		m.activeSelection().shiftEvicted(evicted)
 	}
 	if s, ok := m.dockerSearches[name]; ok && s.active() {
-		s.recompute(m.dockerLogs[name])
+		s.recompute(m.dockerLogs[name], evicted)
 	}
 	if tabIx >= 0 && m.viewMode == tabIx+1 {
 		m.refreshViewport()
@@ -562,15 +561,42 @@ func (m *Model) dockerTabIndex(name string) int {
 	return -1
 }
 
-// setDockerTabs replaces the tab list. If the active tab points at a
-// stack that's no longer present (config reload removed it), the view
-// resets to the hamr tab.
+// setDockerTabs replaces the tab list. The active tab is tracked by index
+// (viewMode), but the selection refers to a buffer keyed by NAME — so a reorder
+// would silently switch the active stack's buffer under a stale selection and
+// leave the tab title and viewport content disagreeing. To avoid that we follow
+// the active stack by name: it moves to its new index (the selection stays
+// valid, same buffer), and only when the active stack is actually removed do we
+// fall back to the hamr tab and clear the now-meaningless selection.
 func (m *Model) setDockerTabs(names []string) {
+	var activeName string
+	if m.viewMode > 0 && m.viewMode-1 < len(m.dockerTabs) {
+		activeName = m.dockerTabs[m.viewMode-1]
+	}
+
 	m.dockerTabs = append(m.dockerTabs[:0], names...)
-	maxMode := len(m.dockerTabs)
-	if m.viewMode > maxMode {
+
+	if activeName == "" {
+		return // hamr tab is active; a docker reorder doesn't affect it
+	}
+
+	newIx := m.dockerTabIndex(activeName)
+	if newIx < 0 {
+		// Active stack removed — reset to hamr and drop its stale selection.
 		m.viewMode = 0
-		m.refreshViewport()
+		m.activeSelection().clear()
+		if m.ready {
+			m.refreshViewport()
+		}
+		return
+	}
+	if newMode := newIx + 1; newMode != m.viewMode {
+		// Same stack, new position — follow it. The selection still refers to
+		// this stack's buffer (keyed by name), so it remains valid.
+		m.viewMode = newMode
+		if m.ready {
+			m.refreshViewport()
+		}
 	}
 }
 
@@ -703,16 +729,12 @@ func (m *Model) handleSearchPrompt(s *searchState, msg tea.KeyMsg) (tea.Model, t
 // prompting the cursor always sits at hit 0 (incremental search
 // always shows the earliest occurrence).
 func (m *Model) applyLiveSearch(s *searchState) {
-	s.recompute(m.currentLogs())
+	s.recompute(m.currentLogs(), 0)
 	m.refreshViewport()
 	if !m.ready || len(s.matches) == 0 {
 		return
 	}
-	cur := s.currentMatch()
-	target := cur.line - m.view.Height/2
-	if target < 0 {
-		target = 0
-	}
+	target := max(m.matchVisualRow()-m.view.Height/2, 0)
 	m.view.SetYOffset(target)
 }
 
@@ -730,17 +752,28 @@ func (m *Model) onSearchCursorChange() {
 	if !s.active() || len(s.matches) == 0 {
 		return
 	}
-	var line int
-	if s.filtering {
-		line = s.filteredCursorLine()
-	} else {
-		line = s.currentMatch().line
-	}
-	target := line - m.view.Height/2
-	if target < 0 {
-		target = 0
-	}
+	target := max(m.matchVisualRow()-m.view.Height/2, 0)
 	m.view.SetYOffset(target)
+}
+
+// matchVisualRow returns the first visual (hard-wrapped) row occupied by the
+// rendered line that holds the current search match. SetYOffset works in visual
+// rows, but match positions are buffer-line indices — without this conversion a
+// long wrapped line above the match pushes the "centred" target off-screen.
+// Works in both filter and full views: in filter view renderedLines() already
+// returns only the visible lines, and the match's buffer index is one of them.
+func (m *Model) matchVisualRow() int {
+	perLine, bufferIx := m.renderedLines()
+	target := m.activeSearch().currentMatch().line
+	width := m.view.Width
+	row := 0
+	for pos, bi := range bufferIx {
+		if bi == target {
+			return row
+		}
+		row += visualRowCount(perLine[pos], width)
+	}
+	return row
 }
 
 // renderHighlightLine emits one log line with the search-match ANSI
@@ -774,10 +807,7 @@ func writeLineWithHighlights(b *strings.Builder, line string, ms []searchMatch, 
 		if mt.start > len(line) {
 			break
 		}
-		end := mt.end
-		if end > len(line) {
-			end = len(line)
-		}
+		end := min(mt.end, len(line))
 		b.WriteString(line[prev:mt.start])
 		text := line[mt.start:end]
 		if mt.line == cur.line && mt.start == cur.start {
@@ -800,6 +830,12 @@ func (m *Model) clearActiveLog() {
 		m.dockerLogs[m.dockerTabs[ix]] = nil
 	}
 	m.activeSelection().clear()
+	// Recompute the active search against the now-empty buffer; otherwise its
+	// match list (and the [k/n] counter + n/N targets) would stay frozen at the
+	// pre-clear state until the next appended line triggers a recompute.
+	if s := m.activeSearch(); s.active() {
+		s.recompute(m.currentLogs(), 0)
+	}
 	if m.ready {
 		m.setViewContent("")
 	}
@@ -813,9 +849,10 @@ func (m *Model) clearActiveLog() {
 // recent reported screen Y, used by the auto-scroll tick to keep
 // extending toward the cursor between motion events.
 type dragState struct {
-	active bool
-	extend bool
-	lastY  int
+	active  bool
+	extend  bool
+	lastY   int
+	ticking bool // an auto-scroll tick chain is in flight (prevents duplicates)
 }
 
 // dragScrollMsg fires on a tea.Tick while the cursor sits past the
@@ -836,18 +873,39 @@ const dragScrollInterval = 50 * time.Millisecond
 // anchor, ctrl toggles one line in/out. Press above the status bar or
 // below the hint bar is ignored. After the press the drag state is
 // armed so subsequent motion events extend the selection.
+// rangeVisibleSet returns the set of buffer indices currently visible, but
+// only when the active search is in filter mode — otherwise nil, meaning a
+// range selection covers every index between its endpoints. In filter view the
+// hidden non-matching lines between two visible rows must be excluded so a
+// drag/shift-click doesn't copy lines the user can't see.
+func (m *Model) rangeVisibleSet() map[int]bool {
+	s := m.activeSearch()
+	if !s.filtering || s.stage != searchActive {
+		return nil
+	}
+	order := s.matchedLineOrder()
+	if len(order) == 0 {
+		return nil
+	}
+	vis := make(map[int]bool, len(order))
+	for _, ix := range order {
+		vis[ix] = true
+	}
+	return vis
+}
+
 func (m *Model) startDrag(msg tea.MouseMsg) tea.Cmd {
 	if msg.Y < 1 || msg.Y >= m.height-1 {
 		return nil
 	}
-	line := m.lineAtScreenY(msg.Y)
+	line := m.lineAtScreenY(msg.Y, false)
 	if line < 0 {
 		return nil
 	}
 	sel := m.activeSelection()
 	switch {
 	case msg.Shift:
-		sel.clickRange(line)
+		sel.clickRange(line, m.rangeVisibleSet())
 	case msg.Ctrl:
 		sel.clickToggle(line)
 	default:
@@ -855,7 +913,7 @@ func (m *Model) startDrag(msg tea.MouseMsg) tea.Cmd {
 	}
 	m.refreshViewport()
 	m.drag = dragState{active: true, extend: !msg.Ctrl, lastY: msg.Y}
-	return m.maybeAutoScroll()
+	return m.startAutoScroll()
 }
 
 // continueDrag responds to motion events with the left button held.
@@ -868,11 +926,11 @@ func (m *Model) continueDrag(msg tea.MouseMsg) tea.Cmd {
 		return nil
 	}
 	m.drag.lastY = msg.Y
-	if line := m.lineAtScreenY(msg.Y); line >= 0 {
-		m.activeSelection().clickRange(line)
+	if line := m.lineAtScreenY(msg.Y, true); line >= 0 {
+		m.activeSelection().clickRange(line, m.rangeVisibleSet())
 		m.refreshViewport()
 	}
-	return m.maybeAutoScroll()
+	return m.startAutoScroll()
 }
 
 // endDrag clears the drag state. Called on left-release and also
@@ -889,34 +947,36 @@ func (m *Model) endDrag() {
 // the viewport, or the viewport hit its scroll limit.
 func (m *Model) tickDrag() tea.Cmd {
 	if !m.drag.active || !m.drag.extend {
+		m.drag.ticking = false
 		return nil
 	}
 	switch m.dragEdge() {
 	case -1:
 		if m.view.AtTop() {
+			m.drag.ticking = false
 			return nil
 		}
 		m.view.SetYOffset(m.view.YOffset - 1)
 	case 1:
 		if m.view.AtBottom() {
+			m.drag.ticking = false
 			return nil
 		}
 		m.view.SetYOffset(m.view.YOffset + 1)
 	default:
+		m.drag.ticking = false
 		return nil
 	}
-	if line := m.lineAtScreenY(m.drag.lastY); line >= 0 {
-		m.activeSelection().clickRange(line)
+	if line := m.lineAtScreenY(m.drag.lastY, true); line >= 0 {
+		m.activeSelection().clickRange(line, m.rangeVisibleSet())
 		m.refreshViewport()
 	}
-	return m.maybeAutoScroll()
+	return m.continueAutoScroll()
 }
 
-// maybeAutoScroll returns a tick command when the drag cursor is past
-// a viewport edge and the viewport can still scroll in that direction.
-// Returns nil when the cursor is inside the viewport (no auto-scroll
-// needed) or the scroll limit is hit (nothing more to reveal).
-func (m *Model) maybeAutoScroll() tea.Cmd {
+// autoScrollTick returns a tick command when the drag cursor is past a viewport
+// edge and the viewport can still scroll in that direction, else nil.
+func (m *Model) autoScrollTick() tea.Cmd {
 	if !m.drag.active || !m.drag.extend {
 		return nil
 	}
@@ -933,6 +993,33 @@ func (m *Model) maybeAutoScroll() tea.Cmd {
 		return nil
 	}
 	return tea.Tick(dragScrollInterval, func(time.Time) tea.Msg { return dragScrollMsg{} })
+}
+
+// startAutoScroll begins an auto-scroll tick chain if one isn't already running.
+// Called from drag-start and every motion event, so repeated drags past the
+// edge can't each spawn a self-perpetuating chain (which would multiply the
+// scroll speed without bound). The `ticking` flag is cleared by continueAutoScroll
+// when the chain ends, or by endDrag.
+func (m *Model) startAutoScroll() tea.Cmd {
+	if m.drag.ticking {
+		return nil
+	}
+	cmd := m.autoScrollTick()
+	if cmd != nil {
+		m.drag.ticking = true
+	}
+	return cmd
+}
+
+// continueAutoScroll schedules the next tick of the running chain, or ends it
+// (clearing `ticking`) when there's nothing left to scroll. Called only from
+// tickDrag, i.e. from within the chain itself.
+func (m *Model) continueAutoScroll() tea.Cmd {
+	cmd := m.autoScrollTick()
+	if cmd == nil {
+		m.drag.ticking = false
+	}
+	return cmd
 }
 
 // dragEdge classifies the most recent drag Y: -1 if above the
@@ -953,7 +1040,13 @@ func (m *Model) dragEdge() int {
 // outside are clamped to the topmost or bottommost visible line so a
 // drag past the edge keeps extending against the boundary line until
 // auto-scroll reveals more. Returns -1 when the buffer is empty.
-func (m *Model) lineAtScreenY(y int) int {
+//
+// clampPastEnd controls what happens when the row lands past the rendered
+// content (a short buffer leaves empty rows below): a drag clamps to the last
+// line so it keeps extending against the boundary, but an initial click must
+// return -1 (ignore) — clicking the empty void below the log shouldn't select
+// the last line.
+func (m *Model) lineAtScreenY(y int, clampPastEnd bool) int {
 	perLine, bufferIx := m.renderedLines()
 	if len(perLine) == 0 {
 		return -1
@@ -969,9 +1062,11 @@ func (m *Model) lineAtScreenY(y int) int {
 	}
 	pos := visualRowToLine(perLine, m.view.Width, visualRow)
 	if pos < 0 || pos >= len(bufferIx) {
-		// Past the rendered content (short buffer with empty viewport
-		// rows below) — clamp to the last line so a drag past the end
-		// still extends to it.
+		if !clampPastEnd {
+			return -1
+		}
+		// Drag past the rendered content — clamp to the last line so the
+		// drag still extends to it.
 		return bufferIx[len(bufferIx)-1]
 	}
 	return bufferIx[pos]
@@ -1177,7 +1272,11 @@ func (w *makePrefixWriter) Write(p []byte) (int, error) {
 		out = append(out, w.prefix...)
 		out = append(out, line...)
 		if _, err := w.out.Write(out); err != nil {
-			return 0, err
+			// All of p was already appended to w.buf, so it is fully consumed.
+			// Report len(p) (not 0) with the error: returning 0 would invite an
+			// io.Writer-contract-respecting caller to retry the same bytes,
+			// which we'd append again and duplicate.
+			return len(p), err
 		}
 		w.buf = w.buf[i+1:]
 	}
@@ -1347,6 +1446,19 @@ func barPad(n int) string {
 	return statusBarStyle.Render(strings.Repeat(" ", n))
 }
 
+// fitBarLeft returns a bar's left cluster fitted to exactly width columns:
+// padded with pad when short, ANSI-aware truncated when it overflows. The bars
+// drop their right cluster when room runs out and pad the left to full width —
+// but a left cluster wider than the terminal (a long ERR rule list, proxy URL,
+// or search query) would otherwise pad by a negative amount, return untruncated,
+// wrap to the next row, and corrupt the whole frame layout.
+func fitBarLeft(left string, width int, pad func(int) string) string {
+	if w := lipgloss.Width(left); w <= width {
+		return left + pad(width-w)
+	}
+	return lipgloss.NewStyle().MaxWidth(width).Render(left)
+}
+
 // hintPad does the same for the hint bar, which uses a slightly
 // different foreground default than the status bar.
 func hintPad(n int) string {
@@ -1412,7 +1524,7 @@ func (m *Model) searchHintBar(s *searchState) string {
 	const trail = 1
 	gap := m.width - leftW - rightW - trail
 	if gap < 1 {
-		return leftContent + hintPad(m.width-leftW)
+		return fitBarLeft(leftContent, m.width, hintPad)
 	}
 	return leftContent + hintPad(gap) + right + hintPad(trail)
 }
@@ -1434,7 +1546,7 @@ func (m *Model) selectionHintBar(sel *selectionState) string {
 	const trail = 1
 	gap := m.width - leftW - rightW - trail
 	if gap < 1 {
-		return left + hintPad(m.width-leftW)
+		return fitBarLeft(left, m.width, hintPad)
 	}
 	return left + hintPad(gap) + right + hintPad(trail)
 }
@@ -1506,11 +1618,9 @@ func (m *Model) statusBar() string {
 	leftW := lipgloss.Width(left)
 	gap := m.width - leftW - rightW
 	if gap < 1 {
-		gap = m.width - leftW
-		if gap < 0 {
-			gap = 0
-		}
-		right = ""
+		// Not enough room for the right tag — drop it and fit the left
+		// cluster to the full width (truncating if it overflows on its own).
+		return fitBarLeft(left, m.width, barPad)
 	}
 	return left + barPad(gap) + right
 }
@@ -1561,8 +1671,9 @@ func (m *Model) hintBar() string {
 	const rightTrailing = 1
 	gap := m.width - leftW - rightW - rightTrailing
 	if gap < 1 {
-		// Out of room for both — keep the left group and pad to width.
-		return leftContent + hintPad(m.width-leftW)
+		// Out of room for both — keep the left group, fitting it to width
+		// (truncating if the left cluster alone overflows the terminal).
+		return fitBarLeft(leftContent, m.width, hintPad)
 	}
 	return leftContent + hintPad(gap) + right + hintPad(rightTrailing)
 }
@@ -1593,13 +1704,7 @@ func (m *Model) runOverlayView() string {
 	// "...showing X of Y" indicator that appears when truncated, so the
 	// modal still fits even when the list overflows.
 	const fixedChrome = 11
-	maxRows := m.availableModalHeight() - fixedChrome
-	if maxRows > 12 {
-		maxRows = 12
-	}
-	if maxRows < 1 {
-		maxRows = 1
-	}
+	maxRows := max(min(m.availableModalHeight()-fixedChrome, 12), 1)
 	filtered := m.run.filtered()
 
 	prompt := modalKey.Render("›") + " " + modalDim.Render(m.run.query) + modalKey.Render("_")
@@ -1619,10 +1724,7 @@ func (m *Model) runOverlayView() string {
 		if m.run.cursor >= maxRows {
 			start = m.run.cursor - maxRows + 1
 		}
-		end := start + maxRows
-		if end > len(filtered) {
-			end = len(filtered)
-		}
+		end := min(start+maxRows, len(filtered))
 		for i := start; i < end; i++ {
 			name := filtered[i]
 			row := "  " + name
@@ -1700,18 +1802,13 @@ func overlay(base, modal string, width, height int) string {
 
 	mh := len(modalLines)
 	mw := lipgloss.Width(modal)
-	startY := (height - mh) / 2
-	// Never overlap the top status bar (row 0) or the bottom hint bar
-	// (row height-1). Modal renderers size themselves to fit between
-	// these two rows; this is a defensive clamp for edge cases like a
-	// very tiny terminal where even a minimum modal would overflow.
-	if startY < 1 {
-		startY = 1
-	}
-	startX := (width - mw) / 2
-	if startX < 0 {
-		startX = 0
-	}
+	startY := max(
+		// Never overlap the top status bar (row 0) or the bottom hint bar
+		// (row height-1). Modal renderers size themselves to fit between
+		// these two rows; this is a defensive clamp for edge cases like a
+		// very tiny terminal where even a minimum modal would overflow.
+		(height-mh)/2, 1)
+	startX := max((width-mw)/2, 0)
 
 	for i, line := range modalLines {
 		row := startY + i

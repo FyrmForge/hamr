@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"container/list"
 	"context"
 	"database/sql"
 	"fmt"
@@ -71,6 +72,11 @@ func RateLimitWithConfig(cfg RateLimitConfig) echo.MiddlewareFunc {
 
 			allowed, remaining, resetAt, err := cfg.Store.Allow(c.Request().Context(), key, rate, window)
 			if err != nil {
+				// On a backing-store outage the limiter fails OPEN by default so a
+				// transient blip doesn't take the whole site down — but that means
+				// brute-force protection is off for the duration. It's logged at
+				// Error (a loud call-out, not a quiet warn), and security-sensitive
+				// routes can opt into fail-closed by setting Config.FailClosed.
 				logger := logging.FromContext(c.Request().Context())
 				logger.Error("rate limit store error", slog.String("error", err.Error()))
 				if cfg.FailClosed {
@@ -114,10 +120,14 @@ type window struct {
 
 // MemoryStore is an in-memory fixed-window rate limit store.
 type MemoryStore struct {
-	mu              sync.Mutex
-	windows         map[string]*window
-	maxSize         int
-	insertOrder     []string
+	mu      sync.Mutex
+	windows map[string]*window
+	maxSize int
+	// lru orders keys least- to most-recently-active (front = LRU). When
+	// maxSize is exceeded the front (least-recently-active) key is evicted, so
+	// an actively-attacked key is NOT flushed by a burst of fresh keys.
+	lru             *list.List
+	elems           map[string]*list.Element
 	cleanupCtx      context.Context
 	cleanupInterval time.Duration
 	window          time.Duration
@@ -151,6 +161,8 @@ func WithWindow(d time.Duration) MemoryStoreOption {
 func NewMemoryStore(opts ...MemoryStoreOption) *MemoryStore {
 	s := &MemoryStore{
 		windows: make(map[string]*window),
+		lru:     list.New(),
+		elems:   make(map[string]*list.Element),
 	}
 	for _, o := range opts {
 		o(s)
@@ -169,27 +181,31 @@ func (s *MemoryStore) Allow(_ context.Context, key string, rate int, dur time.Du
 	now := time.Now()
 	w, ok := s.windows[key]
 	if !ok || now.Sub(w.start) >= dur {
-		isNew := !ok
 		w = &window{count: 0, start: now}
 		s.windows[key] = w
+	}
 
-		if isNew {
-			// Evict oldest entry if max size exceeded.
-			if s.maxSize > 0 && len(s.insertOrder) >= s.maxSize {
-				oldest := s.insertOrder[0]
-				s.insertOrder = s.insertOrder[1:]
-				delete(s.windows, oldest)
+	// Mark this key most-recently-active and evict the least-recently-active
+	// key(s) if over capacity. Touching on every call (new OR window reset)
+	// keeps a busy key away from the eviction front.
+	if s.maxSize > 0 {
+		if el, ok := s.elems[key]; ok {
+			s.lru.MoveToBack(el)
+		} else {
+			s.elems[key] = s.lru.PushBack(key)
+			for s.lru.Len() > s.maxSize {
+				front := s.lru.Front()
+				evicted := front.Value.(string)
+				s.lru.Remove(front)
+				delete(s.elems, evicted)
+				delete(s.windows, evicted)
 			}
-			s.insertOrder = append(s.insertOrder, key)
 		}
 	}
 
 	w.count++
 	resetAt := w.start.Add(dur)
-	remaining := rate - w.count
-	if remaining < 0 {
-		remaining = 0
-	}
+	remaining := max(rate-w.count, 0)
 
 	return w.count <= rate, remaining, resetAt, nil
 }
@@ -203,18 +219,11 @@ func (s *MemoryStore) CleanupExpired(window time.Duration) {
 	for key, w := range s.windows {
 		if now.Sub(w.start) >= window {
 			delete(s.windows, key)
-		}
-	}
-
-	// Rebuild insertOrder to remove deleted keys.
-	if s.maxSize > 0 {
-		alive := s.insertOrder[:0]
-		for _, key := range s.insertOrder {
-			if _, ok := s.windows[key]; ok {
-				alive = append(alive, key)
+			if el, ok := s.elems[key]; ok {
+				s.lru.Remove(el)
+				delete(s.elems, key)
 			}
 		}
-		s.insertOrder = alive
 	}
 }
 
@@ -288,10 +297,7 @@ func (s *PGStore) Allow(ctx context.Context, key string, rate int, dur time.Dura
 		return false, 0, time.Time{}, fmt.Errorf("rate limit: %w", err)
 	}
 
-	remaining := rate - hitCount
-	if remaining < 0 {
-		remaining = 0
-	}
+	remaining := max(rate-hitCount, 0)
 
 	return hitCount <= rate, remaining, resetAt, nil
 }

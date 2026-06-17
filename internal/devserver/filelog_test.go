@@ -92,7 +92,7 @@ func TestRollingFileWriter_RollingTruncation(t *testing.T) {
 	}
 
 	// Write 25 lines — should trigger truncation at 2*maxLines (20).
-	for i := 0; i < 25; i++ {
+	for i := range 25 {
 		_, _ = fmt.Fprintf(w, "line %d\n", i)
 	}
 	_ = w.Close()
@@ -181,7 +181,7 @@ func TestRollingFileWriter_PreExistingFile(t *testing.T) {
 
 	// Create a file with 5 existing lines.
 	var existing strings.Builder
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		_, _ = fmt.Fprintf(&existing, "old %d\n", i)
 	}
 	_ = os.WriteFile(path, []byte(existing.String()), 0o644)
@@ -192,7 +192,7 @@ func TestRollingFileWriter_PreExistingFile(t *testing.T) {
 	}
 
 	// Write 5 more lines (total 10, maxLines=8).
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		_, _ = fmt.Fprintf(w, "new %d\n", i)
 	}
 	_ = w.Close()
@@ -216,7 +216,7 @@ func TestRollingFileWriter_PreExistingOverLimit(t *testing.T) {
 
 	// Create a file with 15 lines, maxLines=5 — should truncate on open.
 	var existing strings.Builder
-	for i := 0; i < 15; i++ {
+	for i := range 15 {
 		_, _ = fmt.Fprintf(&existing, "line %d\n", i)
 	}
 	_ = os.WriteFile(path, []byte(existing.String()), 0o644)

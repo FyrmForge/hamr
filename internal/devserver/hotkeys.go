@@ -29,8 +29,9 @@ type noopHotkeySource struct{}
 
 func (noopHotkeySource) Actions() <-chan HotkeyAction { return nil }
 
-// openBrowser opens the given URL in the default browser.
-func openBrowser(url string) {
+// openBrowser opens the given URL in the default browser. It's a var so tests
+// can substitute a no-op/recorder.
+var openBrowser = func(url string) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":

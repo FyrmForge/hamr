@@ -2,6 +2,7 @@ package i18n
 
 import (
 	"bytes"
+	"maps"
 	"sort"
 	"strings"
 	"text/template"
@@ -10,9 +11,9 @@ import (
 // message is a single translation entry — either a plain/interpolated string
 // or a plural map keyed by CLDR category.
 type message struct {
-	text   string                       // plain string (may contain {{.Var}})
-	plural map[PluralCategory]string    // non-nil for plural messages
-	tmpl   *template.Template           // pre-parsed template (nil if no interpolation)
+	text   string                                // plain string (may contain {{.Var}})
+	plural map[PluralCategory]string             // non-nil for plural messages
+	tmpl   *template.Template                    // pre-parsed template (nil if no interpolation)
 	ptmpls map[PluralCategory]*template.Template // per-category templates
 }
 
@@ -123,15 +124,20 @@ func (t *Translator) T(key string, args ...any) string {
 		}
 		return key
 	}
-	return t.renderMessage(msg, args)
+	return t.renderMessage(key, msg, args)
 }
 
-func (t *Translator) renderMessage(msg message, args []any) string {
+func (t *Translator) renderMessage(key string, msg message, args []any) string {
 	if msg.isPlural() {
-		return t.renderPlural(msg, args)
+		return t.renderPlural(key, msg, args)
 	}
 	return t.renderPlain(msg, args)
 }
+
+// pluralCategoryOrder is the canonical CLDR ordering used to pick a category
+// deterministically when neither the count's category nor Other is defined.
+// Ranging a map directly would render a different string run-to-run.
+var pluralCategoryOrder = []PluralCategory{Zero, One, Two, Few, Many, Other}
 
 func (t *Translator) renderPlain(msg message, args []any) string {
 	if msg.tmpl == nil {
@@ -145,7 +151,7 @@ func (t *Translator) renderPlain(msg message, args []any) string {
 	return buf.String()
 }
 
-func (t *Translator) renderPlural(msg message, args []any) string {
+func (t *Translator) renderPlural(key string, msg message, args []any) string {
 	count := 0
 	var remaining []any
 	if len(args) > 0 {
@@ -160,15 +166,27 @@ func (t *Translator) renderPlural(msg message, args []any) string {
 	cat := t.pluralRule(count)
 	text, ok := msg.plural[cat]
 	if !ok {
-		cat = Other
-		text, ok = msg.plural[Other]
-		if !ok {
-			// Take any available category.
-			for c, v := range msg.plural {
-				cat = c
-				text = v
+		if v, has := msg.plural[Other]; has {
+			cat, text, ok = Other, v, true
+		}
+	}
+	if !ok {
+		// The locale's plural message defines neither the count's category nor
+		// Other. Prefer the fallback locale's (complete) plural for this key —
+		// it has a proper category for the count — over picking an arbitrary
+		// local category, which would be non-deterministic.
+		if t.fallback != nil {
+			return t.fallback.T(key, args...)
+		}
+		// No fallback: choose deterministically by canonical CLDR order.
+		for _, c := range pluralCategoryOrder {
+			if v, has := msg.plural[c]; has {
+				cat, text, ok = c, v, true
 				break
 			}
+		}
+		if !ok {
+			return key // empty plural map — should not happen
 		}
 	}
 
@@ -180,9 +198,7 @@ func (t *Translator) renderPlural(msg message, args []any) string {
 	data := extractData(remaining)
 	// Build a new map so we don't mutate the caller's data.
 	merged := make(map[string]any, len(data)+1)
-	for k, v := range data {
-		merged[k] = v
-	}
+	maps.Copy(merged, data)
 	if _, ok := merged["Count"]; !ok {
 		merged["Count"] = count
 	}

@@ -21,12 +21,11 @@ func CORS() echo.MiddlewareFunc {
 }
 
 // CORSWithConfig returns CORS middleware with the given config.
+//
+// When AllowOrigins is empty, cross-origin requests are DENIED (no
+// Access-Control-Allow-Origin header) rather than falling back to Echo's
+// permissive "*" default — apps that need CORS must pass explicit origins.
 func CORSWithConfig(cfg CORSConfig) echo.MiddlewareFunc {
-	origins := cfg.AllowOrigins
-	if len(origins) == 0 {
-		origins = []string{}
-	}
-
 	methods := cfg.AllowMethods
 	if len(methods) == 0 {
 		methods = []string{
@@ -52,10 +51,19 @@ func CORSWithConfig(cfg CORSConfig) echo.MiddlewareFunc {
 		}
 	}
 
-	return echoMw.CORSWithConfig(echoMw.CORSConfig{
-		AllowOrigins:     origins,
+	ecfg := echoMw.CORSConfig{
 		AllowMethods:     methods,
 		AllowHeaders:     headers,
 		AllowCredentials: cfg.AllowCredentials,
-	})
+	}
+	if len(cfg.AllowOrigins) == 0 {
+		// Deny all cross-origin requests. AllowOriginFunc takes precedence over
+		// AllowOrigins at request time, so returning false never emits an
+		// Access-Control-Allow-Origin header (Echo would otherwise default the
+		// empty list to "*").
+		ecfg.AllowOriginFunc = func(string) (bool, error) { return false, nil }
+	} else {
+		ecfg.AllowOrigins = cfg.AllowOrigins
+	}
+	return echoMw.CORSWithConfig(ecfg)
 }

@@ -72,13 +72,22 @@ func URL(value string) string {
 	return URLMsg(value, MsgURLInvalid)
 }
 
-// URLMsg is like URL with a custom message.
+// URLMsg is like URL with a custom message. Only http/https URLs are accepted:
+// a validated URL frequently lands in an href/src, and schemes like
+// javascript:, data:, and vbscript: are XSS vectors. Note "javascript://x/..."
+// parses with both a scheme and a host, so a scheme allowlist (not just a
+// non-empty-scheme check) is required to reject it.
 func URLMsg(value, msg string) string {
 	u, err := url.ParseRequestURI(value)
-	if err != nil || u.Scheme == "" || u.Host == "" {
+	if err != nil || u.Host == "" {
 		return msg
 	}
-	return ""
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+		return ""
+	default:
+		return msg
+	}
 }
 
 // MinLength returns "" if value has at least min runes, or MsgMinLength.
@@ -152,7 +161,9 @@ func MinAgeMsg(birthDate string, minAge int, msg string) string {
 	if err != nil {
 		return msg
 	}
-	cutoff := time.Now().AddDate(-minAge, 0, 0)
+	// time.Parse yields a UTC instant; compare against "now" in UTC too, or a
+	// local-zone now would shift the cutoff by up to a day near midnight.
+	cutoff := time.Now().UTC().AddDate(-minAge, 0, 0)
 	if dob.After(cutoff) {
 		return msg
 	}
@@ -171,7 +182,8 @@ func MaxAgeMsg(birthDate string, maxAge int, msg string) string {
 	if err != nil {
 		return msg
 	}
-	cutoff := time.Now().AddDate(-(maxAge + 1), 0, 0)
+	// UTC to match the UTC-parsed dob (see MinAgeMsg).
+	cutoff := time.Now().UTC().AddDate(-(maxAge + 1), 0, 0)
 	if dob.Before(cutoff) {
 		return msg
 	}

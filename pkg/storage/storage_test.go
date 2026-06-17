@@ -13,6 +13,7 @@ import (
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -529,4 +530,35 @@ func TestNewS3Storage_emptyRegion(t *testing.T) {
 	_, err := NewS3Storage(S3Config{Bucket: "my-bucket"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "region")
+}
+
+func TestS3Storage_EnsureBucket_createsOnGenericNotFound(t *testing.T) {
+	created := false
+	mc := &mockS3Client{
+		headBucketFn: func(context.Context, *s3.HeadBucketInput) (*s3.HeadBucketOutput, error) {
+			// R2/MinIO surface a generic API error, not the typed *s3types.NotFound.
+			return nil, &smithy.GenericAPIError{Code: "NotFound", Message: "not found"}
+		},
+		createBucketFn: func(context.Context, *s3.CreateBucketInput) (*s3.CreateBucketOutput, error) {
+			created = true
+			return &s3.CreateBucketOutput{}, nil
+		},
+	}
+	store := newTestS3(mc, nil)
+	require.NoError(t, store.EnsureBucket(context.Background()))
+	assert.True(t, created, "a generic NotFound API error must trigger CreateBucket")
+}
+
+func TestS3Storage_EnsureBucket_surfacesOtherErrors(t *testing.T) {
+	mc := &mockS3Client{
+		headBucketFn: func(context.Context, *s3.HeadBucketInput) (*s3.HeadBucketOutput, error) {
+			return nil, &smithy.GenericAPIError{Code: "AccessDenied", Message: "denied"}
+		},
+		createBucketFn: func(context.Context, *s3.CreateBucketInput) (*s3.CreateBucketOutput, error) {
+			t.Fatal("CreateBucket must not be called for a non-not-found error")
+			return nil, nil
+		},
+	}
+	store := newTestS3(mc, nil)
+	assert.Error(t, store.EnsureBucket(context.Background()))
 }

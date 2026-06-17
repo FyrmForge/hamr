@@ -70,6 +70,9 @@ func (m *StripeMock) handlePayoutByID(w http.ResponseWriter, r *http.Request) {
 	}
 	m.mu.RLock()
 	po, ok := m.payouts[id]
+	if ok {
+		po = clonePayout(po)
+	}
 	m.mu.RUnlock()
 	if !ok {
 		writeStripeError(w, http.StatusNotFound, "invalid_request_error",
@@ -121,10 +124,11 @@ func (m *StripeMock) createPayout(w http.ResponseWriter, r *http.Request) {
 
 	m.mu.Lock()
 	m.payouts[po.ID] = po
+	poCopy := clonePayout(po)
 	m.persist()
 	m.mu.Unlock()
 
-	writeStripeJSON(w, http.StatusOK, m.serializePayout(po))
+	writeStripeJSON(w, http.StatusOK, m.serializePayout(poCopy))
 }
 
 // listPayouts returns payouts scoped by Stripe-Account header. With no
@@ -145,7 +149,7 @@ func (m *StripeMock) listPayouts(w http.ResponseWriter, r *http.Request) {
 	var matching []*stripePayout
 	for _, po := range m.payouts {
 		if po.AccountID == scope {
-			matching = append(matching, po)
+			matching = append(matching, clonePayout(po))
 		}
 	}
 	m.mu.RUnlock()
@@ -172,8 +176,8 @@ func (m *StripeMock) listPayouts(w http.ResponseWriter, r *http.Request) {
 // buildPayoutFromParams projects the decoded form params into the mock's
 // internal shape. Mirrors Stripe's required-field validation.
 func buildPayoutFromParams(p map[string]any) (*stripePayout, error) {
-	amount := getInt64(p, "amount")
-	if amount <= 0 {
+	amount, ok := getInt64(p, "amount")
+	if !ok || amount <= 0 {
 		return nil, errors.New("amount must be a positive integer")
 	}
 	currency := strings.ToLower(getString(p, "currency"))

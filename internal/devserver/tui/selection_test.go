@@ -46,7 +46,7 @@ func TestSelection_ClickToggleAddsAndRemoves(t *testing.T) {
 func TestSelection_ClickRangeFromAnchor(t *testing.T) {
 	s := &selectionState{}
 	s.clickPlain(3)
-	s.clickRange(7)
+	s.clickRange(7, nil)
 	if got := sortedKeys(s.lines); !reflect.DeepEqual(got, []int{3, 4, 5, 6, 7}) {
 		t.Fatalf("range from anchor 3 to 7 wrong: %v", got)
 	}
@@ -57,10 +57,26 @@ func TestSelection_ClickRangeFromAnchor(t *testing.T) {
 	}
 }
 
+// TestSelection_ClickRange_FilterExcludesHiddenLines guards the filter-view
+// bug: a range over a filtered buffer must select only the visible (matching)
+// lines, never the hidden non-matching indices between them — otherwise `y`
+// copies lines the user never saw.
+func TestSelection_ClickRange_FilterExcludesHiddenLines(t *testing.T) {
+	s := &selectionState{}
+	s.clickPlain(2) // anchor on visible line 2
+	visible := map[int]bool{2: true, 5: true, 9: true}
+
+	s.clickRange(9, visible)
+
+	if got := sortedKeys(s.lines); !reflect.DeepEqual(got, []int{2, 5, 9}) {
+		t.Fatalf("range must select only visible lines, got %v", got)
+	}
+}
+
 func TestSelection_ClickRangeReversed(t *testing.T) {
 	s := &selectionState{}
 	s.clickPlain(7)
-	s.clickRange(3)
+	s.clickRange(3, nil)
 	if got := sortedKeys(s.lines); !reflect.DeepEqual(got, []int{3, 4, 5, 6, 7}) {
 		t.Fatalf("reversed range wrong: %v", got)
 	}
@@ -68,7 +84,7 @@ func TestSelection_ClickRangeReversed(t *testing.T) {
 
 func TestSelection_ClickRangeWithoutAnchorCollapses(t *testing.T) {
 	s := &selectionState{}
-	s.clickRange(4)
+	s.clickRange(4, nil)
 	if got := sortedKeys(s.lines); !reflect.DeepEqual(got, []int{4}) {
 		t.Fatalf("range without prior selection should be a single line, got %v", got)
 	}
@@ -373,13 +389,13 @@ func TestModel_LineAtScreenYClampsAboveAndBelow(t *testing.T) {
 	m.height = 6 // status + 4 viewport + hint
 	m.view.SetYOffset(0)
 
-	if got := m.lineAtScreenY(0); got != 0 {
+	if got := m.lineAtScreenY(0, true); got != 0 {
 		t.Errorf("Y above viewport should clamp to top visible line (0), got %d", got)
 	}
-	if got := m.lineAtScreenY(5); got != 3 {
+	if got := m.lineAtScreenY(5, true); got != 3 {
 		t.Errorf("Y below viewport should clamp to bottom visible line (3), got %d", got)
 	}
-	if got := m.lineAtScreenY(2); got != 1 {
+	if got := m.lineAtScreenY(2, true); got != 1 {
 		t.Errorf("Y inside viewport should map to its row, got %d", got)
 	}
 }
@@ -395,4 +411,23 @@ func splitLines(s string) []string {
 	}
 	out = append(out, s[start:])
 	return out
+}
+
+// TestModel_LineAtScreenY_VoidClickIgnoredNotClamped guards the click-empty-rows
+// bug: a plain click on the empty void below a short buffer must be ignored
+// (-1), not clamped to the last line — the clamp is only for a drag past the end.
+func TestModel_LineAtScreenY_VoidClickIgnoredNotClamped(t *testing.T) {
+	// 2 lines in a height-4 viewport → rows 2,3 are empty void below the buffer.
+	m := newReadyModelForScroll(4, 2)
+	m.height = 6 // status + 4 viewport + hint
+	m.view.SetYOffset(0)
+
+	// Screen Y=4 → viewport row 3, the empty void below the 2 lines.
+	if got := m.lineAtScreenY(4, false); got != -1 {
+		t.Fatalf("initial click on empty void must return -1 (ignore), got %d", got)
+	}
+	// A drag past the end still clamps to the last line.
+	if got := m.lineAtScreenY(4, true); got != 1 {
+		t.Fatalf("drag past end should clamp to last line (1), got %d", got)
+	}
 }

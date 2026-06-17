@@ -96,6 +96,10 @@ hub.JoinRoom(client, "chat:general")
 hub.LeaveRoom(client, "chat:general")
 ```
 
+`JoinRoom` is a no-op if the client has already disconnected (or was replaced by
+a reconnect), so it's safe to call from a handler goroutine that may race the
+client's disconnect.
+
 ## Runtime Subject Association
 
 Associate a session with a subject after the WebSocket connection is established (e.g.

@@ -156,6 +156,10 @@ func (m *SessionManager) ValidateSession(ctx context.Context, token string) (*Se
 	if m.slidingThreshold > 0 && time.Since(s.CreatedAt) > m.slidingThreshold {
 		if toucher, ok := m.store.(SessionToucher); ok {
 			if err := toucher.Touch(ctx, s.ID, time.Now().Add(m.duration)); err != nil {
+				// Non-fatal by design: a failed expiry-extension must not break an
+				// otherwise-valid request. It is logged (not silently swallowed) so
+				// persistent store flakiness — which would let active sessions
+				// expire despite use — stays visible in logs.
 				slog.Default().Warn("auth: sliding refresh failed", "session", s.ID, "error", err)
 			}
 		}

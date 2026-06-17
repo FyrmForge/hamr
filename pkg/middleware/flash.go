@@ -108,6 +108,12 @@ func SetFlash(c echo.Context, message string, flashType FlashType) {
 }
 
 // GetFlash returns the flash message from the context, or nil if none is set.
+//
+// SECURITY: the flash cookie is base64-encoded only, NOT authenticated (no MAC),
+// so Message and Type are attacker-influenceable — treat them as UNTRUSTED when
+// rendering. They are safe interpolated through templ (which auto-escapes); do
+// not render them via templ.Raw/unescaped HTML, and validate Type before using
+// it to select a code path.
 func GetFlash(c echo.Context) *FlashMessage {
 	val, ok := ctx.Get(c, ctx.FlashKey)
 	if !ok {

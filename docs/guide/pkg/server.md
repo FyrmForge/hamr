@@ -46,6 +46,63 @@ if err := srv.Start(); err != nil {
 | `WithMaxBodySize(size)` | `"2M"` | Max request body (`"500K"`, `"2M"`, etc.) |
 | `WithShutdownTimeout(d)` | 10s | Graceful shutdown timeout |
 | `WithGeneratedDir(dir)` | — | Serve pre-rendered static pages from directory |
+| `WithTrustedProxies(cidrs...)` | — (direct) | Proxy CIDRs trusted to set `X-Forwarded-For`; unset ignores it so `RealIP()` can't be spoofed |
+
+## Trusted Proxies & Client IP
+
+`c.RealIP()` is the default rate-limit key and the source for client-IP audit
+logging, so trusting the wrong source lets a client spoof its IP and evade
+limits. The server therefore defaults to the **direct TCP peer** and **ignores**
+`X-Forwarded-For` / `X-Real-IP` — safe, but behind a reverse proxy or load
+balancer every request then looks like it came from the proxy.
+
+To recover the real client IP, tell the server which upstream hops to trust:
+
+```go
+server.WithTrustedProxies("10.0.0.0/8") // or via the TRUSTED_PROXIES env var (scaffold default)
+```
+
+Only the listed ranges are trusted (loopback/link-local/private auto-trust is
+disabled), and `RealIP()` returns the **left-most untrusted hop** in
+`X-Forwarded-For` — i.e. the actual client. Scaffolded apps wire this from the
+`TRUSTED_PROXIES` env var (comma-separated CIDRs); an existing app adds the
+`WithTrustedProxies` option itself.
+
+**This is opt-in: behind a proxy you MUST set it, to your proxy's range.**
+
+| Deployment | `TRUSTED_PROXIES` |
+|---|---|
+| nginx / Caddy on the same host | `127.0.0.1/32` — loopback is *not* auto-trusted |
+| Docker Compose behind a proxy container | the proxy's network subnet, e.g. `172.16.0.0/12` |
+| Self-hosted Traefik | the network Traefik runs on (its Docker subnet / host IP) — you control it |
+| AWS ALB / GCP LB | the VPC/subnet CIDR the LB sits in |
+| Kubernetes ingress | the ingress-controller / node pod CIDR |
+| Managed PaaS (Railway, Fly, Render) | the platform's internal proxy range — often a private CIDR you don't control and that can change; **verify it** (below) |
+
+**Two non-obvious requirements:**
+
+1. **Your proxy must actually emit `X-Forwarded-For`.** If it doesn't, the CIDR
+   config does nothing and you still see the proxy IP. nginx needs
+   `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`. Traefik and
+   most cloud LBs add it by default.
+2. **Never use `0.0.0.0/0`.** Trusting all sources re-enables spoofing — any
+   client can forge `X-Forwarded-For`. Trust *only* your proxy's actual range.
+
+**Verify before relying on it.** Add a throwaway handler, hit it through the
+proxy from a known client (e.g. your phone on cellular), and read the values:
+
+```go
+e.GET("/__debug/ip", func(c echo.Context) error {
+    return c.JSON(200, map[string]string{
+        "remote_addr": c.Request().RemoteAddr,                  // direct peer → the CIDR to trust
+        "x_forwarded": c.Request().Header.Get("X-Forwarded-For"),
+        "real_ip":     c.RealIP(),                              // what the framework resolved
+    })
+})
+```
+
+`remote_addr`'s IP is the range to put in `TRUSTED_PROXIES`; once configured,
+`real_ip` should equal your real client IP. Remove the handler afterward.
 
 ## Production Defaults
 
@@ -157,6 +214,7 @@ func WithTimeout(d time.Duration) Option
 func WithMaxBodySize(size string) Option
 func WithShutdownTimeout(d time.Duration) Option
 func WithGeneratedDir(dir string) Option
+func WithTrustedProxies(cidrs ...string) Option
 
 // Static generation
 func (s *Server) StaticPage(path string, handler echo.HandlerFunc)

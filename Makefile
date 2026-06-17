@@ -9,6 +9,10 @@ build:
 
 lint:
 	golangci-lint run ./...
+	go run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@latest ./...
+
+modernise-fix:
+	go run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@latest -fix ./...
 
 test:
 	go test ./... -v -race
@@ -26,6 +30,6 @@ install:
 	go install -ldflags '$(LDFLAGS)' ./cmd/hamr 
 
 aiquestion:
-	@echo "Is this of the highest code quality and usability? Are user and ai docs updated?"
+	@echo "Is this of the highest code quality and usability? Are user and ai docs updated? Is docs/changelog.md updated for user-facing changes?"
 	
 ai: build lint test vet aiquestion

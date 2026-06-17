@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -153,9 +154,7 @@ func newTestServer() *httptest.Server {
 func withTestRegistry(t *testing.T, baseURL string) {
 	t.Helper()
 	original := make(map[string]VendorDep, len(defaultRegistry))
-	for k, v := range defaultRegistry {
-		original[k] = v
-	}
+	maps.Copy(original, defaultRegistry)
 
 	defaultRegistry["htmx"] = VendorDep{
 		Version: "2.0.4",
@@ -174,9 +173,7 @@ func withTestRegistry(t *testing.T, baseURL string) {
 	}
 
 	t.Cleanup(func() {
-		for k, v := range original {
-			defaultRegistry[k] = v
-		}
+		maps.Copy(defaultRegistry, original)
 	})
 }
 

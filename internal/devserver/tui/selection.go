@@ -53,7 +53,11 @@ func (s *selectionState) clickToggle(line int) {
 // range (shift-click). When no anchor exists this collapses to a
 // plain click. The anchor is left where it is so repeated shift-clicks
 // extend from the same origin instead of the most recent end.
-func (s *selectionState) clickRange(line int) {
+// visible, when non-nil, restricts the selection to those buffer indices.
+// In filter view only matching lines are shown, so the hidden non-matching
+// indices between two visible rows must not be selected — otherwise `y` would
+// copy lines the user never saw. nil means "no filter, select the whole range".
+func (s *selectionState) clickRange(line int, visible map[int]bool) {
 	a := s.anchor
 	if !s.hasAny() {
 		a = line
@@ -65,7 +69,9 @@ func (s *selectionState) clickRange(line int) {
 	}
 	s.lines = make(map[int]bool, hi-lo+1)
 	for i := lo; i <= hi; i++ {
-		s.lines[i] = true
+		if visible == nil || visible[i] {
+			s.lines[i] = true
+		}
 	}
 }
 

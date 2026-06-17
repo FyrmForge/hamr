@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -32,6 +33,8 @@ type Server struct {
 	timeout         time.Duration
 	maxBodySize     string
 	shutdownTimeout time.Duration
+
+	trustedProxies []string
 
 	userMiddleware []echo.MiddlewareFunc
 	errorHandler   echo.HTTPErrorHandler
@@ -79,9 +82,18 @@ func New(opts ...Option) (*Server, error) {
 		return nil, fmt.Errorf("server: WithStaticDistDir requires WithStaticDir")
 	}
 
+	ipExtractor, err := buildIPExtractor(s.trustedProxies)
+	if err != nil {
+		return nil, err
+	}
+
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
+	// Controls how c.RealIP() derives the client IP, which is the default
+	// rate-limit key. Without trusted proxies this ignores X-Forwarded-For,
+	// closing the spoof-a-header-to-get-a-fresh-bucket bypass.
+	e.IPExtractor = ipExtractor
 
 	// Production defaults — applied in order.
 	e.Use(echoMw.RecoverWithConfig(echoMw.RecoverConfig{
@@ -136,6 +148,36 @@ func New(opts ...Option) (*Server, error) {
 
 	s.echo = e
 	return s, nil
+}
+
+// buildIPExtractor returns the echo.IPExtractor implied by the configured
+// trusted-proxy CIDRs. With none, X-Forwarded-For/X-Real-IP are ignored and
+// the direct TCP peer is used (spoof-proof default). With CIDRs, only those
+// ranges are trusted for X-Forwarded-For — auto-trust of loopback/link-local/
+// private ranges is disabled so the trust set is exactly what was configured.
+func buildIPExtractor(cidrs []string) (echo.IPExtractor, error) {
+	opts := []echo.TrustOption{
+		echo.TrustLoopback(false),
+		echo.TrustLinkLocal(false),
+		echo.TrustPrivateNet(false),
+	}
+	trusted := 0
+	for _, raw := range cidrs {
+		cidr := strings.TrimSpace(raw)
+		if cidr == "" {
+			continue
+		}
+		_, ipNet, err := net.ParseCIDR(cidr)
+		if err != nil {
+			return nil, fmt.Errorf("server: invalid trusted proxy CIDR %q: %w", cidr, err)
+		}
+		opts = append(opts, echo.TrustIPRange(ipNet))
+		trusted++
+	}
+	if trusted == 0 {
+		return echo.ExtractIPDirect(), nil
+	}
+	return echo.ExtractIPFromXFFHeader(opts...), nil
 }
 
 // Echo returns the underlying Echo instance for direct access.

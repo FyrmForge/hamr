@@ -180,3 +180,19 @@ func TestGenerateTokenURLSafe(t *testing.T) {
 			"token should be URL-safe, got %q", tok)
 	}
 }
+
+func TestCheckPasswordRejectsWrongArgon2Version(t *testing.T) {
+	hash, err := HashPassword("test")
+	require.NoError(t, err)
+
+	// Forge a hash claiming a different Argon2 version (real hashes are v=19).
+	tampered := strings.Replace(hash, "v=19", "v=16", 1)
+	require.NotEqual(t, hash, tampered, "test setup: version segment must change")
+
+	ok, err := CheckPassword("test", tampered)
+	require.Error(t, err, "a different argon2 version must be rejected, not silently verified")
+	assert.False(t, ok)
+
+	_, err = NeedsRehash(tampered)
+	require.Error(t, err)
+}

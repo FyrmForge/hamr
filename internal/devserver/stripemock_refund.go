@@ -1,7 +1,6 @@
 package devserver
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -108,7 +107,12 @@ func (m *StripeMock) createRefund(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	requestedAmount := getInt64(parsed, "amount")
+	requestedAmount, ok := getInt64(parsed, "amount")
+	if !ok {
+		writeStripeError(w, http.StatusBadRequest, "invalid_request_error",
+			"amount must be an integer")
+		return
+	}
 	reverseTransfer := getBool(parsed, "reverse_transfer")
 	refundAppFee := getBool(parsed, "refund_application_fee")
 
@@ -128,19 +132,7 @@ func (m *StripeMock) createRefund(w http.ResponseWriter, r *http.Request) {
 
 	// Fire-and-forget the webhook with the updated Charge so the app sees
 	// the new amount_refunded/refunded values.
-	chargeID = ch.ID
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := m.FireEvent(ctx, "charge.refunded", eventObject); err != nil {
-			m.logger.Warn("webhook delivery failed",
-				"refund", rf.ID,
-				"charge", chargeID,
-				"event_type", "charge.refunded",
-				"err", err,
-			)
-		}
-	}()
+	m.fireEventAsync("charge.refunded", eventObject, "refund", rf.ID, "charge", ch.ID)
 
 	m.mu.RLock()
 	out := m.serializeRefund(rf)
@@ -239,10 +231,7 @@ func (m *StripeMock) applyRefund(in refundInput) (*stripeRefund, *stripeCharge, 
 			// transfer's remaining unreversed balance. Real Stripe scales
 			// the reversal proportionally to the application fee split,
 			// but for dev the simpler 1:1 model is good enough.
-			reverseAmt := amount
-			if reverseAmt > tr.Amount-tr.AmountReversed {
-				reverseAmt = tr.Amount - tr.AmountReversed
-			}
+			reverseAmt := min(amount, tr.Amount-tr.AmountReversed)
 			tr.AmountReversed += reverseAmt
 		}
 	}
