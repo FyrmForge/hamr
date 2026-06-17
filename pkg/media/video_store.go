@@ -3,14 +3,10 @@ package media
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"log/slog"
 	"mime/multipart"
-	"net/http"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -320,93 +316,19 @@ func (s *VideoStore) SignedURL(ctx context.Context, path string, expiry time.Dur
 
 // ServeHandler returns an Echo handler that serves video files from the store.
 func (s *VideoStore) ServeHandler() echo.HandlerFunc {
-	if s.isLocal {
-		return s.serveLocal()
-	}
-	return s.serveS3()
+	return serveStorageObject(s.storage, s.urlPrefix, s.config.Category, videoContentType)
 }
 
-func (s *VideoStore) serveLocal() echo.HandlerFunc {
-	return func(c echo.Context) error {
-		// Map the request to a storage key scoped to this store's category —
-		// rejects anything outside urlPrefix or the category prefix (404).
-		storagePath, ok := scopedServeKey(c.Request().URL.Path, s.urlPrefix, s.config.Category)
-		if !ok {
-			return echo.NewHTTPError(http.StatusNotFound)
-		}
-
-		rc, err := s.storage.Open(c.Request().Context(), storagePath)
-		if err != nil {
-			// errors.Is unwraps the storage layer's fmt.Errorf("%w") chain;
-			// os.IsNotExist does not, so a missing file would 500 instead of 404.
-			if errors.Is(err, fs.ErrNotExist) {
-				return echo.NewHTTPError(http.StatusNotFound)
-			}
-			return echo.NewHTTPError(http.StatusInternalServerError)
-		}
-		defer func() { _ = rc.Close() }()
-
-		ext := filepath.Ext(storagePath)
-		ct := "application/octet-stream"
-		switch ext {
-		case ".mp4":
-			ct = "video/mp4"
-		case ".webm":
-			ct = "video/webm"
-		case ".jpg", ".jpeg":
-			ct = "image/jpeg"
-		}
-
-		c.Response().Header().Set("Content-Type", ct)
-		// NOTE: headers (including the year-long immutable cache) are committed
-		// before the body streams, so a mid-copy failure produces a truncated body
-		// the client could cache. Tolerated for immutable content-addressed assets
-		// (a retry re-fetches the identical key); fully closing it would require a
-		// Content-Length from the storage layer so a short read is detectable.
-		c.Response().Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		c.Response().WriteHeader(http.StatusOK)
-		_, err = io.Copy(c.Response(), rc)
-		return err
+// videoContentType maps a file extension (with leading dot) to the Content-Type
+// used when serving videos and their poster frames.
+func videoContentType(ext string) string {
+	switch ext {
+	case ".mp4":
+		return "video/mp4"
+	case ".webm":
+		return "video/webm"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
 	}
-}
-
-func (s *VideoStore) serveS3() echo.HandlerFunc {
-	return func(c echo.Context) error {
-		// Same category scoping as the local path. For S3 stores urlPrefix is
-		// empty, so this strips the leading slash and then confines the key to
-		// "category/…" — without it the handler would proxy any object in the
-		// bucket, defeating the store's access model (incl. signed-URL-only).
-		storagePath, ok := scopedServeKey(c.Request().URL.Path, s.urlPrefix, s.config.Category)
-		if !ok {
-			return echo.NewHTTPError(http.StatusNotFound)
-		}
-
-		rc, err := s.storage.Open(c.Request().Context(), storagePath)
-		if err != nil {
-			return echo.NewHTTPError(http.StatusNotFound)
-		}
-		defer func() { _ = rc.Close() }()
-
-		ext := filepath.Ext(storagePath)
-		ct := "application/octet-stream"
-		switch ext {
-		case ".mp4":
-			ct = "video/mp4"
-		case ".webm":
-			ct = "video/webm"
-		case ".jpg", ".jpeg":
-			ct = "image/jpeg"
-		}
-
-		c.Response().Header().Set("Content-Type", ct)
-		// NOTE: headers (including the year-long immutable cache) are committed
-		// before the body streams, so a mid-copy failure produces a truncated body
-		// the client could cache. Tolerated for immutable content-addressed assets
-		// (a retry re-fetches the identical key); fully closing it would require a
-		// Content-Length from the storage layer so a short read is detectable.
-		c.Response().Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		c.Response().WriteHeader(http.StatusOK)
-		_, err = io.Copy(c.Response(), rc)
-		return err
-	}
+	return "application/octet-stream"
 }

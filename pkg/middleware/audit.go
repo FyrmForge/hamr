@@ -40,12 +40,19 @@ func redactQuery(raw string) string {
 	if err != nil {
 		return "[unparseable]"
 	}
+	redacted := false
 	for k, vs := range vals {
 		if isSensitiveParam(k) {
 			for i := range vs {
 				vs[i] = "[REDACTED]"
 			}
+			redacted = true
 		}
+	}
+	// Common case: nothing sensitive. Return the original query untouched rather
+	// than paying url.Values.Encode()'s re-sort and re-serialization.
+	if !redacted {
+		return raw
 	}
 	return vals.Encode()
 }

@@ -7,12 +7,18 @@ package respond
 import (
 	"bytes"
 	"net/http"
+	"sync"
 
 	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
 
 	"github.com/FyrmForge/hamr/pkg/htmx"
 )
+
+// htmlBufPool reuses render buffers across requests. HTML renders into a buffer
+// before committing the response (see HTML), and that buffer would otherwise be
+// a fresh per-request allocation on the framework's hottest path.
+var htmlBufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
 
 // HTML renders a templ component with the given status code.
 //
@@ -21,8 +27,10 @@ import (
 // handler and a proper error page can be sent. (Writing directly to the
 // response would leave a committed 2xx with a truncated body.)
 func HTML(c echo.Context, status int, component templ.Component) error {
-	var buf bytes.Buffer
-	if err := component.Render(c.Request().Context(), &buf); err != nil {
+	buf := htmlBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer htmlBufPool.Put(buf)
+	if err := component.Render(c.Request().Context(), buf); err != nil {
 		return err
 	}
 	c.Response().Header().Set(echo.HeaderContentType, "text/html; charset=utf-8")

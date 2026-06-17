@@ -2,7 +2,6 @@ package devserver
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -16,8 +15,8 @@ import (
 //	GET  /__hamr/stripe/payment_intent?id=<pi_id>     — state + Succeed/Fail buttons
 //	POST /__hamr/stripe/payment_intent/complete       — apply outcome, fire webhooks
 func (m *StripeMock) registerPaymentIntentUIRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/__hamr/stripe/payment_intent", m.handlePaymentIntentPage)
-	mux.HandleFunc("/__hamr/stripe/payment_intent/complete", m.handlePaymentIntentComplete)
+	mux.HandleFunc("/__hamr/stripe/payment_intent", guardUnsafe(m.handlePaymentIntentPage))
+	mux.HandleFunc("/__hamr/stripe/payment_intent/complete", guardUnsafe(m.handlePaymentIntentComplete))
 }
 
 // piOutcomeRule maps a button press to the resulting PI state and the
@@ -100,9 +99,6 @@ func (m *StripeMock) handlePaymentIntentComplete(w http.ResponseWriter, r *http.
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !checkSameOrigin(w, r) {
-		return
-	}
 
 	id := strings.TrimSpace(r.FormValue("id"))
 	outcome := strings.TrimSpace(r.FormValue("outcome"))
@@ -141,10 +137,6 @@ func (m *StripeMock) handlePaymentIntentComplete(w http.ResponseWriter, r *http.
 	// Capture the cascade objects we'll need to fire webhooks for. Building
 	// them while holding the lock guarantees we serialize cleanly against
 	// any concurrent retrieve.
-	type webhookFire struct {
-		eventType string
-		object    map[string]any
-	}
 	var fires []webhookFire
 
 	if outcome == "succeed" {
@@ -220,19 +212,7 @@ func (m *StripeMock) handlePaymentIntentComplete(w http.ResponseWriter, r *http.
 	// asserts the order via a single ordered sink. A failure mid-loop is
 	// logged but does NOT abort the cascade; this matches real Stripe's
 	// independent-delivery semantics (each event is its own retry surface).
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		for _, f := range fires {
-			if err := m.FireEvent(ctx, f.eventType, f.object); err != nil {
-				m.logger.Warn("webhook delivery failed",
-					"payment_intent", id,
-					"event_type", f.eventType,
-					"err", err,
-				)
-			}
-		}
-	}()
+	m.fireEventsAsync(fires, "payment_intent", id)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")

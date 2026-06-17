@@ -165,7 +165,11 @@ func rewriteTemplImports(path, oldModule, newModule string, dryRun bool) (bool, 
 		switch {
 		case inImportBlock:
 			isImportLine = true
-			if trimmed == ")" {
+			// Exit on the block's closing paren, whether it's on its own line
+			// (`)`) or trailing the last import (`"…/pkg")`). Matching only a
+			// bare ")" would leave the block "open" for the unformatted-but-valid
+			// trailing-paren case and rewrite the rest of the file.
+			if strings.HasSuffix(trimmed, ")") {
 				inImportBlock = false
 			}
 		case strings.HasPrefix(trimmed, "import ("):

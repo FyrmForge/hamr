@@ -25,7 +25,8 @@ mocks, TUI, and CLI. Full diff:
 
 - **Security**: trusted-proxy IP extraction (XFF no longer blindly trusted),
   audit-log redaction, CSRF cookie flags, argon2 version check, media size
-  bounds + category-scoped serving.
+  bounds + category-scoped serving (S3 backend faults now return `500`, not a
+  misleading `404`).
 - **Dev server**: fixed quit/shutdown hangs, process-reaping and
   scheduler/port-walk/watcher races, proxy response truncation.
 - **Stripe/mail mocks**: concurrency-safe (clone-on-read) and higher fidelity

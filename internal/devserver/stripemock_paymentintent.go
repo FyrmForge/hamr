@@ -1,7 +1,6 @@
 package devserver
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -294,10 +293,6 @@ func (m *StripeMock) capturePaymentIntent(w http.ResponseWriter, r *http.Request
 	pi.LatestChargeID = ch.ID
 	pi.AmountReceived = captureAmount
 
-	type webhookFire struct {
-		eventType string
-		object    map[string]any
-	}
 	fires := []webhookFire{
 		{"payment_intent.succeeded", m.serializePaymentIntent(pi, ch)},
 		{"charge.succeeded", m.serializeCharge(ch)},
@@ -332,16 +327,7 @@ func (m *StripeMock) capturePaymentIntent(w http.ResponseWriter, r *http.Request
 	m.persist()
 	m.mu.Unlock()
 
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		for _, f := range fires {
-			if err := m.FireEvent(ctx, f.eventType, f.object); err != nil {
-				m.logger.Warn("webhook delivery failed",
-					"payment_intent", id, "event_type", f.eventType, "err", err)
-			}
-		}
-	}()
+	m.fireEventsAsync(fires, "payment_intent", id)
 
 	writeStripeJSON(w, http.StatusOK, m.serializePaymentIntent(piCopy, chCopy))
 }
@@ -377,9 +363,12 @@ func buildPaymentIntentFromParams(p map[string]any) (*stripePaymentIntent, error
 	}
 	if td, ok := p["transfer_data"].(map[string]any); ok {
 		pi.TransferDataDestination = getString(td, "destination")
-		// Invalid transfer_data.amount falls through to 0 ("entire amount minus
-		// fee" default) rather than erroring — it's a best-effort dev mock field.
-		if v, ok := getInt64(td, "amount"); ok {
+		// Invalid or negative transfer_data.amount falls through to 0 ("entire
+		// amount minus fee" default) rather than erroring — it's a best-effort dev
+		// mock field. The < 0 guard mirrors application_fee_amount; without it a
+		// negative value would bypass the capture-time max(…,0) clamp (which only
+		// runs on the amount==0 default path) and emit a negative transfer.created.
+		if v, ok := getInt64(td, "amount"); ok && v >= 0 {
 			pi.TransferDataAmount = v
 		}
 	}

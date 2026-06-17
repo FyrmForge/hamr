@@ -172,8 +172,10 @@ func (m *MailMock) reportPersistErr(err error) {
 // RegisterRoutes mounts the mail-mock endpoints on mux. Do not register twice
 // on the same mux — http.ServeMux panics on duplicate patterns.
 func (m *MailMock) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/__hamr/mail", m.handleInboxOrDetail)
-	mux.HandleFunc("/__hamr/mail/", m.handleInboxOrDetail)
+	mux.HandleFunc("/__hamr/mail", guardUnsafe(m.handleInboxOrDetail))
+	mux.HandleFunc("/__hamr/mail/", guardUnsafe(m.handleInboxOrDetail))
+	// handleIngest is the SMTP capture sink (server-to-server, no browser
+	// Origin) — intentionally NOT origin-guarded; see guardUnsafe.
 	mux.HandleFunc("/__hamr/mail/ingest", m.handleIngest)
 }
 
@@ -368,9 +370,6 @@ func (m *MailMock) handleInboxOrDetail(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if !checkSameOrigin(w, r) {
-			return
-		}
 		m.Clear()
 		http.Redirect(w, r, "/__hamr/mail", http.StatusSeeOther)
 
@@ -423,17 +422,11 @@ func (m *MailMock) handleInboxOrDetail(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return
 			}
-			if !checkSameOrigin(w, r) {
-				return
-			}
 			m.Delete(id)
 			http.Redirect(w, r, "/__hamr/mail", http.StatusSeeOther)
 		case "fail":
 			if r.Method != http.MethodPost {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-				return
-			}
-			if !checkSameOrigin(w, r) {
 				return
 			}
 			note := r.FormValue("note")
@@ -445,9 +438,6 @@ func (m *MailMock) handleInboxOrDetail(w http.ResponseWriter, r *http.Request) {
 		case "delay":
 			if r.Method != http.MethodPost {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-				return
-			}
-			if !checkSameOrigin(w, r) {
 				return
 			}
 			secsStr := r.FormValue("seconds")
@@ -547,6 +537,29 @@ func checkSameOrigin(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	return true
+}
+
+// guardUnsafe wraps a dev-mock handler so state-changing requests (anything but
+// a safe method) are rejected when their Origin is present and cross-origin —
+// the drive-by-CSRF defense, declared once at registration instead of being
+// re-derived inside every handler body. Safe methods pass straight through, so
+// GET page renders and the GET/POST multiplexing handlers are unaffected.
+//
+// Routes that must NOT be guarded are simply registered without this wrapper:
+// the server-to-server /v1 Stripe API (hit by the app's SDK, never a browser)
+// and the SMTP /__hamr/mail/ingest sink. Keeping those carve-outs at the
+// registration site makes them visible rather than buried in handler logic.
+func guardUnsafe(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+		default:
+			if !checkSameOrigin(w, r) {
+				return
+			}
+		}
+		h(w, r)
+	}
 }
 
 func writeJSON(w http.ResponseWriter, code int, body any) {

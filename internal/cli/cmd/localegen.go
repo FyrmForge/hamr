@@ -290,15 +290,16 @@ func generateGoSource(pkg string, keys []localeKeyInfo) string {
 			var callArgs strings.Builder
 			callArgs.WriteString("count")
 			if len(k.params) > 0 {
-				for _, p := range k.params {
-					params.WriteString(", " + paramName(p) + " string")
+				names := uniqueParamNames(k.params)
+				for _, n := range names {
+					params.WriteString(", " + n + " string")
 				}
 				callArgs.WriteString(", map[string]any{")
 				for i, p := range k.params {
 					if i > 0 {
 						callArgs.WriteString(", ")
 					}
-					fmt.Fprintf(&callArgs, "%q: %s", p, paramName(p))
+					fmt.Fprintf(&callArgs, "%q: %s", p, names[i])
 				}
 				callArgs.WriteString("}")
 			}
@@ -309,9 +310,10 @@ func generateGoSource(pkg string, keys []localeKeyInfo) string {
 		case len(k.params) > 0:
 			var paramList []string
 			var mapEntries []string
-			for _, p := range k.params {
-				paramList = append(paramList, paramName(p)+" string")
-				mapEntries = append(mapEntries, fmt.Sprintf("%q: %s", p, paramName(p)))
+			names := uniqueParamNames(k.params)
+			for i, p := range k.params {
+				paramList = append(paramList, names[i]+" string")
+				mapEntries = append(mapEntries, fmt.Sprintf("%q: %s", p, names[i]))
 			}
 			fmt.Fprintf(&b, "// %s returns the translation for %q.\n", methodName, k.key)
 			fmt.Fprintf(&b, "func (t *T) %s(%s) string {\n", methodName, strings.Join(paramList, ", "))
@@ -399,4 +401,29 @@ func paramName(p string) string {
 		name += "_"
 	}
 	return name
+}
+
+// uniqueParamNames maps a message's interpolation variables to distinct Go
+// parameter identifiers, in order. Two vars differing only by case (e.g.
+// {{.Type}} and {{.type}}) both sanitise to the same identifier via paramName;
+// later duplicates get a numeric suffix so the generated func doesn't declare
+// two parameters with one name (which fails opaquely inside format.Source).
+//
+// Unlike checkMethodNames (which errors on a collision), param collisions are
+// auto-resolved: method names are the package's public API and a silent rename
+// would surprise callers, but parameter names are internal to the generated
+// body — the map KEY passed to T() still carries the original variable name.
+func uniqueParamNames(params []string) []string {
+	seen := make(map[string]bool, len(params))
+	out := make([]string, len(params))
+	for i, p := range params {
+		base := paramName(p)
+		name := base
+		for n := 2; seen[name]; n++ {
+			name = fmt.Sprintf("%s%d", base, n)
+		}
+		seen[name] = true
+		out[i] = name
+	}
+	return out
 }

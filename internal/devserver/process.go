@@ -170,6 +170,16 @@ func (pm *ProcessManager) RunCommand(ctx context.Context, rule *WatchRule) (stri
 	// scheduler and shutdown.
 	cmd.WaitDelay = 2 * time.Second
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// exec.CommandContext's default Cancel only Kills the leader PID; with the
+	// child in its own process group its grandchildren (e.g. a compiler spawned
+	// by `sh -c`) would survive ctx cancel and keep holding ports/files. SIGKILL
+	// the whole group instead, mirroring stopProcess on the StartProcess path.
+	cmd.Cancel = func() error {
+		if pgid, err := syscall.Getpgid(cmd.Process.Pid); err == nil {
+			return syscall.Kill(-pgid, syscall.SIGKILL)
+		}
+		return cmd.Process.Kill()
+	}
 	color := nextColor()
 	capture := newTailBuffer()
 

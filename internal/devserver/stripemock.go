@@ -10,6 +10,7 @@
 package devserver
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -23,6 +24,41 @@ import (
 	"sync"
 	"time"
 )
+
+// webhookDeliveryTimeout bounds a single async webhook fanout. A fanout can
+// deliver several events under one context (e.g. payment_intent.succeeded +
+// charge.succeeded + transfer.created on capture), so it must cover the slowest
+// multi-event case rather than a single POST.
+const webhookDeliveryTimeout = 30 * time.Second
+
+// webhookFire is one event to deliver in an async fanout.
+type webhookFire struct {
+	eventType string
+	object    map[string]any
+}
+
+// fireEventsAsync delivers events out-of-band with a bounded timeout, logging
+// (without surfacing) any delivery failure. logKV are extra structured-log
+// key/value pairs attached to a failure (e.g. "payment_intent", id). Every
+// handler that emits webhooks routes through here so the goroutine, timeout,
+// and warn-on-failure shape live in one place.
+func (m *StripeMock) fireEventsAsync(fires []webhookFire, logKV ...any) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), webhookDeliveryTimeout)
+		defer cancel()
+		for _, f := range fires {
+			if err := m.FireEvent(ctx, f.eventType, f.object); err != nil {
+				kv := append([]any{"event_type", f.eventType, "err", err}, logKV...)
+				m.logger.Warn("webhook delivery failed", kv...)
+			}
+		}
+	}()
+}
+
+// fireEventAsync is the single-event convenience form of fireEventsAsync.
+func (m *StripeMock) fireEventAsync(eventType string, object map[string]any, logKV ...any) {
+	m.fireEventsAsync([]webhookFire{{eventType, object}}, logKV...)
+}
 
 // stripeAPIVersion is the Stripe API version this mock emits responses for.
 // MUST match stripe-go/v82's stripe.APIVersion constant. CI test enforces

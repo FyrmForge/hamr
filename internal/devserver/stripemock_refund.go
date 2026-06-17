@@ -1,7 +1,6 @@
 package devserver
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -133,19 +132,7 @@ func (m *StripeMock) createRefund(w http.ResponseWriter, r *http.Request) {
 
 	// Fire-and-forget the webhook with the updated Charge so the app sees
 	// the new amount_refunded/refunded values.
-	chargeID = ch.ID
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := m.FireEvent(ctx, "charge.refunded", eventObject); err != nil {
-			m.logger.Warn("webhook delivery failed",
-				"refund", rf.ID,
-				"charge", chargeID,
-				"event_type", "charge.refunded",
-				"err", err,
-			)
-		}
-	}()
+	m.fireEventAsync("charge.refunded", eventObject, "refund", rf.ID, "charge", ch.ID)
 
 	m.mu.RLock()
 	out := m.serializeRefund(rf)

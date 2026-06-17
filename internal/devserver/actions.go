@@ -59,8 +59,8 @@ func (a *DevActions) wipe(dc *DockerCompose, service string) {
 
 // RegisterRoutes registers the action API endpoints on the given mux.
 func (a *DevActions) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/__hamr/rule/", a.handleRule)
-	mux.HandleFunc("/__hamr/docker/", a.handleDocker)
+	mux.HandleFunc("/__hamr/rule/", guardUnsafe(a.handleRule))
+	mux.HandleFunc("/__hamr/docker/", guardUnsafe(a.handleDocker))
 }
 
 // ErrorState returns the underlying error state so non-HTTP consumers (the
@@ -83,9 +83,6 @@ func (a *DevActions) handleRule(w http.ResponseWriter, r *http.Request) {
 	// Path: /__hamr/rule/{name}/run
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if !checkSameOrigin(w, r) {
 		return
 	}
 	path := strings.TrimPrefix(r.URL.Path, "/__hamr/rule/")
@@ -164,9 +161,6 @@ func (a *DevActions) handleDocker(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if !checkSameOrigin(w, r) {
-			return
-		}
 		service := r.URL.Query().Get("service")
 		if service != "" && !safeServiceName.MatchString(service) {
 			jsonError(w, "invalid service name", http.StatusBadRequest)
@@ -178,9 +172,6 @@ func (a *DevActions) handleDocker(w http.ResponseWriter, r *http.Request) {
 	case "wipe":
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		if !checkSameOrigin(w, r) {
 			return
 		}
 		service := r.URL.Query().Get("service")

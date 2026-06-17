@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"mime"
 	"path/filepath"
@@ -175,6 +176,14 @@ func (s *S3Storage) Open(ctx context.Context, path string) (io.ReadCloser, error
 		Key:    &path,
 	})
 	if err != nil {
+		// Map a genuine missing object to fs.ErrNotExist so callers can
+		// distinguish it (404) from a real backend fault — outage, auth, throttle
+		// — which must surface as a 500 rather than a misleading "not found".
+		var notFound *s3types.NotFound
+		var noSuchKey *s3types.NoSuchKey
+		if errors.As(err, &notFound) || errors.As(err, &noSuchKey) {
+			return nil, fmt.Errorf("storage: s3 get %q: %w", path, fs.ErrNotExist)
+		}
 		return nil, fmt.Errorf("storage: s3 get %q: %w", path, err)
 	}
 	return out.Body, nil

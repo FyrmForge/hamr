@@ -2,7 +2,6 @@ package devserver
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -19,8 +18,8 @@ import (
 //	GET  /__hamr/stripe/checkout?session=<id>  — pick-an-outcome page
 //	POST /__hamr/stripe/complete               — record outcome, fire webhook, redirect
 func (m *StripeMock) RegisterUIRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/__hamr/stripe/checkout", m.handleCheckoutPage)
-	mux.HandleFunc("/__hamr/stripe/complete", m.handleComplete)
+	mux.HandleFunc("/__hamr/stripe/checkout", guardUnsafe(m.handleCheckoutPage))
+	mux.HandleFunc("/__hamr/stripe/complete", guardUnsafe(m.handleComplete))
 	m.registerAccountUIRoutes(mux)
 	m.registerPaymentIntentUIRoutes(mux)
 	m.registerPayoutUIRoutes(mux)
@@ -116,9 +115,6 @@ func (m *StripeMock) handleComplete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !checkSameOrigin(w, r) {
-		return
-	}
 
 	id := strings.TrimSpace(r.FormValue("session"))
 	outcome := strings.TrimSpace(r.FormValue("outcome"))
@@ -160,10 +156,6 @@ func (m *StripeMock) handleComplete(w http.ResponseWriter, r *http.Request) {
 	// synthesize the PaymentIntent + Charge that real Stripe creates so the app
 	// can retrieve the PI, refund the charge, and receive the payment events —
 	// not just checkout.session.completed.
-	type webhookFire struct {
-		eventType string
-		object    map[string]any
-	}
 	fires := []webhookFire{{rule.eventType, m.serializeSession(sess)}}
 
 	if rule.createPayment {
@@ -222,19 +214,7 @@ func (m *StripeMock) handleComplete(w http.ResponseWriter, r *http.Request) {
 	// while the webhook fans out independently). Events are delivered in order;
 	// a failure mid-list is logged but does not abort the rest (each event is
 	// its own retry surface in real Stripe).
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		for _, f := range fires {
-			if err := m.FireEvent(ctx, f.eventType, f.object); err != nil {
-				m.logger.Warn("webhook delivery failed",
-					"session", id,
-					"event_type", f.eventType,
-					"err", err,
-				)
-			}
-		}
-	}()
+	m.fireEventsAsync(fires, "session", id)
 
 	http.Redirect(w, r, redirect, http.StatusSeeOther)
 }

@@ -2,12 +2,10 @@ package devserver
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"html/template"
 	"net/http"
 	"strings"
-	"time"
 )
 
 // registerAccountUIRoutes mounts the dev-facing onboarding page + outcome
@@ -16,8 +14,8 @@ import (
 //	GET  /__hamr/stripe/onboarding?account=<id>  — current state + Complete button
 //	POST /__hamr/stripe/account/complete         — flip enabled flags, fire account.updated
 func (m *StripeMock) registerAccountUIRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/__hamr/stripe/onboarding", m.handleOnboardingPage)
-	mux.HandleFunc("/__hamr/stripe/account/complete", m.handleAccountComplete)
+	mux.HandleFunc("/__hamr/stripe/onboarding", guardUnsafe(m.handleOnboardingPage))
+	mux.HandleFunc("/__hamr/stripe/account/complete", guardUnsafe(m.handleAccountComplete))
 }
 
 // handleOnboardingPage renders the onboarding state for ?account=<id>.
@@ -70,9 +68,6 @@ func (m *StripeMock) handleAccountComplete(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !checkSameOrigin(w, r) {
-		return
-	}
 	id := strings.TrimSpace(r.FormValue("account"))
 	if id == "" {
 		http.Error(w, "missing account form field", http.StatusBadRequest)
@@ -100,17 +95,7 @@ func (m *StripeMock) handleAccountComplete(w http.ResponseWriter, r *http.Reques
 	m.persist()
 	m.mu.Unlock()
 
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := m.FireEvent(ctx, "account.updated", dataObject); err != nil {
-			m.logger.Warn("webhook delivery failed",
-				"account", id,
-				"event_type", "account.updated",
-				"err", err,
-			)
-		}
-	}()
+	m.fireEventAsync("account.updated", dataObject, "account", id)
 
 	// Render a small success page so the dev sees confirmation without
 	// needing a separate tab — real Stripe would redirect to the

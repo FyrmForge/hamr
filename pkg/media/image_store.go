@@ -3,14 +3,10 @@ package media
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"log/slog"
 	"mime/multipart"
-	"net/http"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -327,94 +323,19 @@ func (s *ImageStore) SignedURL(ctx context.Context, path string, expiry time.Dur
 // For local stores it serves from the filesystem. For S3 stores it proxies
 // through the storage layer.
 func (s *ImageStore) ServeHandler() echo.HandlerFunc {
-	if s.isLocal {
-		return s.serveLocal()
-	}
-	return s.serveS3()
+	return serveStorageObject(s.storage, s.urlPrefix, s.config.Category, imageContentType)
 }
 
-func (s *ImageStore) serveLocal() echo.HandlerFunc {
-	return func(c echo.Context) error {
-		// Map the request to a storage key scoped to this store's category —
-		// rejects anything outside urlPrefix or the category prefix (404).
-		storagePath, ok := scopedServeKey(c.Request().URL.Path, s.urlPrefix, s.config.Category)
-		if !ok {
-			return echo.NewHTTPError(http.StatusNotFound)
-		}
-
-		rc, err := s.storage.Open(c.Request().Context(), storagePath)
-		if err != nil {
-			// errors.Is unwraps the storage layer's fmt.Errorf("%w") chain;
-			// os.IsNotExist does not, so a missing file would 500 instead of 404.
-			if errors.Is(err, fs.ErrNotExist) {
-				return echo.NewHTTPError(http.StatusNotFound)
-			}
-			return echo.NewHTTPError(http.StatusInternalServerError)
-		}
-		defer func() { _ = rc.Close() }()
-
-		// Detect content type from extension.
-		ext := filepath.Ext(storagePath)
-		ct := "application/octet-stream"
-		switch ext {
-		case ".webp":
-			ct = "image/webp"
-		case ".jpeg", ".jpg":
-			ct = "image/jpeg"
-		case ".png":
-			ct = "image/png"
-		}
-
-		c.Response().Header().Set("Content-Type", ct)
-		// NOTE: headers (including the year-long immutable cache) are committed
-		// before the body streams, so a mid-copy failure produces a truncated body
-		// the client could cache. Tolerated for immutable content-addressed assets
-		// (a retry re-fetches the identical key); fully closing it would require a
-		// Content-Length from the storage layer so a short read is detectable.
-		c.Response().Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		c.Response().WriteHeader(http.StatusOK)
-		_, err = io.Copy(c.Response(), rc)
-		return err
+// imageContentType maps a file extension (with leading dot) to the Content-Type
+// used when serving images.
+func imageContentType(ext string) string {
+	switch ext {
+	case ".webp":
+		return "image/webp"
+	case ".jpeg", ".jpg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
 	}
-}
-
-func (s *ImageStore) serveS3() echo.HandlerFunc {
-	return func(c echo.Context) error {
-		// Same category scoping as the local path. For S3 stores urlPrefix is
-		// empty, so this strips the leading slash and then confines the key to
-		// "category/…" — without it the handler would proxy any object in the
-		// bucket, defeating the store's access model (incl. signed-URL-only).
-		storagePath, ok := scopedServeKey(c.Request().URL.Path, s.urlPrefix, s.config.Category)
-		if !ok {
-			return echo.NewHTTPError(http.StatusNotFound)
-		}
-
-		rc, err := s.storage.Open(c.Request().Context(), storagePath)
-		if err != nil {
-			return echo.NewHTTPError(http.StatusNotFound)
-		}
-		defer func() { _ = rc.Close() }()
-
-		ext := filepath.Ext(storagePath)
-		ct := "application/octet-stream"
-		switch ext {
-		case ".webp":
-			ct = "image/webp"
-		case ".jpeg", ".jpg":
-			ct = "image/jpeg"
-		case ".png":
-			ct = "image/png"
-		}
-
-		c.Response().Header().Set("Content-Type", ct)
-		// NOTE: headers (including the year-long immutable cache) are committed
-		// before the body streams, so a mid-copy failure produces a truncated body
-		// the client could cache. Tolerated for immutable content-addressed assets
-		// (a retry re-fetches the identical key); fully closing it would require a
-		// Content-Length from the storage layer so a short read is detectable.
-		c.Response().Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		c.Response().WriteHeader(http.StatusOK)
-		_, err = io.Copy(c.Response(), rc)
-		return err
-	}
+	return "application/octet-stream"
 }

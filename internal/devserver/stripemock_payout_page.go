@@ -2,7 +2,6 @@ package devserver
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -16,8 +15,8 @@ import (
 //	GET  /__hamr/stripe/payout?id=<po_id>      — state + Mark paid / Mark failed
 //	POST /__hamr/stripe/payout/complete        — apply outcome, fire webhook
 func (m *StripeMock) registerPayoutUIRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/__hamr/stripe/payout", m.handlePayoutPage)
-	mux.HandleFunc("/__hamr/stripe/payout/complete", m.handlePayoutComplete)
+	mux.HandleFunc("/__hamr/stripe/payout", guardUnsafe(m.handlePayoutPage))
+	mux.HandleFunc("/__hamr/stripe/payout/complete", guardUnsafe(m.handlePayoutComplete))
 }
 
 // payoutOutcomeRule maps a button to the resulting status + event.
@@ -90,9 +89,6 @@ func (m *StripeMock) handlePayoutComplete(w http.ResponseWriter, r *http.Request
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !checkSameOrigin(w, r) {
-		return
-	}
 	id := strings.TrimSpace(r.FormValue("id"))
 	outcome := strings.TrimSpace(r.FormValue("outcome"))
 	if id == "" {
@@ -124,17 +120,7 @@ func (m *StripeMock) handlePayoutComplete(w http.ResponseWriter, r *http.Request
 	m.persist()
 	m.mu.Unlock()
 
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := m.FireEvent(ctx, rule.eventType, dataObject); err != nil {
-			m.logger.Warn("webhook delivery failed",
-				"payout", id,
-				"event_type", rule.eventType,
-				"err", err,
-			)
-		}
-	}()
+	m.fireEventAsync(rule.eventType, dataObject, "payout", id)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")

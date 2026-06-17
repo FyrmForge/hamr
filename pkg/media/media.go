@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"mime/multipart"
 	"net/http"
@@ -15,7 +16,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/FyrmForge/hamr/pkg/storage"
 	"github.com/google/uuid"
+	"github.com/labstack/echo/v4"
 )
 
 // Size constants.
@@ -383,6 +386,48 @@ func scopedServeKey(reqPath, urlPrefix, category string) (key string, ok bool) {
 		return "", false // outside this store's category prefix
 	}
 	return rel, true
+}
+
+// serveStorageObject returns an Echo handler that serves a single object from
+// the backend, scoped to category (see scopedServeKey). contentType maps a file
+// extension (with leading dot, as path.Ext returns) to a Content-Type value.
+// The local and S3 image/video serve paths are identical apart from that
+// mapping, so all four route through here.
+func serveStorageObject(store storage.FileStorage, urlPrefix, category string, contentType func(ext string) string) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		// Confine the request to this store's own "category/…" keys; for S3
+		// stores urlPrefix is empty, so this also strips the leading slash.
+		// Without it the handler would proxy any object in the bucket, defeating
+		// the store's access model (incl. signed-URL-only).
+		storagePath, ok := scopedServeKey(c.Request().URL.Path, urlPrefix, category)
+		if !ok {
+			return echo.NewHTTPError(http.StatusNotFound)
+		}
+
+		rc, err := store.Open(c.Request().Context(), storagePath)
+		if err != nil {
+			// A genuine missing object is 404; any other backend error (S3
+			// outage, auth, throttle, or a local read failure) is 500 so a real
+			// fault isn't masked as a missing asset. errors.Is unwraps the
+			// storage layer's fmt.Errorf("%w") chain; os.IsNotExist would not.
+			if errors.Is(err, fs.ErrNotExist) {
+				return echo.NewHTTPError(http.StatusNotFound)
+			}
+			return echo.NewHTTPError(http.StatusInternalServerError)
+		}
+		defer func() { _ = rc.Close() }()
+
+		c.Response().Header().Set("Content-Type", contentType(path.Ext(storagePath)))
+		// NOTE: headers (including the year-long immutable cache) are committed
+		// before the body streams, so a mid-copy failure produces a truncated body
+		// the client could cache. Tolerated for immutable content-addressed assets
+		// (a retry re-fetches the identical key); fully closing it would require a
+		// Content-Length from the storage layer so a short read is detectable.
+		c.Response().Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		c.Response().WriteHeader(http.StatusOK)
+		_, err = io.Copy(c.Response(), rc)
+		return err
+	}
 }
 
 // validateCanonicalUUID enforces the contract for *FromReaderWithID: the
