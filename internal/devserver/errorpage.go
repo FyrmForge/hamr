@@ -3,14 +3,15 @@ package devserver
 import (
 	"bytes"
 	"html/template"
-	"regexp"
 	"sort"
 )
 
-var ansiRegexp = regexp.MustCompile(`\x1B\[[0-9;]*[A-Za-z]`)
-
+// stripANSI removes ANSI escape sequences using the shared ansiEscape pattern
+// (defined in filelog.go), which covers CSI/SGR, private-mode (e.g. \x1b[?25h),
+// and OSC sequences — so agent-facing output (logs.read) is scrubbed as
+// thoroughly as the dev log file.
 func stripANSI(s string) string {
-	return ansiRegexp.ReplaceAllString(s, "")
+	return ansiEscape.ReplaceAllString(s, "")
 }
 
 type errorEntry struct {

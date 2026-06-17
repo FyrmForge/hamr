@@ -127,9 +127,10 @@ func NewProxyHandler(target string, broker *SSEBroker, errorState *ErrorState, l
 	mux.Handle("/", rootHandler)
 
 	// Record every served request (incl. /__hamr/*, static, SSE/WS) for the
-	// MCP http.read tool. Wraps the whole mux so nothing is missed.
+	// MCP http.read tool. Wraps the whole mux so nothing is missed; recording
+	// no-ops until the gateway is enabled.
 	if requestLog != nil {
-		return recordRequests(mux, requestLog)
+		return recordRequests(mux, requestLog, gateway)
 	}
 	return mux
 }

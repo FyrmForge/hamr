@@ -26,19 +26,46 @@ type RequestLogEntry struct {
 // proxy-handled routes, and skips /static).
 type RequestLog struct {
 	mu      sync.Mutex
-	entries []RequestLogEntry
+	entries []*RequestLogEntry // pointers so an in-flight entry can be finalized after eviction
 	max     int
 }
 
 // NewRequestLog creates a request log capped at max entries.
 func NewRequestLog(max int) *RequestLog {
-	return &RequestLog{entries: make([]RequestLogEntry, 0, max), max: max}
+	return &RequestLog{entries: make([]*RequestLogEntry, 0, max), max: max}
 }
 
-// Record appends an entry, trimming the oldest once over capacity.
+// Record appends a completed entry, trimming the oldest once over capacity.
 func (rl *RequestLog) Record(e RequestLogEntry) {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
+	rl.push(&e)
+}
+
+// begin appends an in-flight entry (Status/DurationMs zero) so http.read sees
+// the request immediately — important for long-lived SSE/WS connections that
+// would otherwise stay invisible until they close. Caller finalizes on
+// completion. Returns the entry to pass to finalize.
+func (rl *RequestLog) begin(method, path string, t time.Time) *RequestLogEntry {
+	e := &RequestLogEntry{Time: t, Method: method, Path: path}
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	rl.push(e)
+	return e
+}
+
+// finalize records an in-flight entry's final status and duration under the
+// lock (Snapshot may read it concurrently). The entry may already have been
+// evicted from the ring by then; mutating it is harmless.
+func (rl *RequestLog) finalize(e *RequestLogEntry, status int, dur time.Duration) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	e.Status = status
+	e.DurationMs = dur.Milliseconds()
+}
+
+// push appends and trims; caller holds rl.mu.
+func (rl *RequestLog) push(e *RequestLogEntry) {
 	rl.entries = append(rl.entries, e)
 	if len(rl.entries) > rl.max {
 		rl.entries = rl.entries[len(rl.entries)-rl.max:]
@@ -50,29 +77,29 @@ func (rl *RequestLog) Snapshot() []RequestLogEntry {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 	out := make([]RequestLogEntry, len(rl.entries))
-	copy(out, rl.entries)
+	for i, e := range rl.entries {
+		out[i] = *e
+	}
 	return out
 }
 
-// recordRequests wraps next so each served request is recorded into rl after it
-// completes (the final status is known then).
-func recordRequests(next http.Handler, rl *RequestLog) http.Handler {
+// recordRequests wraps next so each served request is recorded into rl. The
+// entry is appended at request start (so in-flight SSE/WS are visible to
+// http.read) and finalized with status/duration on completion. Recording is
+// skipped — at near-zero overhead — for the agent's own /__hamr/mcp/* calls
+// (http.read would log itself) and when the gateway is off (nothing reads the
+// ring until MCP is enabled). gw nil means always record (used in tests).
+func recordRequests(next http.Handler, rl *RequestLog, gw *mcpGateway) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		sr := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(sr, r)
-		// Don't record the agent's own MCP tool calls — http.read would then
-		// log itself recursively, drowning the real app traffic.
-		if strings.HasPrefix(r.URL.Path, "/__hamr/mcp/") {
+		if strings.HasPrefix(r.URL.Path, "/__hamr/mcp/") || (gw != nil && !gw.IsEnabled()) {
+			next.ServeHTTP(w, r)
 			return
 		}
-		rl.Record(RequestLogEntry{
-			Time:       start,
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			Status:     sr.status,
-			DurationMs: time.Since(start).Milliseconds(),
-		})
+		start := time.Now()
+		entry := rl.begin(r.Method, r.URL.Path, start)
+		sr := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(sr, r)
+		rl.finalize(entry, sr.status, time.Since(start))
 	})
 }
 

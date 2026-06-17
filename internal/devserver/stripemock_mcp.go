@@ -150,7 +150,15 @@ func (m *StripeMock) stateSummary() StripeStateSummary {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	out := StripeStateSummary{}
+	// Seed every slice so an empty mock marshals to [] not null — matching the
+	// other read tools and keeping the agent-facing JSON shape stable.
+	out := StripeStateSummary{
+		Sessions:       []StripeSessionSummary{},
+		PaymentIntents: []StripeObjectSummary{},
+		Payouts:        []StripeObjectSummary{},
+		Refunds:        []StripeObjectSummary{},
+		Accounts:       []StripeAccountSummary{},
+	}
 	for _, s := range m.sessions {
 		items := make([]StripeLineItemSummary, 0, len(s.LineItems))
 		for _, li := range s.LineItems {

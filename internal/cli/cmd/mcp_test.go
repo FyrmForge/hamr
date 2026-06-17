@@ -17,7 +17,7 @@ import (
 func writeHandshake(t *testing.T, root, proxyURL, token string) {
 	t.Helper()
 	require.NoError(t, os.MkdirAll(filepath.Join(root, ".hamr"), 0o755))
-	body := `{"proxyURL":"` + proxyURL + `","token":"` + token + `","pid":1}`
+	body := `{"proxyURL":"` + proxyURL + `","token":"` + token + `"}`
 	require.NoError(t, os.WriteFile(filepath.Join(root, ".hamr", "dev.json"), []byte(body), 0o600))
 }
 

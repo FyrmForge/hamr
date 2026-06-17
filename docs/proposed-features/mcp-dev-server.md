@@ -16,7 +16,7 @@ mocks.
   listener. The bridge talks to the running dev server over its existing
   localhost HTTP API (`/__hamr/*`).
 - **Secret handshake via runtime file.** `hamr dev` writes `.hamr/dev.json`
-  (mode 0600, already gitignored): `{ proxyURL, token (fresh per-run), pid }`.
+  (mode 0600, already gitignored): `{ proxyURL, token (fresh per-run) }`.
   `hamr mcp` reads it and authenticates to localhost. The agent's MCP config
   holds **no secret** — just `{"command":"hamr","args":["mcp"]}`.
 - **Multi-instance resolution.** Several `hamr dev`s can run at once (one per
@@ -208,7 +208,7 @@ the access table above.
 - **`mail.list`** — inbox summaries. inputs: none → `[{id, from, to, subject, date}…]`
 - **`mail.get`** — one message. inputs: `id` → `{headers, text, html}`
 - **`mail.clear`** — empty inbox. inputs: none → `{ok: true}`
-- **`mail.ingest`** — inject a raw RFC822 email. inputs: `raw` → `{ok: true, id}`
+- **`mail.ingest`** — inject a message. inputs: `{From, To, Subject, Text, HTML}` (From/To accept a plain email string) → `{id}`
 
 ### Stripe (in v1)
 

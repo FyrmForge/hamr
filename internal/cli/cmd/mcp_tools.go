@@ -89,8 +89,8 @@ var bridgeTools = []bridgeTool{
 	},
 	{
 		name:        "mail.ingest",
-		description: "Inject a message into the mail mock inbox. Body is a message object (From, To, Subject, Text/HTML).",
-		inputSchema: `{"type":"object","properties":{"Subject":{"type":"string"},"Text":{"type":"string"},"HTML":{"type":"string"}}}`,
+		description: "Inject a message into the mail mock inbox. From/To accept a plain email string (e.g. \"a@b.com\"); To is an array.",
+		inputSchema: `{"type":"object","properties":{"From":{"type":"string","description":"sender email, e.g. a@b.com"},"To":{"type":"array","items":{"type":"string"},"description":"recipient emails"},"Subject":{"type":"string"},"Text":{"type":"string"},"HTML":{"type":"string"}}}`,
 	},
 	{
 		name:        "stripe.list",

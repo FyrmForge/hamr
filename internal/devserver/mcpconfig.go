@@ -18,9 +18,9 @@ type MCPConfig struct {
 	// flip the live gateway without rewriting this. Default false.
 	Enabled bool `toml:"enabled"`
 
-	// Access maps a functional area (dev, logs, docker, mail, build) to a level
-	// ("read", "write", or "deny"). "write" implies "read". Areas absent from
-	// the map are denied. With no table at all, zero tools are exposed.
+	// Access maps a functional area (dev, logs, docker, mail, build, stripe) to
+	// a level ("read", "write", or "deny"). "write" implies "read". Areas absent
+	// from the map are denied. With no table at all, zero tools are exposed.
 	Access map[string]string `toml:"access"`
 
 	// MakeTargets constrains make.run to a named subset. Empty = every Makefile
@@ -123,7 +123,7 @@ func (c MCPConfig) ResolvedLogFile() string {
 func (c MCPConfig) validate() error {
 	for area, level := range c.Access {
 		if _, ok := mcpAreas[area]; !ok {
-			return fmt.Errorf("[dev.mcp.access] unknown area %q (want one of dev, logs, docker, mail, build)", area)
+			return fmt.Errorf("[dev.mcp.access] unknown area %q (want one of dev, logs, docker, mail, build, stripe)", area)
 		}
 		switch level {
 		case "read", "write", "deny":

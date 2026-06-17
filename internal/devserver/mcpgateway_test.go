@@ -49,7 +49,7 @@ func doMCP(g *mcpGateway, tool, token, body string) *httptest.ResponseRecorder {
 
 func TestGatewayAuth(t *testing.T) {
 	g := newTestGateway(t, map[string]string{"dev": "read"})
-	g.SetEnabled(true)
+	g.enabled.Store(true)
 
 	assert.Equal(t, http.StatusUnauthorized, doMCP(g, "dev.info", "", "").Code, "no token")
 	assert.Equal(t, http.StatusUnauthorized, doMCP(g, "dev.info", "wrong-token", "").Code, "bad token")
@@ -58,17 +58,17 @@ func TestGatewayAuth(t *testing.T) {
 func TestGatewayKillSwitch(t *testing.T) {
 	g := newTestGateway(t, map[string]string{"dev": "read"})
 
-	g.SetEnabled(false)
+	g.enabled.Store(false)
 	assert.Equal(t, http.StatusForbidden, doMCP(g, "dev.info", g.token, "").Code, "gateway off")
 
-	g.SetEnabled(true)
+	g.enabled.Store(true)
 	assert.Equal(t, http.StatusOK, doMCP(g, "dev.info", g.token, "").Code, "gateway on")
 }
 
 func TestGatewayPermissionEnforcement(t *testing.T) {
 	// dev+logs read granted, docker not granted at all.
 	g := newTestGateway(t, map[string]string{"dev": "read", "logs": "read"})
-	g.SetEnabled(true)
+	g.enabled.Store(true)
 
 	assert.Equal(t, http.StatusForbidden, doMCP(g, "docker.wipe", g.token, `{"name":"infra"}`).Code, "ungranted tool")
 	assert.Equal(t, http.StatusOK, doMCP(g, "logs.read", g.token, "").Code, "granted tool")
@@ -76,7 +76,7 @@ func TestGatewayPermissionEnforcement(t *testing.T) {
 
 func TestGatewayLogsRead(t *testing.T) {
 	g := newTestGateway(t, map[string]string{"logs": "read"})
-	g.SetEnabled(true)
+	g.enabled.Store(true)
 
 	rec := doMCP(g, "logs.read", g.token, `{"rule":"go"}`)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -136,12 +136,12 @@ func TestGatewayAuditsDenials(t *testing.T) {
 	require.NoError(t, err)
 	var lines []string
 	audit.setSink(func(s string) { lines = append(lines, s) })
-	g.audit = audit
+	g.audit.Store(audit)
 
-	g.SetEnabled(true)
+	g.enabled.Store(true)
 	doMCP(g, "docker.wipe", g.token, `{"name":"infra"}`) // not permitted
 	doMCP(g, "dev.info", "badtoken", "")                 // unauthorized
-	g.SetEnabled(false)
+	g.enabled.Store(false)
 	doMCP(g, "dev.info", g.token, "") // gateway off
 
 	joined := strings.Join(lines, "\n")
@@ -152,7 +152,7 @@ func TestGatewayAuditsDenials(t *testing.T) {
 
 func TestGatewayDevInfo(t *testing.T) {
 	g := newTestGateway(t, map[string]string{"dev": "read"})
-	g.SetEnabled(true)
+	g.enabled.Store(true)
 
 	rec := doMCP(g, "dev.info", g.token, "")
 	require.Equal(t, http.StatusOK, rec.Code)

@@ -14,7 +14,7 @@ import (
 func TestGatewayLogsReadStripsANSIAndPrefixMatches(t *testing.T) {
 	g := newTestGateway(t, map[string]string{"logs": "read"})
 	g.logBuf.Append(LogLine{Rule: "site:build", Text: "\x1b[31mred\x1b[0m output"})
-	g.SetEnabled(true)
+	g.enabled.Store(true)
 
 	rec := doMCP(g, "logs.read", g.token, `{"rule":"site"}`)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -44,7 +44,7 @@ func TestRequestLogRecords(t *testing.T) {
 	rl := NewRequestLog(5)
 	h := recordRequests(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-	}), rl)
+	}), rl, nil)
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/foo", nil))
 
 	snap := rl.Snapshot()
@@ -59,7 +59,7 @@ func TestRequestLogExcludesMCPNamespace(t *testing.T) {
 	rl := NewRequestLog(5)
 	h := recordRequests(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}), rl)
+	}), rl, nil)
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/__hamr/mcp/http.read", nil))
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/dashboard", nil))
 
@@ -77,7 +77,7 @@ func TestRecordRequestsPreservesFlusher(t *testing.T) {
 		require.True(t, ok, "wrapped writer must still be an http.Flusher")
 		f.Flush()
 		flushed = true
-	}), rl)
+	}), rl, nil)
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
 	assert.True(t, flushed)
 }

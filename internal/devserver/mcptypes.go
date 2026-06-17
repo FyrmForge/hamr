@@ -160,6 +160,11 @@ type mailSummary struct {
 	Date    string `json:"date"`
 }
 
+// mailIngestResult is the ack for mail.ingest: the id of the injected message.
+type mailIngestResult struct {
+	ID string `json:"id"`
+}
+
 type mailDetail struct {
 	ID      string            `json:"id"`
 	From    string            `json:"from"`
@@ -187,6 +192,13 @@ type stripeRefundArgs struct {
 	Amount          int64  `json:"amount"`
 	ReverseTransfer bool   `json:"reverse_transfer"`
 	RefundAppFee    bool   `json:"refund_application_fee"`
+}
+
+// stripeRefundResult is the ack returned by stripe.refund.
+type stripeRefundResult struct {
+	ID     string `json:"id"`
+	Amount int64  `json:"amount"`
+	Status string `json:"status"`
 }
 
 // StripeStateSummary is the read-only snapshot returned by stripe.list.

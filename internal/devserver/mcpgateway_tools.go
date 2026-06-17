@@ -1,8 +1,6 @@
 package devserver
 
 import (
-	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -63,7 +61,7 @@ func (g *mcpGateway) devInfo() devInfoResult {
 		Gateway: devInfoGateway{
 			Enabled: g.IsEnabled(),
 			Access:  g.cfg.Dev.MCP.Access,
-			Tools:   sortedTools(g.cfg.Dev.MCP.EnabledTools()),
+			Tools:   sortedTools(g.toolSet),
 		},
 	}
 }
@@ -149,23 +147,41 @@ func (g *mcpGateway) makeRun(body []byte) (any, error) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		out, err := g.actions.pm.RunCommand(context.Background(), rule)
+		// Tied to the dev server's context (not Background) so a slow target is
+		// killed on shutdown instead of orphaned. The goroutine still outlives
+		// this request — the agent polls logs.read for the completion marker.
+		out, err := g.actions.pm.RunCommand(g.ctx, rule)
 		// Completion marker so the agent can detect done + exit code via
 		// logs.read after a "check back later".
 		g.logBuf.Append(LogLine{Rule: rule.Name, Text: fmt.Sprintf("[%s] exited %d", rule.Name, exitCodeOf(err))})
 		done <- result{out, err}
 	}()
 
+	timer := time.NewTimer(g.cfg.Dev.MCP.ResolvedMakeWait())
+	defer timer.Stop()
 	select {
 	case r := <-done:
 		code := exitCodeOf(r.err)
 		return makeRunResult{Status: "done", ExitCode: &code, Output: tailString(r.output, 4000)}, nil
-	case <-time.After(g.cfg.Dev.MCP.ResolvedMakeWait()):
+	case <-timer.C:
 		return makeRunResult{
 			Status:  "running",
 			Message: fmt.Sprintf("still running — poll logs.read for rule %q", rule.Name),
 		}, nil
 	}
+}
+
+// auditOutcome makes a make.run failure visible in the audit log: a target that
+// finished within the wait window records "done exit=N" (so a non-zero exit
+// reads as a failure, not "ok"); a still-running one records "running".
+func (r makeRunResult) auditOutcome() string {
+	if r.Status == "running" {
+		return "running"
+	}
+	if r.ExitCode != nil {
+		return fmt.Sprintf("done exit=%d", *r.ExitCode)
+	}
+	return "done"
 }
 
 func exitCodeOf(err error) int {
@@ -243,14 +259,14 @@ func (g *mcpGateway) mailIngest(body []byte) (any, error) {
 		return nil, fmt.Errorf("mail mock not enabled")
 	}
 	var msg mailMessage
-	if err := json.Unmarshal(body, &msg); err != nil {
+	if err := decodeArgs(body, &msg); err != nil {
 		return nil, fmt.Errorf("invalid message: %w", err)
 	}
 	msg.ID = newMessageID()
 	msg.ReceivedAt = time.Now()
 	msg.Status = "delivered"
 	g.mailMock.append(&msg)
-	return map[string]string{"id": msg.ID}, nil
+	return mailIngestResult{ID: msg.ID}, nil
 }
 
 func joinAddrs(addrs []mailAddress) string {
@@ -319,5 +335,5 @@ func (g *mcpGateway) stripeRefund(body []byte) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"id": rf.ID, "amount": rf.Amount, "status": rf.Status}, nil
+	return stripeRefundResult{ID: rf.ID, Amount: rf.Amount, Status: rf.Status}, nil
 }

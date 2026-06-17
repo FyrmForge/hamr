@@ -68,6 +68,29 @@ func (a mailAddress) Display() string {
 	return fmt.Sprintf("%s <%s>", a.Name, a.Email)
 }
 
+// UnmarshalJSON accepts either a bare email string ("a@b.com") or the full
+// {"Name":...,"Email":...} object. The string form lets MCP mail.ingest callers
+// pass the same joined-email shape that mail.list/mail.get render, instead of
+// forcing the object form the schema would otherwise demand. Object senders
+// (the normal /__hamr/mail ingest path) are unaffected.
+func (a *mailAddress) UnmarshalJSON(data []byte) error {
+	if s := strings.TrimSpace(string(data)); strings.HasPrefix(s, `"`) {
+		var email string
+		if err := json.Unmarshal(data, &email); err != nil {
+			return err
+		}
+		a.Name, a.Email = "", email
+		return nil
+	}
+	type alias mailAddress // avoid recursing into this method
+	var v alias
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	*a = mailAddress(v)
+	return nil
+}
+
 type mailAttachment struct {
 	Filename    string `json:"Filename"`
 	ContentType string `json:"ContentType,omitempty"`

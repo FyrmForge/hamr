@@ -1,6 +1,7 @@
 package devserver
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
@@ -30,7 +31,6 @@ const mcpMaxBodyBytes = 1 << 20
 type MCPHandshake struct {
 	ProxyURL string `json:"proxyURL"`
 	Token    string `json:"token"`
-	PID      int    `json:"pid"`
 }
 
 // ReadMCPHandshake loads the handshake descriptor from projectRoot. Returns a
@@ -62,6 +62,17 @@ type mcpGateway struct {
 	proxyURL string      // resolved (post port-walk)
 	appPort  int         // resolved app port
 
+	// ctx ties background work (make.run, docker wait-polls) to the dev
+	// server's lifetime so it's cancelled on shutdown rather than orphaned.
+	ctx context.Context //nolint:containedctx
+	// projectRoot is where the handshake file (.hamr/dev.json) is written, so
+	// it lands next to hamr.toml and matches the bridge's project resolution
+	// regardless of the dev server's working directory. "" means CWD.
+	projectRoot string
+	// toolSet is the enabled-tool set computed once from cfg.Dev.MCP.Access
+	// (immutable for the gateway's lifetime — a config reload rebuilds it).
+	toolSet map[string]bool
+
 	actions     *DevActions
 	logBuf      *LogBuffer
 	mailMock    *MailMock
@@ -72,15 +83,17 @@ type mcpGateway struct {
 	makefile    string
 	logger      *slog.Logger
 
-	auditPath string       // resolved audit-log path ("" = disabled)
-	audit     *mcpAuditLog // opened lazily on first activation
-	logSink   func(string) // live feed for the TUI MCP tab (every request)
+	auditPath string                    // resolved audit-log path ("" = disabled)
+	audit     atomic.Pointer[mcpAuditLog] // opened lazily on first activation; atomic so the M-toggle goroutine can publish it while handlers read it
+	logSink   func(string)              // live feed for the TUI MCP tab (every request)
 }
 
 // mcpGatewayDeps groups the gateway's collaborators so the constructor stays
 // readable instead of taking a dozen positional arguments.
 type mcpGatewayDeps struct {
 	cfg         *Config
+	ctx         context.Context //nolint:containedctx
+	projectRoot string
 	actions     *DevActions
 	logBuf      *LogBuffer
 	mailMock    *MailMock
@@ -102,9 +115,16 @@ func newMCPGateway(d mcpGatewayDeps) (*mcpGateway, error) {
 	if err != nil {
 		return nil, err
 	}
+	ctx := d.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	g := &mcpGateway{
 		cfg:         d.cfg,
 		token:       tok,
+		ctx:         ctx,
+		projectRoot: d.projectRoot,
+		toolSet:     d.cfg.Dev.MCP.EnabledTools(),
 		auditPath:   d.auditPath,
 		logSink:     d.logSink,
 		proxyURL:    d.proxyURL,
@@ -130,7 +150,7 @@ func (g *mcpGateway) SetActive(on bool) error {
 		g.removeHandshake()
 		return nil
 	}
-	if g.audit == nil {
+	if g.audit.Load() == nil {
 		// Created even when the file log is disabled (auditPath == "") so the
 		// TUI tab's live sink still receives every request.
 		a, err := newMCPAuditLog(g.auditPath)
@@ -138,7 +158,7 @@ func (g *mcpGateway) SetActive(on bool) error {
 			return fmt.Errorf("open mcp audit log: %w", err)
 		}
 		a.setSink(g.logSink)
-		g.audit = a // set before enabling so handlers never see a nil/partial audit
+		g.audit.Store(a) // publish before enabling so handlers never see a nil/partial audit
 	}
 	g.enabled.Store(true)
 	return g.writeHandshake()
@@ -151,9 +171,10 @@ func (g *mcpGateway) Toggle() (bool, error) {
 	return on, g.SetActive(on)
 }
 
-// closeAudit flushes the audit log on shutdown.
+// closeAudit flushes the audit log on shutdown. Safe when the audit log was
+// never opened (gateway stayed disabled) — Close is nil-receiver-safe.
 func (g *mcpGateway) closeAudit() {
-	if err := g.audit.Close(); err != nil {
+	if err := g.audit.Load().Close(); err != nil {
 		g.logger.Warn("failed to close mcp audit log", "err", err)
 	}
 }
@@ -166,27 +187,32 @@ func randomToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// SetEnabled flips the runtime kill-switch.
-func (g *mcpGateway) SetEnabled(on bool) { g.enabled.Store(on) }
-
 // IsEnabled reports the live gateway state.
 func (g *mcpGateway) IsEnabled() bool { return g.enabled.Load() }
 
 // EnabledToolCount returns how many tools the access map exposes, for the TUI
 // indicator's "on, N tools" readout.
-func (g *mcpGateway) EnabledToolCount() int { return len(g.cfg.Dev.MCP.EnabledTools()) }
+func (g *mcpGateway) EnabledToolCount() int { return len(g.toolSet) }
+
+// handshakePath returns the absolute (or CWD-relative) path of the handshake
+// file, rooted at the project dir so it lands next to hamr.toml — matching the
+// bridge's project resolution regardless of the dev server's CWD.
+func (g *mcpGateway) handshakePath() string {
+	return filepath.Join(g.projectRoot, MCPHandshakeFile)
+}
 
 // writeHandshake writes .hamr/dev.json (0600) so the bridge can find + auth.
 func (g *mcpGateway) writeHandshake() error {
-	hs := MCPHandshake{ProxyURL: g.proxyURL, Token: g.token, PID: os.Getpid()}
+	hs := MCPHandshake{ProxyURL: g.proxyURL, Token: g.token}
 	data, err := json.Marshal(hs)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(".hamr", 0o755); err != nil {
+	path := g.handshakePath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(MCPHandshakeFile, data, 0o600)
+	return os.WriteFile(path, data, 0o600)
 }
 
 // removeHandshake deletes the descriptor on shutdown so a crashed/dead dev
@@ -194,8 +220,9 @@ func (g *mcpGateway) writeHandshake() error {
 // expected (handshake never written when MCP stayed disabled); anything else is
 // logged.
 func (g *mcpGateway) removeHandshake() {
-	if err := os.Remove(MCPHandshakeFile); err != nil && !os.IsNotExist(err) {
-		g.logger.Warn("failed to remove mcp handshake file", "path", MCPHandshakeFile, "err", err)
+	path := g.handshakePath()
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		g.logger.Warn("failed to remove mcp handshake file", "path", path, "err", err)
 	}
 }
 
@@ -210,63 +237,83 @@ func (g *mcpGateway) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tool := strings.TrimPrefix(r.URL.Path, "/__hamr/mcp/")
+	audit := g.audit.Load() // nil-receiver-safe; nil only while the gateway has never been activated
 
 	// Token-only auth — browsers never reach this namespace. Denials are
 	// audited too (a bad token, a call against a denied tool, or a call while
 	// the gateway is off are exactly the events an audit log exists to record).
 	if !g.authenticated(r) {
-		g.audit.log(tool, "", "DENIED: unauthorized (bad or missing token)")
+		audit.log(tool, "", "DENIED: unauthorized (bad or missing token)")
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	if !g.IsEnabled() {
-		g.audit.log(tool, "", "DENIED: gateway off")
+		audit.log(tool, "", "DENIED: gateway off")
 		jsonError(w, "mcp gateway is off (toggle it on in the hamr dev TUI)", http.StatusForbidden)
 		return
 	}
-	if !g.cfg.Dev.MCP.ToolAllowed(tool) {
-		g.audit.log(tool, "", "DENIED: not permitted by [dev.mcp.access]")
+	if !g.toolSet[tool] {
+		audit.log(tool, "", "DENIED: not permitted by [dev.mcp.access]")
 		jsonError(w, fmt.Sprintf("tool %q not permitted by [dev.mcp.access]", tool), http.StatusForbidden)
 		return
 	}
 
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, mcpMaxBodyBytes))
 	if err != nil {
+		audit.log(tool, "", "ERROR: read request body: "+err.Error())
 		jsonError(w, "read request body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
+	summary := argSummary(body)
 	result, err := g.dispatch(tool, body)
 	if err != nil {
-		g.audit.log(tool, argSummary(body), "ERROR: "+err.Error())
+		audit.log(tool, summary, "ERROR: "+err.Error())
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	g.audit.log(tool, argSummary(body), "ok")
+	// Outcome reflects the result, not just "the call returned" — so a make.run
+	// that finished non-zero records "done exit=1", not "ok" (see auditOutcomer).
+	outcome := "ok"
+	if ao, ok := result.(auditOutcomer); ok {
+		outcome = ao.auditOutcome()
+	}
+	audit.log(tool, summary, outcome)
 	// Attribute mutating actions in the main log so the developer sees agent
 	// activity at a glance, right next to its effects (reads are skipped to
 	// avoid noise). Routed through the dev logger (component "mcp" → a colored
 	// [hamr:mcp] tag) so it lands in the TUI hamr tab and dev_logs.txt.
 	if mutatingMCPTool(tool) {
 		msg := tool
-		if s := argSummary(body); s != "" && s != "{}" {
-			msg += " " + s
+		if summary != "" && summary != "{}" {
+			msg += " " + summary
 		}
 		g.logger.With("component", "mcp").Info(msg)
 	}
 	g.writeJSON(w, result)
 }
 
+// auditOutcomer lets a tool result describe its own audit outcome string (e.g.
+// "done exit=1") instead of the generic "ok", so the audit log reflects success
+// vs failure for tools whose failure rides in the result body, not a Go error.
+type auditOutcomer interface{ auditOutcome() string }
+
+// mcpWriteTools is the set of state-mutating tools, derived once from mcpAreas'
+// writeTools so there's a single source of truth (a tool added as a readTool is
+// automatically treated as a read — no second list to keep in sync).
+var mcpWriteTools = func() map[string]bool {
+	m := make(map[string]bool)
+	for _, a := range mcpAreas {
+		for _, t := range a.writeTools {
+			m[t] = true
+		}
+	}
+	return m
+}()
+
 // mutatingMCPTool reports whether a tool changes state (vs a pure read), so
 // only writes get attributed in the main log.
-func mutatingMCPTool(tool string) bool {
-	switch tool {
-	case "dev.info", "logs.read", "console.read", "docker.logs", "docker.status", "mail.list", "mail.get", "stripe.list":
-		return false
-	default:
-		return true
-	}
-}
+func mutatingMCPTool(tool string) bool { return mcpWriteTools[tool] }
 
 func (g *mcpGateway) authenticated(r *http.Request) bool {
 	const prefix = "Bearer "
@@ -472,13 +519,20 @@ func (g *mcpGateway) dockerAction(body []byte, wipe bool) (any, error) {
 
 	// wait: run synchronously, then poll until everything is running/healthy or
 	// the timeout elapses — saves the agent a manual docker.status poll loop.
+	// Cap a client-supplied wait_timeout so it can't park a goroutine for hours.
+	timeout := min(parseDurationOr(a.WaitTimeout, 60*time.Second), mcpMaxDockerWait)
 	action(dc, a.Service)
-	statuses, healthy := g.waitForHealthy(dc, parseDurationOr(a.WaitTimeout, 60*time.Second))
+	statuses, healthy := g.waitForHealthy(dc, timeout)
 	return dockerWaitResult{OK: true, Healthy: healthy, Statuses: statuses}, nil
 }
 
+// mcpMaxDockerWait caps docker.restart/wipe wait:true so an unbounded
+// client-supplied wait_timeout can't keep a goroutine polling for hours.
+const mcpMaxDockerWait = 10 * time.Minute
+
 // waitForHealthy polls docker.status until every container is running (and
-// healthy, when it has a healthcheck) or the timeout elapses.
+// healthy, when it has a healthcheck), the timeout elapses, or the dev server
+// shuts down (g.ctx cancelled).
 func (g *mcpGateway) waitForHealthy(dc *DockerCompose, timeout time.Duration) ([]containerStatus, bool) {
 	deadline := time.Now().Add(timeout)
 	for {
@@ -489,7 +543,11 @@ func (g *mcpGateway) waitForHealthy(dc *DockerCompose, timeout time.Duration) ([
 		if time.Now().After(deadline) {
 			return statuses, false
 		}
-		time.Sleep(time.Second)
+		select {
+		case <-g.ctx.Done():
+			return statuses, false
+		case <-time.After(time.Second):
+		}
 	}
 }
 

@@ -317,6 +317,11 @@ func (r *Runner) Run(ctx context.Context) error {
 		if proxySrv != nil {
 			_ = proxySrv.Close()
 		}
+		// Close the MCP audit log only after the proxy has stopped serving, so a
+		// late in-flight tool call can't write to an already-closed audit file.
+		if r.mcpGateway != nil {
+			r.mcpGateway.closeAudit()
+		}
 	}()
 
 	// Build scheduler state up front so manual runs (POST /run, hotkey rebuild)
@@ -503,8 +508,19 @@ func (r *Runner) Run(ctx context.Context) error {
 		// kill-switch (M) can flip it on at runtime; the handshake file (.hamr/
 		// dev.json) and audit log are only activated when enabled (initially
 		// from [dev.mcp].enabled).
+		// Resolve the project root from the config path so the handshake file
+		// lands next to hamr.toml — matching where the bridge looks for it,
+		// regardless of the dev server's working directory.
+		mcpProjectRoot := "."
+		if r.configPath != "" {
+			if abs, aerr := filepath.Abs(r.configPath); aerr == nil {
+				mcpProjectRoot = filepath.Dir(abs)
+			}
+		}
 		mcpGw, gwErr := newMCPGateway(mcpGatewayDeps{
 			cfg:         r.cfg,
+			ctx:         runCtx,
+			projectRoot: mcpProjectRoot,
 			actions:     actions,
 			logBuf:      logBuf,
 			mailMock:    mailMock,
@@ -524,10 +540,10 @@ func (r *Runner) Run(ctx context.Context) error {
 			return fmt.Errorf("start mcp gateway: %w", gwErr)
 		}
 		r.mcpGateway = mcpGw
-		defer func() {
-			mcpGw.removeHandshake()
-			mcpGw.closeAudit()
-		}()
+		// Remove the handshake on shutdown. The audit log is closed by the proxy
+		// shutdown defer instead (after the proxy stops serving) so an in-flight
+		// tool call can't write to a closed audit file.
+		defer mcpGw.removeHandshake()
 		if r.cfg.Dev.MCP.Enabled {
 			if err := mcpGw.SetActive(true); err != nil {
 				r.logger.Error("failed to activate mcp gateway", "err", err)
