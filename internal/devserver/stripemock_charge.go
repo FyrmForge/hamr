@@ -53,7 +53,8 @@ type stripeTransfer struct {
 }
 
 // serializeCharge renders the JSON wire shape stripe-go expects for a
-// Charge. Caller must hold m.mu when called from serializePaymentIntent.
+// Charge. Contract: c must be lock-stable — either hold m.mu across the call
+// or pass a clone (see stripemock_clone.go). This method reads only c.
 func (m *StripeMock) serializeCharge(c *stripeCharge) map[string]any {
 	out := map[string]any{
 		"id":                     c.ID,

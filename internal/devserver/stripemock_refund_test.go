@@ -292,3 +292,33 @@ func createAndSucceedPI(t *testing.T, mock *StripeMock, amount int64, dest strin
 	require.NoError(t, err)
 	return updated
 }
+
+// TestStripeMock_CreateRefund_RejectsGarbageAmount guards the fix where a
+// non-numeric or negative amount used to parse to 0, and 0 means "refund
+// everything" — so garbage silently executed a full refund.
+func TestStripeMock_CreateRefund_RejectsGarbageAmount(t *testing.T) {
+	mock, srv, _ := newFullStripeStack(t, "")
+	var chargeID string
+	withStripeBackend(t, srv.URL, func() {
+		pi := createAndSucceedPI(t, mock, 1000, "")
+		chargeID = pi.LatestCharge.ID
+	})
+
+	post := func(amount string) int {
+		body := "charge=" + chargeID + "&amount=" + amount
+		resp, err := http.Post(srv.URL+"/v1/refunds",
+			"application/x-www-form-urlencoded", strings.NewReader(body))
+		require.NoError(t, err)
+		defer func() { _ = resp.Body.Close() }()
+		return resp.StatusCode
+	}
+
+	assert.Equal(t, http.StatusBadRequest, post("abc"), "non-numeric amount must be rejected")
+	assert.Equal(t, http.StatusBadRequest, post("-500"), "negative amount must be rejected")
+
+	// The charge must be untouched by the garbage attempts.
+	mock.mu.RLock()
+	refunded := mock.charges[chargeID].AmountRefunded
+	mock.mu.RUnlock()
+	assert.Equal(t, int64(0), refunded, "garbage refund attempts must not refund anything")
+}

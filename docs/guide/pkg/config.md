@@ -85,11 +85,21 @@ timeout := config.GetEnvOrDefaultDuration("REQUEST_TIMEOUT", 30*time.Second)
 
 Accepts any value `time.ParseDuration` understands (`5s`, `100ms`, `1m30s`, etc.).
 
+### CSV (string list)
+
+```go
+proxies := config.GetEnvCSV("TRUSTED_PROXIES") // "10.0.0.0/8, 172.16.0.0/12"
+```
+
+Splits on commas, trims whitespace, drops empty entries. Returns `nil` when the
+variable is unset/empty.
+
 
 ## API Reference
 
 ```go
 func GetEnvOrDefault(key, def string) string
+func GetEnvCSV(key string) []string
 func GetEnvOrPanic(key string) string
 func GetEnvOrDefaultInt(key string, def int) int
 func GetEnvOrDefaultBool(key string, def bool) bool

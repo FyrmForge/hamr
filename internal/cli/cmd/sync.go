@@ -151,7 +151,12 @@ func readDotenvKey(path, key string) (string, bool) {
 		if !ok {
 			continue
 		}
-		if strings.TrimSpace(k) != key {
+		// Accept the `export KEY=value` form that godotenv (used by scaffolded
+		// apps) understands, so `hamr sync` doesn't miss credentials the app
+		// loads fine.
+		k = strings.TrimSpace(k)
+		k = strings.TrimSpace(strings.TrimPrefix(k, "export "))
+		if k != key {
 			continue
 		}
 		v = strings.TrimSpace(v)

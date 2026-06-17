@@ -1,6 +1,7 @@
 package devserver
 
 import (
+	"maps"
 	"sort"
 	"sync"
 )
@@ -72,9 +73,7 @@ func (e *ErrorState) HasErrors() bool {
 func (e *ErrorState) Snapshot() map[string]string {
 	e.mu.RLock()
 	cp := make(map[string]string, len(e.errors))
-	for k, v := range e.errors {
-		cp[k] = v
-	}
+	maps.Copy(cp, e.errors)
 	e.mu.RUnlock()
 	return cp
 }

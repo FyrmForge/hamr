@@ -37,7 +37,7 @@ Examples:
 func init() {
 	upgradeCmd.Flags().Bool("json", false, "output as JSON")
 	upgradeCmd.Flags().String("from", "", "override the base version to diff from")
-	upgradeCmd.Flags().Bool("applied", false, "update project baseline to current HAMR version")
+	upgradeCmd.Flags().Bool("applied", false, "record the project baseline as the current HAMR version (won't move backwards; use --from to set a specific version)")
 	upgradeCmd.Flags().String("dir", "", "directory to save the upgrade report (defaults to .hamr/ai/upgrades)")
 }
 
@@ -51,13 +51,32 @@ func runUpgrade(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("cannot determine current HAMR version (running dev build)")
 	}
 
-	// --applied: bump the baseline version forward.
-	// Runs before metadata checks so it works on legacy projects without [hamr].
+	// --applied: bump the baseline version. Runs before metadata checks so it
+	// works on legacy projects without [hamr].
 	if applied {
-		if err := scaffold.UpdateVersion("hamr.toml", version); err != nil {
+		// Default target is the current CLI version; --from explicitly overrides
+		// it (so a user can record a specific applied version) instead of being
+		// silently ignored.
+		target := strings.TrimPrefix(version, "v")
+		if fromVersion != "" {
+			target = strings.TrimPrefix(fromVersion, "v")
+		}
+		// Don't silently regress the recorded baseline (e.g. running an older
+		// CLI with --applied). Guard the implicit target only; an explicit
+		// --from is taken as a deliberate set.
+		if fromVersion == "" {
+			if meta, err := scaffold.LoadMetadata("hamr.toml"); err == nil && meta.HasHamrSection() {
+				cur, errCur := scaffold.ParseVersion(meta.Hamr.Version)
+				next, errNext := scaffold.ParseVersion(target)
+				if errCur == nil && errNext == nil && next.Less(cur) {
+					return fmt.Errorf("refusing to move [hamr] version backwards: baseline is %s but this CLI is %s (use --from to set it explicitly)", meta.Hamr.Version, target)
+				}
+			}
+		}
+		if err := scaffold.UpdateVersion("hamr.toml", target); err != nil {
 			return fmt.Errorf("update version: %w", err)
 		}
-		return writeUpgradeLine(cmd.OutOrStdout(), "updated [hamr] version to %s\n", version)
+		return writeUpgradeLine(cmd.OutOrStdout(), "updated [hamr] version to %s\n", target)
 	}
 
 	meta, err := scaffold.LoadMetadata("hamr.toml")
@@ -170,10 +189,24 @@ func writeReportFile(dir string, report *scaffold.DiffReport) (string, error) {
 	return path, nil
 }
 
-var versionFilenameReplacer = strings.NewReplacer(".", "_", "-", "_")
-
+// sanitizeVersionForFilename maps every character that isn't a plain
+// alphanumeric to '_'. The base/current version can come from --from or
+// hamr.toml and may contain path-unsafe characters (a git ref like
+// "release/0.1.0", SemVer build metadata "1.0.0+build") — left raw, the '/'
+// would make os.WriteFile fail (or escape the report dir) only AFTER the
+// expensive clone+diff already ran. Normal semver ("." and "-") still maps to
+// '_' exactly as before.
 func sanitizeVersionForFilename(v string) string {
-	return versionFilenameReplacer.Replace(v)
+	var b strings.Builder
+	b.Grow(len(v))
+	for _, r := range v {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
 }
 
 func writeUpgradeLine(w io.Writer, format string, args ...any) error {

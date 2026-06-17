@@ -67,6 +67,7 @@ type Hub struct {
 	cancel    context.CancelFunc
 	wg        sync.WaitGroup
 	closeOnce sync.Once
+	closed    bool // guarded by mu; once true, Handler rejects new connections
 }
 
 // NewHub creates a Hub with the given options.
@@ -118,9 +119,21 @@ func (h *Hub) Handler() echo.HandlerFunc {
 			send:      make(chan []byte, h.sendBufferSize),
 		}
 
-		h.register(client)
-
+		// Register and increment the wait group under a single lock, gated on
+		// the closed flag. This makes "is the hub still open?" and "account for
+		// this pump" atomic with Close()'s "set closed, then Wait" — without it
+		// wg.Add(1) could race wg.Wait() (a WaitGroup contract violation) and a
+		// late connection could repopulate the maps Close just cleared.
+		h.mu.Lock()
+		if h.closed {
+			h.mu.Unlock()
+			_ = conn.Close(ws.StatusGoingAway, "hub closing")
+			return nil
+		}
+		h.registerLocked(client)
 		h.wg.Add(1)
+		h.mu.Unlock()
+
 		go func() {
 			defer h.wg.Done()
 			client.writePump(h.ctx)
@@ -135,6 +148,13 @@ func (h *Hub) Handler() echo.HandlerFunc {
 // Safe to call multiple times.
 func (h *Hub) Close() {
 	h.closeOnce.Do(func() {
+		// Mark closed first so any in-flight Handler either already incremented
+		// wg under the lock (and is awaited below) or sees closed and bails out
+		// without touching wg — so wg.Add never races the Wait.
+		h.mu.Lock()
+		h.closed = true
+		h.mu.Unlock()
+
 		h.cancel()
 		h.wg.Wait()
 
@@ -230,10 +250,17 @@ func (h *Hub) Broadcast(msg []byte) int {
 
 // --- Room management ---
 
-// JoinRoom adds a client to a room.
+// JoinRoom adds a client to a room. No-op if the client is no longer the
+// registered client for its session (e.g. it disconnected, or was replaced by a
+// reconnect): adding a stale client whose send channel is already closed would
+// make the next SendToRoom/Broadcast panic on send-to-closed-channel.
 func (h *Hub) JoinRoom(c *Client, room string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	if h.clients[c.SessionID] != c {
+		return
+	}
 
 	if h.rooms[room] == nil {
 		h.rooms[room] = make(map[*Client]bool)
@@ -310,10 +337,8 @@ func (h *Hub) Stats() HubStats {
 
 // --- internal helpers ---
 
-func (h *Hub) register(c *Client) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
+// registerLocked inserts a client into the hub maps. The caller must hold h.mu.
+func (h *Hub) registerLocked(c *Client) {
 	// If a client already exists for this session, clean it up first to
 	// avoid orphaned goroutines and stale map entries.
 	if old, ok := h.clients[c.SessionID]; ok {

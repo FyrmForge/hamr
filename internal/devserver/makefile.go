@@ -71,7 +71,7 @@ func MakefileTargetsFromPath(path string) ([]string, error) {
 		}
 		// A target line may declare multiple space-separated targets:
 		//   build clean: deps
-		for _, name := range strings.Fields(head) {
+		for name := range strings.FieldsSeq(head) {
 			if strings.HasPrefix(name, ".") {
 				// Special targets (.PHONY, .DEFAULT_GOAL, .SUFFIXES, ...)
 				continue

@@ -138,6 +138,49 @@ func TestStripeMock_Dashboard_Resend_NothingToSendErrors(t *testing.T) {
 		"resending an open session has no natural event — should error not silently succeed")
 }
 
+// TestStripeMock_Dashboard_Resend_NeverAttemptedPI_NothingToSend guards the
+// resend-as-failed fix: a freshly-created PI sits at requires_payment_method
+// with no failed attempt, so there is no payment_failed event to resend.
+func TestStripeMock_Dashboard_Resend_NeverAttemptedPI_NothingToSend(t *testing.T) {
+	mock, _, _ := newFullStripeStack(t, "")
+
+	id := "pi_test_" + randomHex(16)
+	mock.mu.Lock()
+	mock.paymentIntents[id] = &stripePaymentIntent{
+		ID: id, Amount: 1000, Currency: "gbp", Status: "requires_payment_method",
+		ClientSecret: id + "_secret", Created: time.Now(),
+	}
+	mock.mu.Unlock()
+
+	resp := postDashboardResend(t, mock, "payment_intent", id)
+	defer resp.Body.Close() //nolint:errcheck
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode,
+		"never-attempted PI has no payment_failed event to resend")
+}
+
+// TestStripeMock_Dashboard_Resend_DeclinedPIFiresPaymentFailed asserts the
+// other half: once a PI has actually been declined (Failed set), resending
+// re-fires payment_intent.payment_failed.
+func TestStripeMock_Dashboard_Resend_DeclinedPIFiresPaymentFailed(t *testing.T) {
+	const secret = "whsec_test_devmock"
+	app := newOrderedWebhookSink(t, secret)
+
+	mock, _, _ := newFullStripeStack(t, "")
+	mock.SetWebhookEndpoint(WebhookEndpoint{URL: app.URL, Secret: secret})
+
+	piID := seedPaymentIntent(t, mock, paymentIntentSeed{Amount: 1000, Currency: "gbp"})
+	resp := postPaymentIntentComplete(t, mock, piID, "fail")
+	resp.Body.Close() //nolint:errcheck
+	app.WaitFor(t, 1, 2*time.Second) // original payment_intent.payment_failed
+
+	resp = postDashboardResend(t, mock, "payment_intent", piID)
+	defer resp.Body.Close() //nolint:errcheck
+	assert.Equal(t, http.StatusSeeOther, resp.StatusCode)
+
+	got := app.WaitFor(t, 2, 2*time.Second)
+	assert.Equal(t, "payment_intent.payment_failed", string(got[1].Type))
+}
+
 // TestStripeMock_Dashboard_Refund issues a full refund via the dashboard
 // form and asserts both Charge state and the webhook fire correctly.
 // Equivalent to a refund.New call but routed through the dashboard endpoint.

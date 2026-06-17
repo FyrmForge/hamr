@@ -6,6 +6,8 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -194,7 +196,7 @@ func TestProcessManager_StartProcess_Restart(t *testing.T) {
 	require.NotNil(t, secondProc)
 
 	// PIDs should be different.
-	assert.NotEqual(t, firstProc.Pid, secondProc.Pid)
+	assert.NotEqual(t, firstProc.proc.Pid, secondProc.proc.Pid)
 
 	pm.StopAll()
 }
@@ -342,13 +344,7 @@ func TestBuildEnv(t *testing.T) {
 		env := buildEnv([]string{"FOO=bar"})
 		assert.NotNil(t, env)
 
-		found := false
-		for _, e := range env {
-			if e == "FOO=bar" {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(env, "FOO=bar")
 		assert.True(t, found, "FOO=bar should be in env")
 	})
 
@@ -370,13 +366,7 @@ func TestBuildEnv(t *testing.T) {
 
 		env := buildEnv([]string{"EXTRA=val"})
 
-		found := false
-		for _, e := range env {
-			if e == "HAMR_TEST_MARKER=present" {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(env, "HAMR_TEST_MARKER=present")
 		assert.True(t, found, "system env should be included")
 	})
 }
@@ -441,4 +431,53 @@ func TestPrefixWriter(t *testing.T) {
 		_, _ = io.Copy(&buf, r)
 		assert.Contains(t, buf.String(), "\033[31mred text\033[0m")
 	})
+}
+
+// TestProcessManager_StopProcess_EscalatesToKill exercises the stop path with a
+// process that ignores SIGINT: stopProcess must hit the grace timeout, escalate
+// to SIGKILL, and wait for the single Wait owner to reap — without a second
+// Wait racing the reap.
+func TestProcessManager_StopProcess_EscalatesToKill(t *testing.T) {
+	pm := NewProcessManager(testLogger())
+
+	rule := &WatchRule{Name: "stubborn", Run: "trap '' INT; sleep 60"}
+	require.NoError(t, pm.StartProcess(context.Background(), rule))
+	time.Sleep(100 * time.Millisecond)
+
+	start := time.Now()
+	pm.StopAll()
+	elapsed := time.Since(start)
+
+	assert.GreaterOrEqual(t, elapsed, shutdownTimeout, "SIGINT is ignored, so the grace timeout must elapse before SIGKILL")
+	assert.Less(t, elapsed, shutdownTimeout+3*time.Second, "stop must not hang well past the timeout")
+
+	pm.mu.Lock()
+	_, running := pm.procs["stubborn"]
+	pm.mu.Unlock()
+	assert.False(t, running, "process entry must be removed after stop")
+}
+
+// TestProcessManager_StopProcess_DoesNotHangOnEscapedPipeHolder guards the quit
+// hang: a long-running process can spawn a grandchild that escapes the process
+// group (setsid → new session) and keeps the stdout pipe open. After the group
+// is SIGKILLed that grandchild survives, so cmd.Wait() would block forever
+// copying its pipe — hanging stopProcess (and quit) — unless StartProcess sets
+// cmd.WaitDelay to bound the post-exit I/O wait.
+func TestProcessManager_StopProcess_DoesNotHangOnEscapedPipeHolder(t *testing.T) {
+	if _, err := exec.LookPath("setsid"); err != nil {
+		t.Skip("setsid not available")
+	}
+	pm := NewProcessManager(testLogger())
+
+	rule := &WatchRule{Name: "leaky", Run: "setsid sh -c 'sleep 10' & exec sleep 10"}
+	require.NoError(t, pm.StartProcess(context.Background(), rule))
+	time.Sleep(100 * time.Millisecond)
+
+	done := make(chan struct{})
+	go func() { pm.StopAll(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(8 * time.Second):
+		t.Fatal("stopProcess hung: cmd.Wait() blocked on an escaped pipe-holder (StartProcess missing WaitDelay)")
+	}
 }

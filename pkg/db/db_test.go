@@ -14,8 +14,13 @@ import (
 )
 
 func TestConnectInvalidURL(t *testing.T) {
+	// An empty DSN must fail fast, not run the retry ladder against PG* env
+	// defaults.
+	start := time.Now()
 	_, err := Connect("")
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "database URL is required")
+	assert.Less(t, time.Since(start), time.Second, "empty DSN must fail immediately")
 }
 
 func TestConnectRetryInvalidDSN(t *testing.T) {
@@ -169,7 +174,7 @@ func TestStartKeepAliveDoesNotPanic(t *testing.T) {
 	assert.NotPanics(t, func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		StartKeepAlive(ctx, db, 1, 1)
+		StartKeepAlive(ctx, db, time.Second, 1)
 	})
 }
 

@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -94,6 +95,14 @@ func Connect(databaseURL string, opts ...ConnectOption) (*sqlx.DB, error) {
 func ConnectContext(ctx context.Context, databaseURL string, opts ...ConnectOption) (*sqlx.DB, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+
+	// Reject an empty DSN up front. pgx.ParseConfig("") succeeds by falling back
+	// to PG* environment variables, so without this an empty URL would silently
+	// run the full retry+backoff ladder against whatever the environment points
+	// at (or nothing) before failing — slow and surprising.
+	if strings.TrimSpace(databaseURL) == "" {
+		return nil, fmt.Errorf("db: database URL is required")
 	}
 
 	cfg := ConnectConfig{

@@ -60,11 +60,16 @@ func TestHTML_rendersComponent(t *testing.T) {
 }
 
 func TestHTML_componentError(t *testing.T) {
-	c, _ := newTestContext(http.MethodGet, "/", nil)
+	c, w := newTestContext(http.MethodGet, "/", nil)
 	comp := &mockComponent{err: errors.New("render failed")}
 
 	err := HTML(c, http.StatusOK, comp)
-	assert.Error(t, err)
+	require.Error(t, err)
+	// On a render failure nothing must be committed — no body and no
+	// Content-Type header — so Echo's error handler can still send an error
+	// page instead of a truncated 200.
+	assert.Empty(t, w.Body.String())
+	assert.Empty(t, w.Header().Get("Content-Type"))
 }
 
 // ---------------------------------------------------------------------------

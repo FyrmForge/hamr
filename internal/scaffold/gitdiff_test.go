@@ -12,9 +12,12 @@ import (
 )
 
 // setupTestRepo creates a local git repo with two tagged commits for testing.
-// Returns the repo path. The repo has:
-//   - v0.1.0: initial commit with file.txt containing "hello"
-//   - v0.2.0: second commit with file.txt containing "hello world"
+// Files span the dependency surface (in scope) and hamr's internals (out of
+// scope) so the path-scoping of the upgrade diff can be asserted. Each marker
+// changes between v0.1.0 and v0.2.0.
+//
+//	in scope:  pkg/, internal/cli/generator/templates/, docs/, llmsdocs/
+//	out:       internal/devserver/ (hamr internals), *_test.go, file.txt (root)
 func setupTestRepo(t *testing.T) string {
 	t.Helper()
 
@@ -34,20 +37,34 @@ func setupTestRepo(t *testing.T) string {
 		require.NoError(t, err, "git %v failed: %s", args, out)
 	}
 
+	write := func(rel, content string) {
+		t.Helper()
+		p := filepath.Join(dir, rel)
+		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
+		require.NoError(t, os.WriteFile(p, []byte(content), 0o644))
+	}
+
+	commit := func(marker string) {
+		// In scope: libs, scaffold templates, docs, llms context.
+		write("pkg/lib.go", "package pkg\n\nconst V = \"PKG_"+marker+"\"\n")
+		write("internal/cli/generator/templates/site.tmpl", "TEMPLATE_"+marker+"\n")
+		write("docs/guide/x.md", "DOCS_"+marker+"\n")
+		write("llmsdocs/llms.txt", "LLMS_"+marker+"\n")
+		// Out of scope: hamr internals, tests, root files.
+		write("internal/devserver/tool.go", "package devserver\n\nconst T = \"INTERNAL_"+marker+"\"\n")
+		write("pkg/lib_test.go", "package pkg\n\n// TEST_"+marker+"\n")
+		write("file.txt", "ROOT_"+marker+"\n")
+		run("add", ".")
+		run("commit", "-m", "commit "+marker)
+	}
+
 	run("init")
 	run("config", "user.email", "test@test.com")
 	run("config", "user.name", "test")
 
-	// First commit + tag.
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "file.txt"), []byte("hello"), 0o644))
-	run("add", ".")
-	run("commit", "-m", "initial")
+	commit("V1")
 	run("tag", "v0.1.0")
-
-	// Second commit + tag.
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "file.txt"), []byte("hello world"), 0o644))
-	run("add", ".")
-	run("commit", "-m", "update")
+	commit("V2")
 	run("tag", "v0.2.0")
 
 	return dir
@@ -65,8 +82,26 @@ func TestGitDiff(t *testing.T) {
 
 		assert.Equal(t, "0.1.0", report.Project.BaseVersion)
 		assert.Equal(t, "0.2.0", report.Project.CurrentVersion)
-		assert.Contains(t, report.Diff, "hello world")
-		assert.Contains(t, report.DiffStat, "file.txt")
+		assert.Contains(t, report.Diff, "PKG_V2")
+		assert.Contains(t, report.DiffStat, "pkg/lib.go")
+	})
+
+	t.Run("scopes to the project surface (pkg + templates + docs + llmsdocs)", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		report, err := GitDiff(context.Background(), repo, "0.1.0", "0.2.0")
+		require.NoError(t, err)
+
+		// In scope: libs, scaffold templates, docs, and llms context the project
+		// carries and can upgrade.
+		assert.Contains(t, report.Diff, "PKG_V2")
+		assert.Contains(t, report.Diff, "TEMPLATE_V2")
+		assert.Contains(t, report.Diff, "DOCS_V2")
+		assert.Contains(t, report.Diff, "LLMS_V2")
+
+		// Out of scope: hamr's own internal tooling, tests, root files.
+		assert.NotContains(t, report.Diff, "INTERNAL_V2", "hamr internals must be excluded")
+		assert.NotContains(t, report.Diff, "TEST_V2", "tests must be excluded")
+		assert.NotContains(t, report.Diff, "ROOT_V2", "unrelated root files must be excluded")
 	})
 
 	t.Run("no diff when versions match", func(t *testing.T) {
@@ -99,7 +134,7 @@ func TestGitDiff(t *testing.T) {
 
 		assert.Equal(t, "0.1.0", report.Project.BaseVersion)
 		assert.Equal(t, "0.2.0", report.Project.CurrentVersion)
-		assert.Contains(t, report.Diff, "hello world")
+		assert.Contains(t, report.Diff, "PKG_V2")
 	})
 
 	t.Run("context cancellation", func(t *testing.T) {

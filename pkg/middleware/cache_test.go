@@ -66,7 +66,25 @@ func TestCacheControl_htmlPage(t *testing.T) {
 
 	err := handler(c)
 	require.NoError(t, err)
-	assert.Empty(t, rec.Header().Get("Cache-Control"))
+	// Dynamic responses default to not being cached.
+	assert.Equal(t, "no-store, private", rec.Header().Get("Cache-Control"))
+}
+
+func TestCacheControl_dynamicCachingOptOut(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := middleware.CacheControlWithConfig(middleware.CacheConfig{
+		AllowDynamicCaching: true,
+	})(func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	})
+
+	require.NoError(t, handler(c))
+	assert.Empty(t, rec.Header().Get("Cache-Control"),
+		"AllowDynamicCaching opts out of the no-store default")
 }
 
 func TestCacheControl_disableCaching(t *testing.T) {
@@ -127,9 +145,10 @@ func TestCacheControlWithConfig_customExtensions(t *testing.T) {
 	}{
 		{"/img/photo.avif", "public, max-age=31536000, immutable"},
 		{"/feed.xml", "public, max-age=86400"},
-		{"/static/logo.png", ""},  // .png not in custom immutable list
-		{"/static/app.css", ""},   // .css not in custom static list
-		{"/dashboard", ""},
+		// Not in the custom lists → treated as dynamic → secure no-store default.
+		{"/static/logo.png", "no-store, private"}, // .png not in custom immutable list
+		{"/static/app.css", "no-store, private"},  // .css not in custom static list
+		{"/dashboard", "no-store, private"},
 	}
 
 	for _, tt := range tests {

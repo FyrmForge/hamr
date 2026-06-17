@@ -35,4 +35,33 @@ func TestCSRF_defaultConfig(t *testing.T) {
 	}
 	require.NotNil(t, csrfCookie, "csrf cookie should be set on GET")
 	assert.NotEmpty(t, csrfCookie.Value)
+	// Unset SameSite must default to Lax, not be omitted (defense-in-depth).
+	assert.Equal(t, http.SameSiteLaxMode, csrfCookie.SameSite,
+		"default CSRF cookie must carry SameSite=Lax")
+}
+
+func TestCSRF_explicitSameSite(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := middleware.CSRFWithConfig(middleware.CSRFConfig{
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+	})(func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	})
+	require.NoError(t, handler(c))
+
+	var csrfCookie *http.Cookie
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == "csrf" {
+			csrfCookie = cookie
+			break
+		}
+	}
+	require.NotNil(t, csrfCookie)
+	assert.Equal(t, http.SameSiteStrictMode, csrfCookie.SameSite,
+		"explicit SameSite must be honored")
 }

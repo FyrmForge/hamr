@@ -306,10 +306,10 @@ func readSSEEvents(scanner *bufio.Scanner, count int) []sseEvent {
 			continue
 		}
 
-		if strings.HasPrefix(line, "event: ") {
-			current.typ = strings.TrimPrefix(line, "event: ")
-		} else if strings.HasPrefix(line, "data: ") {
-			current.data = strings.TrimPrefix(line, "data: ")
+		if after, ok := strings.CutPrefix(line, "event: "); ok {
+			current.typ = after
+		} else if after, ok := strings.CutPrefix(line, "data: "); ok {
+			current.data = after
 		}
 	}
 	return events

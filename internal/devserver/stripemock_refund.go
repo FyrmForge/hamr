@@ -108,7 +108,12 @@ func (m *StripeMock) createRefund(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	requestedAmount := getInt64(parsed, "amount")
+	requestedAmount, ok := getInt64(parsed, "amount")
+	if !ok {
+		writeStripeError(w, http.StatusBadRequest, "invalid_request_error",
+			"amount must be an integer")
+		return
+	}
 	reverseTransfer := getBool(parsed, "reverse_transfer")
 	refundAppFee := getBool(parsed, "refund_application_fee")
 
@@ -239,10 +244,7 @@ func (m *StripeMock) applyRefund(in refundInput) (*stripeRefund, *stripeCharge, 
 			// transfer's remaining unreversed balance. Real Stripe scales
 			// the reversal proportionally to the application fee split,
 			// but for dev the simpler 1:1 model is good enough.
-			reverseAmt := amount
-			if reverseAmt > tr.Amount-tr.AmountReversed {
-				reverseAmt = tr.Amount - tr.AmountReversed
-			}
+			reverseAmt := min(amount, tr.Amount-tr.AmountReversed)
 			tr.AmountReversed += reverseAmt
 		}
 	}

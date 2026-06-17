@@ -49,6 +49,9 @@ func (m *StripeMock) handlePaymentIntentPage(w http.ResponseWriter, r *http.Requ
 
 	m.mu.RLock()
 	pi, ok := m.paymentIntents[id]
+	if ok {
+		pi = clonePaymentIntent(pi)
+	}
 	m.mu.RUnlock()
 	if !ok {
 		http.Error(w, "payment_intent not found", http.StatusNotFound)
@@ -145,6 +148,7 @@ func (m *StripeMock) handlePaymentIntentComplete(w http.ResponseWriter, r *http.
 	var fires []webhookFire
 
 	if outcome == "succeed" {
+		pi.Failed = false // a prior decline is cleared once the PI succeeds
 		ch := &stripeCharge{
 			ID:                   "ch_test_" + randomHex(24),
 			Amount:               pi.Amount,
@@ -187,20 +191,23 @@ func (m *StripeMock) handlePaymentIntentComplete(w http.ResponseWriter, r *http.
 			ch.TransferID = tr.ID
 
 			fires = append(fires,
-				webhookFire{rule.primaryEvt, m.serializePaymentIntent(pi)},
+				webhookFire{rule.primaryEvt, m.serializePaymentIntent(pi, ch)},
 				webhookFire{"charge.succeeded", m.serializeCharge(ch)},
 				webhookFire{"transfer.created", m.serializeTransfer(tr)},
 			)
 		} else {
 			fires = append(fires,
-				webhookFire{rule.primaryEvt, m.serializePaymentIntent(pi)},
+				webhookFire{rule.primaryEvt, m.serializePaymentIntent(pi, ch)},
 				webhookFire{"charge.succeeded", m.serializeCharge(ch)},
 			)
 		}
 	} else {
 		// Fail path: just fire the PI failed event. No Charge is created in
 		// real Stripe for a sync card decline, so don't synthesise one here.
-		fires = append(fires, webhookFire{rule.primaryEvt, m.serializePaymentIntent(pi)})
+		// Mark the PI failed so the dashboard can tell this declined PI apart
+		// from a never-attempted one (both sit at requires_payment_method).
+		pi.Failed = true
+		fires = append(fires, webhookFire{rule.primaryEvt, m.serializePaymentIntent(pi, nil)})
 	}
 	m.persist()
 	m.mu.Unlock()

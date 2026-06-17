@@ -224,9 +224,16 @@ func (h *harness) startServer() {
 	h.srvCmd.Stderr = &testWriter{h.t}
 	require.NoError(h.t, h.srvCmd.Start())
 
-	// Monitor for early exit so waitHealthy can fail fast.
+	// Monitor for early exit so waitHealthy can fail fast. Buffered + closed
+	// after the send so BOTH waitHealthy (early-exit path) and Cleanup can
+	// receive without one stealing the other's value: whoever reads second gets
+	// the zero value from the closed channel instead of blocking forever (which
+	// would hang the test until the 10-minute panic, burying the real failure).
 	h.exited = make(chan error, 1)
-	go func() { h.exited <- h.srvCmd.Wait() }()
+	go func() {
+		h.exited <- h.srvCmd.Wait()
+		close(h.exited)
+	}()
 
 	h.t.Cleanup(func() {
 		_ = h.srvCmd.Process.Kill()

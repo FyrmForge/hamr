@@ -83,6 +83,12 @@ func decodePHC(encoded string) (HashConfig, []byte, []byte, error) {
 	if _, err := fmt.Sscanf(parts[2], "v=%d", &version); err != nil {
 		return HashConfig{}, nil, nil, fmt.Errorf("auth: parsing version: %w", err)
 	}
+	// Reject hashes from a different Argon2 version — verifying them with the
+	// current implementation would silently produce a wrong (and possibly
+	// accepting) result.
+	if version != argon2.Version {
+		return HashConfig{}, nil, nil, fmt.Errorf("auth: unsupported argon2 version %d (expected %d)", version, argon2.Version)
+	}
 
 	var cfg HashConfig
 	if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &cfg.Memory, &cfg.Time, &cfg.Parallelism); err != nil {
@@ -117,7 +123,8 @@ func NeedsRehash(encodedHash string) (bool, error) {
 	return cfg.Time != DefaultHashConfig.Time ||
 		cfg.Memory != DefaultHashConfig.Memory ||
 		cfg.Parallelism != DefaultHashConfig.Parallelism ||
-		cfg.KeyLength != DefaultHashConfig.KeyLength, nil
+		cfg.KeyLength != DefaultHashConfig.KeyLength ||
+		cfg.SaltLength != DefaultHashConfig.SaltLength, nil
 }
 
 // GenerateToken returns a 32-byte cryptographically-secure random token

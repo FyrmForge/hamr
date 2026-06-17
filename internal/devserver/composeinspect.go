@@ -140,7 +140,7 @@ func decodeComposePS(raw []byte) ([]composePSEntry, error) {
 		return entries, nil
 	}
 	var entries []composePSEntry
-	for _, line := range bytes.Split(raw, []byte("\n")) {
+	for line := range bytes.SplitSeq(raw, []byte("\n")) {
 		line = bytes.TrimSpace(line)
 		if len(line) == 0 {
 			continue
@@ -303,10 +303,10 @@ func stateShiftsForServices(services []composeService, publishers []composeStack
 //     ascending PublishedPort), iff the leftover counts match. This
 //     handles two edge cases without bloating the call site:
 //     - exotic compose files publishing the same container port to
-//       multiple host ports (container-collision ambiguity);
+//     multiple host ports (container-collision ambiguity);
 //     - older compose ps output where TargetPort may be unreliable or
-//       0 (the only-binding-only-publisher service degrades into a
-//       1-vs-1 sort pairing).
+//     0 (the only-binding-only-publisher service degrades into a
+//     1-vs-1 sort pairing).
 //
 // Bindings whose HostPort is 0 (random/dynamic) are excluded from
 // pairing entirely — there's no declared baseline to diff against.

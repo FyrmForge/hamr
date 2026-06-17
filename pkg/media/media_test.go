@@ -330,6 +330,17 @@ func TestDetectType_Unknown(t *testing.T) {
 	assert.ErrorIs(t, err, ErrUnknownType)
 }
 
+func TestDetectType_IgnoresSpoofedContentTypeHeader(t *testing.T) {
+	// Content sniffs as non-media, but the (attacker-controlled) multipart
+	// Content-Type header claims image/jpeg. DetectType must sniff, not trust
+	// the header — otherwise it disagrees with the sniff-only upload gate.
+	fh := fakeMultipartFile(t, "evil.jpg", "image/jpeg", []byte("this is plain text, not an image"))
+
+	_, _, err := DetectType(fh)
+	assert.ErrorIs(t, err, ErrUnknownType,
+		"DetectType must not trust the spoofable Content-Type header")
+}
+
 // ---------------------------------------------------------------------------
 // ImageRef tests
 // ---------------------------------------------------------------------------
@@ -611,7 +622,7 @@ func TestImageStore_GetMedia(t *testing.T) {
 
 func TestDetectMIME_JPEG(t *testing.T) {
 	data := testJPEG(t, 10, 10)
-	mime, buf, err := detectMIME(bytes.NewReader(data))
+	mime, buf, err := detectMIME(bytes.NewReader(data), 0)
 	require.NoError(t, err)
 	assert.Equal(t, "image/jpeg", mime)
 	assert.Equal(t, data, buf)
@@ -619,7 +630,7 @@ func TestDetectMIME_JPEG(t *testing.T) {
 
 func TestDetectMIME_PNG(t *testing.T) {
 	data := testPNG(t, 10, 10)
-	mime, buf, err := detectMIME(bytes.NewReader(data))
+	mime, buf, err := detectMIME(bytes.NewReader(data), 0)
 	require.NoError(t, err)
 	assert.Equal(t, "image/png", mime)
 	assert.Equal(t, data, buf)

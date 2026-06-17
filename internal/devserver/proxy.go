@@ -215,15 +215,25 @@ func injectReloadScript(resp *http.Response) error {
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxInjectBody+1))
-	_ = resp.Body.Close()
 	if err != nil {
+		_ = resp.Body.Close()
 		return err
 	}
 	if int64(len(body)) > maxInjectBody {
-		// Larger than advertised — send original bytes through without injection.
-		resp.Body = io.NopCloser(bytes.NewReader(body))
+		// Larger than we're willing to buffer for injection. Stream the original
+		// response through UNTOUCHED: the prefix we already read, followed by the
+		// rest of the still-open body. Closing resp.Body here (and serving only
+		// the prefix) would silently truncate the page — instead keep it open and
+		// let the proxy drain + close it.
+		orig := resp.Body
+		resp.Body = struct {
+			io.Reader
+			io.Closer
+		}{io.MultiReader(bytes.NewReader(body), orig), orig}
 		return nil
 	}
+	// Fully buffered (<= maxInjectBody, EOF reached) — safe to close now.
+	_ = resp.Body.Close()
 
 	// Find </body> and inject script before it.
 	lower := bytes.ToLower(body)

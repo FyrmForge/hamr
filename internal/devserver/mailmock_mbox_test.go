@@ -382,7 +382,7 @@ func TestMailMock_LoadDropsOverCapAndRewrites(t *testing.T) {
 		MaxMessageBytes: 64 * 1024,
 		PersistPath:     path,
 	})
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		seed.append(&mailMessage{
 			ID:         "m" + string(rune('a'+i)),
 			ReceivedAt: time.Now().Add(time.Duration(i) * time.Second),
@@ -402,11 +402,17 @@ func TestMailMock_LoadDropsOverCapAndRewrites(t *testing.T) {
 	assert.Equal(t, "me", list[0].ID)
 	assert.Equal(t, "md", list[1].ID)
 
-	// File must have been rewritten to match.
-	raw, _ := os.ReadFile(path)
-	assert.NotContains(t, string(raw), "msg_ma")
-	assert.NotContains(t, string(raw), "msg_mb")
-	assert.NotContains(t, string(raw), "msg_mc")
+	// File must have been rewritten to match: the three evicted messages are
+	// gone and the two newest survive. Assert against the real header form
+	// (`X-Hamr-Id: <id>`) so the check actually exercises the stored IDs.
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	body := string(raw)
+	assert.NotContains(t, body, xHamrID+": ma")
+	assert.NotContains(t, body, xHamrID+": mb")
+	assert.NotContains(t, body, xHamrID+": mc")
+	assert.Contains(t, body, xHamrID+": md")
+	assert.Contains(t, body, xHamrID+": me")
 }
 
 func TestMailMock_PersistErrorIsReportedNotFatal(t *testing.T) {
@@ -489,4 +495,28 @@ func TestMbox_SeparatorBetweenMessages(t *testing.T) {
 		leadingFrom = 1
 	}
 	assert.Equal(t, 2, count+leadingFrom)
+}
+
+func TestMBoxEscapeRoundTrip(t *testing.T) {
+	cases := []string{
+		"From here we go",
+		">From an already-quoted line", // the corruption case before the fix
+		">>From a double-quoted line",
+		"normal\nFrom the start\n>From quoted\n>>From deep\nend",
+	}
+	for _, body := range cases {
+		esc := escapeMBoxBody(body)
+		got := strings.TrimRight(string(unescapeMBox([]byte(esc))), "\n")
+		want := strings.TrimRight(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
+		assert.Equal(t, want, got, "MBOXO escaping must round-trip for %q", body)
+	}
+}
+
+func TestValidHeaderName(t *testing.T) {
+	assert.True(t, validHeaderName("X-Custom"))
+	assert.True(t, validHeaderName("List-Unsubscribe"))
+	assert.False(t, validHeaderName(""))
+	assert.False(t, validHeaderName("Subject\r\nX-Hamr-Status")) // CRLF injection
+	assert.False(t, validHeaderName("Has Space"))
+	assert.False(t, validHeaderName("Colon:In:Name"))
 }

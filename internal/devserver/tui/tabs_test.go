@@ -29,6 +29,45 @@ func TestModel_CycleTabHamrOnly_NoOp(t *testing.T) {
 	}
 }
 
+// TestModel_SetDockerTabs_ReorderFollowsActiveByName guards the reorder bug:
+// the active stack must follow its name to the new index (not stay pinned to a
+// now-different stack), and a selection on that stack must survive.
+func TestModel_SetDockerTabs_ReorderFollowsActiveByName(t *testing.T) {
+	m := newModelForTabs("a", "b", "c")
+	m.viewMode = 2 // tab "b"
+	m.activeSelection().clickPlain(0)
+	if !m.selection.hasAny() {
+		t.Fatal("setup: expected an active selection")
+	}
+
+	m.setDockerTabs([]string{"a", "c", "b"}) // "b" moves to index 2 → mode 3
+
+	if m.viewMode != 3 {
+		t.Fatalf("active tab b should follow to mode 3, got %d", m.viewMode)
+	}
+	if !m.selection.hasAny() {
+		t.Fatal("selection on the same stack must survive a reorder")
+	}
+}
+
+// TestModel_SetDockerTabs_RemovedActiveResetsAndClearsSelection covers the
+// other branch: when the active stack is gone, fall back to hamr and drop the
+// stale selection.
+func TestModel_SetDockerTabs_RemovedActiveResetsAndClearsSelection(t *testing.T) {
+	m := newModelForTabs("a", "b", "c")
+	m.viewMode = 2 // tab "b"
+	m.activeSelection().clickPlain(0)
+
+	m.setDockerTabs([]string{"a", "c"}) // "b" removed
+
+	if m.viewMode != 0 {
+		t.Fatalf("removed active tab should reset to hamr (mode 0), got %d", m.viewMode)
+	}
+	if m.selection.hasAny() {
+		t.Fatal("selection must be cleared when its stack is removed")
+	}
+}
+
 func TestModel_CycleTabForwardWraps(t *testing.T) {
 	m := newModelForTabs("infra", "stripe")
 	steps := []int{1, 2, 0, 1, 2, 0}

@@ -63,6 +63,11 @@ Each task gets its own cron schedule. `AddTask` returns the Janitor for chaining
 `Start` validates configuration, registers tasks with the cron scheduler, and starts it.
 Cancelling the context stops the scheduler.
 
+`Stop` cancels the scheduler and **blocks until in-flight tasks return** (both
+scheduled and `WithRunImmediately` runs), so it's safe to close shared resources
+like the DB right after. A task never runs concurrently with itself — an
+immediate run won't overlap the first scheduled tick.
+
 ## Schedule Expressions
 
 Standard cron format and robfig/cron descriptors are supported:

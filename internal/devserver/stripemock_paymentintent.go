@@ -1,6 +1,7 @@
 package devserver
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -44,6 +45,15 @@ type stripePaymentIntent struct {
 	ClientSecret            string            `json:"client_secret"`
 	Created                 time.Time         `json:"created"`
 	Metadata                map[string]string `json:"metadata,omitempty"`
+	// Failed records that a confirmation attempt was declined (status falls back
+	// to requires_payment_method, which is otherwise indistinguishable from a
+	// freshly-created, never-attempted PI). The dashboard uses it to decide
+	// whether resending payment_intent.payment_failed is meaningful.
+	Failed bool `json:"failed,omitempty"`
+	// AmountReceived is the amount actually captured. For a full capture it
+	// equals Amount; a partial manual capture sets it lower. Zero until the PI
+	// succeeds.
+	AmountReceived int64 `json:"amount_received,omitempty"`
 }
 
 // registerPaymentIntentRoutes mounts PI endpoints. Called from
@@ -86,6 +96,8 @@ func (m *StripeMock) handlePaymentIntentByID(w http.ResponseWriter, r *http.Requ
 		m.retrievePaymentIntent(w, id)
 	case action == "confirm" && r.Method == http.MethodPost:
 		m.confirmPaymentIntent(w, r, id)
+	case action == "capture" && r.Method == http.MethodPost:
+		m.capturePaymentIntent(w, r, id)
 	default:
 		writeStripeError(w, http.StatusMethodNotAllowed, "invalid_request_error",
 			fmt.Sprintf("method %s not allowed on /v1/payment_intents/%s/%s", r.Method, id, action))
@@ -134,23 +146,35 @@ func (m *StripeMock) createPaymentIntent(w http.ResponseWriter, r *http.Request)
 
 	m.mu.Lock()
 	m.paymentIntents[pi.ID] = pi
+	piCopy := clonePaymentIntent(pi)
 	m.persist()
 	m.mu.Unlock()
 
-	writeStripeJSON(w, http.StatusOK, m.serializePaymentIntent(pi))
+	// New PI has no charge yet (LatestChargeID empty), so ch is nil.
+	writeStripeJSON(w, http.StatusOK, m.serializePaymentIntent(piCopy, nil))
 }
 
 // retrievePaymentIntent serves GET /v1/payment_intents/{id}.
 func (m *StripeMock) retrievePaymentIntent(w http.ResponseWriter, id string) {
 	m.mu.RLock()
 	pi, ok := m.paymentIntents[id]
+	var piCopy *stripePaymentIntent
+	var chCopy *stripeCharge
+	if ok {
+		piCopy = clonePaymentIntent(pi)
+		if pi.LatestChargeID != "" {
+			if ch, ok := m.charges[pi.LatestChargeID]; ok {
+				chCopy = cloneCharge(ch)
+			}
+		}
+	}
 	m.mu.RUnlock()
 	if !ok {
 		writeStripeError(w, http.StatusNotFound, "invalid_request_error",
 			fmt.Sprintf("No such payment_intent: '%s'", id))
 		return
 	}
-	writeStripeJSON(w, http.StatusOK, m.serializePaymentIntent(pi))
+	writeStripeJSON(w, http.StatusOK, m.serializePaymentIntent(piCopy, chCopy))
 }
 
 // confirmPaymentIntent moves the PI from requires_confirmation → either
@@ -198,30 +222,149 @@ func (m *StripeMock) confirmPaymentIntent(w http.ResponseWriter, r *http.Request
 		// `pi.Status == "requires_action"` to show an SCA modal.
 		pi.Status = "processing"
 	}
+	piCopy := clonePaymentIntent(pi)
 	m.persist()
 	m.mu.Unlock()
 
-	m.mu.RLock()
-	out := m.serializePaymentIntent(pi)
-	m.mu.RUnlock()
-	writeStripeJSON(w, http.StatusOK, out)
+	// Confirm never creates a charge (LatestChargeID still empty here), and
+	// cloning under the lock above closes the previous TOCTOU window between
+	// the mutation and the response serialization.
+	writeStripeJSON(w, http.StatusOK, m.serializePaymentIntent(piCopy, nil))
+}
+
+// capturePaymentIntent captures a manual-capture PI sitting in
+// requires_capture: it creates the Charge (and destination Transfer, if any),
+// advances the PI to succeeded, and fires payment_intent.succeeded +
+// charge.succeeded (+ transfer.created). Supports partial capture via
+// amount_to_capture. Mirrors POST /v1/payment_intents/{id}/capture, which an
+// app calls after authorizing now and capturing later.
+func (m *StripeMock) capturePaymentIntent(w http.ResponseWriter, r *http.Request, id string) {
+	parsed, ok := readStripeForm(w, r)
+	if !ok {
+		return
+	}
+
+	m.mu.Lock()
+	pi, exists := m.paymentIntents[id]
+	if !exists {
+		m.mu.Unlock()
+		writeStripeError(w, http.StatusNotFound, "invalid_request_error",
+			fmt.Sprintf("No such payment_intent: '%s'", id))
+		return
+	}
+	if pi.Status != "requires_capture" {
+		m.mu.Unlock()
+		writeStripeError(w, http.StatusBadRequest, "invalid_request_error",
+			fmt.Sprintf("PaymentIntent status is %s; only requires_capture can be captured", pi.Status))
+		return
+	}
+
+	captureAmount := pi.Amount
+	if v, ok := getInt64(parsed, "amount_to_capture"); ok && v > 0 {
+		if v > pi.Amount {
+			m.mu.Unlock()
+			writeStripeError(w, http.StatusBadRequest, "invalid_request_error",
+				fmt.Sprintf("amount_to_capture (%d) cannot exceed the authorized amount (%d)", v, pi.Amount))
+			return
+		}
+		captureAmount = v
+	}
+
+	now := time.Now()
+	ch := &stripeCharge{
+		ID:                   "ch_test_" + randomHex(24),
+		Amount:               pi.Amount,
+		AmountCaptured:       captureAmount,
+		Currency:             pi.Currency,
+		Status:               "succeeded",
+		Paid:                 true,
+		Captured:             true,
+		PaymentIntentID:      pi.ID,
+		PaymentMethod:        pi.PaymentMethod,
+		ApplicationFeeAmount: pi.ApplicationFeeAmount,
+		Destination:          pi.TransferDataDestination,
+		Description:          pi.Description,
+		ReceiptEmail:         pi.ReceiptEmail,
+		Customer:             pi.Customer,
+		Created:              now,
+		Metadata:             pi.Metadata,
+	}
+	m.charges[ch.ID] = ch
+	pi.Status = "succeeded"
+	pi.LatestChargeID = ch.ID
+	pi.AmountReceived = captureAmount
+
+	type webhookFire struct {
+		eventType string
+		object    map[string]any
+	}
+	fires := []webhookFire{
+		{"payment_intent.succeeded", m.serializePaymentIntent(pi, ch)},
+		{"charge.succeeded", m.serializeCharge(ch)},
+	}
+	// Destination-charge cascade: transfer the captured amount (minus the
+	// application fee) to the connected account, unless transfer_data.amount
+	// overrides it.
+	if pi.TransferDataDestination != "" {
+		amt := pi.TransferDataAmount
+		if amt == 0 {
+			// A partial capture can be smaller than the application fee, which
+			// would make the default transfer negative — clamp to 0 (real Stripe
+			// never emits a negative transfer).
+			amt = max(captureAmount-pi.ApplicationFeeAmount, 0)
+		}
+		tr := &stripeTransfer{
+			ID:                  "tr_test_" + randomHex(24),
+			Amount:              amt,
+			Currency:            pi.Currency,
+			Destination:         pi.TransferDataDestination,
+			SourceTransactionID: ch.ID,
+			Created:             now,
+		}
+		m.transfers[tr.ID] = tr
+		pi.TransferID = tr.ID
+		ch.TransferID = tr.ID
+		fires = append(fires, webhookFire{"transfer.created", m.serializeTransfer(tr)})
+	}
+
+	piCopy := clonePaymentIntent(pi)
+	chCopy := cloneCharge(ch)
+	m.persist()
+	m.mu.Unlock()
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		for _, f := range fires {
+			if err := m.FireEvent(ctx, f.eventType, f.object); err != nil {
+				m.logger.Warn("webhook delivery failed",
+					"payment_intent", id, "event_type", f.eventType, "err", err)
+			}
+		}
+	}()
+
+	writeStripeJSON(w, http.StatusOK, m.serializePaymentIntent(piCopy, chCopy))
 }
 
 // buildPaymentIntentFromParams projects the decoded params into the mock's
 // internal shape with Stripe-equivalent validation.
 func buildPaymentIntentFromParams(p map[string]any) (*stripePaymentIntent, error) {
-	amount := getInt64(p, "amount")
-	if amount <= 0 {
+	amount, ok := getInt64(p, "amount")
+	if !ok || amount <= 0 {
 		return nil, errors.New("amount must be a positive integer")
 	}
 	currency := strings.ToLower(getString(p, "currency"))
 	if currency == "" {
 		return nil, errors.New("currency is required")
 	}
+	appFee, ok := getInt64(p, "application_fee_amount")
+	if !ok {
+		return nil, errors.New("application_fee_amount must be an integer")
+	}
 	pi := &stripePaymentIntent{
 		Amount:               amount,
 		Currency:             currency,
-		ApplicationFeeAmount: getInt64(p, "application_fee_amount"),
+		ApplicationFeeAmount: appFee,
 		OnBehalfOf:           getString(p, "on_behalf_of"),
 		Description:          getString(p, "description"),
 		StatementDescriptor:  getString(p, "statement_descriptor"),
@@ -234,7 +377,11 @@ func buildPaymentIntentFromParams(p map[string]any) (*stripePaymentIntent, error
 	}
 	if td, ok := p["transfer_data"].(map[string]any); ok {
 		pi.TransferDataDestination = getString(td, "destination")
-		pi.TransferDataAmount = getInt64(td, "amount")
+		// Invalid transfer_data.amount falls through to 0 ("entire amount minus
+		// fee" default) rather than erroring — it's a best-effort dev mock field.
+		if v, ok := getInt64(td, "amount"); ok {
+			pi.TransferDataAmount = v
+		}
 	}
 	if pi.ApplicationFeeAmount < 0 {
 		return nil, errors.New("application_fee_amount must be non-negative")
@@ -246,18 +393,20 @@ func buildPaymentIntentFromParams(p map[string]any) (*stripePaymentIntent, error
 }
 
 // serializePaymentIntent renders the JSON wire shape stripe-go expects.
-// LatestCharge is rendered as an inline charge object when available so a
+// LatestCharge is rendered as an inline charge object when ch is non-nil so a
 // single PI retrieve gives the app everything it needs to update its state.
 //
-// Caller must hold m.mu (RLock or Lock) when LatestChargeID is non-empty,
-// because this method calls into m.charges.
-func (m *StripeMock) serializePaymentIntent(pi *stripePaymentIntent) map[string]any {
+// Contract: pi (and ch) must be lock-stable — either hold m.mu across the
+// call or pass a clone (see stripemock_clone.go). This method reads only its
+// arguments; the caller is responsible for resolving the charge from m.charges
+// under the lock and passing it in (nil when there is no charge).
+func (m *StripeMock) serializePaymentIntent(pi *stripePaymentIntent, ch *stripeCharge) map[string]any {
 	out := map[string]any{
 		"id":                     pi.ID,
 		"object":                 "payment_intent",
 		"amount":                 pi.Amount,
 		"amount_capturable":      int64(0),
-		"amount_received":        int64(0),
+		"amount_received":        pi.AmountReceived,
 		"application_fee_amount": pi.ApplicationFeeAmount,
 		"capture_method":         pi.CaptureMethod,
 		"client_secret":          pi.ClientSecret,
@@ -273,8 +422,18 @@ func (m *StripeMock) serializePaymentIntent(pi *stripePaymentIntent) map[string]
 		"statement_descriptor":   nullableString(pi.StatementDescriptor),
 		"status":                 pi.Status,
 	}
+	if pi.Status == "requires_capture" {
+		// The full authorized amount is available to capture.
+		out["amount_capturable"] = pi.Amount
+	}
 	if pi.Status == "succeeded" {
-		out["amount_received"] = pi.Amount
+		// Captured amount: AmountReceived for an explicit (possibly partial)
+		// capture, else the full amount for an auto-captured success.
+		if pi.AmountReceived > 0 {
+			out["amount_received"] = pi.AmountReceived
+		} else {
+			out["amount_received"] = pi.Amount
+		}
 	}
 	if pi.Metadata != nil {
 		out["metadata"] = pi.Metadata
@@ -291,7 +450,7 @@ func (m *StripeMock) serializePaymentIntent(pi *stripePaymentIntent) map[string]
 		out["transfer_data"] = td
 	}
 	if pi.LatestChargeID != "" {
-		if ch, ok := m.charges[pi.LatestChargeID]; ok {
+		if ch != nil {
 			out["latest_charge"] = m.serializeCharge(ch)
 		} else {
 			out["latest_charge"] = pi.LatestChargeID

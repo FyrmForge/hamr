@@ -65,11 +65,11 @@ func parseGoMod(path string) (module, goVersion string, err error) {
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, "module ") {
-			module = strings.TrimPrefix(line, "module ")
+		if after, ok := strings.CutPrefix(line, "module "); ok {
+			module = after
 		}
-		if strings.HasPrefix(line, "go ") {
-			goVersion = strings.TrimPrefix(line, "go ")
+		if after, ok := strings.CutPrefix(line, "go "); ok {
+			goVersion = after
 		}
 	}
 	if err := scanner.Err(); err != nil {

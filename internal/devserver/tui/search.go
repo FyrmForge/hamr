@@ -141,7 +141,7 @@ func (s *searchState) commit(buffer []string) {
 	}
 	s.stage = searchActive
 	if buffer != nil {
-		s.recompute(buffer)
+		s.recompute(buffer, 0)
 	}
 }
 
@@ -150,11 +150,17 @@ func (s *searchState) commit(buffer []string) {
 // cursor always resets to 0 (incremental search shows the first hit);
 // while active it sticks to the same prior match where possible so
 // new log lines arriving don't yank the user mid-navigation.
-func (s *searchState) recompute(buffer []string) {
+// evicted is the number of lines the bounded buffer trimmed from its head
+// since the last recompute. Match line indices shift down by that amount, so
+// the prior anchor is realigned before we look for it — otherwise re-anchoring
+// by (line, start) fails on every append at capacity and the cursor snaps back
+// to match 0.
+func (s *searchState) recompute(buffer []string, evicted int) {
 	if s.stage == searchClosed {
 		return
 	}
 	prev := s.currentMatch()
+	prev.line -= evicted
 	s.matches = findMatches(buffer, s.query)
 	if len(s.matches) == 0 {
 		s.cursor = 0
@@ -164,10 +170,7 @@ func (s *searchState) recompute(buffer []string) {
 		s.cursor = 0
 		return
 	}
-	s.cursor = indexOfMatch(s.matches, prev)
-	if s.cursor < 0 {
-		s.cursor = 0
-	}
+	s.cursor = max(indexOfMatch(s.matches, prev), 0)
 }
 
 // next advances the cursor to the next match, wrapping at the end.
@@ -212,7 +215,7 @@ func findMatches(buffer []string, needle string) []searchMatch {
 	nlen := len(lneedle)
 	var out []searchMatch
 	for i, line := range buffer {
-		ll := strings.ToLower(line)
+		ll, origAt := lowerWithOffsets(line)
 		off := 0
 		for {
 			idx := strings.Index(ll[off:], lneedle)
@@ -220,14 +223,38 @@ func findMatches(buffer []string, needle string) []searchMatch {
 				break
 			}
 			start := off + idx
-			out = append(out, searchMatch{line: i, start: start, end: start + nlen})
-			off = start + nlen
+			end := start + nlen
+			// origAt translates lower-copy byte offsets back to the original
+			// line so highlight rendering slices the right bytes.
+			out = append(out, searchMatch{line: i, start: origAt[start], end: origAt[end]})
+			off = end
 			if off > len(ll) {
 				break
 			}
 		}
 	}
 	return out
+}
+
+// lowerWithOffsets returns the lower-cased form of s plus a table mapping each
+// byte offset in the lower-cased string back to the byte offset of the rune it
+// came from in the ORIGINAL s. Some runes change byte length when lower-cased
+// (İ 2→1, ẞ 3→2, Ⱥ 2→3), so an offset computed against the lower-cased copy
+// must be translated before slicing the original. origAt has len(lower)+1
+// entries; the final entry is len(s) so an exclusive end offset maps cleanly.
+func lowerWithOffsets(s string) (string, []int) {
+	var b strings.Builder
+	b.Grow(len(s))
+	origAt := make([]int, 0, len(s)+1)
+	for i, r := range s {
+		lr := strings.ToLower(string(r))
+		for range len(lr) { // one entry per byte of the lower-cased rune
+			origAt = append(origAt, i)
+		}
+		b.WriteString(lr)
+	}
+	origAt = append(origAt, len(s))
+	return b.String(), origAt
 }
 
 // indexOfMatch returns the position of m in matches, or -1 if absent.

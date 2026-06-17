@@ -100,6 +100,55 @@ func TestStripeMock_Complete_PaidFiresWebhookAndRedirects(t *testing.T) {
 	assert.Equal(t, "paid", stored.PaymentStatus)
 }
 
+// TestStripeMock_Complete_PaidCreatesRetrievablePaymentIntentAndCharge guards
+// the dangling-checkout-PI fix: a paid session must materialise the
+// PaymentIntent (whose id the session advertised) plus its Charge, and fire
+// payment_intent.succeeded + charge.succeeded — so the app can retrieve the PI
+// and refund the checkout payment, not just receive checkout.session.completed.
+func TestStripeMock_Complete_PaidCreatesRetrievablePaymentIntentAndCharge(t *testing.T) {
+	const secret = "whsec_test_devmock"
+	app := newWebhookSink(t, secret)
+
+	mock, _, _ := newFullStripeStack(t, "")
+	mock.SetWebhookEndpoint(WebhookEndpoint{URL: app.URL, Secret: secret})
+
+	sessID := createTestSession(t, mock, []stripe.LineItem{
+		{Description: "Item", AmountTotal: 1500, Quantity: 1, Currency: "gbp"},
+	})
+
+	mock.mu.RLock()
+	piID := mock.sessions[sessID].PaymentIntentID
+	mock.mu.RUnlock()
+	require.NotEmpty(t, piID)
+
+	resp := postComplete(t, mock, sessID, "paid")
+	resp.Body.Close() //nolint:errcheck
+	assert.Equal(t, http.StatusSeeOther, resp.StatusCode)
+
+	// Events fire in order: completed, payment_intent.succeeded, charge.succeeded.
+	e1 := app.Wait(t, 2*time.Second)
+	e2 := app.Wait(t, 2*time.Second)
+	e3 := app.Wait(t, 2*time.Second)
+	assert.Equal(t, "checkout.session.completed", string(e1.Type))
+	assert.Equal(t, "payment_intent.succeeded", string(e2.Type))
+	assert.Equal(t, "charge.succeeded", string(e3.Type))
+
+	// The PaymentIntent + Charge now exist and are retrievable.
+	mock.mu.RLock()
+	pi, okPI := mock.paymentIntents[piID]
+	var ch *stripeCharge
+	if okPI {
+		ch = mock.charges[pi.LatestChargeID]
+	}
+	mock.mu.RUnlock()
+	require.True(t, okPI, "checkout paid must create the PaymentIntent the session advertised")
+	assert.Equal(t, "succeeded", pi.Status)
+	assert.Equal(t, int64(1500), pi.Amount)
+	require.NotNil(t, ch, "checkout paid must create a Charge so the payment can be refunded")
+	assert.Equal(t, int64(1500), ch.Amount)
+	assert.Equal(t, piID, ch.PaymentIntentID)
+}
+
 // TestStripeMock_Complete_CancelledFiresExpiredAndRedirectsToCancelURL
 // asserts the cancel button's mapping: status=expired, event=expired,
 // redirect to cancel_url.
@@ -122,8 +171,10 @@ func TestStripeMock_Complete_CancelledFiresExpiredAndRedirectsToCancelURL(t *tes
 	assert.Equal(t, "checkout.session.expired", string(evt.Type))
 }
 
-// TestStripeMock_Complete_FailedFiresPaymentFailed covers the third button.
-func TestStripeMock_Complete_FailedFiresPaymentFailed(t *testing.T) {
+// TestStripeMock_Complete_FailedIsSyncDeclineLeavesSessionOpen covers the
+// "Card Declined" button. A synchronous decline leaves the session open (so the
+// buyer can retry), fires NO webhook, and redirects back to the checkout page.
+func TestStripeMock_Complete_FailedIsSyncDeclineLeavesSessionOpen(t *testing.T) {
 	const secret = "whsec_test_devmock"
 	app := newWebhookSink(t, secret)
 
@@ -136,10 +187,18 @@ func TestStripeMock_Complete_FailedFiresPaymentFailed(t *testing.T) {
 	resp := postComplete(t, mock, sessID, "failed")
 	defer resp.Body.Close() //nolint:errcheck
 	assert.Equal(t, http.StatusSeeOther, resp.StatusCode)
-	assert.Equal(t, "https://app.example/cancel", resp.Header.Get("Location"))
+	assert.Equal(t, "/__hamr/stripe/checkout?session="+sessID, resp.Header.Get("Location"))
 
-	evt := app.Wait(t, 2*time.Second)
-	assert.Equal(t, "checkout.session.async_payment_failed", string(evt.Type))
+	// Session must remain open for a retry.
+	mock.mu.RLock()
+	stored := mock.sessions[sessID]
+	mock.mu.RUnlock()
+	assert.Equal(t, "open", stored.Status)
+	assert.Equal(t, "unpaid", stored.PaymentStatus)
+
+	// No webhook should fire for a synchronous decline.
+	time.Sleep(150 * time.Millisecond)
+	assert.Equal(t, 0, app.Count(), "sync card decline must not fire a webhook")
 }
 
 // TestStripeMock_Complete_DoubleSubmitGuardedByConflict ensures clicking
@@ -159,17 +218,23 @@ func TestStripeMock_Complete_DoubleSubmitGuardedByConflict(t *testing.T) {
 	resp1.Body.Close() //nolint:errcheck
 	assert.Equal(t, http.StatusSeeOther, resp1.StatusCode)
 
-	app.Wait(t, 2*time.Second) // first webhook delivered
+	// A paid session fires three events: checkout.session.completed,
+	// payment_intent.succeeded, charge.succeeded.
+	app.Wait(t, 2*time.Second)
+	app.Wait(t, 2*time.Second)
+	app.Wait(t, 2*time.Second)
+	time.Sleep(100 * time.Millisecond)
+	firstCount := app.Count()
+	assert.Equal(t, 3, firstCount, "paid fires session.completed + payment_intent.succeeded + charge.succeeded")
 
 	resp2 := postComplete(t, mock, sessID, "paid")
 	defer resp2.Body.Close() //nolint:errcheck
 	assert.Equal(t, http.StatusConflict, resp2.StatusCode)
 
-	// Brief settle window: if a second event were going to fire, it would
-	// arrive in this window. The sink only counts events; a duplicate would
-	// show up as count > 1.
+	// Brief settle window: a duplicate delivery would push the count past the
+	// three events from the first submit.
 	time.Sleep(100 * time.Millisecond)
-	assert.Equal(t, 1, app.Count(), "second submit must not fire a duplicate webhook")
+	assert.Equal(t, firstCount, app.Count(), "second submit must not fire duplicate webhooks")
 }
 
 // TestStripeMock_Complete_RejectsCrossOriginPOST verifies the CSRF guard:

@@ -2,6 +2,7 @@ package i18n
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,6 +14,7 @@ type BundleConfig struct {
 	LocaleDir         string // directory containing *.json files
 	DefaultLocale     string // e.g. "en"
 	FallbackToDefault *bool  // fall back to default locale for missing keys (default true; nil = true)
+	Logger            *slog.Logger // receives missing/extra-key warnings; nil = slog.Default()
 }
 
 
@@ -86,15 +88,40 @@ func NewBundle(cfg BundleConfig) (*Bundle, error) {
 		return nil, fmt.Errorf("i18n: default locale %q not found in %s", cfg.DefaultLocale, cfg.LocaleDir)
 	}
 
-	// Validate non-default locales against default.
+	// Validate non-default locales against default. Interpolation mismatches are
+	// hard errors (they cause render failures); missing/extra keys are surfaced
+	// as warnings so typo'd or incomplete translations don't fall through
+	// silently — missing keys are handled at runtime by the default-locale
+	// fallback, and extra keys are almost always typos.
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
 	for _, ld := range locales {
 		if ld.name == cfg.DefaultLocale {
 			continue
 		}
+		var missing, extra []string
 		for _, ve := range validateLocale(defaultData.messages, ld.messages, ld.name) {
-			if strings.Contains(ve.Message, "interpolation mismatch") {
+			switch ve.Kind {
+			case validationInterpolation:
 				return nil, fmt.Errorf("i18n: %s", ve.Error())
+			case validationMissingKey:
+				missing = append(missing, ve.Key)
+			case validationExtraKey:
+				extra = append(extra, ve.Key)
 			}
+		}
+		if len(missing) > 0 || len(extra) > 0 {
+			sort.Strings(missing)
+			sort.Strings(extra)
+			logger.Warn("i18n: locale has key mismatches against the default locale",
+				"locale", ld.name,
+				"missing_count", len(missing),
+				"extra_count", len(extra),
+				"missing", missing,
+				"extra", extra,
+			)
 		}
 	}
 

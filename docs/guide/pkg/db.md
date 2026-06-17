@@ -26,7 +26,9 @@ defer cancel()
 database, err := db.ConnectContext(ctx, os.Getenv("DATABASE_URL"))
 ```
 
-Connectivity is validated with `PingContext` on each retry attempt.
+Connectivity is validated with `PingContext` on each retry attempt. An empty
+DSN is rejected immediately (it would otherwise fall back to `PG*` environment
+variables and run the full retry ladder before failing).
 
 ## Connection Options
 

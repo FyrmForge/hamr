@@ -52,6 +52,9 @@ func (m *StripeMock) handlePayoutPage(w http.ResponseWriter, r *http.Request) {
 	}
 	m.mu.RLock()
 	po, ok := m.payouts[id]
+	if ok {
+		po = clonePayout(po)
+	}
 	m.mu.RUnlock()
 	if !ok {
 		http.Error(w, "payout not found", http.StatusNotFound)

@@ -37,6 +37,13 @@ type CacheConfig struct {
 
 	// DisableCaching sets no-cache directives on every response.
 	DisableCaching bool
+
+	// AllowDynamicCaching disables the default "no-store, private" header on
+	// dynamic (non-static) responses. Leave false (default) so authenticated
+	// pages aren't retained by the browser back-button or shared proxy caches;
+	// set true for apps that serve cacheable public dynamic content. A handler
+	// can always override per-route by setting its own Cache-Control.
+	AllowDynamicCaching bool
 }
 
 // CacheControl sets Cache-Control headers based on asset type.
@@ -79,6 +86,12 @@ func CacheControlWithConfig(cfg CacheConfig) echo.MiddlewareFunc {
 				c.Response().Header().Set("Cache-Control", immutableHeader)
 			case hasSuffix(path, cfg.StaticExtensions):
 				c.Response().Header().Set("Cache-Control", staticHeader)
+			case !cfg.AllowDynamicCaching:
+				// Dynamic (non-static) response: default to not caching so
+				// authenticated pages aren't served from the back-button or a
+				// shared proxy after logout. Set before next(c) so a handler
+				// that wants caching can override it.
+				c.Response().Header().Set("Cache-Control", "no-store, private")
 			}
 
 			return next(c)

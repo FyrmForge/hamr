@@ -122,8 +122,11 @@ func (m *StripeMock) handleResend(w http.ResponseWriter, r *http.Request) {
 		}
 		switch pi.Status {
 		case "succeeded":
-			fires = append(fires, fire{"payment_intent.succeeded", m.serializePaymentIntent(pi)})
-			if ch, ok := m.charges[pi.LatestChargeID]; ok {
+			// Under RLock: passing the live charge pointer is safe because
+			// serialize only reads it (nil when there is no charge).
+			ch := m.charges[pi.LatestChargeID]
+			fires = append(fires, fire{"payment_intent.succeeded", m.serializePaymentIntent(pi, ch)})
+			if ch != nil {
 				fires = append(fires, fire{"charge.succeeded", m.serializeCharge(ch)})
 			}
 			if pi.TransferID != "" {
@@ -132,8 +135,13 @@ func (m *StripeMock) handleResend(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		case "requires_payment_method":
-			// PI was failed (status reset by handlePaymentIntentComplete on fail outcome).
-			fires = append(fires, fire{"payment_intent.payment_failed", m.serializePaymentIntent(pi)})
+			// requires_payment_method covers BOTH a freshly-created PI that was
+			// never attempted AND one whose confirmation was declined. Only the
+			// latter has a payment_failed event worth resending; a never-attempted
+			// PI leaves fires empty → "nothing to resend".
+			if pi.Failed {
+				fires = append(fires, fire{"payment_intent.payment_failed", m.serializePaymentIntent(pi, nil)})
+			}
 		}
 	case "refund":
 		rf, ok := m.refunds[id]
@@ -209,9 +217,14 @@ func (m *StripeMock) handleDashboardRefund(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "missing payment_intent", http.StatusBadRequest)
 		return
 	}
+	amount, ok := getInt64(map[string]any{"amount": r.FormValue("amount")}, "amount")
+	if !ok {
+		http.Error(w, "invalid amount", http.StatusBadRequest)
+		return
+	}
 	rf, _, eventObject, err := m.applyRefund(refundInput{
 		piID:            piID,
-		amount:          getInt64(map[string]any{"amount": r.FormValue("amount")}, "amount"),
+		amount:          amount,
 		reverseTransfer: r.FormValue("reverse_transfer") == "true",
 		refundAppFee:    r.FormValue("refund_application_fee") == "true",
 	})
@@ -298,9 +311,11 @@ func sessionResendEvent(s *stripeSession) string {
 
 // --- snapshot helpers ---
 //
-// Each snapshotter copies map values into a slice sorted newest-first and
-// caps at dashboardLimit. Pointer values share storage with the live state
-// — safe because the dashboard only reads, but callers must not mutate.
+// Each snapshotter sorts the live map values newest-first, caps at
+// dashboardLimit, then deep-clones only the survivors. Sorting reads immutable
+// fields (ID/Created) under m.mu.RLock (the caller holds it) and the clone runs
+// before the lock is released, so the template gets private copies that
+// concurrent writers can't mutate — without cloning entries that get discarded.
 
 func snapshotSessions(m map[string]*stripeSession) []*stripeSession {
 	out := make([]*stripeSession, 0, len(m))
@@ -310,6 +325,9 @@ func snapshotSessions(m map[string]*stripeSession) []*stripeSession {
 	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
 	if len(out) > dashboardLimit {
 		out = out[:dashboardLimit]
+	}
+	for i, v := range out {
+		out[i] = cloneSession(v)
 	}
 	return out
 }
@@ -323,6 +341,9 @@ func snapshotAccounts(m map[string]*stripeAccount) []*stripeAccount {
 	if len(out) > dashboardLimit {
 		out = out[:dashboardLimit]
 	}
+	for i, v := range out {
+		out[i] = cloneAccount(v)
+	}
 	return out
 }
 
@@ -334,6 +355,9 @@ func snapshotPaymentIntents(m map[string]*stripePaymentIntent) []*stripePaymentI
 	sort.Slice(out, func(i, j int) bool { return out[i].Created.After(out[j].Created) })
 	if len(out) > dashboardLimit {
 		out = out[:dashboardLimit]
+	}
+	for i, v := range out {
+		out[i] = clonePaymentIntent(v)
 	}
 	return out
 }
@@ -347,6 +371,9 @@ func snapshotRefunds(m map[string]*stripeRefund) []*stripeRefund {
 	if len(out) > dashboardLimit {
 		out = out[:dashboardLimit]
 	}
+	for i, v := range out {
+		out[i] = cloneRefund(v)
+	}
 	return out
 }
 
@@ -358,6 +385,9 @@ func snapshotPayouts(m map[string]*stripePayout) []*stripePayout {
 	sort.Slice(out, func(i, j int) bool { return out[i].Created.After(out[j].Created) })
 	if len(out) > dashboardLimit {
 		out = out[:dashboardLimit]
+	}
+	for i, v := range out {
+		out[i] = clonePayout(v)
 	}
 	return out
 }

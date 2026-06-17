@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"mime/multipart"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 
@@ -354,19 +355,34 @@ func DetectType(fh *multipart.FileHeader) (mediaType string, mimeType string, er
 		return TypeVideo, detected, nil
 	}
 
-	// Fallback: check the Content-Type header from the upload.
-	ct := fh.Header.Get("Content-Type")
-	ct = strings.SplitN(ct, ";", 2)[0]
-	ct = strings.TrimSpace(ct)
-
-	if imageTypes[ct] {
-		return TypeImage, ct, nil
-	}
-	if videoTypes[ct] {
-		return TypeVideo, ct, nil
-	}
-
+	// Deliberately do NOT fall back to the multipart Content-Type header: it is
+	// attacker-controlled and the actual upload gate (Image/VideoStore.upload)
+	// is content-sniff-only. Trusting the header here would make DetectType
+	// accept files the upload would then reject — a spoofing bypass for callers
+	// that use DetectType as a pre-check.
 	return "", "", ErrUnknownType
+}
+
+// scopedServeKey maps an incoming request URL path to the storage key for a
+// store mounted at urlPrefix and confined to category. It strips urlPrefix,
+// normalizes the remainder with path.Clean (collapsing ./ and ../ so a crafted
+// request can't escape), and requires the result to live under "category/".
+//
+// It returns ok=false — which serve handlers translate to 404 — for any path
+// outside the URL prefix or the store's category. This is what keeps a handler
+// from proxying objects that belong to another category, or anywhere else in
+// the bucket / storage root: the only keys it will resolve are this store's own
+// "category/…" objects.
+func scopedServeKey(reqPath, urlPrefix, category string) (key string, ok bool) {
+	rel := strings.TrimPrefix(reqPath, urlPrefix+"/")
+	if rel == reqPath {
+		return "", false // request is not under this store's URL prefix
+	}
+	rel = strings.TrimPrefix(path.Clean("/"+rel), "/")
+	if category != "" && !strings.HasPrefix(rel, category+"/") {
+		return "", false // outside this store's category prefix
+	}
+	return rel, true
 }
 
 // validateCanonicalUUID enforces the contract for *FromReaderWithID: the

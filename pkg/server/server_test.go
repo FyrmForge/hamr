@@ -191,3 +191,54 @@ func TestAddr(t *testing.T) {
 		})
 	}
 }
+
+func TestServer_RealIPDefaultIgnoresXFF(t *testing.T) {
+	srv, err := server.New()
+	require.NoError(t, err)
+	ext := srv.Echo().IPExtractor
+	require.NotNil(t, ext, "IPExtractor must be configured")
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "203.0.113.7:5555"
+	req.Header.Set("X-Forwarded-For", "1.2.3.4")
+	// No trusted proxies: the spoofed header is ignored; direct peer wins.
+	assert.Equal(t, "203.0.113.7", ext(req))
+}
+
+func TestServer_TrustedProxyHonorsXFF(t *testing.T) {
+	srv, err := server.New(server.WithTrustedProxies("203.0.113.0/24"))
+	require.NoError(t, err)
+	ext := srv.Echo().IPExtractor
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "203.0.113.7:5555" // a trusted proxy
+	req.Header.Set("X-Forwarded-For", "1.2.3.4")
+	assert.Equal(t, "1.2.3.4", ext(req), "XFF honored when forwarded by a trusted proxy")
+}
+
+func TestServer_UntrustedPeerIgnoresXFF(t *testing.T) {
+	srv, err := server.New(server.WithTrustedProxies("10.0.0.0/8"))
+	require.NoError(t, err)
+	ext := srv.Echo().IPExtractor
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "203.0.113.7:5555" // NOT in the trusted range
+	req.Header.Set("X-Forwarded-For", "1.2.3.4")
+	assert.Equal(t, "203.0.113.7", ext(req), "XFF from an untrusted peer must be ignored")
+}
+
+func TestServer_InvalidTrustedProxyCIDR(t *testing.T) {
+	_, err := server.New(server.WithTrustedProxies("not-a-cidr"))
+	require.Error(t, err)
+}
+
+func TestServer_BlankTrustedProxiesIgnored(t *testing.T) {
+	srv, err := server.New(server.WithTrustedProxies("", "  "))
+	require.NoError(t, err)
+	ext := srv.Echo().IPExtractor
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "203.0.113.7:5555"
+	req.Header.Set("X-Forwarded-For", "1.2.3.4")
+	assert.Equal(t, "203.0.113.7", ext(req), "blank entries leave the safe direct default")
+}

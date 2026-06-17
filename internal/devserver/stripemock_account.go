@@ -73,6 +73,9 @@ func (m *StripeMock) handleAccountByID(w http.ResponseWriter, r *http.Request) {
 
 	m.mu.RLock()
 	acct, ok := m.accounts[id]
+	if ok {
+		acct = cloneAccount(acct)
+	}
 	m.mu.RUnlock()
 	if !ok {
 		writeStripeError(w, http.StatusNotFound, "invalid_request_error",
@@ -128,10 +131,11 @@ func (m *StripeMock) createAccount(w http.ResponseWriter, r *http.Request) {
 
 	m.mu.Lock()
 	m.accounts[acct.ID] = acct
+	acctCopy := cloneAccount(acct)
 	m.persist()
 	m.mu.Unlock()
 
-	writeStripeJSON(w, http.StatusOK, m.serializeAccount(acct))
+	writeStripeJSON(w, http.StatusOK, m.serializeAccount(acctCopy))
 }
 
 // handleAccountLinks creates an onboarding link for an existing account.

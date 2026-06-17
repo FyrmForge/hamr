@@ -117,6 +117,12 @@ func GetEnvOrDefaultDuration(key string, def time.Duration) time.Duration
 Returns the environment variable as a time.Duration, falling back to `def` if
 unset, empty, or not a valid duration string.
 
+```go
+func GetEnvCSV(key string) []string
+```
+Returns the environment variable parsed as a comma-separated list (whitespace
+trimmed, empty entries dropped). Returns `nil` when unset/empty.
+
 ---
 
 ### server
@@ -154,7 +160,17 @@ func WithTimeout(d time.Duration) Option                 // request context time
 func WithMaxBodySize(size string) Option                 // e.g. "2M", "500K"
 func WithShutdownTimeout(d time.Duration) Option         // graceful shutdown (default 10s)
 func WithGeneratedDir(dir string) Option                 // pre-rendered static pages dir
+func WithTrustedProxies(cidrs ...string) Option          // proxy CIDRs trusted for X-Forwarded-For; unset = ignore XFF (RealIP unspoofable)
 ```
+
+Behind a proxy you MUST pass its range (`WithTrustedProxies` / `TRUSTED_PROXIES`
+env, comma-separated CIDRs) or `RealIP()` returns the proxy IP, not the client:
+nginx/Caddy on-host → `127.0.0.1/32` (loopback is NOT auto-trusted); Docker →
+the proxy's subnet; AWS ALB/GCP LB → the VPC/subnet CIDR; PaaS (Railway/Fly/
+Render) → the platform's internal proxy range, which you often can't pin and may
+change, so verify it. Requirements: the proxy must actually emit
+`X-Forwarded-For`; never trust `0.0.0.0/0` (re-enables IP spoofing). Verify by
+dumping `c.Request().RemoteAddr` (the peer → CIDR to trust) vs `c.RealIP()`.
 
 #### Methods
 
@@ -359,7 +375,7 @@ func EmailMsg(value, msg string) string
 func Phone(value string) string                // accepts optional '+' + 7-15 digits
 func PhoneMsg(value, msg string) string
 
-func URL(value string) string
+func URL(value string) string         // absolute http/https only (rejects javascript:/data:/vbscript: XSS schemes)
 func URLMsg(value, msg string) string
 
 func MinLength(value string, min int) string
@@ -817,16 +833,26 @@ Usage: `site.GET("/login", loginHandler.Page, auth.RequireNotAuth())`
 ```go
 func GetSubjectID(c echo.Context) string   // from session or trusted header
 func GetSubject(c echo.Context) any        // only when SubjectLoader is configured
-func TrustedSubject() echo.MiddlewareFunc  // reads X-Subject-ID from trusted internal requests
+func TrustedSubject() echo.MiddlewareFunc  // reads X-Subject-ID with NO verification — internal networks only
+
+// Gated variant: ignores X-Subject-ID unless the request passes the configured
+// gate(s); on failure the subject is left unset (downstream RBAC fails closed).
+type TrustedSubjectConfig struct {
+    SharedSecret   string   // required in SecretHeader (constant-time compared)
+    SecretHeader   string   // default: "X-Internal-Secret"
+    TrustedProxies []string // c.RealIP() must be within one of these CIDRs
+}
+func TrustedSubjectWithConfig(cfg TrustedSubjectConfig) echo.MiddlewareFunc
 ```
 
 #### CSRF
 
 ```go
 type CSRFConfig struct {
-    CookieName  string  // default: "csrf"
-    TokenLookup string  // default: "form:csrf_token,header:X-CSRF-Token"
-    Secure      bool    // default: true
+    CookieName  string         // default: "csrf"
+    TokenLookup string         // default: "form:csrf_token,header:X-CSRF-Token"
+    Secure      bool           // default: true
+    SameSite    http.SameSite  // default: Lax
 }
 
 func CSRF() echo.MiddlewareFunc
@@ -844,6 +870,7 @@ type CORSConfig struct {
 }
 
 func CORS() echo.MiddlewareFunc
+// With no AllowOrigins configured, cross-origin requests are DENIED (no "*").
 func CORSWithConfig(cfg CORSConfig) echo.MiddlewareFunc
 ```
 
@@ -886,6 +913,7 @@ type CacheConfig struct {
     StaticExtensions    []string  // default: DefaultStaticExtensions
     StaticMaxAge        int       // seconds, default: 86400 (1 day)
     DisableCaching      bool
+    AllowDynamicCaching bool      // default false: dynamic responses get "no-store, private"
 }
 
 var DefaultImmutableExtensions = []string{".webp", ".jpg", ".jpeg", ".png", ".gif", ".svg", ".ico", ".woff2", ".woff", ".ttf", ".eot"}
@@ -1548,9 +1576,10 @@ func (e ValidationError) Error() string  // "[locale] key: message"
 
 ```go
 type BundleConfig struct {
-    LocaleDir         string  // directory containing *.json files
-    DefaultLocale     string  // e.g. "en"
-    FallbackToDefault *bool   // default true; nil = true
+    LocaleDir         string       // directory containing *.json files
+    DefaultLocale     string       // e.g. "en"
+    FallbackToDefault *bool        // default true; nil = true
+    Logger            *slog.Logger // missing/extra-key warnings; nil = slog.Default()
 }
 
 type Bundle struct{ /* unexported */ }
@@ -2130,6 +2159,12 @@ from config alone, not from the runtime listener.
   Stripe's sync card flow), or to `requires_capture` if
   `capture_method=manual`. Defaults the payment_method to `pm_card_visa`
   if absent so the rest of the flow doesn't error.
+- `POST /v1/payment_intents/{id}/capture` — capture a `requires_capture`
+  (manual-capture) PI: creates the Charge, advances to `succeeded`, fires
+  `payment_intent.succeeded` + `charge.succeeded` (+ `transfer.created` for
+  destination charges). Partial capture via `amount_to_capture`. While in
+  `requires_capture` the serialized PI reports `amount_capturable` (the
+  authorized amount); after capture `amount_received` is the captured amount.
 
 **Dev UI (PaymentIntent).**
 - `GET /__hamr/stripe/payment_intent?id=<pi_id>` — renders the amount,
@@ -2257,10 +2292,10 @@ event envelope includes `api_version` (set to the mock's pinned version)
 which clears stripe-go's release-train compatibility check.
 
 **Outcome → event mapping (checkout).**
-| Button | Event | Status, payment_status | Redirect |
+| Button | Event(s) | Status, payment_status | Redirect |
 |---|---|---|---|
-| Pay Successfully | `checkout.session.completed` | complete, paid | success_url |
-| Card Declined | `checkout.session.async_payment_failed` | complete, unpaid | cancel_url |
+| Pay Successfully | `checkout.session.completed`, `payment_intent.succeeded`, `charge.succeeded` (PI + Charge materialised) | complete, paid | success_url |
+| Card Declined | *(none — synchronous decline)* | stays open | back to checkout page |
 | Cancel Payment | `checkout.session.expired` | expired, unpaid | cancel_url |
 
 **Outcome → event mapping (account onboarding).**

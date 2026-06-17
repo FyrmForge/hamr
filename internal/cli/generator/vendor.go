@@ -69,7 +69,7 @@ func VendorAll(dir string, update bool, deps []string) error {
 		if !ok {
 			return fmt.Errorf("unknown dependency %q (known: htmx, alpine, idiomorph)", name)
 		}
-		if err := vendorDep(dir, name, reg.Version, reg, lock, update); err != nil {
+		if err := vendorDep(dir, name, reg.Version, reg, lock, update, false); err != nil {
 			return fmt.Errorf("vendor %s: %w", name, err)
 		}
 	}
@@ -87,7 +87,8 @@ func VendorOne(dir, nameArg string, update bool) error {
 		return fmt.Errorf("unknown dependency %q (known: htmx, alpine, idiomorph)", name)
 	}
 
-	if version != "" {
+	explicit := version != ""
+	if explicit {
 		reg.Version = version
 	}
 
@@ -96,7 +97,7 @@ func VendorOne(dir, nameArg string, update bool) error {
 		return err
 	}
 
-	if err := vendorDep(dir, name, reg.Version, reg, lock, update); err != nil {
+	if err := vendorDep(dir, name, reg.Version, reg, lock, update, explicit); err != nil {
 		return fmt.Errorf("vendor %s: %w", name, err)
 	}
 
@@ -161,12 +162,22 @@ func VendorCustom(dir, url, out string) error {
 }
 
 // vendorDep handles the logic for a single dependency: skip if already valid,
-// otherwise download and record in the lock file.
-func vendorDep(dir, name, version string, reg VendorDep, lock *VendorLock, update bool) error {
+// otherwise download and record in the lock file. explicit is true when the
+// caller requested a specific version (a `name@version` pin); when false the
+// passed version is just the registry default and must NOT override a locked
+// pin (otherwise VendorAll — which `hamr new` runs — silently re-downloads
+// pinned deps at the default and overwrites the lock).
+func vendorDep(dir, name, version string, reg VendorDep, lock *VendorLock, update, explicit bool) error {
 	existing, locked := lock.Deps[name]
 
-	// If not updating and the lock file already has this dep at the same
-	// version, verify the file on disk instead of re-downloading.
+	// A locked dep keeps its locked version unless we're updating or the caller
+	// explicitly pinned a version.
+	if locked && !update && !explicit {
+		version = existing.Version
+	}
+
+	// If the lock already has this dep at this version, verify the file on disk
+	// instead of re-downloading.
 	if !update && locked && existing.Version == version {
 		path := filepath.Join(dir, existing.Out)
 		actual, err := checksumFile(path)

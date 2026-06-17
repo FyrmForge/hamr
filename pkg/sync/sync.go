@@ -87,6 +87,11 @@ func WatchAndSync(ctx context.Context, store storage.FileStorage, dir string) er
 				}
 				if info.IsDir() {
 					_ = addWatchDirs(watcher, event.Name)
+					// A newly created directory only fires one Create event for
+					// the dir itself; files created inside it before the watch
+					// was added get no event and would be missed. Sync any that
+					// already exist now.
+					syncExistingFiles(ctx, store, dir, event.Name)
 					continue
 				}
 				if err := uploadFile(ctx, store, event.Name, key); err != nil {
@@ -132,6 +137,27 @@ func uploadFile(ctx context.Context, store storage.FileStorage, path, key string
 	}
 	defer func() { _ = f.Close() }()
 	return store.Save(ctx, key, f)
+}
+
+// syncExistingFiles uploads every file already present under dir, keyed
+// relative to root. Used when a new directory appears so its pre-existing
+// contents aren't missed. Per-file failures are logged, not fatal.
+func syncExistingFiles(ctx context.Context, store storage.FileStorage, root, dir string) {
+	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		key := Key(root, path)
+		if key == "" {
+			return nil
+		}
+		if err := uploadFile(ctx, store, path, key); err != nil {
+			slog.Warn("sync upload failed", "key", key, "error", err)
+		} else {
+			slog.Info("synced", "key", key)
+		}
+		return nil
+	})
 }
 
 func addWatchDirs(w *fsnotify.Watcher, root string) error {

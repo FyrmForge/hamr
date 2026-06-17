@@ -5,6 +5,7 @@
 package respond
 
 import (
+	"bytes"
 	"net/http"
 
 	"github.com/a-h/templ"
@@ -14,10 +15,20 @@ import (
 )
 
 // HTML renders a templ component with the given status code.
+//
+// The component is rendered into a buffer first: if rendering fails, no status
+// or body has been committed, so the returned error reaches Echo's error
+// handler and a proper error page can be sent. (Writing directly to the
+// response would leave a committed 2xx with a truncated body.)
 func HTML(c echo.Context, status int, component templ.Component) error {
+	var buf bytes.Buffer
+	if err := component.Render(c.Request().Context(), &buf); err != nil {
+		return err
+	}
 	c.Response().Header().Set(echo.HeaderContentType, "text/html; charset=utf-8")
 	c.Response().WriteHeader(status)
-	return component.Render(c.Request().Context(), c.Response())
+	_, err := c.Response().Write(buf.Bytes())
+	return err
 }
 
 // JSON sends a JSON response with the given status code.

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"go/format"
+	"go/token"
 	"os"
 	"path/filepath"
 	"slices"
@@ -169,11 +170,20 @@ func runLocaleGen(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("locale validation failed — fix interpolation mismatches above")
 	}
 
+	// Catch keys that map to the same (or an empty) Go method name before
+	// codegen, so the failure is a clear message instead of an opaque
+	// duplicate-method / format error.
+	if err := checkMethodNames(keys); err != nil {
+		return err
+	}
+
 	// Generate Go source.
 	src := generateGoSource(cfg.Package, keys)
 	formatted, err := format.Source([]byte(src))
 	if err != nil {
-		return fmt.Errorf("format generated source: %w (raw source written for debugging)", err)
+		rawPath := cfg.Output + ".raw"
+		_ = os.WriteFile(rawPath, []byte(src), 0o644)
+		return fmt.Errorf("format generated source: %w (raw source written to %s for debugging)", err, rawPath)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(cfg.Output), 0o755); err != nil {
@@ -210,6 +220,9 @@ func flattenForGen(data map[string]any, prefix string) ([]localeKeyInfo, error) 
 				for _, s := range val {
 					params = mergeParams(params, extractInterpolationParams(s.(string)))
 				}
+				// Count is auto-injected for plural messages, so it's not a
+				// caller-supplied parameter.
+				params = slices.DeleteFunc(params, func(v string) bool { return v == "Count" })
 				sort.Strings(params)
 				out = append(out, localeKeyInfo{
 					key:      key,
@@ -230,11 +243,13 @@ func flattenForGen(data map[string]any, prefix string) ([]localeKeyInfo, error) 
 	return out, nil
 }
 
-// extractInterpolationParams returns sorted interpolation variable names,
-// excluding "Count" which is auto-injected for plural messages.
+// extractInterpolationParams returns sorted interpolation variable names. It
+// keeps "Count": the plural path strips it (Count is auto-injected for plurals),
+// but a non-plural message like "You have {{.Count}} credits" needs it as a real
+// parameter — deleting it unconditionally would emit a zero-arg accessor whose
+// placeholder can never be filled.
 func extractInterpolationParams(s string) []string {
-	vars := i18n.InterpolationVars(s)
-	return slices.DeleteFunc(vars, func(v string) bool { return v == "Count" })
+	return i18n.InterpolationVars(s)
 }
 
 func mergeParams(a, b []string) []string {
@@ -270,31 +285,33 @@ func generateGoSource(pkg string, keys []localeKeyInfo) string {
 
 		switch {
 		case k.isPlural:
-			params := "count int"
-			callArgs := "count"
+			var params strings.Builder
+			params.WriteString("count int")
+			var callArgs strings.Builder
+			callArgs.WriteString("count")
 			if len(k.params) > 0 {
 				for _, p := range k.params {
-					params += ", " + toLowerFirst(p) + " string"
+					params.WriteString(", " + paramName(p) + " string")
 				}
-				callArgs += ", map[string]any{"
+				callArgs.WriteString(", map[string]any{")
 				for i, p := range k.params {
 					if i > 0 {
-						callArgs += ", "
+						callArgs.WriteString(", ")
 					}
-					callArgs += fmt.Sprintf("%q: %s", p, toLowerFirst(p))
+					fmt.Fprintf(&callArgs, "%q: %s", p, paramName(p))
 				}
-				callArgs += "}"
+				callArgs.WriteString("}")
 			}
 			fmt.Fprintf(&b, "// %s returns the translation for %q (plural).\n", methodName, k.key)
-			fmt.Fprintf(&b, "func (t *T) %s(%s) string {\n", methodName, params)
-			fmt.Fprintf(&b, "\treturn t.tr.T(%q, %s)\n", k.key, callArgs)
+			fmt.Fprintf(&b, "func (t *T) %s(%s) string {\n", methodName, params.String())
+			fmt.Fprintf(&b, "\treturn t.tr.T(%q, %s)\n", k.key, callArgs.String())
 			b.WriteString("}\n\n")
 		case len(k.params) > 0:
 			var paramList []string
 			var mapEntries []string
 			for _, p := range k.params {
-				paramList = append(paramList, toLowerFirst(p)+" string")
-				mapEntries = append(mapEntries, fmt.Sprintf("%q: %s", p, toLowerFirst(p)))
+				paramList = append(paramList, paramName(p)+" string")
+				mapEntries = append(mapEntries, fmt.Sprintf("%q: %s", p, paramName(p)))
 			}
 			fmt.Fprintf(&b, "// %s returns the translation for %q.\n", methodName, k.key)
 			fmt.Fprintf(&b, "func (t *T) %s(%s) string {\n", methodName, strings.Join(paramList, ", "))
@@ -311,11 +328,32 @@ func generateGoSource(pkg string, keys []localeKeyInfo) string {
 	return b.String()
 }
 
+// checkMethodNames reports the first key that produces an empty Go method name
+// or collides with another key (e.g. "home.title" and "home_title" both map to
+// "HomeTitle"). Without this the collision surfaces as an opaque duplicate-method
+// compile error inside format.Source.
+func checkMethodNames(keys []localeKeyInfo) error {
+	seen := make(map[string]string, len(keys)) // method name → first key that produced it
+	for _, k := range keys {
+		m := keyToMethodName(k.key)
+		if m == "" {
+			return fmt.Errorf("locale gen: key %q produces an empty method name (no letters/digits)", k.key)
+		}
+		if prev, ok := seen[m]; ok {
+			return fmt.Errorf("locale gen: keys %q and %q both generate method %s — rename one", prev, k.key, m)
+		}
+		seen[m] = k.key
+	}
+	return nil
+}
+
 // keyToMethodName converts a dot-separated key like "home.items_count" into
 // a PascalCase Go method name like "HomeItemsCount".
 func keyToMethodName(key string) string {
+	// Split on any non-alphanumeric rune so keys containing spaces or
+	// punctuation still yield valid identifiers (e.g. "hello world" -> "HelloWorld").
 	parts := strings.FieldsFunc(key, func(r rune) bool {
-		return r == '.' || r == '_' || r == '-'
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	})
 	var b strings.Builder
 	for _, p := range parts {
@@ -340,4 +378,25 @@ func toLowerFirst(s string) string {
 	runes := []rune(s)
 	runes[0] = unicode.ToLower(runes[0])
 	return string(runes)
+}
+
+// reservedParamNames are identifiers that appear in the generated method
+// bodies; a parameter colliding with one would shadow it and break compilation
+// (e.g. a param named "string" shadows the return type).
+var reservedParamNames = map[string]bool{
+	"t": true, "tr": true, // receiver and its field
+	"string": true, "any": true, "int": true, // types used in generated code
+	"count": true, // the auto-injected plural parameter
+}
+
+// paramName turns an interpolation variable name into a valid, non-colliding Go
+// parameter identifier. The map KEY passed to T() keeps the original name; only
+// the Go identifier is sanitised, so keywords ({{.Type}}, {{.Range}}) and
+// reserved names ({{.T}}) don't produce uncompilable code.
+func paramName(p string) string {
+	name := toLowerFirst(p)
+	if token.IsKeyword(name) || reservedParamNames[name] {
+		name += "_"
+	}
+	return name
 }

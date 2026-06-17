@@ -370,9 +370,7 @@ func TestSessionConcurrentCreateValidate(t *testing.T) {
 	errs := make(chan error, 40)
 
 	for range 20 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			s, err := m.CreateSession(ctx, "user-1", nil)
 			if err != nil {
 				errs <- err
@@ -386,7 +384,7 @@ func TestSessionConcurrentCreateValidate(t *testing.T) {
 			if got == nil {
 				errs <- errors.New("expected session, got nil")
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

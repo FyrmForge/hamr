@@ -173,6 +173,14 @@ By default the command creates a per-capture folder under `.hamr/captures/` and 
 
 Show scaffold changes between the project's baseline version and the current HAMR version by diffing the actual HAMR repository between version tags.
 
+The diff is scoped to the surface a downstream project consumes or mirrors — the
+`pkg/` libraries it imports, the scaffold templates its files were generated from
+(`internal/cli/generator/templates/`), and the `docs/` + `llmsdocs/` the project
+carries and can bring up to date. Only hamr's own internal tooling (the CLI
+commands, dev server, generator logic, the `hamr` binary) and tests are
+excluded — none of it ever lands in a project. This keeps the report focused on
+what an upgrade must adapt to rather than the whole framework diff.
+
 ```bash
 hamr ai upgrade [flags]
 ```
@@ -435,7 +443,7 @@ hamr rename module github.com/neworg/myproject --dry-run
 hamr rename module github.com/neworg/tools --dir ./tools
 ```
 
-Reads the current module path from `go.mod`, then replaces it in every `.go` file and the `go.mod` module directive.
+Reads the current module path from `go.mod`, then replaces it in every `.go` and `.templ` file and the `go.mod` module directive. The `.git`, `vendor`, `node_modules`, and `testdata` directories are skipped — vendored and third-party code must not be rewritten, and `testdata` is excluded from Go builds (and often holds intentionally malformed fixtures).
 
 ---
 

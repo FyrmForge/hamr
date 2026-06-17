@@ -125,7 +125,11 @@ func writeMboxMessage(w io.Writer, msg *mailMessage) error {
 	}
 	sort.Strings(headerNames)
 	for _, k := range headerNames {
-		if isReservedHeader(k) {
+		// Skip reserved names and any name that isn't a valid header field-name
+		// token: a name containing CR/LF/colon would otherwise inject arbitrary
+		// headers (e.g. spoofing X-Hamr-Status), and the reserved-name check is
+		// exact-match so it wouldn't catch "Subject\r\nX-Hamr-Status".
+		if isReservedHeader(k) || !validHeaderName(k) {
 			continue
 		}
 		_, _ = fmt.Fprintf(w, "%s: %s\r\n", k, encodeHeaderValue(msg.Headers[k]))
@@ -166,8 +170,25 @@ func writeMboxMessage(w io.Writer, msg *mailMessage) error {
 	return nil
 }
 
-// escapeMBoxBody applies MBOXO `>From ` escaping to lines in body. Preserves
-// the original byte stream otherwise — no added or stripped trailing newlines.
+// validHeaderName reports whether name is a valid RFC 5322 header field name:
+// non-empty, printable ASCII, and free of ':' (and thus of CR/LF/space/control).
+func validHeaderName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		if r < '!' || r > '~' || r == ':' {
+			return false
+		}
+	}
+	return true
+}
+
+// escapeMBoxBody applies MBOXO escaping: any line of the form `>*From ` gets one
+// extra leading `>`, so it round-trips through unescapeMBox (which strips one
+// `>` from any `>+From ` line). Escaping only the bare `From ` form would
+// corrupt body lines that already begin with `>From ` on reload. Preserves the
+// original byte stream otherwise.
 func escapeMBoxBody(body string) string {
 	if body == "" {
 		return body
@@ -176,7 +197,7 @@ func escapeMBoxBody(body string) string {
 	normalized := strings.ReplaceAll(body, "\r\n", "\n")
 	lines := strings.Split(normalized, "\n")
 	for i, line := range lines {
-		if strings.HasPrefix(line, "From ") {
+		if strings.HasPrefix(strings.TrimLeft(line, ">"), "From ") {
 			lines[i] = ">" + line
 		}
 	}
@@ -308,10 +329,7 @@ func writeBase64(w io.Writer, data []byte) {
 	const width = 76
 	enc := base64.StdEncoding.EncodeToString(data)
 	for i := 0; i < len(enc); i += width {
-		end := i + width
-		if end > len(enc) {
-			end = len(enc)
-		}
+		end := min(i+width, len(enc))
 		_, _ = fmt.Fprintln(w, enc[i:end])
 	}
 }
@@ -428,11 +446,11 @@ func splitMboxEntries(data []byte) [][]byte {
 // message. Returns nil, nil if the entry has no usable headers (e.g. empty).
 func parseMboxEntry(raw []byte) (*mailMessage, error) {
 	// Strip the leading `From ` line.
-	nl := bytes.IndexByte(raw, '\n')
-	if nl < 0 {
+	_, after, ok := bytes.Cut(raw, []byte{'\n'})
+	if !ok {
 		return nil, fmt.Errorf("mbox entry missing newline")
 	}
-	body := raw[nl+1:]
+	body := after
 
 	// Reverse MBOXO escaping: `>From ` at line start → `From `.
 	body = unescapeMBox(body)
@@ -731,7 +749,10 @@ func unescapeMBox(body []byte) []byte {
 		line := scanner.Bytes()
 		if len(line) > 0 && line[0] == '>' {
 			rest := line[1:]
-			if bytes.HasPrefix(rest, []byte("From ")) || bytes.HasPrefix(rest, []byte(">From ")) {
+			// Strip one '>' from any `>+From ` line (mirrors escapeMBoxBody,
+			// which adds one '>' to any `>*From ` line) so escaping round-trips
+			// at every nesting level.
+			if bytes.HasPrefix(bytes.TrimLeft(rest, ">"), []byte("From ")) {
 				line = rest
 			}
 		}

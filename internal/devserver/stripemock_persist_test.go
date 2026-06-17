@@ -101,16 +101,29 @@ func TestStripeMock_Persist_RoundTrip(t *testing.T) {
 // PersistPath leaves the in-memory state ephemeral — no file ever appears
 // and persist() is a silent no-op.
 func TestStripeMock_Persist_NoPathIsNoOp(t *testing.T) {
-	dir := t.TempDir()
+	// OnPersistError must never fire on the no-path path — any invocation is a
+	// bug (persist should bail before touching the filesystem).
 	mock := NewStripeMock(StripeMockOptions{
 		BaseURL: "http://x",
 		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		OnPersistError: func(err error) {
+			t.Errorf("OnPersistError fired with no PersistPath set: %v", err)
+		},
 	})
-	seedConnectedAccount(t, mock)
+	require.Empty(t, mock.persistPath, "construction without PersistPath must stay in-memory only")
 
-	entries, err := os.ReadDir(dir)
-	require.NoError(t, err)
-	assert.Empty(t, entries, "no persist file should be created when PersistPath is unset")
+	// Seeding mutates state and triggers persist() internally; an explicit call
+	// exercises the no-op path directly. Neither should error or write anything.
+	acctID := seedConnectedAccount(t, mock)
+	mock.mu.Lock()
+	mock.persist()
+	mock.mu.Unlock()
+
+	// State is held in memory despite no persistence.
+	mock.mu.RLock()
+	_, ok := mock.accounts[acctID]
+	mock.mu.RUnlock()
+	assert.True(t, ok, "seeded account must live in memory when persistence is disabled")
 }
 
 // TestStripeMock_Persist_LoadCorruptFile_StartsEmptyAndReports asserts the

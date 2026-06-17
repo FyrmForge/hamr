@@ -3,12 +3,13 @@ package media
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"mime/multipart"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -166,7 +167,9 @@ func (s *VideoStore) upload(ctx context.Context, r io.Reader, id string, overwri
 		}
 	}
 
-	mimeType, raw, err := detectMIME(r)
+	// detectMIME bounds buffering to MaxSize+1 (see its doc); the size check
+	// below relies on that +1 to flag oversized uploads.
+	mimeType, raw, err := detectMIME(r, s.config.MaxSize)
 	if err != nil {
 		return nil, err
 	}
@@ -325,15 +328,18 @@ func (s *VideoStore) ServeHandler() echo.HandlerFunc {
 
 func (s *VideoStore) serveLocal() echo.HandlerFunc {
 	return func(c echo.Context) error {
-		reqPath := c.Request().URL.Path
-		storagePath := strings.TrimPrefix(reqPath, s.urlPrefix+"/")
-		if storagePath == reqPath {
+		// Map the request to a storage key scoped to this store's category —
+		// rejects anything outside urlPrefix or the category prefix (404).
+		storagePath, ok := scopedServeKey(c.Request().URL.Path, s.urlPrefix, s.config.Category)
+		if !ok {
 			return echo.NewHTTPError(http.StatusNotFound)
 		}
 
 		rc, err := s.storage.Open(c.Request().Context(), storagePath)
 		if err != nil {
-			if os.IsNotExist(err) || strings.Contains(err.Error(), "not exist") {
+			// errors.Is unwraps the storage layer's fmt.Errorf("%w") chain;
+			// os.IsNotExist does not, so a missing file would 500 instead of 404.
+			if errors.Is(err, fs.ErrNotExist) {
 				return echo.NewHTTPError(http.StatusNotFound)
 			}
 			return echo.NewHTTPError(http.StatusInternalServerError)
@@ -352,6 +358,11 @@ func (s *VideoStore) serveLocal() echo.HandlerFunc {
 		}
 
 		c.Response().Header().Set("Content-Type", ct)
+		// NOTE: headers (including the year-long immutable cache) are committed
+		// before the body streams, so a mid-copy failure produces a truncated body
+		// the client could cache. Tolerated for immutable content-addressed assets
+		// (a retry re-fetches the identical key); fully closing it would require a
+		// Content-Length from the storage layer so a short read is detectable.
 		c.Response().Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		c.Response().WriteHeader(http.StatusOK)
 		_, err = io.Copy(c.Response(), rc)
@@ -361,8 +372,14 @@ func (s *VideoStore) serveLocal() echo.HandlerFunc {
 
 func (s *VideoStore) serveS3() echo.HandlerFunc {
 	return func(c echo.Context) error {
-		reqPath := c.Request().URL.Path
-		storagePath := strings.TrimPrefix(reqPath, "/")
+		// Same category scoping as the local path. For S3 stores urlPrefix is
+		// empty, so this strips the leading slash and then confines the key to
+		// "category/…" — without it the handler would proxy any object in the
+		// bucket, defeating the store's access model (incl. signed-URL-only).
+		storagePath, ok := scopedServeKey(c.Request().URL.Path, s.urlPrefix, s.config.Category)
+		if !ok {
+			return echo.NewHTTPError(http.StatusNotFound)
+		}
 
 		rc, err := s.storage.Open(c.Request().Context(), storagePath)
 		if err != nil {
@@ -382,6 +399,11 @@ func (s *VideoStore) serveS3() echo.HandlerFunc {
 		}
 
 		c.Response().Header().Set("Content-Type", ct)
+		// NOTE: headers (including the year-long immutable cache) are committed
+		// before the body streams, so a mid-copy failure produces a truncated body
+		// the client could cache. Tolerated for immutable content-addressed assets
+		// (a retry re-fetches the identical key); fully closing it would require a
+		// Content-Length from the storage layer so a short read is detectable.
 		c.Response().Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		c.Response().WriteHeader(http.StatusOK)
 		_, err = io.Copy(c.Response(), rc)

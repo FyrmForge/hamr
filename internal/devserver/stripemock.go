@@ -18,6 +18,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -166,6 +167,9 @@ func (m *StripeMock) handleCheckoutSessionByID(w http.ResponseWriter, r *http.Re
 
 	m.mu.RLock()
 	sess, ok := m.sessions[id]
+	if ok {
+		sess = cloneSession(sess)
+	}
 	m.mu.RUnlock()
 	if !ok {
 		writeStripeError(w, http.StatusNotFound, "invalid_request_error",
@@ -196,10 +200,11 @@ func (m *StripeMock) createCheckoutSession(w http.ResponseWriter, r *http.Reques
 
 	m.mu.Lock()
 	m.sessions[sess.ID] = sess
+	sessCopy := cloneSession(sess)
 	m.persist()
 	m.mu.Unlock()
 
-	writeStripeJSON(w, http.StatusOK, m.serializeSession(sess))
+	writeStripeJSON(w, http.StatusOK, m.serializeSession(sessCopy))
 }
 
 // buildSessionFromParams projects the decoded Stripe params into the mock's
@@ -246,7 +251,7 @@ func buildSessionFromParams(p map[string]any) (*stripeSession, error) {
 // Supports inline price_data only — referencing existing prices by ID is a
 // later concern.
 func buildLineItem(item map[string]any, idx int) (stripeLineItem, error) {
-	qty := getInt64(item, "quantity")
+	qty, _ := getInt64(item, "quantity")
 	if qty <= 0 {
 		qty = 1
 	}
@@ -258,9 +263,9 @@ func buildLineItem(item map[string]any, idx int) (stripeLineItem, error) {
 	if currency == "" {
 		return stripeLineItem{}, fmt.Errorf("line_items[%d].price_data.currency is required", idx)
 	}
-	unitAmount := getInt64(priceData, "unit_amount")
-	if unitAmount < 0 {
-		return stripeLineItem{}, fmt.Errorf("line_items[%d].price_data.unit_amount must be non-negative", idx)
+	unitAmount, ok := getInt64(priceData, "unit_amount")
+	if !ok || unitAmount < 0 {
+		return stripeLineItem{}, fmt.Errorf("line_items[%d].price_data.unit_amount must be a non-negative integer", idx)
 	}
 	productData, _ := priceData["product_data"].(map[string]any)
 	name := getString(productData, "name")
@@ -324,20 +329,22 @@ func getString(m map[string]any, key string) string {
 }
 
 // getInt64 reads a base-10 integer at key. Form-decoded values are always
-// strings, so we parse here. Missing/empty/unparseable returns 0.
-func getInt64(m map[string]any, key string) int64 {
+// strings, so we parse here. Returns (value, true) for a valid integer
+// (negatives included) or a missing/empty key (value 0); returns (0, false)
+// when the key is PRESENT but not a valid integer (incl. overflow). Callers
+// for which a garbage value must be an error (e.g. a refund amount, where 0
+// means "refund everything") must check ok rather than silently treating bad
+// input as 0.
+func getInt64(m map[string]any, key string) (int64, bool) {
 	s := getString(m, key)
 	if s == "" {
-		return 0
+		return 0, true
 	}
-	var n int64
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return 0
-		}
-		n = n*10 + int64(r-'0')
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0, false
 	}
-	return n
+	return n, true
 }
 
 // stringMap converts a decoded map[string]any whose values are all strings

@@ -80,20 +80,22 @@ func collectOpenTags(lines []string, tag string) []openTag {
 			}
 			buf.WriteString(line)
 
-			if end := strings.Index(line, ">"); end >= 0 {
-				tagText := buf.String()
-				if cut := strings.Index(tagText, ">"); cut >= 0 {
-					tagText = tagText[:cut+1]
-				}
+			// Find the closing '>' against the full accumulated buffer so quote
+			// state carried from earlier lines is honoured.
+			full := buf.String()
+			if cut := findTagEnd(full); cut >= 0 {
 				tags = append(tags, openTag{
 					line: startLine,
 					col:  startCol,
-					text: tagText,
+					text: full[:cut+1],
 				})
 				inTag = false
 				buf.Reset()
-				line = line[end+1:]
-				baseCol += end + 1
+				// Map the buffer-relative close back to the current line so the
+				// remainder can be scanned for more tags.
+				tailStart := max(cut+1-(len(full)-len(line)), 0)
+				baseCol += tailStart
+				line = line[tailStart:]
 				offset = 0
 			} else {
 				continue
@@ -107,7 +109,7 @@ func collectOpenTags(lines []string, tag string) []openTag {
 			}
 
 			rest := line[pos:]
-			end := strings.Index(rest, ">")
+			end := findTagEnd(rest)
 			if end >= 0 {
 				tags = append(tags, openTag{
 					line: i + 1,
@@ -128,6 +130,29 @@ func collectOpenTags(lines []string, tag string) []openTag {
 	}
 
 	return tags
+}
+
+// findTagEnd returns the index of the first '>' that actually closes the tag —
+// i.e. the first '>' not inside a single- or double-quoted attribute value.
+// Without this a value like title="a > b" or data-x="x>y" would be treated as
+// the tag end, hiding every attribute after it (e.g. alt=/href=) from the
+// a11y checks and producing false "missing attribute" diagnostics.
+func findTagEnd(s string) int {
+	var quote byte
+	for i := range len(s) {
+		c := s[i]
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+		case c == '>':
+			return i
+		}
+	}
+	return -1
 }
 
 func findTagStart(line, tag string, from int) int {

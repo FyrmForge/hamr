@@ -741,7 +741,7 @@ func TestGenerateProject_ciWorkflow(t *testing.T) {
 
 	deploy := readFile(t, dir, ".github/workflows/deploy.yml")
 	// Every non-empty line should be a comment.
-	for _, line := range strings.Split(deploy, "\n") {
+	for line := range strings.SplitSeq(deploy, "\n") {
 		if strings.TrimSpace(line) != "" {
 			assert.True(t, strings.HasPrefix(line, "#"), "deploy.yml has uncommented line: %q", line)
 		}

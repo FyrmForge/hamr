@@ -279,6 +279,15 @@ func walkComposeServices(services []composeService, owned map[string]bool, maxAt
 	}
 	updated := make([]composeService, len(services))
 	var shifts []portShift
+	// assigned tracks every host:port already claimed during this walk —
+	// seeded with the project's own running-container ports so a service never
+	// walks onto a port another service or container already holds. probeFreePort
+	// only checks OS bind availability (it probes then releases), so without this
+	// two services sharing a base port would both be handed the same number.
+	assigned := make(map[string]bool, len(owned))
+	for k := range owned {
+		assigned[k] = true
+	}
 	for i, svc := range services {
 		updated[i] = composeService{Name: svc.Name, Ports: append([]composePortBinding(nil), svc.Ports...)}
 		for j, p := range svc.Ports {
@@ -295,7 +304,7 @@ func walkComposeServices(services []composeService, owned map[string]bool, maxAt
 				// — treat as available, leave unchanged, record no shift.
 				continue
 			}
-			actual, err := probeFreePort(host, p.HostPort, maxAttempts, log)
+			actual, err := probeFreePort(host, p.HostPort, maxAttempts, assigned, log)
 			if err != nil {
 				// Walking disabled (max=1) or every port in range busy:
 				// leave the original value and let `compose up` fail
@@ -303,6 +312,7 @@ func walkComposeServices(services []composeService, owned map[string]bool, maxAt
 				// the user what happened.
 				continue
 			}
+			assigned[hostPortKey(host, actual)] = true
 			updated[i].Ports[j].HostPort = actual
 			if actual != p.HostPort {
 				shifts = append(shifts, portShift{

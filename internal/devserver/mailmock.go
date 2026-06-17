@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -22,7 +23,7 @@ import (
 type MailMock struct {
 	maxMessages     int
 	maxMessageBytes int64
-	persistPath     string     // "" disables persistence
+	persistPath     string      // "" disables persistence
 	persistErr      func(error) // callback for persist errors; nil logs via default logger
 
 	mu       sync.RWMutex
@@ -101,9 +102,7 @@ func cloneStringMap(m map[string]string) map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
+	maps.Copy(out, m)
 	return out
 }
 
@@ -493,6 +492,13 @@ func (m *MailMock) handleInline(w http.ResponseWriter, _ *http.Request, msg *mai
 			w.Header().Set("X-Content-Type-Options", "nosniff")
 			w.Header().Set("Referrer-Policy", "no-referrer")
 			w.Header().Set("Cache-Control", "no-store")
+			// Inline content is served on the dev-proxy origin and can't use
+			// Content-Disposition: attachment (it's referenced via cid: in img
+			// tags). A message could carry an inline part with Content-Type
+			// text/html and a script payload — the sandbox CSP makes the browser
+			// treat the response as an isolated, script-disabled document, so
+			// even an HTML inline part can't run code on the app's origin.
+			w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
 			w.Write(a.Data) //nolint:errcheck
 			return
 		}
@@ -556,9 +562,9 @@ func newMessageID() string {
 }
 
 func localPart(email string) string {
-	i := strings.IndexByte(email, '@')
-	if i < 0 {
+	before, _, ok := strings.Cut(email, "@")
+	if !ok {
 		return strings.ToLower(email)
 	}
-	return strings.ToLower(email[:i])
+	return strings.ToLower(before)
 }

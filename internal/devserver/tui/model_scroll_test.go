@@ -13,7 +13,7 @@ func newReadyModelForScroll(height int, lines int) *Model {
 	m.ready = true
 	m.view = viewport.New(80, height)
 	m.view.KeyMap = scrollKeyMap()
-	for i := 0; i < lines; i++ {
+	for i := range lines {
 		m.hamrLogs = append(m.hamrLogs, fmt.Sprintf("line %d", i))
 	}
 	m.view.SetContent("")
@@ -94,7 +94,7 @@ func TestModel_FollowResumesAfterScrollUpAndEnter(t *testing.T) {
 func TestModel_FollowResumesAfterArrowScrollAndEnter(t *testing.T) {
 	m := newReadyModelForScroll(4, 8)
 
-	for i := 0; i < 6; i++ {
+	for range 6 {
 		got, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyUp})
 		m = got.(*Model)
 	}
@@ -108,7 +108,7 @@ func TestModel_FollowResumesAfterArrowScrollAndEnter(t *testing.T) {
 		t.Fatalf("enter should land at bottom; YOffset=%d", m.view.YOffset)
 	}
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		m.appendHamrLog(fmt.Sprintf("after %d", i))
 		if !m.view.AtBottom() {
 			t.Fatalf("follow broke after %d new lines; YOffset=%d", i+1, m.view.YOffset)
@@ -127,7 +127,7 @@ func TestModel_FollowDoesNotResumeAfterEnterWhileSearchActive(t *testing.T) {
 	s.open()
 	s.appendRune('l')
 	s.appendRune('i')
-	s.recompute(m.hamrLogs)
+	s.recompute(m.hamrLogs, 0)
 	s.commit(m.hamrLogs)
 	if s.stage != searchActive {
 		t.Fatalf("setup: expected searchActive stage, got %v", s.stage)
@@ -143,10 +143,10 @@ func TestModel_FollowDoesNotResumeAfterEnterWhileSearchActive(t *testing.T) {
 
 	m.appendHamrLog("line 8")
 
+	// With an active search, a new log must NOT yank the viewport back to the
+	// bottom — the user is reading search results.
 	if m.view.AtBottom() {
-		t.Log("follow DOES resume even with active search (test asserts it doesn't — flip if you want resume)")
-	} else {
-		t.Logf("BUG candidate: follow does NOT resume after enter while search active; YOffset=%d", m.view.YOffset)
+		t.Fatalf("follow must not resume after Enter while search is active; YOffset=%d", m.view.YOffset)
 	}
 }
 
@@ -156,7 +156,7 @@ func TestModel_FollowDoesNotResumeAfterEnterWhileSearchActive(t *testing.T) {
 func TestModel_FollowResumesAfterWheelScrollAndEnter(t *testing.T) {
 	m := newReadyModelForScroll(4, 8)
 
-	for i := 0; i < 6; i++ {
+	for range 6 {
 		var cmd tea.Cmd
 		m.view, cmd = m.view.Update(tea.MouseMsg{Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
 		_ = cmd
@@ -171,10 +171,105 @@ func TestModel_FollowResumesAfterWheelScrollAndEnter(t *testing.T) {
 		t.Fatalf("enter should land at bottom; YOffset=%d", m.view.YOffset)
 	}
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		m.appendHamrLog(fmt.Sprintf("after %d", i))
 		if !m.view.AtBottom() {
 			t.Fatalf("follow broke after %d new lines; YOffset=%d", i+1, m.view.YOffset)
 		}
+	}
+}
+
+func TestModel_AutoScrollSingleChain(t *testing.T) {
+	m := newReadyModelForScroll(4, 100)
+	m.height = 6         // drag edge is at height-1
+	m.view.SetYOffset(0) // at top, so we can scroll down
+	// Drag held below the bottom edge (lastY >= height-1 => bottom edge).
+	m.drag = dragState{active: true, extend: true, lastY: 20}
+
+	// First motion past the edge starts exactly one chain.
+	if cmd := m.startAutoScroll(); cmd == nil {
+		t.Fatal("expected an auto-scroll tick to start")
+	}
+	if !m.drag.ticking {
+		t.Fatal("ticking flag should be set after starting a chain")
+	}
+
+	// Further motion events past the edge must NOT start additional chains —
+	// otherwise N events would run N self-perpetuating chains and multiply the
+	// scroll speed.
+	for range 5 {
+		if cmd := m.startAutoScroll(); cmd != nil {
+			t.Fatal("a second concurrent auto-scroll chain was started")
+		}
+	}
+
+	// When the chain reaches the bottom it stops and clears the flag, so a later
+	// drag can start a fresh chain.
+	m.view.GotoBottom()
+	if cmd := m.continueAutoScroll(); cmd != nil {
+		t.Fatal("chain should stop at the bottom")
+	}
+	if m.drag.ticking {
+		t.Fatal("ticking flag should be cleared when the chain ends")
+	}
+}
+
+// TestModel_ClearActiveLog_RecomputesSearch guards the clear-with-search bug:
+// clearing the buffer must recompute the active search so the [k/n] counter and
+// n/N targets don't linger against lines that no longer exist.
+func TestModel_ClearActiveLog_RecomputesSearch(t *testing.T) {
+	m := NewModel(NewHotkeySource())
+	m.hamrLogs = []string{"foo a", "foo b", "foo c"}
+
+	s := m.activeSearch()
+	s.open()
+	for _, r := range "foo" {
+		s.appendRune(r)
+	}
+	s.commit(m.hamrLogs)
+	if len(s.matches) != 3 {
+		t.Fatalf("setup: expected 3 matches, got %d", len(s.matches))
+	}
+
+	m.clearActiveLog()
+
+	if len(s.matches) != 0 {
+		t.Fatalf("clearing logs must recompute the search to 0 matches, got %d", len(s.matches))
+	}
+}
+
+// TestModel_SearchScroll_AccountsForWrappedRows guards the visual-row bug:
+// SetYOffset takes a visual row, but matches are buffer-line indices. With long
+// wrapped lines above the match, scrolling by buffer index leaves the match
+// off-screen; the fix converts to the match's visual row first.
+func TestModel_SearchScroll_AccountsForWrappedRows(t *testing.T) {
+	m := NewModel(NewHotkeySource())
+	m.ready = true
+	m.width = 10
+	m.height = 6
+	m.view = viewport.New(10, 4) // width 10 forces wrapping
+
+	long := "xxxxxxxxxxxxxxxxxxxxxxxxxxxx" // 28 chars → 3 visual rows at width 10
+	for range 5 {
+		m.hamrLogs = append(m.hamrLogs, long)
+	}
+	m.hamrLogs = append(m.hamrLogs, "needle here") // match on buffer line 5
+	m.refreshViewport()
+
+	s := m.activeSearch()
+	s.open()
+	for _, r := range "needle" {
+		s.appendRune(r)
+	}
+	s.commit(m.hamrLogs)
+	m.onSearchCursorChange()
+
+	vr := m.matchVisualRow()
+	if vr <= 5 {
+		t.Fatalf("expected wrapped match visual row > buffer index 5, got %d", vr)
+	}
+	top, bottom := m.view.YOffset, m.view.YOffset+m.view.Height
+	if vr < top || vr >= bottom {
+		t.Fatalf("match visual row %d must be visible in viewport [%d,%d)", vr, top, bottom)
 	}
 }

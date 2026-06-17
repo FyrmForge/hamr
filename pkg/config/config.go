@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -48,6 +49,24 @@ func GetEnvOrDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// GetEnvCSV returns the environment variable named by key parsed as a
+// comma-separated list, with surrounding whitespace trimmed and empty entries
+// dropped. Returns nil when the variable is unset/empty or contains no
+// non-empty entries.
+func GetEnvCSV(key string) []string {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return nil
+	}
+	var out []string
+	for part := range strings.SplitSeq(raw, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // GetEnvOrPanic returns the value of the environment variable named by key.

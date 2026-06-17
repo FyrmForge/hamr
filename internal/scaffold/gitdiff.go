@@ -12,6 +12,28 @@ import (
 // HamrRepoURL is the default repository URL for diffing scaffold changes.
 const HamrRepoURL = "https://github.com/FyrmForge/hamr.git"
 
+// upgradeDiffPaths is the git pathspec the upgrade diff is scoped to — what a
+// downstream project actually consumes or mirrors:
+//   - pkg/                              the importable libraries
+//   - internal/cli/generator/templates the scaffold the project's files come
+//     from (so an agent can upgrade the project to the latest template)
+//   - docs/                            the project carries its own docs (the
+//     scaffold templates a docs/ tree, CLAUDE.md, AGENTS.md, skill references),
+//     so an agent can bring them up to date
+//   - llmsdocs/                        the project's llms.txt-style AI context
+//     tracks these
+//
+// Only hamr's own internal tooling — the CLI commands, the dev server, the
+// generator logic (NOT its templates), the hamr binary, and tests — is excluded:
+// it can never appear in, or be applied to, a scaffolded project.
+var upgradeDiffPaths = []string{
+	"pkg",
+	"internal/cli/generator/templates",
+	"docs",
+	"llmsdocs",
+	":(exclude)**/*_test.go",
+}
+
 // DiffReport is the structured output of the git-based upgrade command.
 type DiffReport struct {
 	Project  DiffProjectInfo `json:"project"`
@@ -57,14 +79,22 @@ func GitDiff(ctx context.Context, repoURL, baseVersion, currentVersion string) (
 		return nil, fmt.Errorf("current version tag %s not found: %w", currentTag, err)
 	}
 
+	// Scope the diff to what a downstream project actually consumes: the
+	// importable libraries and the scaffold templates its own files were
+	// generated from, plus the curated changelog. hamr's CLI / dev-server
+	// internals, cmd/, and tests never appear in a scaffolded project, so
+	// including them only buries the relevant changes in noise (and tokens) for
+	// the agent doing the upgrade.
+	rng := baseTag + ".." + currentTag
+
 	// Get the unified diff.
-	diff, err := gitOutput(ctx, tmpDir, "diff", baseTag+".."+currentTag)
+	diff, err := gitOutput(ctx, tmpDir, append([]string{"diff", rng, "--"}, upgradeDiffPaths...)...)
 	if err != nil {
 		return nil, fmt.Errorf("git diff: %w", err)
 	}
 
 	// Get the stat summary.
-	stat, err := gitOutput(ctx, tmpDir, "diff", "--stat", baseTag+".."+currentTag)
+	stat, err := gitOutput(ctx, tmpDir, append([]string{"diff", "--stat", rng, "--"}, upgradeDiffPaths...)...)
 	if err != nil {
 		return nil, fmt.Errorf("git diff --stat: %w", err)
 	}

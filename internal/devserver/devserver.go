@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -45,7 +46,17 @@ type Runner struct {
 	// (possibly walked) port. Read by the o-open hotkey so it always points
 	// at the actual listening URL, not the value originally written in
 	// hamr.toml. Empty when the proxy isn't running.
+	//
+	// It is written before `ready` is set and only read once `ready` is
+	// observed true, so the atomic store/load on `ready` provides the
+	// happens-before that makes the cross-goroutine access (startup hotkey
+	// drain vs Run) race-free without a separate mutex.
 	proxyURL string
+
+	// ready flips true once startup has finished and proxyURL / cfg.Proxy.*
+	// are stable. Until then the startup hotkey-drain goroutine ignores
+	// system-dependent actions (open browser, rebuild) — only quit works.
+	ready atomic.Bool
 }
 
 // Option configures a Runner.
@@ -288,9 +299,25 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 	}()
 
+	// Build scheduler state up front so manual runs (POST /run, hotkey rebuild)
+	// can enqueue through the single scheduler goroutine rather than starting
+	// processes directly. requestRun mirrors the file-watcher event path below.
+	dirty := make(map[string]FileEvent, len(r.cfg.Dev.Watch))
+	var dirtyMu sync.Mutex
+	scheduleCh := make(chan struct{}, 1)
+
 	actions := &DevActions{
 		ctx: runCtx, cfg: r.cfg, pm: pm, broker: broker,
 		errorState: errorState, graph: graph, logger: r.logger,
+		requestRun: func(rule *WatchRule) {
+			dirtyMu.Lock()
+			dirty[rule.Name] = FileEvent{Rule: rule}
+			dirtyMu.Unlock()
+			select {
+			case scheduleCh <- struct{}{}:
+			default:
+			}
+		},
 	}
 	if r.actionsHook != nil {
 		r.actionsHook(actions)
@@ -396,7 +423,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		if probeHost == "" {
 			probeHost = "127.0.0.1"
 		}
-		actualAppPort, err = probeFreePort(probeHost, targetStartPort, portWalkAttempts(r.cfg), r.logger)
+		actualAppPort, err = probeFreePort(probeHost, targetStartPort, portWalkAttempts(r.cfg), nil, r.logger)
 		if err != nil {
 			_ = ln.Close()
 			return fmt.Errorf("probe app port: %w", err)
@@ -591,6 +618,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	if len(r.cfg.Dev.Watch) == 0 {
 		r.logger.Info("no watch rules, running daemons only")
 		r.logger.Info("ready")
+		r.ready.Store(true)
 		close(startupDone)
 		<-startupExited
 		if r.configPath != "" {
@@ -623,6 +651,7 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	r.logger.Info("watching for changes")
 	r.logger.Info("ready")
+	r.ready.Store(true)
 	close(startupDone)
 	<-startupExited
 
@@ -631,15 +660,10 @@ func (r *Runner) Run(ctx context.Context) error {
 		go r.watchConfigFile(runCtx, configReloadCh)
 	}
 
-	dirty := make(map[string]FileEvent, len(r.cfg.Dev.Watch))
-	var dirtyMu sync.Mutex
-	scheduleCh := make(chan struct{}, 1)
 
 	// Single scheduler goroutine coalesces bursts and executes in topological
 	// order to preserve dependency semantics.
-	schedulerWG.Add(1)
-	go func() {
-		defer schedulerWG.Done()
+	schedulerWG.Go(func() {
 		for {
 			select {
 			case <-runCtx.Done():
@@ -675,6 +699,17 @@ func (r *Runner) Run(ctx context.Context) error {
 			}
 
 			for {
+				// Abandon the queue the instant shutdown begins — don't launch
+				// further builds. Without this, a runaway watch loop (e.g. a rule
+				// whose output lands in its own watched dir) keeps re-filling
+				// `dirty` and the drain never converges, so schedulerWG.Wait()
+				// blocks shutdown and `q`/Ctrl-C appear to hang.
+				select {
+				case <-runCtx.Done():
+					return
+				default:
+				}
+
 				var evt FileEvent
 				found := false
 
@@ -717,7 +752,7 @@ func (r *Runner) Run(ctx context.Context) error {
 				r.handleEvent(runCtx, evt, graph, pm, broker, errorState)
 			}
 		}
-	}()
+	})
 
 	// Event loop: coalesce to latest event per rule and notify scheduler.
 	for {
@@ -751,6 +786,14 @@ func (r *Runner) Run(ctx context.Context) error {
 
 // handleHotkey processes a hotkey action. Returns true if the server should exit.
 func (r *Runner) handleHotkey(action HotkeyAction, actions *DevActions, cancel context.CancelFunc) bool {
+	// Until the dev server is ready, only quit is honored. The startup
+	// hotkey-drain goroutine runs concurrently with Run() binding the proxy, so
+	// gating here both (a) avoids opening a not-yet-listening URL / rebuilding
+	// before the scheduler is up, and (b) keeps the drain goroutine from reading
+	// proxyURL / cfg.Proxy.* while Run() is still writing them.
+	if action != HotkeyQuit && !r.ready.Load() {
+		return false
+	}
 	switch action {
 	case HotkeyRebuild:
 		r.logger.Info("rebuilding all rules")

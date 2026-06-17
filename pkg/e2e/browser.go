@@ -167,6 +167,9 @@ func SetupBrowser(t *testing.T, opts ...Option) *rod.Browser {
 
 	u, err := l.Launch()
 	require.NoError(t, err, "e2e: failed to launch browser")
+	// Remove the temp Chromium profile dir. Registered before the browser-close
+	// cleanup so it runs after it (t.Cleanup is LIFO) — browser gone first.
+	t.Cleanup(l.Cleanup)
 
 	browser := rod.New().ControlURL(u)
 	if cfg.SlowMotion > 0 {
@@ -244,7 +247,7 @@ func WaitForURLChange(t *testing.T, page *rod.Page, currentURL string, timeout t
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	require.Fail(t, "e2e: URL did not change from %s within %v", currentURL, timeout)
+	require.Failf(t, "e2e: URL did not change", "from %s within %v", currentURL, timeout)
 }
 
 // Input clears and types value into the element matching selector.

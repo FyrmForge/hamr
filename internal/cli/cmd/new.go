@@ -310,29 +310,22 @@ func ensureLatestCLI(ctx context.Context, skip bool) error {
 }
 
 // normalizeHamrVersion returns a clean semver string for embedding in hamr.toml.
-// Released builds pass through as-is. Dev builds resolve the latest git tag and
-// append "-dev" (e.g. "0.5.0-dev"). Falls back to "0.0.0-dev" when no tag exists.
+// Released builds pass through as-is. Dev builds (or an empty version) bake
+// "0.0.0-dev".
+//
+// It deliberately does NOT shell out to `git describe`: the only git repo
+// available at runtime is the USER's cwd (the project being scaffolded or
+// whatever repo they ran `hamr new` inside), not the hamr repo — so a git tag
+// here would stamp an unrelated repo's version into the project's baseline and
+// make `ensureCLINotBehindScaffold` wrongly block a correct CLI. The embedded
+// build version (resolved via debug.ReadBuildInfo in version.go) is the only
+// trustworthy source, and it's already applied before this call.
 func normalizeHamrVersion(v string) string {
 	v = strings.TrimPrefix(v, "v")
 	if v != "dev" && v != "" {
 		return v
 	}
-	// Dev build — resolve latest tag from git.
-	tag := latestGitTag()
-	if tag != "" {
-		return tag + "-dev"
-	}
 	return "0.0.0-dev"
-}
-
-// latestGitTag returns the most recent semver tag (without "v" prefix), or ""
-// if no tags exist or git is unavailable.
-func latestGitTag() string {
-	out, err := exec.Command("git", "describe", "--tags", "--abbrev=0").Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimPrefix(strings.TrimSpace(string(out)), "v")
 }
 
 func init() {

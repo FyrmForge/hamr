@@ -359,7 +359,7 @@ func TestConcurrentSetStatusAndRead(t *testing.T) {
 	// Writer: flips status between failed/delayed.
 	go func() {
 		defer wg.Done()
-		for i := 0; i < iterations; i++ {
+		for i := range iterations {
 			status := "failed"
 			if i%2 == 0 {
 				status = "delayed"
@@ -370,7 +370,7 @@ func TestConcurrentSetStatusAndRead(t *testing.T) {
 	// Reader via Get.
 	go func() {
 		defer wg.Done()
-		for i := 0; i < iterations; i++ {
+		for range iterations {
 			if msg := mm.Get(id); msg != nil {
 				_ = msg.Status
 				_ = msg.StatusNote
@@ -380,7 +380,7 @@ func TestConcurrentSetStatusAndRead(t *testing.T) {
 	// Reader via List.
 	go func() {
 		defer wg.Done()
-		for i := 0; i < iterations; i++ {
+		for range iterations {
 			for _, msg := range mm.List() {
 				_ = msg.Status
 			}

@@ -37,6 +37,9 @@ func (m *StripeMock) handleOnboardingPage(w http.ResponseWriter, r *http.Request
 
 	m.mu.RLock()
 	acct, ok := m.accounts[id]
+	if ok {
+		acct = cloneAccount(acct)
+	}
 	m.mu.RUnlock()
 	if !ok {
 		http.Error(w, "account not found", http.StatusNotFound)

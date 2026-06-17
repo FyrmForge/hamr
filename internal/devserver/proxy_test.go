@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -103,6 +104,47 @@ func TestInjectReloadScript_Chunked(t *testing.T) {
 	got := string(body)
 	assert.Contains(t, got, "<p>hello</p>")
 	assert.Contains(t, got, "__hamr", "reload script must be injected into chunked responses")
+}
+
+// TestInjectReloadScript_OversizedChunkedNotTruncated guards against the
+// truncation bug: a chunked (Content-Length -1) HTML response larger than
+// maxInjectBody must stream through in full — previously only the buffered
+// prefix was served and the rest of the body was silently dropped.
+func TestInjectReloadScript_OversizedChunkedNotTruncated(t *testing.T) {
+	payload := "<html><body>" + strings.Repeat("x", maxInjectBody+(1<<20)) + "END_MARKER</body></html>"
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		// Write in flushed chunks so the response is chunked (no Content-Length).
+		flusher, _ := w.(http.Flusher)
+		const chunk = 64 * 1024
+		for i := 0; i < len(payload); i += chunk {
+			end := min(i+chunk, len(payload))
+			_, _ = io.WriteString(w, payload[i:end])
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+	}))
+	defer backend.Close()
+
+	broker := NewSSEBroker(nil, nil, nil, false, false, false)
+	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, nil, nil, nil, nil, nil, nil, true)
+	proxy := httptest.NewServer(handler)
+	defer proxy.Close()
+
+	resp, err := http.Get(proxy.URL)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	assert.Equal(t, len(payload), len(body), "oversized chunked body must not be truncated")
+	assert.True(t, bytes.HasSuffix(body, []byte("END_MARKER</body></html>")),
+		"the tail of the body must survive passthrough")
+	assert.NotContains(t, string(body), "__hamr",
+		"too-large response is passed through without injection")
 }
 
 func TestInjectReloadScript_NonHTML(t *testing.T) {

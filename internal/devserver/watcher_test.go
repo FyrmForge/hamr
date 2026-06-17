@@ -284,6 +284,30 @@ func TestWatcher_Debounce(t *testing.T) {
 	w.Stop()
 }
 
+// TestWatcher_ClosesDoneWhenFsnotifyChannelsClose guards the leak fix: if
+// fsnotify closes its Events/Errors channels underneath the loop (rather than
+// the loop exiting via context cancellation), the loop must still run cleanup —
+// stop timers and close w.done — so consumers unblock and no timer goroutine is
+// left blocked forever on w.events.
+func TestWatcher_ClosesDoneWhenFsnotifyChannelsClose(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWatcher(dir, []WatchRule{{Name: "go", Watch: StringOrSlice{"**/*.go"}}}, watcherLogger())
+	require.NoError(t, err)
+
+	require.NoError(t, w.Start(t.Context()))
+
+	// Close the underlying watcher: fsnotify closes its Events/Errors channels,
+	// driving loop() out via the !ok path instead of ctx.Done().
+	require.NoError(t, w.fsw.Close())
+
+	select {
+	case <-w.Done():
+		// Cleanup ran.
+	case <-time.After(2 * time.Second):
+		t.Fatal("watcher did not close Done() after fsnotify channels closed")
+	}
+}
+
 func TestNewWatcher(t *testing.T) {
 	dir := t.TempDir()
 	w, err := NewWatcher(dir, []WatchRule{{Name: "test", Watch: StringOrSlice{"*.go"}}}, watcherLogger())

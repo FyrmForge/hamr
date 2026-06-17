@@ -78,7 +78,13 @@ func listenWalk(addr string, maxAttempts int, log *slog.Logger) (net.Listener, i
 // Used for ports hamr doesn't bind itself but needs to inject as env vars
 // (PORT for the spawned app process, etc.). With maxAttempts == 1, behaves
 // as a single-shot probe — returns ErrNotAvailable on busy.
-func probeFreePort(host string, start, maxAttempts int, log *slog.Logger) (int, error) {
+// taken, when non-nil, marks ports (by hostPortKey) that the caller has already
+// handed out earlier in the same batch. probeFreePort only checks OS-level bind
+// availability — it binds then immediately closes — so without this a second
+// caller probing the same base would see the port free and collide. Ports in
+// taken are treated exactly like an in-use port: skipped, walked past, and
+// counted toward maxAttempts so the walk window stays honest.
+func probeFreePort(host string, start, maxAttempts int, taken map[string]bool, log *slog.Logger) (int, error) {
 	if maxAttempts < 1 {
 		maxAttempts = 1
 	}
@@ -94,6 +100,12 @@ func probeFreePort(host string, start, maxAttempts int, log *slog.Logger) (int, 
 	}
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		port := start + attempt
+		if taken[hostPortKey(host, port)] {
+			if log != nil && maxAttempts > 1 {
+				log.Warn("port already assigned this run, walking", "addr", joinHostPort(host, port), "next", joinHostPort(host, port+1))
+			}
+			continue
+		}
 		ln, err := net.Listen("tcp", joinHostPort(host, port))
 		if err == nil {
 			_ = ln.Close()

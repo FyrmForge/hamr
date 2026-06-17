@@ -154,3 +154,52 @@ func TestTranslatorPluralWithCountAndData(t *testing.T) {
 		t.Errorf("got %q, want %q", got, "3 messages for Bob")
 	}
 }
+
+func TestTranslatorPluralDeterministicWithoutFallback(t *testing.T) {
+	// Neither the count's category (en -> "other") nor Other is defined, and
+	// there is no fallback. The category must be chosen deterministically.
+	pm, err := newPluralMessage(map[string]any{
+		"two": "two-form",
+		"few": "few-form",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := newTranslator("en", map[string]message{"x": pm}, "ltr", nil)
+
+	first := tr.T("x", 5)
+	for range 50 {
+		if got := tr.T("x", 5); got != first {
+			t.Fatalf("non-deterministic plural fallback: got %q then %q", first, got)
+		}
+	}
+	// Canonical CLDR order [zero, one, two, few, many, other] -> "two" wins.
+	if first != "two-form" {
+		t.Errorf("expected canonical-first category 'two', got %q", first)
+	}
+}
+
+func TestTranslatorPluralFallsBackForMissingCategory(t *testing.T) {
+	// Default locale has a complete plural; the locale is missing the category
+	// for the count and has no Other -> should use the default's complete plural.
+	def, err := newPluralMessage(map[string]any{
+		"one":   "{{.Count}} item",
+		"other": "{{.Count}} items",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defTr := newTranslator("en", map[string]message{"items": def}, "ltr", nil)
+
+	loc, err := newPluralMessage(map[string]any{
+		"one": "{{.Count}} element", // only "one"; missing the category for 5
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plTr := newTranslator("pl", map[string]message{"items": loc}, "ltr", defTr)
+
+	if got := plTr.T("items", 5); got != "5 items" {
+		t.Errorf("expected fallback to default-locale plural, got %q", got)
+	}
+}

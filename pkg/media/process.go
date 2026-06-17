@@ -100,7 +100,15 @@ func checkFFmpeg() error {
 
 // detectMIME reads the first 512 bytes from r to detect the MIME type and
 // returns the full contents (header + rest) so the reader can still be used.
-func detectMIME(r io.Reader) (mimeType string, buf []byte, err error) {
+//
+// When maxSize > 0 the read is bounded to maxSize+1 bytes so an oversized (or
+// Content-Length-lying) upload can't exhaust memory before the caller's size
+// check runs; the +1 lets that check still distinguish "exactly maxSize" from
+// "too large". maxSize <= 0 reads unbounded (callers that already trust r).
+func detectMIME(r io.Reader, maxSize int64) (mimeType string, buf []byte, err error) {
+	if maxSize > 0 {
+		r = io.LimitReader(r, maxSize+1)
+	}
 	header := make([]byte, 512)
 	n, err := io.ReadAtLeast(r, header, 1)
 	if err != nil {

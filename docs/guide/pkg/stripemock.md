@@ -82,9 +82,10 @@ also set `DEV_MODE=true`.
 4. App redirects the user to that URL.
 5. Browser hits hamr's proxy at `/__hamr/stripe/checkout`, sees three
    outcome buttons (Pay / Card Declined / Cancel).
-6. User clicks an outcome. The mock:
+6. User clicks an outcome. The mock (except for a synchronous Card Declined,
+   which leaves the session open and fires nothing — see the table below):
    - Updates the stored session's `status` and `payment_status`.
-   - Fires a real signed webhook (HMAC-SHA256, `Stripe-Signature: t=...,v1=...`)
+   - Fires real signed webhook(s) (HMAC-SHA256, `Stripe-Signature: t=...,v1=...`)
      to `webhook_url`.
    - Substitutes `{CHECKOUT_SESSION_ID}` in `success_url` / `cancel_url`
      (Stripe's documented placeholder pattern) before redirecting.
@@ -96,11 +97,21 @@ also set `DEV_MODE=true`.
 
 ## Outcome → event mapping
 
-| Button | Webhook event | Status | Redirect |
+| Button | Webhook event(s) | Status | Redirect |
 |---|---|---|---|
-| Pay Successfully | `checkout.session.completed` | complete + paid | success_url |
-| Card Declined | `checkout.session.async_payment_failed` | complete + unpaid | cancel_url |
+| Pay Successfully | `checkout.session.completed`, `payment_intent.succeeded`, `charge.succeeded` | complete + paid | success_url |
+| Card Declined | *(none)* | stays open | back to checkout page |
 | Cancel Payment | `checkout.session.expired` | expired | cancel_url |
+
+**Pay Successfully** also materialises the `PaymentIntent` (the id the session
+advertised) and its `Charge`, so the app can retrieve the PI and refund the
+checkout payment — mirroring real Stripe, which fires the payment events
+alongside `checkout.session.completed`.
+
+**Card Declined** models a *synchronous* decline: the session stays `open`, no
+webhook fires, and the buyer is sent back to the checkout page to retry with
+another card — exactly as real Stripe behaves (the decline is surfaced inline,
+not as an event; `async_payment_failed` is only for delayed/async methods).
 
 ## What the mock implements today
 
@@ -127,6 +138,12 @@ also set `DEV_MODE=true`.
   `requires_payment_method` to `processing` for auto-capture (mirrors
   real Stripe's sync card flow), or to `requires_capture` if
   `capture_method=manual`. The dev UI drives the rest.
+- `POST /v1/payment_intents/{id}/capture` — capture a `requires_capture`
+  (manual-capture) PI: creates the Charge, advances to `succeeded`, and fires
+  `payment_intent.succeeded` + `charge.succeeded` (+ `transfer.created` for
+  destination charges). Supports partial capture via `amount_to_capture`.
+  While in `requires_capture`, `amount_capturable` reports the authorized
+  amount; after capture, `amount_received` reflects the captured amount.
 - Validates `transfer_data.destination` references an existing connected
   account; rejects `application_fee_amount > amount`.
 - Dev UI at `/__hamr/stripe/payment_intent?id=<pi_id>` with Succeed/Fail

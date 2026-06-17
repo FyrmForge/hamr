@@ -234,7 +234,6 @@ func Capture(opts Options) (Result, error) {
 	}
 
 	launchCtx, launchCancel := context.WithTimeout(context.Background(), opts.Timeout)
-	defer launchCancel()
 
 	l := launcher.New().
 		Context(launchCtx).
@@ -242,6 +241,14 @@ func Capture(opts Options) (Result, error) {
 		NoSandbox(opts.NoSandbox).
 		Set("disable-dev-shm-usage").
 		Set("disable-gpu")
+	// rod's launcher leaves a multi-MB Chromium profile dir behind; Cleanup
+	// removes it. Cancel the launch context first so the browser process exits
+	// before we delete its data dir. Runs on every return path, including a
+	// failed browser.Connect.
+	defer func() {
+		launchCancel()
+		l.Cleanup()
+	}()
 
 	browserPath, err := resolveBrowserPath(opts.BrowserPath)
 	if err != nil {
@@ -525,7 +532,7 @@ func defaultCaptureBaseName(rawURL string, now time.Time) string {
 			host = "file"
 		}
 
-		for _, part := range strings.Split(strings.Trim(u.Path, "/"), "/") {
+		for part := range strings.SplitSeq(strings.Trim(u.Path, "/"), "/") {
 			if part != "" {
 				pathParts = append(pathParts, part)
 			}

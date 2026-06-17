@@ -272,3 +272,30 @@ func TestRateLimit_defaultsToIP(t *testing.T) {
 		assert.Equal(t, 2-(i+1), remaining)
 	}
 }
+
+func TestMemoryStore_lruEvictsLeastRecentlyActive(t *testing.T) {
+	store := middleware.NewMemoryStore(middleware.WithMaxSize(2))
+	ctx := context.Background()
+	const rate = 2
+	dur := time.Minute
+
+	allow := func(key string) bool {
+		ok, _, _, err := store.Allow(ctx, key, rate, dur)
+		require.NoError(t, err)
+		return ok
+	}
+
+	require.True(t, allow("A")) // A count1            lru: A
+	require.True(t, allow("B")) // B count1            lru: A,B
+	require.True(t, allow("A")) // A count2 (busy)     lru: B,A
+	require.True(t, allow("C")) // C count1 -> evict B lru: A,C
+
+	// A was the busiest key, so it must not have been evicted: its window
+	// persists and the next hit pushes it over the rate. (With the old
+	// FIFO-by-insertion eviction, A would have been flushed and reset.)
+	assert.False(t, allow("A"), "busy key A must keep its accumulated count, not be evicted")
+
+	// B was least-recently-active and should have been the eviction target,
+	// so it starts a fresh window and is allowed again.
+	assert.True(t, allow("B"), "idle key B should have been evicted")
+}
