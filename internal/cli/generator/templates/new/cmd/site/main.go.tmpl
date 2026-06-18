@@ -105,6 +105,7 @@ var (
 	envEmailMock   = config.GetEnvOrDefaultBool("EMAIL_MOCK", false)
 	envHamrDevURL  = config.GetEnvOrDefault("HAMR_DEV_URL", "http://localhost:3000")
 {{- end}}
+	envTrustedProxies = config.GetEnvCSV("TRUSTED_PROXIES")
 )
 
 func main() {
@@ -135,7 +136,7 @@ func main() {
 		// balancers allowed to set X-Forwarded-For (drives client-IP detection
 		// and the rate-limit key). Empty/unset ignores X-Forwarded-For so a
 		// direct client can't spoof its IP; set it to your LB ranges behind one.
-		server.WithTrustedProxies(config.GetEnvCSV("TRUSTED_PROXIES")...),
+		server.WithTrustedProxies(envTrustedProxies...),
 	)
 	if err != nil {
 		log.Error("failed to create server", "error", err)
