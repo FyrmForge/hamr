@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -348,6 +349,80 @@ func TestS3Storage_Save_error(t *testing.T) {
 	err := store.Save(context.Background(), "key", strings.NewReader("data"))
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "network error")
+}
+
+// readerOnly hides any io.Seeker implementation of the wrapped reader, so Save
+// is forced down the buffering path (mirrors a non-seekable S3 GetObject body).
+type readerOnly struct{ r io.Reader }
+
+func (ro readerOnly) Read(p []byte) (int, error) { return ro.r.Read(p) }
+
+func TestS3Storage_Save_nonSeekableIsBuffered(t *testing.T) {
+	var got []byte
+	mc := &mockS3Client{
+		putFn: func(_ context.Context, in *s3.PutObjectInput) (*s3.PutObjectOutput, error) {
+			// A buffered body must itself be seekable so the SDK signer can hash it.
+			_, ok := in.Body.(io.Seeker)
+			assert.True(t, ok, "buffered body should be seekable")
+			b, err := io.ReadAll(in.Body)
+			require.NoError(t, err)
+			got = b
+			return &s3.PutObjectOutput{}, nil
+		},
+	}
+	store := newTestS3(mc, nil)
+	err := store.Save(context.Background(), "doc.pdf", readerOnly{strings.NewReader("pdf-bytes")})
+	require.NoError(t, err)
+	assert.Equal(t, "pdf-bytes", string(got))
+}
+
+func TestS3Storage_Save_nonSeekableOverLimit(t *testing.T) {
+	called := false
+	mc := &mockS3Client{
+		putFn: func(context.Context, *s3.PutObjectInput) (*s3.PutObjectOutput, error) {
+			called = true
+			return &s3.PutObjectOutput{}, nil
+		},
+	}
+	store := newS3StorageWithClient(mc, nil, "test-bucket", WithMaxUploadBuffer(4))
+	err := store.Save(context.Background(), "big.bin", readerOnly{strings.NewReader("12345")})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exceeds max upload buffer")
+	assert.False(t, called, "PutObject must not be called when the body exceeds the limit")
+}
+
+func TestS3Storage_Save_seekableBypassesLimit(t *testing.T) {
+	orig := strings.NewReader("well over four bytes")
+	mc := &mockS3Client{
+		putFn: func(_ context.Context, in *s3.PutObjectInput) (*s3.PutObjectOutput, error) {
+			// The original seekable reader must be passed through untouched, not
+			// buffered into a bytes.Reader.
+			assert.Same(t, orig, in.Body)
+			return &s3.PutObjectOutput{}, nil
+		},
+	}
+	// Tiny cap, but a seekable body larger than the cap must still pass through.
+	store := newS3StorageWithClient(mc, nil, "test-bucket", WithMaxUploadBuffer(4))
+	err := store.Save(context.Background(), "big.bin", orig)
+	assert.NoError(t, err)
+}
+
+func TestS3Storage_Save_nonSeekableMaxInt64NoTruncate(t *testing.T) {
+	var got []byte
+	mc := &mockS3Client{
+		putFn: func(_ context.Context, in *s3.PutObjectInput) (*s3.PutObjectOutput, error) {
+			b, err := io.ReadAll(in.Body)
+			require.NoError(t, err)
+			got = b
+			return &s3.PutObjectOutput{}, nil
+		},
+	}
+	// A MaxInt64 cap must not overflow the read limit and silently store an
+	// empty object — the body must be saved verbatim.
+	store := newS3StorageWithClient(mc, nil, "test-bucket", WithMaxUploadBuffer(math.MaxInt64))
+	err := store.Save(context.Background(), "doc.pdf", readerOnly{strings.NewReader("pdf-bytes")})
+	require.NoError(t, err)
+	assert.Equal(t, "pdf-bytes", string(got))
 }
 
 // --- Open ---

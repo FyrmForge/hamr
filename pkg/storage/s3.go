@@ -1,12 +1,14 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
+	"math"
 	"mime"
 	"path/filepath"
 	"time"
@@ -20,6 +22,12 @@ import (
 
 // Compile-time checks.
 var _ SignableStorage = (*S3Storage)(nil)
+
+// defaultMaxUploadBuffer bounds how many bytes Save will read into memory when
+// it has to buffer a non-seekable body (see Save). 64 MiB is comfortably above
+// typical document/image uploads while keeping concurrent buffered uploads from
+// exhausting process memory.
+const defaultMaxUploadBuffer = 64 << 20
 
 // s3API is the subset of the S3 client used by S3Storage (unexported for testability).
 type s3API interface {
@@ -41,11 +49,12 @@ type presigner interface {
 // S3Storage implements SignableStorage backed by an S3-compatible service
 // (AWS S3, RustFS, Cloudflare R2).
 type S3Storage struct {
-	client     s3API
-	presigner  presigner
-	bucket     string
-	logger     *slog.Logger
-	publicRead bool
+	client          s3API
+	presigner       presigner
+	bucket          string
+	logger          *slog.Logger
+	publicRead      bool
+	maxUploadBuffer int64
 }
 
 // S3Option configures an S3Storage instance.
@@ -60,6 +69,19 @@ func WithS3Logger(l *slog.Logger) S3Option {
 // policy after creating the bucket. Defaults to false.
 func WithPublicRead(v bool) S3Option {
 	return func(s *S3Storage) { s.publicRead = v }
+}
+
+// WithMaxUploadBuffer sets the maximum number of bytes Save will read into
+// memory when buffering a non-seekable body (see Save). Seekable bodies are
+// streamed directly and are unaffected by this limit. A non-positive value
+// leaves the default (64 MiB) in place. Raising this allows larger
+// non-seekable uploads at the cost of higher peak memory per upload.
+func WithMaxUploadBuffer(n int64) S3Option {
+	return func(s *S3Storage) {
+		if n > 0 {
+			s.maxUploadBuffer = n
+		}
+	}
 }
 
 // NewS3Storage creates an S3Storage connected to the service described by cfg.
@@ -86,10 +108,11 @@ func NewS3Storage(cfg S3Config, opts ...S3Option) (*S3Storage, error) {
 // newS3StorageWithClient allows tests to inject mock clients.
 func newS3StorageWithClient(client s3API, ps presigner, bucket string, opts ...S3Option) *S3Storage {
 	s := &S3Storage{
-		client:    client,
-		presigner: ps,
-		bucket:    bucket,
-		logger:    slog.Default(),
+		client:          client,
+		presigner:       ps,
+		bucket:          bucket,
+		logger:          slog.Default(),
+		maxUploadBuffer: defaultMaxUploadBuffer,
 	}
 	for _, o := range opts {
 		o(s)
@@ -154,10 +177,36 @@ func isBucketNotFound(err error) bool {
 }
 
 func (s *S3Storage) Save(ctx context.Context, path string, r io.Reader) error {
+	// The AWS SDK signer computes the request payload hash by seeking the body
+	// to the start, so PutObject requires a seekable Body. Callers may pass a
+	// non-seekable stream (e.g. an Open() result piped straight into Save), so
+	// buffer those into a seekable reader first. Already-seekable readers
+	// (files, bytes.Reader, multipart.File) stream directly. Buffering is
+	// bounded by maxUploadBuffer to avoid an unbounded allocation keyed on
+	// caller-supplied input.
+	body := r
+	if _, ok := r.(io.Seeker); !ok {
+		// Read one past the limit so an over-limit body is detectable. Guard the
+		// +1 against int64 overflow (e.g. WithMaxUploadBuffer(math.MaxInt64)),
+		// which would make LimitReader read zero bytes and silently store an
+		// empty object.
+		limit := s.maxUploadBuffer
+		if limit < math.MaxInt64 {
+			limit++
+		}
+		buf, err := io.ReadAll(io.LimitReader(r, limit))
+		if err != nil {
+			return fmt.Errorf("storage: s3 put %q: buffer body: %w", path, err)
+		}
+		if int64(len(buf)) > s.maxUploadBuffer {
+			return fmt.Errorf("storage: s3 put %q: body exceeds max upload buffer (%d bytes)", path, s.maxUploadBuffer)
+		}
+		body = bytes.NewReader(buf)
+	}
 	input := &s3.PutObjectInput{
 		Bucket: &s.bucket,
 		Key:    &path,
-		Body:   r,
+		Body:   body,
 	}
 	if ct := mime.TypeByExtension(filepath.Ext(path)); ct != "" {
 		input.ContentType = &ct

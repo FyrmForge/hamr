@@ -1708,10 +1708,12 @@ type S3Option func(*S3Storage)
 func NewS3Storage(cfg S3Config, opts ...S3Option) (*S3Storage, error)
 func WithS3Logger(l *slog.Logger) S3Option
 func WithPublicRead(v bool) S3Option  // applies public-read policy on EnsureBucket
+func WithMaxUploadBuffer(n int64) S3Option  // cap for buffering non-seekable Save bodies (default 64 MiB)
 
 func (s *S3Storage) EnsureBucket(ctx context.Context) error
 ```
 Methods: Save, Open, Delete, Exists, List, SignURL (implementing SignableStorage).
+`Save` streams seekable bodies straight to S3; a non-seekable body (e.g. an `Open` result piped into `Save`) is buffered into memory first because the AWS signer needs a seekable body to hash it. The buffer is bounded by `WithMaxUploadBuffer` (default 64 MiB) — a larger non-seekable body fails the upload rather than allocating unbounded memory.
 
 ---
 

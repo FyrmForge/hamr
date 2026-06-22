@@ -6,6 +6,18 @@ under `## [Unreleased]`, rename to the version (e.g. `## [0.24.0]`) at release.
 `hamr ai upgrade` already carries the full code diff between versions; this is
 the TL;DR on top of it.
 
+## [Unreleased]
+
+### Fixes
+
+- **S3 `Save` accepts non-seekable readers.** Piping an `Open` result (or any
+  non-seekable stream) straight into `S3Storage.Save` previously failed with
+  "request stream is not seekable" because the AWS signer needs a seekable body
+  to hash. `Save` now buffers non-seekable bodies before upload; seekable
+  readers (files, `bytes.Reader`, `multipart.File`) still stream directly. The
+  buffer is bounded by the new `WithMaxUploadBuffer` option (default 64 MiB) so
+  a large non-seekable body fails rather than allocating unbounded memory.
+
 ## [0.24.0] - 2026-06-17
 
 Whole-repo code-review remediation across the libraries, dev server, Stripe/mail

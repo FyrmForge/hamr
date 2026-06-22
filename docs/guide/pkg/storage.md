@@ -39,6 +39,14 @@ type FileStorage interface {
 - `Delete` is idempotent — deleting a non-existent file returns nil
 - `Open` returns a `ReadCloser` — the caller must close it
 
+On the S3 backend, `Save` streams seekable readers (files, `bytes.Reader`,
+`multipart.File`, an `Open` result wrapped seekably) straight to S3. A
+**non-seekable** reader — e.g. an `Open` result piped directly into `Save` — is
+buffered into memory first, because the AWS signer needs a seekable body to hash
+it. That buffer is bounded by `WithMaxUploadBuffer` (default 64 MiB); a
+non-seekable body larger than the limit fails the upload rather than allocating
+unbounded memory.
+
 ## SignableStorage Interface
 
 Extends `FileStorage` with pre-signed URL generation:
@@ -196,4 +204,6 @@ type S3Config struct {
 }
 func NewS3Storage(cfg S3Config, opts ...S3Option) (*S3Storage, error)
 func WithS3Logger(l *slog.Logger) S3Option
+func WithPublicRead(v bool) S3Option
+func WithMaxUploadBuffer(n int64) S3Option // cap for buffering non-seekable Save bodies (default 64 MiB)
 ```
