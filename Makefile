@@ -33,3 +33,7 @@ aiquestion:
 	@echo "Is this of the highest code quality and usability? Are user and ai docs updated? Is docs/changelog.md updated for user-facing changes?"
 	
 ai: build lint test vet aiquestion
+
+## fmt: Format all Go source files
+fmt:
+	go fmt ./...

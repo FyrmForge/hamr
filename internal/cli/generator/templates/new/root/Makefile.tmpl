@@ -47,6 +47,10 @@ css-build: check-node-modules
 
 VERSION := $(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
 
+## fmt: Format all Go source files
+fmt:
+	go fmt ./...
+
 ## build: Build the site binary
 build: check-templ{{- if eq .CSS "tailwind"}} check-node-modules{{- end}}
 	templ generate

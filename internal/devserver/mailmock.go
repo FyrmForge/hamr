@@ -192,13 +192,24 @@ func (m *MailMock) reportPersistErr(err error) {
 	}
 }
 
-// RegisterRoutes mounts the mail-mock endpoints on mux. Do not register twice
-// on the same mux — http.ServeMux panics on duplicate patterns.
+// RegisterRoutes mounts both the UI and the ingest endpoint on mux. Do not
+// register twice on the same mux — http.ServeMux panics on duplicate patterns.
 func (m *MailMock) RegisterRoutes(mux *http.ServeMux) {
+	m.RegisterUIRoutes(mux)
+	m.RegisterIngestRoutes(mux)
+}
+
+// RegisterUIRoutes mounts the human-facing inbox UI. Split from the ingest
+// sink so the two can live on separate listeners (see `hamr mock serve`).
+func (m *MailMock) RegisterUIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/__hamr/mail", guardUnsafe(m.handleInboxOrDetail))
 	mux.HandleFunc("/__hamr/mail/", guardUnsafe(m.handleInboxOrDetail))
-	// handleIngest is the SMTP capture sink (server-to-server, no browser
-	// Origin) — intentionally NOT origin-guarded; see guardUnsafe.
+}
+
+// RegisterIngestRoutes mounts the SMTP capture sink. handleIngest is
+// server-to-server (no browser Origin) — intentionally NOT origin-guarded;
+// see guardUnsafe.
+func (m *MailMock) RegisterIngestRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/__hamr/mail/ingest", m.handleIngest)
 }
 
@@ -374,8 +385,11 @@ func (m *MailMock) SetStatus(id, status, note string) bool {
 }
 
 // handleInboxOrDetail dispatches /__hamr/mail, /__hamr/mail/, and all deeper
-// paths. The /__hamr/mail/ingest exact-pattern registration takes precedence
-// over the /__hamr/mail/ subtree, so ingest is never routed here.
+// paths. When both RegisterUIRoutes and RegisterIngestRoutes share a mux, the
+// /__hamr/mail/ingest exact pattern takes precedence over the subtree. In
+// split-port mode (uiMux only has RegisterUIRoutes), /__hamr/mail/ingest
+// requests still reach this handler via the subtree — they resolve as an
+// unknown message ID and return 404, so ingest is not processed.
 func (m *MailMock) handleInboxOrDetail(w http.ResponseWriter, r *http.Request) {
 	p := strings.TrimPrefix(r.URL.Path, "/__hamr/mail")
 	p = strings.TrimPrefix(p, "/")

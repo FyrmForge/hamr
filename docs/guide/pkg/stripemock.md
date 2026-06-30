@@ -350,5 +350,6 @@ production deployments — the mock never starts.
 
 - [emailmock](emailmock.md) — Same `hamr dev`-hosted mock pattern, applied to email
 - [dev](dev.md) — `hamr dev` overview
+- [mock-serve](mock-serve.md) — Running the mocks standalone in a container
 - [stripe-go SDK reference](https://stripe.com/docs/api?lang=go)
 - [Stripe webhook signing](https://stripe.com/docs/webhooks#signatures)

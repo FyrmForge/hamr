@@ -8,6 +8,16 @@ the TL;DR on top of it.
 
 ## [Unreleased]
 
+### Features
+
+- **`hamr mock serve` — headless dev mocks.** Runs the mail and Stripe mocks
+  standalone (no proxy, TUI, build, or watch) for running in a dedicated
+  container in a dev environment. Configured entirely via environment
+  variables (no `hamr.toml`): `HAMR_MOCKS` selects which to start,
+  `HAMR_MOCK_PORT` carries the app-facing surface (Stripe `/v1/*` + mail
+  ingest), and an optional `HAMR_MOCK_UI_PORT` splits the human dashboards
+  onto a separately-exposable listener. See [CLI reference](guide/cli.md).
+
 ### Fixes
 
 - **S3 `Save` accepts non-seekable readers.** Piping an `Open` result (or any

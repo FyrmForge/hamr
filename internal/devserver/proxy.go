@@ -109,8 +109,7 @@ func NewProxyHandler(target string, broker *SSEBroker, errorState *ErrorState, l
 		mailMock.RegisterRoutes(mux)
 	}
 	if stripeMock != nil {
-		stripeMock.RegisterAPIRoutes(mux)
-		stripeMock.RegisterUIRoutes(mux)
+		stripeMock.RegisterRoutes(mux)
 	}
 	if logBuf != nil {
 		mux.HandleFunc("/__hamr/logs", func(w http.ResponseWriter, r *http.Request) {

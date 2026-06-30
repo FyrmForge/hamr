@@ -101,6 +101,22 @@
   merging and idempotent — Claude `.mcp.json` + opencode `opencode.json` are
   project-scoped; Codex `~/.codex/config.toml` is global and gets `--project`
   pinned.
+- **hamr mock serve**: Runs the dev mocks (mail, stripe) standalone — no
+  proxy, TUI, build, or watch — for a dedicated container in a dev
+  environment. Configured entirely via env (no hamr.toml). `HAMR_MOCKS`
+  (csv, required) selects which to start; `HAMR_MOCK_PORT` (default 4500) is
+  the app-facing surface (stripe `/v1/*` + mail `/__hamr/mail/ingest`);
+  optional `HAMR_MOCK_UI_PORT` splits the dashboards (`/__hamr/stripe`,
+  `/__hamr/mail`) onto a separately-exposable listener (unset → UI on the
+  app-facing port). Invalid/out-of-range ports error loudly (no silent
+  default). Both listeners bind all interfaces; `HAMR_MOCK_BIND` restricts
+  the host (set `127.0.0.1` on a shared host — the mock surfaces are
+  unauthenticated: the UI serves captured emails, the Stripe surface fires
+  signed webhooks). Stripe requires `HAMR_STRIPE_BASE_URL` (browser-reachable
+  UI origin; no container-safe default), `HAMR_STRIPE_WEBHOOK_URL`,
+  `HAMR_STRIPE_WEBHOOK_SECRET`. Mail tuning: `HAMR_MAIL_MAX_MESSAGES`,
+  `HAMR_MAIL_MAX_MESSAGE_BYTES`, `HAMR_MAIL_PERSIST_PATH`; stripe persist:
+  `HAMR_STRIPE_PERSIST_PATH`.
 - **hamr new**: Project scaffolder. On released builds, queries GitHub for the
   latest release and refuses to run when the local CLI is out of date so
   scaffolds never lag the template; bypass with `--skip-version-check`.

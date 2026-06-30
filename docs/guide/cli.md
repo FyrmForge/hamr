@@ -103,6 +103,39 @@ The TUI shows an MCP indicator when `[dev.mcp]` is configured; press `M` to togg
 
 ---
 
+## hamr mock serve
+
+```
+hamr mock serve
+```
+
+Runs the dev mocks (mail, stripe) standalone — no proxy, TUI, build, or watch — for running in a dedicated container in a dev environment. Unlike the mocks embedded in `hamr dev` (which live on the proxy mux and read `hamr.toml`), this command is configured entirely through environment variables and depends on no config file.
+
+Two listeners:
+
+- **app-facing** (`HAMR_MOCK_PORT`): the surface your app talks to — stripe `/v1/*` API and the mail ingest sink.
+- **UI** (`HAMR_MOCK_UI_PORT`): the human dashboards (captured email, fake payments). Optional — when unset the UI mounts on the app-facing port too. Splitting it onto its own port lets your deployment expose the two surfaces differently — e.g. publish the app-facing port to the app while keeping the dashboards on a port you only publish to `127.0.0.1`.
+
+Both listeners bind all interfaces by default (`HAMR_MOCK_BIND` empty), which is correct inside a container where sibling containers reach the mock by service name; isolate by controlling which ports you publish. **The mock surfaces are unauthenticated** — the UI serves every captured email (which can contain password-reset tokens and magic-login links) over plain GET, and the Stripe surface will fire a correctly-signed webhook at your app on request. Do not expose them on a reachable interface in a shared environment. When running outside a container on a shared host, set `HAMR_MOCK_BIND=127.0.0.1`.
+
+| Env | Purpose | Default |
+| --- | --- | --- |
+| `HAMR_MOCKS` | comma-separated mocks to start (required), e.g. `mail,stripe` | — |
+| `HAMR_MOCK_PORT` | app-facing port (stripe `/v1`, mail ingest) | `4500` |
+| `HAMR_MOCK_UI_PORT` | dashboards port; unset → UI on `HAMR_MOCK_PORT` | unset |
+| `HAMR_MOCK_BIND` | bind host for both listeners; empty → all interfaces | empty |
+| `HAMR_MAIL_MAX_MESSAGES` | inbox cap | `500` |
+| `HAMR_MAIL_MAX_MESSAGE_BYTES` | per-message byte cap | `10MiB` |
+| `HAMR_MAIL_PERSIST_PATH` | mbox path; empty → in-memory only | empty |
+| `HAMR_STRIPE_BASE_URL` | browser-reachable origin of the mock UI (required for stripe) | — |
+| `HAMR_STRIPE_WEBHOOK_URL` | app's webhook handler (required for stripe) | — |
+| `HAMR_STRIPE_WEBHOOK_SECRET` | matches the app's `STRIPE_WEBHOOK_SECRET` (required for stripe) | — |
+| `HAMR_STRIPE_PERSIST_PATH` | state JSON path; empty → in-memory only | empty |
+
+Stripe has no sensible auto-default for its base URL in a container (`localhost:<port>` isn't reachable from the host's published port or sibling containers), so `HAMR_STRIPE_BASE_URL` is required whenever stripe is selected, alongside the webhook url + secret. Point your app at the mock by setting its `HAMR_DEV_URL` / Stripe base to `HAMR_MOCK_PORT`'s URL.
+
+---
+
 ## hamr mcp
 
 ```

@@ -10,6 +10,12 @@ import (
 	"strings"
 )
 
+// RegisterRoutes mounts all Stripe mock endpoints (API + UI) on mux.
+func (m *StripeMock) RegisterRoutes(mux *http.ServeMux) {
+	m.RegisterAPIRoutes(mux)
+	m.RegisterUIRoutes(mux)
+}
+
 // RegisterUIRoutes mounts the dev-facing checkout page + outcome handler on
 // mux. These routes live on the proxy mux (/__hamr/* namespace), separate
 // from the Stripe-API routes which require a path-free root and run on the

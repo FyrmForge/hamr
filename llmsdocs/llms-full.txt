@@ -85,6 +85,31 @@
   opencode `opencode.json` are project-scoped; Codex `~/.codex/config.toml` is
   global and gets `--project` pinned to this project. Requires `hamr` on PATH
   and `[proxy]` configured (the gateway lives on the proxy mux).
+- **hamr mock serve**: Runs the dev mocks (mail, stripe) standalone — no proxy,
+  TUI, build, or watch — built for a dedicated container in a dev environment.
+  Unlike the mocks embedded in `hamr dev` (which mount on the proxy mux and read
+  `[dev.email]`/`[dev.stripe]` from hamr.toml), this command depends on no config
+  file: selection and all tuning come from env vars. `HAMR_MOCKS` (csv, required,
+  e.g. `mail,stripe`) selects which to start; unknown names fail loudly.
+  Two listeners: `HAMR_MOCK_PORT` (default 4500) carries the app-facing surface
+  (stripe `/v1/*` API + mail `/__hamr/mail/ingest` sink); optional
+  `HAMR_MOCK_UI_PORT` splits the human dashboards (stripe `/__hamr/stripe/*`,
+  mail inbox `/__hamr/mail`) onto a second listener you can bind to loopback or
+  firewall separately (unset → UI shares the app-facing port). Invalid or out-of-range port values
+  error loudly rather than silently falling back to a default. Both listeners bind all interfaces by
+  default (correct in a container, where siblings reach it by service name); `HAMR_MOCK_BIND` restricts
+  the bind host — set `127.0.0.1` when running outside a container on a shared host, because the mock
+  surfaces are unauthenticated (the UI serves every captured email, which may contain reset tokens /
+  magic links, over plain GET, and the Stripe surface fires a correctly-signed webhook at the app on
+  request). Stripe needs
+  `HAMR_STRIPE_BASE_URL` (browser-reachable origin of the mock UI — required
+  because `localhost:<port>` has no container-safe default: not reachable via the
+  host's published port or from sibling containers), plus `HAMR_STRIPE_WEBHOOK_URL`
+  and `HAMR_STRIPE_WEBHOOK_SECRET` (must match the app's `STRIPE_WEBHOOK_SECRET`).
+  Mail tuning: `HAMR_MAIL_MAX_MESSAGES` (500), `HAMR_MAIL_MAX_MESSAGE_BYTES`
+  (10MiB), `HAMR_MAIL_PERSIST_PATH` (empty → in-memory only); stripe persist:
+  `HAMR_STRIPE_PERSIST_PATH`. Graceful shutdown on SIGINT/SIGTERM. Reuses the
+  same mock implementations as `hamr dev` via split route-registration methods.
 - **hamr ai capture**: Browser screenshot capture with HTML/text/metadata sidecars.
 - **hamr ai upgrade**: Git-based scaffold upgrade report. Clones the HAMR repo and diffs between version tags to produce a unified diff and stat summary of all changes between the project's baseline and current HAMR.
 - **.hamr/ai/**: Playground directory for all AI command artifacts (captures, upgrade reports). Gitignored. Configurable via `[ai] dir` in hamr.toml.
