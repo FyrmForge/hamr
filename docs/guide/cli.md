@@ -12,15 +12,14 @@ hamr
 │   ├── capture <url>       Capture a browser screenshot of a page
 │   └── upgrade             Show scaffold changes between versions via git diff
 ├── gen
-│   └── static              Fingerprint static assets into dist/
+│   ├── static              Fingerprint static assets into dist/
+│   └── locale              Generate type-safe Go accessors from locale JSON
+├── mock-serve              Serve the dev mocks (mail, stripe) headlessly
 ├── sync                    Sync local directory to S3-compatible bucket
 ├── vendor [dep[@version]]  Download/checksum frontend JS deps
 ├── lint
 │   └── templ               Lint .templ files
-├── locale
-│   └── gen                 Generate type-safe Go accessors from locale JSON
-├── rename
-│   └── module <new-path>   Rename Go module and rewrite imports
+├── rename-module <new-path>  Rename Go module and rewrite imports
 ├── completion
 │   ├── bash                Generate bash completion script
 │   ├── zsh                 Generate zsh completion script
@@ -103,10 +102,10 @@ The TUI shows an MCP indicator when `[dev.mcp]` is configured; press `M` to togg
 
 ---
 
-## hamr mock serve
+## hamr mock-serve
 
 ```
-hamr mock serve
+hamr mock-serve
 ```
 
 Runs the dev mocks (mail, stripe) standalone — no proxy, TUI, build, or watch — for running in a dedicated container in a dev environment. Unlike the mocks embedded in `hamr dev` (which live on the proxy mux and read `hamr.toml`), this command is configured entirely through environment variables and depends on no config file.
@@ -411,12 +410,12 @@ Configure in `hamr.toml` under `[lint.templ]` — each rule mapped to `"warning"
 
 ---
 
-## hamr locale gen
+## hamr gen locale
 
 Generate type-safe Go accessor methods from locale JSON files.
 
 ```bash
-hamr locale gen [flags]
+hamr gen locale [flags]
 ```
 
 | Flag | Default | Description |
@@ -426,8 +425,8 @@ hamr locale gen [flags]
 | `--out` | from config | Output file path (overrides config) |
 
 ```bash
-hamr locale gen                            # use hamr.toml settings
-hamr locale gen --dir locales --out internal/locale/locale.go
+hamr gen locale                            # use hamr.toml settings
+hamr gen locale --dir locales --out internal/locale/locale.go
 ```
 
 Reads the default locale JSON, flattens all keys, and generates a Go file with
@@ -448,7 +447,7 @@ output  = "internal/locale/locale.go"
 package = "locale"
 ```
 
-The scaffolded `Makefile` runs `hamr locale gen` as part of `make build` and
+The scaffolded `Makefile` runs `hamr gen locale` as part of `make build` and
 `make test` when the project includes locale support.
 
 **Guide:** [I18n](pkg/i18n.md) covers the runtime library.
@@ -483,12 +482,12 @@ Downloads files to `static/js/` and records checksums in `hamr.vendor.json`. Bui
 
 ---
 
-## hamr rename module
+## hamr rename-module
 
 Rename the Go module path and rewrite all import paths.
 
 ```bash
-hamr rename module <new-module-path> [flags]
+hamr rename-module <new-module-path> [flags]
 ```
 
 | Flag | Default | Description |
@@ -497,9 +496,9 @@ hamr rename module <new-module-path> [flags]
 | `--dry-run` | `false` | Show what would change without writing files |
 
 ```bash
-hamr rename module github.com/neworg/myproject
-hamr rename module github.com/neworg/myproject --dry-run
-hamr rename module github.com/neworg/tools --dir ./tools
+hamr rename-module github.com/neworg/myproject
+hamr rename-module github.com/neworg/myproject --dry-run
+hamr rename-module github.com/neworg/tools --dir ./tools
 ```
 
 Reads the current module path from `go.mod`, then replaces it in every `.go` and `.templ` file and the `go.mod` module directive. The `.git`, `vendor`, `node_modules`, and `testdata` directories are skipped — vendored and third-party code must not be rewritten, and `testdata` is excluded from Go builds (and often holds intentionally malformed fixtures).

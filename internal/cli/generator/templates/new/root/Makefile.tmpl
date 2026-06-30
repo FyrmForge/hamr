@@ -55,7 +55,7 @@ fmt:
 build: check-templ{{- if eq .CSS "tailwind"}} check-node-modules{{- end}}
 	templ generate
 {{- if .IncludeLocale}}
-	hamr locale gen
+	hamr gen locale
 {{- end}}
 {{- if eq .CSS "tailwind"}}
 	npm run css:build
@@ -72,7 +72,7 @@ generate:
 test: check-templ
 	templ generate
 {{- if .IncludeLocale}}
-	hamr locale gen
+	hamr gen locale
 {{- end}}
 	go test ./...
 {{- if not .MigrateAtStartup}}
@@ -147,7 +147,7 @@ e2e-run-local:
 
 ## locale-gen: Regenerate type-safe Go accessors from locale JSON files
 locale-gen:
-	hamr locale gen
+	hamr gen locale
 {{- end}}
 
 ## clean: Remove build artifacts

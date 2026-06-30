@@ -17,16 +17,14 @@ func init() {
 
 func init() {
 	rootCmd.AddCommand(newCmd)
-	rootCmd.AddCommand(renameCmd)
+	rootCmd.AddCommand(renameModuleCmd)
 	rootCmd.AddCommand(vendorCmd)
 	rootCmd.AddCommand(syncCmd)
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(lintCmd)
 	rootCmd.AddCommand(devCmd)
-	rootCmd.AddCommand(mockCmd)
 	rootCmd.AddCommand(mcpCmd)
 	rootCmd.AddCommand(aiCmd)
-	rootCmd.AddCommand(localeCmd)
 	rootCmd.AddCommand(completionCmd)
 	rootCmd.AddCommand(genCmd)
 	rootCmd.AddCommand(addCmd)

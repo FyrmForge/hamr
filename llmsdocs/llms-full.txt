@@ -85,7 +85,7 @@
   opencode `opencode.json` are project-scoped; Codex `~/.codex/config.toml` is
   global and gets `--project` pinned to this project. Requires `hamr` on PATH
   and `[proxy]` configured (the gateway lives on the proxy mux).
-- **hamr mock serve**: Runs the dev mocks (mail, stripe) standalone — no proxy,
+- **hamr mock-serve**: Runs the dev mocks (mail, stripe) standalone — no proxy,
   TUI, build, or watch — built for a dedicated container in a dev environment.
   Unlike the mocks embedded in `hamr dev` (which mount on the proxy mux and read
   `[dev.email]`/`[dev.stripe]` from hamr.toml), this command depends on no config
@@ -113,7 +113,7 @@
 - **hamr ai capture**: Browser screenshot capture with HTML/text/metadata sidecars.
 - **hamr ai upgrade**: Git-based scaffold upgrade report. Clones the HAMR repo and diffs between version tags to produce a unified diff and stat summary of all changes between the project's baseline and current HAMR.
 - **.hamr/ai/**: Playground directory for all AI command artifacts (captures, upgrade reports). Gitignored. Configurable via `[ai] dir` in hamr.toml.
-- **hamr locale gen**: Code generator for type-safe i18n accessors.
+- **hamr gen locale**: Code generator for type-safe i18n accessors.
 - **hamr gen static**: Content-based static asset fingerprinting. Reads from
   static/, writes fingerprinted copies to dist/, and generates a Go source file
   with the manifest baked in at compile time. Config in [static] section of

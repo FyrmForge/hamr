@@ -20,26 +20,39 @@ type DockerLogLineMsg struct {
 	Line string
 }
 
-// Sink is an io.Writer that emits LogLineMsg per newline-terminated line.
+// Sink is an io.Writer that emits one tea.Msg per newline-terminated line.
+// toMsg builds the message from each line, so the same line-batching logic
+// serves both the runner's combined log (LogLineMsg) and a docker stack's
+// tagged log (DockerLogLineMsg) — see NewSink and NewDockerSink.
+//
 // One Sink can fan in stdout, stderr, and the runner's slog writer because
 // the only thing it does with each line is post a tea.Msg — colors and
 // prefixes are preserved upstream by prefixWriter.
 type Sink struct {
-	mu   sync.Mutex
-	buf  []byte
-	send func(tea.Msg)
+	mu    sync.Mutex
+	buf   []byte
+	send  func(tea.Msg)
+	toMsg func(string) tea.Msg
 }
 
-// NewSink returns a sink that drops lines until Bind is called. The dev
-// runtime binds the program right after constructing it, so the drop window
-// is bounded by the few lines emitted between sink creation and program
-// start — acceptable for a demo runtime.
+// NewSink returns a sink emitting LogLineMsg per line. It drops lines until
+// Bind is called; the dev runtime binds the program right after constructing
+// it, so the drop window is bounded by the few lines emitted between sink
+// creation and program start — acceptable for a demo runtime.
 func NewSink() *Sink {
-	return &Sink{}
+	return &Sink{toMsg: func(s string) tea.Msg { return LogLineMsg(s) }}
+}
+
+// NewDockerSink returns a sink scoped to one docker compose stack, emitting
+// DockerLogLineMsg tagged with the stack's name from hamr.toml
+// (`[[dev.docker_compose]] name = ...`). The runtime binds the program
+// shortly after construction.
+func NewDockerSink(name string) *Sink {
+	return &Sink{toMsg: func(s string) tea.Msg { return DockerLogLineMsg{Name: name, Line: s} }}
 }
 
 // Bind attaches the bubbletea program. After this call, every complete line
-// is delivered as a LogLineMsg.
+// is delivered as the sink's message type.
 func (s *Sink) Bind(p *tea.Program) {
 	s.bindSender(func(m tea.Msg) { p.Send(m) })
 }
@@ -71,65 +84,10 @@ func (s *Sink) Write(p []byte) (int, error) {
 		out := string(line)
 		s.buf = s.buf[i+1:]
 		if s.send != nil {
-			s.send(LogLineMsg(out))
+			s.send(s.toMsg(out))
 		}
 	}
 	return len(p), nil
 }
 
 var _ io.Writer = (*Sink)(nil)
-
-// DockerSink is an io.Writer for one docker compose stack's logs. Each
-// complete line becomes a DockerLogLineMsg tagged with the stack's name
-// from hamr.toml (`[[dev.docker_compose]] name = ...`). Sink wraps this
-// — they share the line-batching logic and just emit different message
-// types.
-type DockerSink struct {
-	mu   sync.Mutex
-	buf  []byte
-	send func(tea.Msg)
-	name string
-}
-
-// NewDockerSink returns a sink scoped to one compose stack name. The
-// runtime binds the program shortly after construction.
-func NewDockerSink(name string) *DockerSink {
-	return &DockerSink{name: name}
-}
-
-// Bind attaches the bubbletea program. After this call, every complete
-// line is delivered as a DockerLogLineMsg.
-func (s *DockerSink) Bind(p *tea.Program) {
-	s.bindSender(func(m tea.Msg) { p.Send(m) })
-}
-
-func (s *DockerSink) bindSender(send func(tea.Msg)) {
-	s.mu.Lock()
-	s.send = send
-	s.mu.Unlock()
-}
-
-func (s *DockerSink) Write(p []byte) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.buf = append(s.buf, p...)
-	for {
-		i := bytes.IndexByte(s.buf, '\n')
-		if i < 0 {
-			break
-		}
-		line := s.buf[:i]
-		if n := len(line); n > 0 && line[n-1] == '\r' {
-			line = line[:n-1]
-		}
-		out := string(line)
-		s.buf = s.buf[i+1:]
-		if s.send != nil {
-			s.send(DockerLogLineMsg{Name: s.name, Line: out})
-		}
-	}
-	return len(p), nil
-}
-
-var _ io.Writer = (*DockerSink)(nil)

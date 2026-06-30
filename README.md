@@ -67,7 +67,7 @@ HAMR is two things:
 | `hamr gen static`           | Fingerprint static assets into dist/ with compile-time manifest     |
 | `hamr vendor`               | Download and checksum frontend JS dependencies (htmx, alpine, etc) |
 | `hamr sync`                 | Sync a local directory to an S3-compatible bucket                   |
-| `hamr rename module <path>` | Rename the Go module and update all import paths                    |
+| `hamr rename-module <path>` | Rename the Go module and update all import paths                    |
 | `hamr lint templ`           | Lint `.templ` files for common issues                               |
 | `hamr version`              | Print version and commit                                            |
 | `hamr completion install`   | Install shell completion scripts (bash, zsh, fish)                  |

@@ -8,9 +8,16 @@ the TL;DR on top of it.
 
 ## [Unreleased]
 
+### Breaking changes
+
+- **CLI commands flattened.** `hamr locale gen` is now `hamr gen locale` (folded
+  under the `gen` group alongside `hamr gen static`); `hamr rename module` is now
+  `hamr rename-module`. Update any scripts, `hamr.toml` `cmd =` hooks, and
+  Makefiles. Scaffolded projects' Makefiles already use the new names.
+
 ### Features
 
-- **`hamr mock serve` — headless dev mocks.** Runs the mail and Stripe mocks
+- **`hamr mock-serve` — headless dev mocks.** Runs the mail and Stripe mocks
   standalone (no proxy, TUI, build, or watch) for running in a dedicated
   container in a dev environment. Configured entirely via environment
   variables (no `hamr.toml`): `HAMR_MOCKS` selects which to start,

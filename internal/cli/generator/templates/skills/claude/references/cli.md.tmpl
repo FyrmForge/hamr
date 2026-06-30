@@ -12,15 +12,13 @@ hamr
 │   ├── capture <url>       Browser screenshot + HTML/text/metadata sidecars
 │   └── upgrade             Diff scaffold changes between versions
 ├── gen
-│   └── static              Content-hash static assets into dist/, emit Go manifest
+│   ├── static              Content-hash static assets into dist/, emit Go manifest
+│   └── locale              Generate type-safe Go accessors from locale JSON
 ├── sync                    Sync local directory to an S3-compatible bucket
 ├── vendor [dep[@ver]]      Download/checksum frontend JS deps
 ├── lint
 │   └── templ               Lint .templ files
-├── locale
-│   └── gen                 Generate type-safe Go accessors from locale JSON
-├── rename
-│   └── module <new-path>   Rewrite the Go module path and all imports
+├── rename-module <new-path>  Rewrite the Go module path and all imports
 ├── completion              Install shell completions (bash/zsh/fish)
 └── version                 Print hamr version
 ```
@@ -175,13 +173,13 @@ Rules (default severities — what the scaffold writes):
 
 Configure in `hamr.toml` under `[lint.templ]` — each rule mapped to `"warning"`, `"error"`, or `"off"`. **Rules not listed are disabled.** Unknown rule IDs and invalid severities fail loudly. Use `make templint` to run it against the whole repo with project config.
 
-## hamr locale gen
+## hamr gen locale
 
 Generate type-safe Go accessor methods from locale JSON. Reads the default locale, flattens keys, and emits a `T` struct with one typed method per key. Non-default locales are validated — missing keys are warnings, interpolation mismatches are errors.
 
 ```bash
-hamr locale gen
-hamr locale gen --dir locales --out internal/locale/locale.go
+hamr gen locale
+hamr gen locale --dir locales --out internal/locale/locale.go
 ```
 
 Config under `[locale]` in `hamr.toml`:
@@ -211,13 +209,13 @@ hamr vendor --url <url> --out <path>  # custom dep
 
 Built-in deps: `htmx`, `alpine`, `idiomorph`.[[if not .IncludeAlpine]] This project was scaffolded without Alpine — `alpine` is available via `hamr vendor alpine` if you later opt in.[[end]] Never check vendored JS in by hand — always go through `hamr vendor`.
 
-## hamr rename module <new-path>
+## hamr rename-module <new-path>
 
 Rewrite the Go module path in `go.mod` and every `.go` import site.
 
 ```bash
-hamr rename module github.com/neworg/myproject
-hamr rename module github.com/neworg/myproject --dry-run
+hamr rename-module github.com/neworg/myproject
+hamr rename-module github.com/neworg/myproject --dry-run
 ```
 
 ## hamr completion

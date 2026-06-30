@@ -99,7 +99,7 @@ func TestGenerateGoSource(t *testing.T) {
 	assert.Contains(t, src, "func (t *T) AppTitle() string")
 	assert.Contains(t, src, "func (t *T) HomeWelcome(name string) string")
 	assert.Contains(t, src, "func (t *T) HomeItems(count int) string")
-	assert.Contains(t, src, "//go:generate hamr locale gen")
+	assert.Contains(t, src, "//go:generate hamr gen locale")
 	assert.Contains(t, src, "DO NOT EDIT")
 }
 

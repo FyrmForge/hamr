@@ -131,7 +131,7 @@ func TestSink_ReturnsFullByteCount(t *testing.T) {
 }
 
 // captureDockerSink is the docker-tagged equivalent of captureSink.
-func captureDockerSink(name string) (*DockerSink, *[]DockerLogLineMsg, *sync.Mutex) {
+func captureDockerSink(name string) (*Sink, *[]DockerLogLineMsg, *sync.Mutex) {
 	var mu sync.Mutex
 	var lines []DockerLogLineMsg
 	s := NewDockerSink(name)

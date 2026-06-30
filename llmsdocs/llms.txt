@@ -101,7 +101,7 @@
   merging and idempotent — Claude `.mcp.json` + opencode `opencode.json` are
   project-scoped; Codex `~/.codex/config.toml` is global and gets `--project`
   pinned.
-- **hamr mock serve**: Runs the dev mocks (mail, stripe) standalone — no
+- **hamr mock-serve**: Runs the dev mocks (mail, stripe) standalone — no
   proxy, TUI, build, or watch — for a dedicated container in a dev
   environment. Configured entirely via env (no hamr.toml). `HAMR_MOCKS`
   (csv, required) selects which to start; `HAMR_MOCK_PORT` (default 4500) is
@@ -151,7 +151,7 @@
   (`--tile-overlap`), ideal for LLM consumption of long pages.
 - **hamr ai upgrade**: Git-based scaffold upgrade report. Clones the HAMR repo and diffs between version tags to produce a unified diff + stat summary. Scoped to the surface a project consumes or mirrors — `pkg/` (imported libs), `internal/cli/generator/templates/` (scaffold templates), `docs/` + `llmsdocs/` (the project's own docs/llms context it can bring up to date) — excluding only hamr's internal tooling (CLI/dev-server/generator-logic/binary) and tests.
 - **.hamr/ai/**: Playground directory for all AI command artifacts (captures, upgrade reports). Gitignored. Configurable via `[ai] dir` in hamr.toml.
-- **hamr locale gen**: Code generator for type-safe i18n accessors.
+- **hamr gen locale**: Code generator for type-safe i18n accessors.
 - **hamr gen static**: Content-based static asset fingerprinting. Reads from
   static/, writes fingerprinted copies to dist/, and generates a Go source file
   with the manifest baked in at compile time. Config in [static] section of

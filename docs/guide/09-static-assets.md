@@ -180,7 +180,7 @@ dist = "dist"     # output directory
 The `make build` target runs fingerprinting before `go build` so the manifest is baked in:
 
 ```
-templ generate → [locale gen] → [css:build] → hamr gen static → go build → make generate
+templ generate → [gen locale] → [css:build] → hamr gen static → go build → make generate
 ```
 
 ### CI Verification

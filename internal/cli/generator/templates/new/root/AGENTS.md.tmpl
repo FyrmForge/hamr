@@ -47,7 +47,7 @@ internal/web/components/ Shared templ components (layout, form helpers)
 static/                  CSS, JS, images
 {{- if .IncludeLocale}}
 locales/                 Translation JSON files (one per language)
-internal/locale/         Generated type-safe i18n accessors after `hamr locale gen`
+internal/locale/         Generated type-safe i18n accessors after `hamr gen locale`
 {{- end}}
 ```
 
@@ -601,14 +601,14 @@ templ Page(c echo.Context) {
 
 ### Build-time Validation
 
-`hamr locale gen` validates all locale files against the default locale.
+`hamr gen locale` validates all locale files against the default locale.
 Interpolation mismatches are hard errors. Missing keys are warnings (they
 fall back to the default locale at runtime).
 
 ### Regenerating Accessors
 
 ```bash
-hamr locale gen
+hamr gen locale
 # after internal/locale/locale.go exists:
 go generate ./internal/locale/...
 ```

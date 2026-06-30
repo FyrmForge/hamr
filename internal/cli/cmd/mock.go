@@ -10,13 +10,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var mockCmd = &cobra.Command{
-	Use:   "mock",
-	Short: "Run the dev mocks (mail, stripe) standalone",
-}
-
 var mockServeCmd = &cobra.Command{
-	Use:   "serve",
+	Use:   "mock-serve",
 	Short: "Serve the selected dev mocks headlessly, configured via environment",
 	Long: `Stands up the dev mocks on plain listeners — no proxy, TUI, build, or
 watch — for running in a dedicated container in a dev environment. All
@@ -44,5 +39,5 @@ configuration comes from environment variables:
 }
 
 func init() {
-	mockCmd.AddCommand(mockServeCmd)
+	rootCmd.AddCommand(mockServeCmd)
 }

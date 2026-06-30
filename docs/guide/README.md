@@ -18,7 +18,7 @@ Learn how to build full-stack Go applications with HAMR.
 | [`hamr sync`](cli.md#hamr-sync) | Sync directory to S3 |
 | [`hamr lint templ`](cli.md#hamr-lint-templ) | Lint `.templ` files |
 | [`hamr vendor`](cli.md#hamr-vendor) | Vendor frontend JS deps |
-| [`hamr rename module`](cli.md#hamr-rename-module) | Rename Go module + imports |
+| [`hamr rename-module`](cli.md#hamr-rename-module) | Rename Go module + imports |
 | [`hamr version`](cli.md#hamr-version) | Print version |
 
 ## Guides

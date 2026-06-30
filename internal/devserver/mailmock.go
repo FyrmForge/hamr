@@ -200,7 +200,7 @@ func (m *MailMock) RegisterRoutes(mux *http.ServeMux) {
 }
 
 // RegisterUIRoutes mounts the human-facing inbox UI. Split from the ingest
-// sink so the two can live on separate listeners (see `hamr mock serve`).
+// sink so the two can live on separate listeners (see `hamr mock-serve`).
 func (m *MailMock) RegisterUIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/__hamr/mail", guardUnsafe(m.handleInboxOrDetail))
 	mux.HandleFunc("/__hamr/mail/", guardUnsafe(m.handleInboxOrDetail))

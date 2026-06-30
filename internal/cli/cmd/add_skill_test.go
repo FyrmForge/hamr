@@ -50,6 +50,8 @@ func TestAddSkill_ProjectInstall_WritesExpectedFiles(t *testing.T) {
 
 	for _, rel := range []string{
 		".claude/skills/hamr/SKILL.md",
+		".claude/skills/hamr/qa.md",
+		".claude/skills/hamr/qa-loop.md",
 		".claude/skills/hamr/references/cli.md",
 		".claude/skills/hamr/references/packages.md",
 		".claude/skills/hamr/references/practices.md",

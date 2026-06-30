@@ -1,7 +1,7 @@
 # `hamr.toml` — Configuration Reference
 
 The `hamr.toml` file at the project root configures `hamr dev` (proxy, file
-watchers, mocks, daemons), `hamr gen static` / `hamr locale gen`
+watchers, mocks, daemons), `hamr gen static` / `hamr gen locale`
 (generators), `hamr lint templ` (linter), and records the scaffold
 options chosen at `hamr new` time.
 
@@ -28,7 +28,7 @@ This is a schema reference. For tutorial-style usage see
 | `[[dev.daemon]]`        | `hamr dev`                    | Long-running background processes |
 | `[[dev.watch]]`         | `hamr dev`                    | File watch + build/run pipelines |
 | `[lint.templ]`          | `hamr lint templ`             | Templ linter rule overrides |
-| `[locale]`              | `hamr locale gen`             | i18n codegen |
+| `[locale]`              | `hamr gen locale`             | i18n codegen |
 
 ---
 
@@ -402,7 +402,7 @@ inline-style           = "off"       # disable the rule
 
 ## `[locale]` — i18n codegen
 
-Read by `hamr locale gen`. Only present when scaffolded with `--locale`.
+Read by `hamr gen locale`. Only present when scaffolded with `--locale`.
 
 | Field     | Type   | Example                         | Notes |
 |-----------|--------|---------------------------------|-------|

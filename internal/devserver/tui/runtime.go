@@ -17,7 +17,7 @@ type Runtime struct {
 	program     *tea.Program
 	sink        *Sink
 	hotkeys     *HotkeySource
-	dockerSinks map[string]*DockerSink
+	dockerSinks map[string]*Sink
 }
 
 // NewRuntime builds the TUI runtime. Call Wire on a Runner before its Run
@@ -50,7 +50,7 @@ func NewRuntime() *Runtime {
 		program:     prog,
 		sink:        sink,
 		hotkeys:     hotkeys,
-		dockerSinks: make(map[string]*DockerSink),
+		dockerSinks: make(map[string]*Sink),
 	}
 }
 
@@ -74,7 +74,7 @@ func (r *Runtime) Wire(opts []devserver.Option) []devserver.Option {
 // labels each tab) and returns the per-entry io.Writer map the runner
 // should pass to WithDockerLogSinks. Sinks are created lazily and
 // cached, so a config reload that re-registers the same name reuses
-// the same DockerSink (its already-buffered lines stay buffered until
+// the same docker sink (its already-buffered lines stay buffered until
 // the new follower process emits more).
 func (r *Runtime) RegisterDockerStacks(names []string) map[string]io.Writer {
 	out := make(map[string]io.Writer, len(names))

@@ -1,6 +1,6 @@
-# Deploying Mocks (`hamr mock serve`)
+# Deploying Mocks (`hamr mock-serve`)
 
-`hamr mock serve` runs the mail and Stripe mocks as a standalone process — no
+`hamr mock-serve` runs the mail and Stripe mocks as a standalone process — no
 proxy, TUI, build, or file-watching. It is designed for a dedicated container
 in a Docker Compose dev environment.
 
@@ -105,10 +105,10 @@ bind both listeners to loopback only.
 
 ## Environment Variables
 
-Full reference: [CLI reference — hamr mock serve](../cli.md#hamr-mock-serve).
+Full reference: [CLI reference — hamr mock-serve](../cli.md#hamr-mock-serve).
 
 ## See Also
 
-- [emailmock](emailmock.md) — mail mock used by `hamr dev` and `hamr mock serve`
-- [stripemock](stripemock.md) — Stripe mock used by `hamr dev` and `hamr mock serve`
+- [emailmock](emailmock.md) — mail mock used by `hamr dev` and `hamr mock-serve`
+- [stripemock](stripemock.md) — Stripe mock used by `hamr dev` and `hamr mock-serve`
 - [CLI reference](../cli.md#hamr-mock-serve) — full env var table

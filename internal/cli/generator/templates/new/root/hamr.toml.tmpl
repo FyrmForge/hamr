@@ -69,7 +69,7 @@ cmd = "hamr sync --watch --bucket {{.Name | slug}}-static"
 [[dev.watch]]
 name = "locale"
 watch = "locales/*.json"
-cmd = "hamr locale gen"
+cmd = "hamr gen locale"
 debounce = 200
 {{- end}}
 
