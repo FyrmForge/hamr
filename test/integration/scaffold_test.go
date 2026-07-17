@@ -160,7 +160,7 @@ func (h *harness) localeGenerate() {
 	if !h.cfg.IncludeLocale {
 		return
 	}
-	h.runInProject(hamrBin, "locale", "gen")
+	h.runInProject(hamrBin, "gen", "locale")
 }
 
 func (h *harness) goModTidy() {
