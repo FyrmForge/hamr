@@ -174,7 +174,8 @@ func (h *harness) npmInstall() {
 	if h.cfg.CSS != "tailwind" {
 		return
 	}
-	h.runInProject("npm", "install")
+	// package.json lives in frontend/, not the project root.
+	h.runInDir(filepath.Join(h.dir, "frontend"), "npm", "install")
 }
 
 func (h *harness) composeUp() {
@@ -278,8 +279,13 @@ func (h *harness) runMakeTest() {
 
 func (h *harness) runInProject(name string, args ...string) {
 	h.t.Helper()
+	h.runInDir(h.dir, name, args...)
+}
+
+func (h *harness) runInDir(dir, name string, args ...string) {
+	h.t.Helper()
 	cmd := exec.Command(name, args...)
-	cmd.Dir = h.dir
+	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),
 		"PATH="+filepath.Dir(hamrBin)+":"+os.Getenv("PATH"),
 	)

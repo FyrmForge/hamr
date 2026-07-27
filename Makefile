@@ -32,7 +32,10 @@ install:
 aiquestion:
 	@echo "Is this of the highest code quality and usability? Are user and ai docs updated? Is docs/changelog.md updated for user-facing changes?"
 	
-ai: build lint test vet aiquestion
+# Mirrors the CI job. test-integration-scaffold is in here because it is the
+# only check that scaffolds a project and builds it — template/path changes
+# pass every unit test and still break `hamr new`. Needs docker, npm, and templ.
+ai: build lint test test-integration-scaffold vet aiquestion
 
 ## fmt: Format all Go source files
 fmt:
