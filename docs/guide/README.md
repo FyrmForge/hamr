@@ -13,6 +13,7 @@ Learn how to build full-stack Go applications with HAMR.
 |---------|-------------|
 | [`hamr new`](cli.md#hamr-new) | Scaffold a new project |
 | [`hamr dev`](cli.md#hamr-dev) | Dev server with live reload |
+| [`hamr setup`](cli.md#hamr-setup) | Interactive AI-agent setup: MCP bridge, permissions, skills |
 | [`hamr ai capture`](cli.md#hamr-ai-capture) | Capture browser screenshots for debugging or LLM use |
 | [`hamr gen static`](cli.md#hamr-gen-static) | Fingerprint static assets into dist/ |
 | [`hamr sync`](cli.md#hamr-sync) | Sync directory to S3 |

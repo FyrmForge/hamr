@@ -84,8 +84,8 @@ present; the scaffold sets them.
 
 | Field      | Type   | Example | Notes |
 |------------|--------|---------|-------|
-| `dir`      | string | `static` | Source directory of un-fingerprinted assets. |
-| `dist`     | string | `dist` | Output directory for fingerprinted copies. |
+| `dir`      | string | `frontend/static` | Source directory of un-fingerprinted assets. |
+| `dist`     | string | `dist` | Output directory for fingerprinted copies. Current scaffolds set `frontend/dist`. |
 | `manifest` | string | `internal/web/components/staticmanifest.go` | Generated Go file path. |
 | `package`  | string | `components` | Package name for the generated file. |
 
@@ -328,6 +328,7 @@ Long-running processes started once at launch. No file watching, no restart.
 |--------|----------|-------|
 | `name` | string   | Required. Must be unique. |
 | `cmd`  | string   | Required. Shell command. |
+| `dir`  | string   | Working directory for `cmd`, relative to the project root. Defaults to the project root. |
 | `env`  | []string | `KEY=value` pairs. |
 
 ### `[[dev.watch]]` — Build/run pipelines
@@ -342,12 +343,26 @@ alive between builds. Rules can depend on each other to form a build graph.
 | `ignore`   | string\|[]string|         | Glob patterns to exclude. |
 | `cmd`      | string          |         | One-shot build command. Required if `run` is unset. |
 | `run`      | string          |         | Long-running process; restarted after each successful `cmd`. |
+| `dir`      | string          |         | Working directory for `cmd` and `run`, relative to the project root. Defaults to the project root. Does **not** affect `watch`/`ignore`. |
 | `depends`  | []string        |         | Other watch-rule names that must succeed first. |
 | `debounce` | int (ms) or string | `100`ms | E.g. `200` or `"200ms"`. |
 | `reload`   | string or bool  | `"none"`| `"full"` / `"css"` / `"none"`. `true`/`false` = `full`/`none`. |
 | `env`      | []string        |         | `KEY=value` pairs for `cmd` and `run`. |
 
 Cycles in `depends` fail validation at startup. Unknown deps fail too.
+
+`dir` must exist, must be relative, and must resolve inside the project root
+(symlinks included) — otherwise startup fails. `watch` and `ignore` globs are
+always project-root-relative, so a rule can watch the whole repo while building
+in a subdirectory:
+
+```toml
+[[dev.watch]]
+name = "tailwind"
+watch = ["**/*.templ", "frontend/css/input.css"]   # root-relative
+dir = "frontend"
+cmd = "npm run css:build"                          # runs inside frontend/
+```
 
 ```toml
 [[dev.watch]]
@@ -422,7 +437,8 @@ the API rule sets `reload = "none"`.
 **S3 sync of fingerprinted assets.** Add a `[[dev.daemon]]` running
 `hamr sync --watch --bucket my-bucket-static`.
 
-**Tailwind.** Add a `[[dev.daemon]]` running `npm run css`. Scaffold the
-project with `--css tailwind` to get this wired automatically.
+**Tailwind.** Add a `[[dev.watch]]` with `dir = "frontend"` running
+`npm run css:build` on `.templ` changes. Scaffold the project with
+`--css tailwind` to get this wired automatically.
 
 For worked examples of each, see [Dev Server: Examples](pkg/dev.md#examples).

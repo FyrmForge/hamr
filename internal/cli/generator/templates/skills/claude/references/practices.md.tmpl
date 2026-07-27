@@ -122,7 +122,7 @@ templ HomePage(user *models.User) {
 ### Static asset URLs
 
 - Call `StaticURL("css/app.css")`, not a hardcoded path. The helper resolves to a fingerprinted path in production (`css/app.a1b2c3d4e5f6.css`) and the raw path in dev.
-- Never reference anything under `dist/` directly — that dir is generated.
+- Never reference anything under `frontend/dist/` directly — that dir is generated.
 
 ### Accessibility + hygiene
 
@@ -281,13 +281,40 @@ A canonical form flow in HAMR:
 
 ---
 
+## hamr MCP
+
+When `[dev.mcp]` is enabled in `hamr.toml`, a running `hamr dev` exposes its
+state as MCP tools. Prefer them over the manual equivalent — they read the live
+server, so the answer is current and costs the developer nothing. Exactly which
+tools exist depends on `[dev.mcp.access]`; `hamr setup` writes a project-specific
+version of this list into `AGENTS.md` and `CLAUDE.md`.
+
+- `logs.read`, `console.read`, `http.read` — app/build output, browser console
+  (uncaught errors, CSP violations), and the HTTP request log. Never ask the
+  developer to paste logs.
+- `rule.run`, `rebuild.all`, `make.run` — the dev server is already running;
+  never start a second one or shell out to `make build`.
+- `docker.status`, `docker.logs` (+ `docker.restart`, `docker.wipe` at write) —
+  check dependency containers before blaming the app for a connection error.
+- `mail.list`, `mail.get` (+ `mail.clear`, `mail.ingest`) — read the dev inbox
+  instead of asking what an email said.
+- `stripe.list` (+ `stripe.complete`, `stripe.expire`, `stripe.refund`) — read
+  and drive the Stripe mock instead of guessing at payment state.
+- `dev.info` — running rules, ports (including walked ones), versions.
+
+A call failing with "dev not running / gateway off" means `hamr dev` isn't up or
+the gateway is off — say so rather than silently falling back to manual steps.
+
+---
+
 ## What NOT to do
 
 - **Don't render HTML outside `respond.HTML`.** It breaks error-page middleware and HTMX/full-render branching.
 - **Don't use `html/template`.** Templ is the framework templating layer; mixing engines fragments the build.
-- **Don't add new frontend JS libraries without `hamr vendor`.** Vendored assets are version-pinned, checksum-tracked, and committed under `static/js/`.
+- **Don't add new frontend JS libraries without `hamr vendor`.** Vendored assets are version-pinned, checksum-tracked, and committed under `frontend/static/js/`.
 - **Don't hand-write fingerprinted filenames.** Use `StaticURL(...)`; the manifest is generated.
 - **Don't use `c.Get("userID")` style untyped keys.** Use `pkg/ctx.NewKey[T]`.
 - **Don't call `go build`/`go test` on single packages.** Always `make build` / `make test`.
+- **Don't do by hand what the hamr MCP tools do.** Reading logs, rebuilding, checking containers, and inspecting the mail/Stripe mocks all have tools when `[dev.mcp]` is enabled — see [hamr MCP](#hamr-mcp).
 - **Don't write inline `if`/`for`/`switch` with HTML bodies in templ.** They compile but produce nothing.
-- **Don't commit `.env`, `dist/`, or `.hamr/`.** All gitignored by scaffold.
+- **Don't commit `.env`, `**/node_modules/`, or `.hamr/`.** All gitignored by scaffold. `frontend/dist/` *is* committed — the fingerprinted manifest is compiled into the binary, so the build needs it.

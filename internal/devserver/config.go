@@ -169,6 +169,7 @@ type DockerCompose struct {
 type Daemon struct {
 	Name string   `toml:"name"`
 	Cmd  string   `toml:"cmd"`
+	Dir  string   `toml:"dir"`
 	Env  []string `toml:"env"`
 }
 
@@ -180,12 +181,18 @@ type ProxyConfig struct {
 }
 
 // WatchRule defines a single watch/build/run rule.
+//
+// Dir sets the working directory for cmd and run, relative to the directory
+// hamr dev runs in. It does NOT affect watch/ignore globs —
+// those stay root-relative regardless, so a rule can watch the whole repo
+// while building inside a subdirectory.
 type WatchRule struct {
 	Name     string        `toml:"name"`
 	Watch    StringOrSlice `toml:"watch"`
 	Ignore   StringOrSlice `toml:"ignore"`
 	Cmd      string        `toml:"cmd"`
 	Run      string        `toml:"run"`
+	Dir      string        `toml:"dir"`
 	Depends  StringOrSlice `toml:"depends"`
 	Debounce Duration      `toml:"debounce"`
 	Reload   ReloadScope   `toml:"reload"`
@@ -300,8 +307,75 @@ func LoadConfig(path string) (*Config, error) {
 	if err := validate(&cfg); err != nil {
 		return nil, fmt.Errorf("validate config: %w", err)
 	}
+	// Validated against the process working directory, not the config file's
+	// directory: `dir` ends up as cmd.Dir on a relative path, and watch globs
+	// are cwd-relative too, so cwd is what the rule actually resolves against
+	// under `hamr dev --config /elsewhere/hamr.toml`.
+	if err := validateRuleDirs(&cfg, "."); err != nil {
+		return nil, fmt.Errorf("validate config: %w", err)
+	}
 
 	return &cfg, nil
+}
+
+// validateRuleDirs checks every rule/daemon `dir` against root (the working
+// directory rules execute from). Split out of validate() because it is the
+// only check that touches the filesystem.
+func validateRuleDirs(cfg *Config, root string) error {
+	for _, rule := range cfg.Dev.Watch {
+		if err := validateRuleDir(root, rule.Dir); err != nil {
+			return fmt.Errorf("watch rule %q: %w", rule.Name, err)
+		}
+	}
+	for _, d := range cfg.Dev.Daemons {
+		if err := validateRuleDir(root, d.Dir); err != nil {
+			return fmt.Errorf("daemon %q: %w", d.Name, err)
+		}
+	}
+	return nil
+}
+
+// validateRuleDir rejects a `dir` that is absolute, escapes root, or does not
+// exist as a directory. Empty means "run in root" and always passes. The existence check is deliberate: silently falling back to the root
+// on a typo (dir = "frontned") runs the build in the wrong place and the only
+// symptom is a confusing command failure.
+//
+// Symlinks are resolved before the containment check so a symlinked dir can't
+// be used to step outside the project.
+func validateRuleDir(root, dir string) error {
+	if dir == "" {
+		return nil
+	}
+	if filepath.IsAbs(dir) {
+		return fmt.Errorf("dir %q must be relative to the project root", dir)
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return fmt.Errorf("resolve project root: %w", err)
+	}
+	if resolved, err := filepath.EvalSymlinks(absRoot); err == nil {
+		absRoot = resolved
+	}
+	full := filepath.Join(absRoot, dir)
+	info, err := os.Stat(full)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("dir %q does not exist", dir)
+		}
+		return fmt.Errorf("dir %q: %w", dir, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("dir %q is not a directory", dir)
+	}
+	resolved, err := filepath.EvalSymlinks(full)
+	if err != nil {
+		return fmt.Errorf("dir %q: %w", dir, err)
+	}
+	rel, err := filepath.Rel(absRoot, resolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("dir %q resolves outside the project root", dir)
+	}
+	return nil
 }
 
 func applyProxyAliases(cfg *Config, configPath string) error {

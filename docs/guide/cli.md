@@ -6,6 +6,7 @@
 hamr
 ├── new [name]              Scaffold a new project
 ├── dev                     Start dev server with file watching + live reload
+├── setup                   Interactive AI-agent setup (MCP bridge, permissions, skills)
 ├── add
 │   └── skill <target>      Install an AI agent skill describing hamr
 ├── ai
@@ -132,6 +133,27 @@ Both listeners bind all interfaces by default (`HAMR_MOCK_BIND` empty), which is
 | `HAMR_STRIPE_PERSIST_PATH` | state JSON path; empty → in-memory only | empty |
 
 Stripe has no sensible auto-default for its base URL in a container (`localhost:<port>` isn't reachable from the host's published port or sibling containers), so `HAMR_STRIPE_BASE_URL` is required whenever stripe is selected, alongside the webhook url + secret. Point your app at the mock by setting its `HAMR_DEV_URL` / Stripe base to `HAMR_MOCK_PORT`'s URL.
+
+---
+
+## hamr setup
+
+```
+hamr setup [--dry-run]
+```
+
+Interactive picker for this project's AI-agent integration. One screen per decision:
+
+1. **MCP bridge** — which agents (`claude`, `codex`, `opencode`) get the hamr bridge registered. Already-installed agents start ticked. Writes the same per-agent config as [`hamr mcp install`](#hamr-mcp-install) — merged, never clobbered.
+2. **Gateway enabled** — sets `[dev.mcp].enabled` in `hamr.toml`.
+3. **Tool permissions** — `deny` / `read` / `write` per area (`dev`, `logs`, `docker`, `mail`, `build`, `stripe`), seeded from the current `[dev.mcp.access]`. `write` implies `read`; a denied area exposes none of its tools.
+4. **Agent skills** — installs the hamr framework skill, the same content as [`hamr add skill`](#hamr-add-skill). Overwrites an existing skill directory. `claude` only for now.
+
+It also upserts a `## hamr MCP` section into `AGENTS.md` and `CLAUDE.md`, listing only the tools the granted areas actually expose — agents that never read the config otherwise default to doing the same work by hand (tailing logs, running `make build`, asking what an email said). Disabling the gateway removes the section again, so the instructions never point at tools that aren't there. Missing instruction files are skipped, not created.
+
+Only `[dev.mcp]` and `[dev.mcp.access]` are rewritten in `hamr.toml`, and only the `## hamr MCP` section in the instruction files — comments, ordering, and every other table or section are left alone. `--dry-run` prints what would change and writes nothing.
+
+Run it from anywhere inside the project; the nearest `hamr.toml` wins. Needs a TTY.
 
 ---
 
@@ -274,21 +296,21 @@ hamr gen static [flags]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--config` | `hamr.toml` | Path to hamr.toml config file |
-| `--clean` | `false` | Remove dist/ and reset the generated manifest |
+| `--clean` | `false` | Remove the dist dir and reset the generated manifest |
 
 ```bash
-hamr gen static          # fingerprint static/ → dist/
-hamr gen static --clean  # remove dist/ and reset manifest
+hamr gen static          # fingerprint frontend/static/ → frontend/dist/
+hamr gen static --clean  # remove frontend/dist/ and reset manifest
 ```
 
-Reads source files from `static/`, creates fingerprinted copies (e.g. `output.a1b2c3d4e5f6.css`) in `dist/`, and generates a Go source file with the manifest baked in at compile time. The `make build` target runs this automatically before `go build`.
+Reads source files from `[static].dir` (`frontend/static/` in current scaffolds), creates fingerprinted copies (e.g. `output.a1b2c3d4e5f6.css`) in `[static].dist`, and generates a Go source file with the manifest baked in at compile time. The `make build` target runs this automatically before `go build`.
 
 **Configuration** via `hamr.toml`:
 
 ```toml
 [static]
-dir = "static"
-dist = "dist"
+dir = "frontend/static"
+dist = "frontend/dist"
 manifest = "internal/web/components/staticmanifest.go"
 package = "components"
 ```
@@ -317,7 +339,7 @@ hamr sync [flags]
 | `--path-style` | `true` | Use path-style addressing (required for RustFS) |
 
 ```bash
-hamr sync                              # one-shot sync of static/ to S3
+hamr sync                              # one-shot sync of [static].dir to S3
 hamr sync --watch                      # watch for changes and sync continuously
 hamr sync --dir dist --bucket my-cdn   # sync a different directory to a specific bucket
 ```
@@ -478,7 +500,7 @@ hamr vendor --verify                 # check checksums
 hamr vendor --url <url> --out <path> # custom dependency
 ```
 
-Downloads files to `static/js/` and records checksums in `hamr.vendor.json`. Built-in deps: `htmx`, `alpine`, `idiomorph`.
+Downloads files to `frontend/static/js/` and records checksums in `hamr.vendor.json`. Built-in deps: `htmx`, `alpine`, `idiomorph`.
 
 ---
 

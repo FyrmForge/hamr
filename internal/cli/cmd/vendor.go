@@ -12,7 +12,7 @@ var vendorCmd = &cobra.Command{
 	Short: "Download and checksum frontend JS dependencies",
 	Long: `Vendor frontend JavaScript dependencies (htmx, alpine, idiomorph) from CDN.
 
-Downloads files to static/js/ and records checksums in hamr.vendor.json.
+Downloads files to frontend/static/js/ and records checksums in hamr.vendor.json.
 
 Examples:
   hamr vendor                          # vendor all deps at default/locked versions

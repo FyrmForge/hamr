@@ -143,10 +143,6 @@ Long-running processes that start once and run for the entire dev session:
 
 ```toml
 [[dev.daemon]]
-name = "tailwind"
-cmd = "npm run css"
-
-[[dev.daemon]]
 name = "sync-static"
 cmd = "hamr sync --watch --bucket myapp-static"
 ```
@@ -231,17 +227,22 @@ Set `hamr_console_capture = false` in `[dev]` to disable the whole transport —
 ### With Tailwind CSS
 
 ```toml
-[[dev.daemon]]
+[[dev.watch]]
 name = "tailwind"
-cmd = "npm run css"
+watch = ["**/*.templ", "frontend/css/input.css"]
+dir = "frontend"
+cmd = "npm run css:build"
+debounce = 200
 
 [[dev.watch]]
 name = "css"
-watch = "static/css/output.css"
+watch = "frontend/static/css/output.css"
 reload = "css"
 ```
 
-The Tailwind daemon watches `.templ` files and outputs CSS. The `css` watch rule picks up the output and hot-swaps stylesheets.
+The `tailwind` rule rebuilds the stylesheet on every `.templ` change (`dir` runs
+npm inside `frontend/`; the `watch` globs stay project-root-relative). The `css`
+rule picks up the output and hot-swaps stylesheets.
 
 ### API-Only Project
 

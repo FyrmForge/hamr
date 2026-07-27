@@ -87,7 +87,7 @@ internal/
   db/                    Database{{- if eq .DBConnector "sqlx"}} + migrations{{- else}} + models{{- end}}
   repo/                  Data access layer
   web/                   HTTP handlers + components
-static/                  CSS, JS, images
+frontend/                Static assets, CSS source, npm config, dist/
 {{- if or (ne .Database "sqlite") (eq .StorageBackend "s3")}}
 docker/                  Docker Compose
 {{- end}}

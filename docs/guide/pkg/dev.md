@@ -84,6 +84,7 @@ reload = "full"
 | `ignore` | string or list | Glob pattern(s) to exclude |
 | `cmd` | string | Shell command to run on change |
 | `run` | string | Long-running process to (re)start after `cmd` succeeds |
+| `dir` | string | Working directory for `cmd`/`run`, relative to the project root (default: project root). Does not affect `watch`/`ignore`. |
 | `depends` | string or list | Rules that must complete before this one runs |
 | `debounce` | int or string | Delay before firing — `100` (ms) or `"200ms"` (default: 100ms) |
 | `reload` | string or bool | Browser reload scope: `"full"`, `"css"`, `"none"`, or `true`/`false` |
@@ -125,10 +126,6 @@ Long-running processes that start once and run for the entire dev session:
 
 ```toml
 [[dev.daemon]]
-name = "tailwind"
-cmd = "npm run css"
-
-[[dev.daemon]]
 name = "sync-static"
 cmd = "hamr sync --watch --bucket myapp-static"
 ```
@@ -137,6 +134,7 @@ cmd = "hamr sync --watch --bucket myapp-static"
 |-------|------|-------------|
 | `name` | string | Unique label (required) |
 | `cmd` | string | Shell command to run (required) |
+| `dir` | string | Working directory for `cmd`, relative to the project root (default: project root) |
 | `env` | list | Extra environment variables |
 
 Daemons are started after the initial build completes.
@@ -471,9 +469,12 @@ Add a Tailwind daemon for CSS hot-reloading alongside Templ and Go:
 listen = ":3000"
 target = ":8080"
 
-[[dev.daemon]]
+[[dev.watch]]
 name = "tailwind"
-cmd = "npm run css"
+watch = ["**/*.templ", "frontend/css/input.css"]
+dir = "frontend"
+cmd = "npm run css:build"
+debounce = 200
 
 [[dev.watch]]
 name = "templ"
@@ -484,7 +485,7 @@ reload = "full"
 
 [[dev.watch]]
 name = "css"
-watch = "static/css/output.css"
+watch = "frontend/static/css/output.css"
 reload = "css"
 
 [[dev.watch]]
@@ -497,7 +498,7 @@ depends = ["templ"]
 reload = "full"
 ```
 
-The Tailwind daemon runs `npm run css` (typically `tailwindcss --watch`). The `css`
+The Tailwind rule runs `npm run css:build` inside `frontend/`. The `css`
 watch rule picks up the output file and hot-swaps stylesheets without a full page reload.
 
 ### Web App + API Server

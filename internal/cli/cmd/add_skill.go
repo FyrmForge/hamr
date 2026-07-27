@@ -91,7 +91,7 @@ func resolveSkillDest(target string, global bool) (string, error) {
 // loadSkillData builds the render context for skill templates from the current
 // project. Global installs default to the scaffold baseline (Alpine off).
 // For project installs, Alpine is considered enabled if either hamr.toml's
-// [options].alpine is true, OR static/js/alpine.min.js exists on disk — the
+// [options].alpine is true, OR <static dir>/js/alpine.min.js exists on disk — the
 // disk check covers projects scaffolded before the alpine key was tracked and
 // projects that opted in via `hamr vendor alpine` post-scaffold.
 func loadSkillData(global bool) generator.SkillData {
@@ -108,7 +108,7 @@ func loadSkillData(global bool) generator.SkillData {
 		alpine = meta.Options.Alpine
 	}
 	if !alpine {
-		if _, err := os.Stat(filepath.Join(cwd, "static", "js", "alpine.min.js")); err == nil {
+		if _, err := os.Stat(filepath.Join(cwd, staticDirFromConfig("static"), "js", "alpine.min.js")); err == nil {
 			alpine = true
 		}
 	}

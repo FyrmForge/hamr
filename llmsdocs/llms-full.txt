@@ -79,7 +79,10 @@
   by `make_targets` (empty=all allowed). Every call is audit-logged to `.hamr/mcp_logs.txt`
   (`log_file`; `"none"` disables); a dedicated `mcp` TUI tab (last in the `Tab`
   cycle) shows one line per request (reads included), and mutations are also
-  tagged `[mcp]` in the main log tab. Setup: `hamr mcp install --client claude|codex|opencode` (auto-detects
+  tagged `[mcp]` in the main log tab. Setup: `hamr setup` walks agents, per-area
+  permissions, and skill install in one interactive pass, writing `[dev.mcp]` +
+  `[dev.mcp.access]` and the per-agent configs (`--dry-run` previews).
+  `hamr mcp install --client claude|codex|opencode` (auto-detects
   installed agents when omitted; `--dry-run` previews) writes the per-client
   config, merging existing entries and idempotent — Claude `.mcp.json` and
   opencode `opencode.json` are project-scoped; Codex `~/.codex/config.toml` is
@@ -115,9 +118,9 @@
 - **.hamr/ai/**: Playground directory for all AI command artifacts (captures, upgrade reports). Gitignored. Configurable via `[ai] dir` in hamr.toml.
 - **hamr gen locale**: Code generator for type-safe i18n accessors.
 - **hamr gen static**: Content-based static asset fingerprinting. Reads from
-  static/, writes fingerprinted copies to dist/, and generates a Go source file
+  frontend/static/, writes fingerprinted copies to frontend/dist/, and generates a Go source file
   with the manifest baked in at compile time. Config in [static] section of
-  hamr.toml. `--clean` removes dist/ and resets the manifest.
+  hamr.toml. `--clean` removes the dist dir and resets the manifest.
 - **hamr completion install**: Installs shell completion scripts for bash, zsh, or fish. Auto-detects shell from $SHELL. Supports --system for system-wide install (requires root) and --shell to override detection.
 - **respond.Redirect**: HTMX-aware redirect that sets HX-Redirect for HTMX
   requests and falls back to HTTP 303.
@@ -214,8 +217,8 @@ func WithHost(host string) Option                        // bind address
 func WithPort(port int) Option                           // listen port (1-65535)
 func WithDevMode(dev bool) Option                        // skip security headers in dev
 func WithMiddleware(mw ...echo.MiddlewareFunc) Option    // append global middleware
-func WithStaticDir(path string) Option                   // serve static/ at /static
-func WithStaticDistDir(path string) Option               // dist/ takes priority over static/
+func WithStaticDir(path string) Option                   // serve the static dir at /static
+func WithStaticDistDir(path string) Option               // dist dir takes priority over the static dir
 func WithEmbeddedStatic(fsys fs.FS, prefix string) Option // serve from embed.FS
 func WithErrorHandler(h echo.HTTPErrorHandler) Option    // custom error handler
 func WithTimeout(d time.Duration) Option                 // request context timeout

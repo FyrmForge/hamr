@@ -17,8 +17,8 @@ storage = "{{.StorageBackend}}"
 alpine = {{.IncludeAlpine}}
 
 [static]
-dir = "static"
-dist = "dist"
+dir = "frontend/static"
+dist = "frontend/dist"
 manifest = "internal/web/components/staticmanifest.go"
 package = "components"
 
@@ -54,9 +54,15 @@ cmd = "templ generate"
 debounce = 100
 {{- if eq .CSS "tailwind"}}
 
-[[dev.daemon]]
+# One-shot build per change rather than `npx tailwindcss --watch` as a daemon:
+# the long-lived watcher leaks memory over a working day. watch globs stay
+# project-root-relative; dir only sets the working directory for cmd.
+[[dev.watch]]
 name = "tailwind"
-cmd = "npm run css"
+watch = ["**/*.templ", "frontend/css/input.css"]
+dir = "frontend"
+cmd = "npm run css:build"
+debounce = 200
 {{- end}}
 {{- if .StaticS3}}
 
@@ -84,7 +90,7 @@ reload = "full"
 
 [[dev.watch]]
 name = "static"
-watch = ["static/**/*"]
+watch = ["frontend/static/**/*"]
 cmd = "hamr gen static"
 debounce = 200
 {{- if .IncludeLocale}}

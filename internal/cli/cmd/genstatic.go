@@ -21,6 +21,25 @@ type staticTomlFile struct {
 	Static staticTomlConfig `toml:"static"`
 }
 
+// staticDirFromConfig returns [static].dir from hamr.toml in the current
+// directory, or fallback when hamr.toml is missing, unparseable, or has no
+// [static] table. Lets commands that touch the static tree (sync, skill
+// install) follow a project's configured layout instead of assuming one.
+func staticDirFromConfig(fallback string) string {
+	data, err := os.ReadFile("hamr.toml")
+	if err != nil {
+		return fallback
+	}
+	var f staticTomlFile
+	if err := toml.Unmarshal(data, &f); err != nil {
+		return fallback
+	}
+	if f.Static.Dir == "" {
+		return fallback
+	}
+	return f.Static.Dir
+}
+
 var genStaticCmd = &cobra.Command{
 	Use:   "static",
 	Short: "Fingerprint static assets into the dist directory",
@@ -33,14 +52,14 @@ source file with the manifest baked in at compile time.
 Configuration is read from [static] in hamr.toml:
 
   [static]
-  dir = "static"
-  dist = "dist"
+  dir = "frontend/static"
+  dist = "frontend/dist"
   manifest = "internal/web/components/staticmanifest.go"
   package = "components"
 
 Examples:
-  hamr gen static          # fingerprint static/ → dist/
-  hamr gen static --clean  # remove dist/ and reset manifest`,
+  hamr gen static          # fingerprint [static].dir → [static].dist
+  hamr gen static --clean  # remove the dist dir and reset the manifest`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configPath, _ := cmd.Flags().GetString("config")
 		clean, _ := cmd.Flags().GetBool("clean")

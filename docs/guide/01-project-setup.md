@@ -54,9 +54,13 @@ myapp/
 │               ├── handler.go
 │               └── templates/
 ├── migrations/               # SQL migration files
-├── static/
-│   ├── css/                  # Stylesheets
-│   └── js/                   # Vendored JS (htmx, idiomorph; alpine if opted in)
+├── frontend/
+│   ├── static/
+│   │   ├── css/              # Stylesheets
+│   │   └── js/               # Vendored JS (htmx, idiomorph; alpine if opted in)
+│   ├── css/input.css         # Tailwind source (tailwind projects only)
+│   ├── package.json          # npm deps (tailwind projects only)
+│   └── dist/                 # Fingerprinted output of `hamr gen static` (committed)
 ├── docker/
 │   └── docker-compose.yaml   # Local dev services (Postgres, etc. — not generated for SQLite-only projects)
 ├── generated/                # Pre-rendered static pages

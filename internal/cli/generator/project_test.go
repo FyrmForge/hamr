@@ -141,10 +141,10 @@ func TestBuildProjectFileList_plainCSS(t *testing.T) {
 		dests[f.dest] = true
 	}
 
-	assert.True(t, dests["static/css/base/variables.css"])
-	assert.True(t, dests["static/css/components/buttons.css"])
-	assert.False(t, dests["tailwind.config.js"])
-	assert.False(t, dests["package.json"])
+	assert.True(t, dests["frontend/static/css/base/variables.css"])
+	assert.True(t, dests["frontend/static/css/components/buttons.css"])
+	assert.False(t, dests["frontend/tailwind.config.js"])
+	assert.False(t, dests["frontend/package.json"])
 }
 
 func TestBuildProjectFileList_tailwind(t *testing.T) {
@@ -156,9 +156,9 @@ func TestBuildProjectFileList_tailwind(t *testing.T) {
 		dests[f.dest] = true
 	}
 
-	assert.True(t, dests["tailwind.config.js"])
-	assert.True(t, dests["package.json"])
-	assert.False(t, dests["static/css/base/variables.css"])
+	assert.True(t, dests["frontend/tailwind.config.js"])
+	assert.True(t, dests["frontend/package.json"])
+	assert.False(t, dests["frontend/static/css/base/variables.css"])
 }
 
 func TestBuildProjectFileList_auth(t *testing.T) {
@@ -435,11 +435,11 @@ func TestGenerateProject_tailwindCSS(t *testing.T) {
 
 	require.NoError(t, GenerateProject(dir, cfg))
 
-	assertFileExists(t, dir, "tailwind.config.js")
-	assertFileExists(t, dir, "package.json")
+	assertFileExists(t, dir, "frontend/tailwind.config.js")
+	assertFileExists(t, dir, "frontend/package.json")
 
 	// Plain CSS files should NOT exist.
-	assertFileNotExists(t, dir, "static/css/base/variables.css")
+	assertFileNotExists(t, dir, "frontend/static/css/base/variables.css")
 }
 
 func TestGenerateProject_e2eFiles(t *testing.T) {

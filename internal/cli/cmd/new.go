@@ -22,7 +22,7 @@ var newCmd = &cobra.Command{
 Creates a complete project directory with:
   cmd/site/            - Application entry point and Dockerfile
   internal/            - Config, DB, repo, web layers
-  static/              - CSS, JS, images
+  frontend/            - Static assets, CSS source, npm config, dist/
   docker/              - Docker Compose (PostgreSQL only; skipped for SQLite)
   docs/                - ADR, feature specs, AI guides
 
@@ -185,7 +185,7 @@ When all flags are provided, no interactive prompts are shown.`,
 		// Install npm dependencies for Tailwind (non-fatal).
 		if cfg.CSS == "tailwind" {
 			npmInstall := exec.Command("npm", "install")
-			npmInstall.Dir = dir
+			npmInstall.Dir = filepath.Join(dir, "frontend")
 			if err := runWithSpinner("npm install", npmInstall); err != nil {
 				warnings = append(warnings, fmt.Sprintf("npm install failed: %v", err))
 			}

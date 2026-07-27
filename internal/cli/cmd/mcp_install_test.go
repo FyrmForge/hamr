@@ -82,3 +82,21 @@ func countOccurrences(s, sub string) int {
 	}
 	return n
 }
+
+// Re-upserting identical content must not nibble a blank line (or the file's
+// trailing newline) off the file each run.
+func TestUpsertTOMLBlock_Idempotent(t *testing.T) {
+	block := "[mcp_servers.hamr-dev]\ncommand = \"hamr\"\n"
+
+	for _, existing := range []string{
+		"",
+		"[other]\nx = 1\n",
+		"[mcp_servers.hamr-dev]\ncommand = \"hamr\"\n\n[other]\nx = 1\n",
+		"[other]\nx = 1\n\n[mcp_servers.hamr-dev]\ncommand = \"hamr\"\n",
+	} {
+		once := upsertTOMLBlock(existing, "[mcp_servers.hamr-dev]", block)
+		twice := upsertTOMLBlock(once, "[mcp_servers.hamr-dev]", block)
+		assert.Equal(t, once, twice, "second upsert changed the file")
+		assert.Contains(t, once, "command = \"hamr\"")
+	}
+}

@@ -11,7 +11,7 @@ RUN CGO_ENABLED=0 go build -ldflags "-X main.version=${VERSION}" -o /site ./cmd/
 FROM alpine:3.21
 RUN apk --no-cache add ca-certificates
 COPY --from=builder /site /site
-COPY --from=builder /app/static /static
+COPY --from=builder /app/frontend /frontend
 {{- if eq .Database "sqlite"}}
 
 # SQLite database file directory — mount a volume here for persistence.

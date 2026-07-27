@@ -164,6 +164,7 @@ func (pm *ProcessManager) RunCommand(ctx context.Context, rule *WatchRule) (stri
 	pm.logger.Info("running", "rule", rule.Name, "cmd", rule.Cmd)
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", rule.Cmd)
+	cmd.Dir = rule.Dir
 	cmd.Env = buildEnv(append(append([]string(nil), pm.injectedEnv...), rule.Env...))
 	// Match StartProcess / compose invocations: put the child in its own
 	// process group, and bound the I/O wait on cancel. Without WaitDelay a
@@ -226,6 +227,7 @@ func (pm *ProcessManager) StartProcess(ctx context.Context, rule *WatchRule) err
 	pm.logger.Info("starting", "rule", rule.Name, "run", rule.Run)
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", rule.Run)
+	cmd.Dir = rule.Dir
 	cmd.Env = buildEnv(append(append([]string(nil), pm.injectedEnv...), rule.Env...))
 	cmd.Stdin = pm.stdinR
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

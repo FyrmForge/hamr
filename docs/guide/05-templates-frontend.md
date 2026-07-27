@@ -152,7 +152,7 @@ STATIC_BASE_URL=https://cdn.example.com/static
 
 ## Vendored JS Dependencies
 
-HAMR vendors frontend JS dependencies into `static/js/`. `htmx` and `idiomorph` are always vendored; `alpine` is vendored only when the project opts in. Manage them with:
+HAMR vendors frontend JS dependencies into `frontend/static/js/`. `htmx` and `idiomorph` are always vendored; `alpine` is vendored only when the project opts in. Manage them with:
 
 ```bash
 hamr vendor                     # vendor all deps at locked versions

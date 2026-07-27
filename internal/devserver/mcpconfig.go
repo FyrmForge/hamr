@@ -55,6 +55,18 @@ var mcpAreas = map[string]mcpArea{
 	"stripe": {readTools: []string{"stripe.list"}, writeTools: []string{"stripe.complete", "stripe.expire", "stripe.refund"}},
 }
 
+// MCPAreaNames returns every configurable [dev.mcp.access] area in a stable
+// order. Exported for the `hamr setup` picker, which needs the canonical list
+// without duplicating it.
+func MCPAreaNames() []string {
+	names := make([]string, 0, len(mcpAreas))
+	for name := range mcpAreas {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
+}
+
 // EnabledTools returns the set of tool names the Access map exposes. Unknown
 // areas/levels are ignored here (validate() rejects them at load time).
 func (c MCPConfig) EnabledTools() map[string]bool {

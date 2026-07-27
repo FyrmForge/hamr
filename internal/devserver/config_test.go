@@ -959,3 +959,36 @@ cmd = "echo"
 	_, err := LoadConfig(path)
 	require.NoError(t, err)
 }
+
+func TestValidateRuleDir(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "frontend"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "notadir"), []byte("x"), 0o644))
+	outside := t.TempDir()
+	require.NoError(t, os.Symlink(outside, filepath.Join(root, "escape")))
+
+	tests := []struct {
+		name    string
+		dir     string
+		wantErr string
+	}{
+		{name: "empty means project root", dir: ""},
+		{name: "existing subdir", dir: "frontend"},
+		{name: "missing", dir: "frontned", wantErr: "does not exist"},
+		{name: "file not dir", dir: "notadir", wantErr: "not a directory"},
+		{name: "absolute", dir: outside, wantErr: "must be relative"},
+		{name: "parent escape", dir: "../elsewhere", wantErr: "does not exist"},
+		{name: "symlink escape", dir: "escape", wantErr: "outside the project root"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateRuleDir(root, tt.dir)
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}

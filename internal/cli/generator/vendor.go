@@ -31,17 +31,17 @@ var defaultRegistry = map[string]VendorDep{
 	"htmx": {
 		Version: "2.0.4",
 		URL:     "https://unpkg.com/htmx.org@{{.Version}}/dist/htmx.min.js",
-		Out:     "static/js/htmx.min.js",
+		Out:     "frontend/static/js/htmx.min.js",
 	},
 	"alpine": {
 		Version: "3.14.9",
 		URL:     "https://unpkg.com/alpinejs@{{.Version}}/dist/cdn.min.js",
-		Out:     "static/js/alpine.min.js",
+		Out:     "frontend/static/js/alpine.min.js",
 	},
 	"idiomorph": {
 		Version: "0.3.0",
 		URL:     "https://unpkg.com/idiomorph@{{.Version}}/dist/idiomorph.min.js",
-		Out:     "static/js/idiomorph.min.js",
+		Out:     "frontend/static/js/idiomorph.min.js",
 	},
 }
 
@@ -188,7 +188,16 @@ func vendorDep(dir, name, version string, reg VendorDep, lock *VendorLock, updat
 	}
 
 	url := resolveURL(reg.URL, version)
-	destPath := filepath.Join(dir, reg.Out)
+
+	// A dep already in the lock keeps its recorded output path. The registry
+	// default moved (static/js → frontend/static/js) and projects on the old
+	// layout reference the old path from their templates — re-vendoring must
+	// not quietly write the update somewhere nothing is served from.
+	out := reg.Out
+	if locked && existing.Out != "" {
+		out = existing.Out
+	}
+	destPath := filepath.Join(dir, out)
 
 	hash, err := downloadAndChecksum(url, destPath)
 	if err != nil {
@@ -198,7 +207,7 @@ func vendorDep(dir, name, version string, reg VendorDep, lock *VendorLock, updat
 	lock.Deps[name] = VendorDep{
 		Version: version,
 		URL:     url,
-		Out:     reg.Out,
+		Out:     out,
 		SHA256:  hash,
 	}
 

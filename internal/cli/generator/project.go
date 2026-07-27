@@ -243,8 +243,8 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 		{"templates/new/internal/web/components/form/helpers.go.tmpl", "internal/web/components/form/helpers.go"},
 
 		// static
-		{"templates/new/static/js/main.js.tmpl", "static/js/main.js"},
-		{"templates/new/static/images/gitkeep.tmpl", "static/images/.gitkeep"},
+		{"templates/new/static/js/main.js.tmpl", "frontend/static/js/main.js"},
+		{"templates/new/static/images/gitkeep.tmpl", "frontend/static/images/.gitkeep"},
 
 		// docs
 		{"templates/new/docs/adr/000-base-framework.md.tmpl", "docs/adr/000-base-framework.md"},
@@ -285,24 +285,24 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 	// Plain CSS files.
 	if cfg.CSS == "plain" {
 		files = append(files,
-			templateFile{"templates/new/static/css/base/variables.css.tmpl", "static/css/base/variables.css"},
-			templateFile{"templates/new/static/css/base/reset.css.tmpl", "static/css/base/reset.css"},
-			templateFile{"templates/new/static/css/base/utilities.css.tmpl", "static/css/base/utilities.css"},
-			templateFile{"templates/new/static/css/components/buttons.css.tmpl", "static/css/components/buttons.css"},
-			templateFile{"templates/new/static/css/components/forms.css.tmpl", "static/css/components/forms.css"},
-			templateFile{"templates/new/static/css/components/alerts.css.tmpl", "static/css/components/alerts.css"},
-			templateFile{"templates/new/static/css/layout/header.css.tmpl", "static/css/layout/header.css"},
-			templateFile{"templates/new/static/css/layout/footer.css.tmpl", "static/css/layout/footer.css"},
-			templateFile{"templates/new/static/css/pages/home.css.tmpl", "static/css/pages/home.css"},
+			templateFile{"templates/new/static/css/base/variables.css.tmpl", "frontend/static/css/base/variables.css"},
+			templateFile{"templates/new/static/css/base/reset.css.tmpl", "frontend/static/css/base/reset.css"},
+			templateFile{"templates/new/static/css/base/utilities.css.tmpl", "frontend/static/css/base/utilities.css"},
+			templateFile{"templates/new/static/css/components/buttons.css.tmpl", "frontend/static/css/components/buttons.css"},
+			templateFile{"templates/new/static/css/components/forms.css.tmpl", "frontend/static/css/components/forms.css"},
+			templateFile{"templates/new/static/css/components/alerts.css.tmpl", "frontend/static/css/components/alerts.css"},
+			templateFile{"templates/new/static/css/layout/header.css.tmpl", "frontend/static/css/layout/header.css"},
+			templateFile{"templates/new/static/css/layout/footer.css.tmpl", "frontend/static/css/layout/footer.css"},
+			templateFile{"templates/new/static/css/pages/home.css.tmpl", "frontend/static/css/pages/home.css"},
 		)
 	}
 
 	// Tailwind files.
 	if cfg.CSS == "tailwind" {
 		files = append(files,
-			templateFile{"templates/new/root/tailwind.config.js.tmpl", "tailwind.config.js"},
-			templateFile{"templates/new/root/package.json.tmpl", "package.json"},
-			templateFile{"templates/new/css/input.css.tmpl", "css/input.css"},
+			templateFile{"templates/new/root/tailwind.config.js.tmpl", "frontend/tailwind.config.js"},
+			templateFile{"templates/new/root/package.json.tmpl", "frontend/package.json"},
+			templateFile{"templates/new/css/input.css.tmpl", "frontend/css/input.css"},
 		)
 	}
 
@@ -328,7 +328,7 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 	// WebSocket files.
 	if cfg.IncludeWS {
 		files = append(files,
-			templateFile{"templates/new/static/js/ws.js.tmpl", "static/js/ws.js"},
+			templateFile{"templates/new/static/js/ws.js.tmpl", "frontend/static/js/ws.js"},
 		)
 	}
 

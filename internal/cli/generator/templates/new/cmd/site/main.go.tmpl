@@ -129,8 +129,8 @@ func main() {
 	srv, err := server.New(
 		server.WithPort(envPort),
 		server.WithDevMode(envDevMode),
-		server.WithStaticDir("static"),
-		server.WithStaticDistDir("dist"),
+		server.WithStaticDir("frontend/static"),
+		server.WithStaticDistDir("frontend/dist"),
 		server.WithGeneratedDir("generated"),
 		// TRUSTED_PROXIES: comma-separated CIDRs of upstream proxies/load
 		// balancers allowed to set X-Forwarded-For (drives client-IP detection

@@ -17,7 +17,7 @@ srv, err := server.New(
     server.WithPort(envPort),
     server.WithDevMode(envDevMode),
     server.WithTimeout(30*time.Second),
-    server.WithStaticDir("static"),
+    server.WithStaticDir("frontend/static"),
 )
 if err != nil {
     log.Fatal(err)

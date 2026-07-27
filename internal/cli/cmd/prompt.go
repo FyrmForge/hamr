@@ -303,7 +303,7 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 		if err := huh.NewForm(huh.NewGroup(
 			huh.NewSelect[string]().
 				Title("Static asset syncing").
-				Description("Adds a background daemon to hamr dev that syncs your static/ directory to a separate S3 bucket, and a Makefile target for CI deployments.").
+				Description("Adds a background daemon to hamr dev that syncs your frontend/static/ directory to a separate S3 bucket, and a Makefile target for CI deployments.").
 				Options(
 					huh.NewOption("Yes", "yes"),
 					huh.NewOption("No", "no"),

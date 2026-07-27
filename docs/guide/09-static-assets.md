@@ -10,7 +10,7 @@ HAMR doesn't mandate a CSS framework and vendors JS dependencies instead of usin
 
 ### Plain CSS (Default)
 
-HAMR ships a minimal CSS reset in `static/css/base/`. Write styles in `static/css/app.css`.
+HAMR ships a minimal CSS reset in `frontend/static/css/base/`. Write styles in `frontend/static/css/app.css`.
 
 ### Tailwind CSS
 
@@ -20,26 +20,35 @@ Choose `--css tailwind` during scaffolding:
 hamr new myapp --css tailwind
 ```
 
-This sets up a Tailwind daemon in `hamr.toml`:
+Everything frontend lives under `frontend/` — `package.json`, `tailwind.config.js`, the `css/input.css` source, the `static/` tree, and the generated `dist/`. Nothing npm-related sits at the repo root.
+
+This sets up a Tailwind watch rule in `hamr.toml`:
 
 ```toml
-[[dev.daemon]]
+[[dev.watch]]
 name = "tailwind"
-cmd = "npm run css"
+watch = ["**/*.templ", "frontend/css/input.css"]
+dir = "frontend"
+cmd = "npm run css:build"
+debounce = 200
 
 [[dev.watch]]
 name = "css"
-watch = "static/css/output.css"
+watch = "frontend/static/css/output.css"
 reload = "css"
 ```
 
-Tailwind watches `.templ` files, outputs to `static/css/output.css`, and the dev server hot-swaps stylesheets without page reload.
+A one-shot build per change, not a long-lived `--watch` daemon: the daemon leaks
+memory over a working day. `dir` sets the working directory for `cmd` only —
+`watch` globs stay relative to the project root.
+
+Tailwind outputs to `frontend/static/css/output.css`, and the dev server hot-swaps stylesheets without page reload.
 
 ---
 
 ## JS Vendoring
 
-Frontend JavaScript dependencies are vendored into `static/js/` — no npm runtime, no bundler:
+Frontend JavaScript dependencies are vendored into `frontend/static/js/` — no npm runtime, no bundler:
 
 ```bash
 hamr vendor                     # vendor all deps at locked versions
@@ -54,7 +63,7 @@ Built-in deps: `htmx`, `alpine`, `idiomorph`. New projects vendor `htmx` and `id
 For custom dependencies:
 
 ```bash
-hamr vendor --url https://cdn.example.com/lib.js --out static/js/lib.min.js
+hamr vendor --url https://cdn.example.com/lib.js --out frontend/static/js/lib.min.js
 ```
 
 ---
@@ -119,7 +128,7 @@ Sync static assets to an S3-compatible bucket for CDN serving.
 ### CLI
 
 ```bash
-hamr sync                              # one-shot sync of static/ to S3
+hamr sync                              # one-shot sync of [static].dir to S3
 hamr sync --watch                      # watch for changes and sync continuously
 hamr sync --dir dist --bucket my-cdn   # sync a different directory
 ```
@@ -128,10 +137,10 @@ hamr sync --dir dist --bucket my-cdn   # sync a different directory
 
 ```go
 // One-shot upload
-err := sync.SyncAll(ctx, s3Store, "static")
+err := sync.SyncAll(ctx, s3Store, "frontend/static")
 
 // Watch and sync continuously
-err := sync.WatchAndSync(ctx, s3Store, "static")
+err := sync.WatchAndSync(ctx, s3Store, "frontend/static")
 ```
 
 ### Development Setup
@@ -148,31 +157,31 @@ cmd = "hamr sync --watch --bucket myapp-static"
 
 ## Asset Fingerprinting
 
-HAMR uses content-based file hashing for cache busting. Source files live in `static/`, fingerprinted copies go to `dist/` — a separate output directory that is committed to the repo.
+HAMR uses content-based file hashing for cache busting. Source files live in `frontend/static/`, fingerprinted copies go to `frontend/dist/` — a separate output directory that is committed to the repo.
 
 ### CLI
 
 ```bash
-hamr gen static          # fingerprint static/ → dist/
-hamr gen static --clean  # remove dist/
+hamr gen static          # fingerprint frontend/static/ → frontend/dist/
+hamr gen static --clean  # remove frontend/dist/
 ```
 
 Configuration in `hamr.toml`:
 
 ```toml
 [static]
-dir = "static"    # source directory
-dist = "dist"     # output directory
+dir = "frontend/static"   # source directory
+dist = "frontend/dist"     # output directory
 ```
 
 ### How It Works
 
-1. `hamr gen static` walks the `static/` directory
+1. `hamr gen static` walks the `frontend/static/` directory
 2. For each file, it computes a SHA-256 hash of the contents (12-char hex prefix)
-3. Writes fingerprinted copies to `dist/` mirroring the directory structure (e.g. `dist/css/output.a1b2c3d4e5f6.css`)
+3. Writes fingerprinted copies to `frontend/dist/` mirroring the directory structure (e.g. `frontend/dist/css/output.a1b2c3d4e5f6.css`)
 4. Generates a Go source file (`internal/web/components/staticmanifest.go`) with the manifest baked in as a compiled map — no runtime loading needed
 5. `StaticURL("css/output.css")` returns `/static/css/output.a1b2c3d4e5f6.css` at compile time
-6. The server serves from `dist/` first, falling back to `static/` for non-fingerprinted files
+6. The server serves from `frontend/dist/` first, falling back to `frontend/static/` for non-fingerprinted files
 7. In dev mode (no fingerprinting), `StaticManifest` is nil — `StaticURL` returns the plain path
 
 ### Build Pipeline
@@ -185,11 +194,11 @@ templ generate → [gen locale] → [css:build] → hamr gen static → go build
 
 ### CI Verification
 
-`dist/` is committed. CI should verify it's up to date:
+`frontend/dist/` is committed. CI should verify it's up to date:
 
 ```bash
 hamr gen static
-git diff --exit-code dist/
+git diff --exit-code frontend/dist/
 ```
 
 ### Cache Headers

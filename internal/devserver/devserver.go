@@ -689,7 +689,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	for i := range r.cfg.Dev.Daemons {
 		d := &r.cfg.Dev.Daemons[i]
 		r.logger.Info("starting daemon", "name", d.Name)
-		rule := &WatchRule{Name: d.Name, Run: d.Cmd, Env: d.Env}
+		rule := &WatchRule{Name: d.Name, Run: d.Cmd, Dir: d.Dir, Env: d.Env}
 		if err := pm.StartProcess(runCtx, rule); err != nil {
 			r.logger.Error("failed to start daemon", "daemon", d.Name, "err", err)
 		}

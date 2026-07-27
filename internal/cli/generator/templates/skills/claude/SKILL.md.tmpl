@@ -40,7 +40,7 @@ Default to loading no reference files until the task needs one. When in doubt, p
 4. **POST handlers follow PRG**: after a successful write, redirect with `respond.Redirect(c, url)` (which sets `HX-Redirect` for HTMX requests and falls back to 303).
 5. **Validators come from `pkg/validate`** — do not roll your own. `validate.NewForm(...)` + `Field(name, rules...)` is the path for form validation; it also renders field errors as HTMX OOB swaps.
 6. **Config comes from `pkg/config`** helpers (`GetEnvOrDefault`, `GetEnvOrPanic`, etc.), not ad-hoc `os.Getenv` calls.
-7. **Never add JS libraries beyond the vendored set** ([[if .IncludeAlpine]]`htmx`, `alpine`, `idiomorph`[[else]]`htmx`, `idiomorph`; `alpine` is available via `hamr vendor alpine` when needed[[end]]). Use `hamr vendor` to manage them; do not check unvendored JS into `static/js/`.
+7. **Never add JS libraries beyond the vendored set** ([[if .IncludeAlpine]]`htmx`, `alpine`, `idiomorph`[[else]]`htmx`, `idiomorph`; `alpine` is available via `hamr vendor alpine` when needed[[end]]). Use `hamr vendor` to manage them; do not check unvendored JS into `frontend/static/js/`.
 8. **Build & test go through the Makefile.** Use `make build`, `make test`, `make lint`, `make templint` — never call `go build` / `go test` on individual packages.
 
 ## Project layout cheat-sheet
@@ -56,8 +56,11 @@ internal/
     handler/<domain>/     # per-domain handlers and domain-local .templ files
     components/           # shared templ components, static manifest
 locales/                  # i18n JSON (if --locale was enabled)
-static/                   # raw CSS/JS/images
-dist/                     # fingerprinted static output (gitignored)
+frontend/
+  static/                 # raw CSS/JS/images
+  css/input.css           # Tailwind source (tailwind projects only)
+  dist/                   # fingerprinted static output, committed
+  package.json            # npm deps live here, not at the repo root
 docs/                     # project docs including llms.txt / llms-full.txt
 hamr.toml                 # CLI + dev server + codegen config
 ```

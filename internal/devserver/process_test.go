@@ -481,3 +481,19 @@ func TestProcessManager_StopProcess_DoesNotHangOnEscapedPipeHolder(t *testing.T)
 		t.Fatal("stopProcess hung: cmd.Wait() blocked on an escaped pipe-holder (StartProcess missing WaitDelay)")
 	}
 }
+
+func TestProcessManager_RunCommand_Dir(t *testing.T) {
+	pm := NewProcessManager(testLogger())
+	dir := t.TempDir()
+
+	out, err := pm.RunCommand(context.Background(), &WatchRule{Name: "test", Cmd: "pwd", Dir: dir})
+	require.NoError(t, err)
+	assert.Contains(t, out, dir)
+
+	// Empty Dir keeps the inherited working directory.
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	out, err = pm.RunCommand(context.Background(), &WatchRule{Name: "test", Cmd: "pwd"})
+	require.NoError(t, err)
+	assert.Contains(t, out, cwd)
+}

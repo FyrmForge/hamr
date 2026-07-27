@@ -18,18 +18,23 @@ var syncCmd = &cobra.Command{
 	Short: "Sync a local directory to an S3-compatible bucket",
 	Long: `Upload files from a local directory to an S3-compatible bucket.
 
-By default performs a one-shot sync of the static/ directory, then exits.
+By default performs a one-shot sync of the [static].dir directory configured in
+hamr.toml (frontend/static in current scaffolds), then exits.
 Use --watch to keep running and sync changes as they happen.
 
 S3 credentials come from flags or environment variables:
   S3_ENDPOINT, S3_BUCKET, S3_REGION, S3_ACCESS_KEY, S3_SECRET_KEY
 
 Examples:
-  hamr sync                              One-shot sync of static/ to S3
+  hamr sync                              One-shot sync of [static].dir to S3
   hamr sync --watch                      Watch for changes and sync continuously
-  hamr sync --dir dist --bucket my-cdn   Sync dist/ to a specific bucket`,
+  hamr sync --dir frontend/dist --bucket my-cdn
+                                         Sync a specific directory to a bucket`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dir, _ := cmd.Flags().GetString("dir")
+		if !cmd.Flags().Changed("dir") {
+			dir = staticDirFromConfig(dir)
+		}
 		watch, _ := cmd.Flags().GetBool("watch")
 		pathStyle, _ := cmd.Flags().GetBool("path-style")
 
@@ -81,7 +86,7 @@ Examples:
 }
 
 func init() {
-	syncCmd.Flags().String("dir", "static", "local directory to sync")
+	syncCmd.Flags().String("dir", "static", "local directory to sync (default: [static].dir from hamr.toml)")
 	syncCmd.Flags().Bool("watch", false, "watch for changes after initial sync")
 	syncCmd.Flags().String("endpoint", "", "S3 endpoint URL (default http://localhost:9000)")
 	syncCmd.Flags().String("bucket", "", "S3 bucket name")

@@ -96,7 +96,9 @@
   20s) before returning "still running". Every call is audit-logged to
   `.hamr/mcp_logs.txt` (`log_file`, `"none"` disables); mutations are tagged
   `[mcp]` in the main log; the TUI also has a dedicated `mcp` tab (last in the
-  `Tab` cycle) showing one line per request. `hamr mcp install --client claude|codex|opencode`
+  `Tab` cycle) showing one line per request. `hamr setup` is the
+  interactive front end for all of it (agents, per-area permissions, skills);
+  `hamr mcp install --client claude|codex|opencode`
   (auto-detects when omitted; `--dry-run`) writes the per-client config,
   merging and idempotent — Claude `.mcp.json` + opencode `opencode.json` are
   project-scoped; Codex `~/.codex/config.toml` is global and gets `--project`
@@ -153,9 +155,9 @@
 - **.hamr/ai/**: Playground directory for all AI command artifacts (captures, upgrade reports). Gitignored. Configurable via `[ai] dir` in hamr.toml.
 - **hamr gen locale**: Code generator for type-safe i18n accessors.
 - **hamr gen static**: Content-based static asset fingerprinting. Reads from
-  static/, writes fingerprinted copies to dist/, and generates a Go source file
+  frontend/static/, writes fingerprinted copies to frontend/dist/, and generates a Go source file
   with the manifest baked in at compile time. Config in [static] section of
-  hamr.toml. `--clean` removes dist/ and resets the manifest.
+  hamr.toml. `--clean` removes the dist dir and resets the manifest.
 - **hamr completion install**: Installs shell completion scripts for bash, zsh, or fish. Auto-detects shell from $SHELL. Supports --system for system-wide install (requires root) and --shell to override detection.
 - **hamr add skill <target>**: Installs an AI agent skill describing the hamr framework. Target selects the AI tool (currently `claude`). Writes to `./.claude/skills/hamr/` by default; `--global` writes to `~/.claude/skills/hamr/`. Requires `hamr.toml` in CWD for project installs. `--force` overwrites.
 - **respond.Redirect**: HTMX-aware redirect that sets HX-Redirect for HTMX

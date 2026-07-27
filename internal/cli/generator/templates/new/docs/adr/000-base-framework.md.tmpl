@@ -44,7 +44,7 @@ cmd/site/          Entry point + Dockerfile (env config loaded here)
 internal/db/         Database connection + migrations
 internal/repo/       Data access layer (Store interface)
 internal/web/        HTTP handlers + components
-static/              CSS, JS, images
+frontend/            Static assets, CSS source, npm config, dist/
 {{- if or (ne .Database "sqlite") (eq .StorageBackend "s3")}}
 docker/              Docker Compose
 {{- end}}

@@ -18,7 +18,7 @@ hamr sync [flags]
 | `--path-style` | `true` | Use path-style addressing (required for RustFS) |
 
 ```bash
-hamr sync                              # one-shot sync of static/ to S3
+hamr sync                              # one-shot sync of [static].dir to S3
 hamr sync --watch                      # watch for changes and sync continuously
 hamr sync --dir dist --bucket my-cdn   # sync a different directory to a specific bucket
 ```

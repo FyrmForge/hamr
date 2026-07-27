@@ -6,13 +6,14 @@
 hamr
 ├── new [name]              Scaffold a new project
 ├── dev                     Dev server: file watching, build orchestration, live reload
+├── setup                   Interactive AI-agent setup (MCP bridge, permissions, skills)
 ├── add
 │   └── skill <target>      Install an AI agent skill describing hamr (e.g. claude)
 ├── ai
 │   ├── capture <url>       Browser screenshot + HTML/text/metadata sidecars
 │   └── upgrade             Diff scaffold changes between versions
 ├── gen
-│   ├── static              Content-hash static assets into dist/, emit Go manifest
+│   ├── static              Content-hash static assets into the dist dir, emit Go manifest
 │   └── locale              Generate type-safe Go accessors from locale JSON
 ├── sync                    Sync local directory to an S3-compatible bucket
 ├── vendor [dep[@ver]]      Download/checksum frontend JS deps
@@ -99,19 +100,19 @@ Reports save to `.hamr/ai/upgrades/`. The JSON form is meant to be consumed by a
 
 ## hamr gen static
 
-Content-fingerprint static assets. Reads from `static/`, writes fingerprinted copies (e.g. `output.a1b2c3d4e5f6.css`) to `dist/`, and generates a Go source file with a compiled-in manifest.
+Content-fingerprint static assets. Reads from `frontend/static/`, writes fingerprinted copies (e.g. `output.a1b2c3d4e5f6.css`) to `frontend/dist/`, and generates a Go source file with a compiled-in manifest.
 
 ```bash
 hamr gen static
-hamr gen static --clean      # remove dist/ and reset the manifest
+hamr gen static --clean      # remove the dist dir and reset the manifest
 ```
 
 Config under `[static]` in `hamr.toml`:
 
 ```toml
 [static]
-dir      = "static"
-dist     = "dist"
+dir      = "frontend/static"
+dist     = "frontend/dist"
 manifest = "internal/web/components/staticmanifest.go"
 package  = "components"
 ```
@@ -196,7 +197,7 @@ The scaffolded `Makefile` wires this into `make build` and `make test` when loca
 
 ## hamr vendor [dep[@version]]
 
-Download and checksum frontend JS dependencies into `static/js/`, tracking versions/hashes in `hamr.vendor.json`.
+Download and checksum frontend JS dependencies into `frontend/static/js/`, tracking versions/hashes in `hamr.vendor.json`.
 
 ```bash
 hamr vendor                        # all deps at pinned versions

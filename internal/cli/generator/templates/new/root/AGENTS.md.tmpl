@@ -44,7 +44,8 @@ internal/web/server.go   Route registration + middleware groups
 internal/web/handler/    One package per page, mirroring URL path
                          (e.g. /admin/users → handler/admin/user/)
 internal/web/components/ Shared templ components (layout, form helpers)
-static/                  CSS, JS, images
+frontend/                Everything frontend: static assets, CSS source,
+                         npm config, generated dist/
 {{- if .IncludeLocale}}
 locales/                 Translation JSON files (one per language)
 internal/locale/         Generated type-safe i18n accessors after `hamr gen locale`
@@ -388,10 +389,10 @@ renders.
 
 ## CSS
 
-Plain CSS with design system in `static/css/`:
+Plain CSS with design system in `frontend/static/css/`:
 
 ```
-static/css/
+frontend/static/css/
 ├── base/
 │   ├── variables.css    CSS custom properties (colors, spacing, typography)
 │   ├── reset.css        Minimal reset + base element styles
@@ -409,8 +410,8 @@ static/css/
 
 ### Adding Styles
 
-- New component: create `static/css/components/<name>.css`, add `<link>` in `layout.templ`
-- New page: create `static/css/pages/<name>.css`, add `<link>` in the page templ or layout
+- New component: create `frontend/static/css/components/<name>.css`, add `<link>` in `layout.templ`
+- New page: create `frontend/static/css/pages/<name>.css`, add `<link>` in the page templ or layout
 
 ### Design System
 
@@ -434,20 +435,23 @@ Prefer using variables over hard-coded values.
 
 ## CSS
 
-Tailwind CSS — classes directly in templ components. Config in `tailwind.config.js`.
+Tailwind CSS — classes directly in templ components. Config in `frontend/tailwind.config.js`.
 
 ```bash
-npm install
-npm run css        # Watch mode
-npm run css:build  # Production build
+make install     # installs npm deps in frontend/
+make css-build   # one-shot production build
 ```
 
+`hamr dev` rebuilds the CSS on every `.templ` change — there is no watch
+daemon.
+
 ```
-css/input.css          Tailwind directives (@tailwind base, components, utilities)
-static/css/output.css  Generated CSS (do not edit)
+frontend/css/input.css          Tailwind directives (@tailwind base, components, utilities)
+frontend/static/css/output.css  Generated CSS (do not edit)
+frontend/dist/                  Fingerprinted output of `hamr gen static`
 ```
 
-Custom components via `@apply` in `css/input.css`:
+Custom components via `@apply` in `frontend/css/input.css`:
 
 ```css
 @layer components {

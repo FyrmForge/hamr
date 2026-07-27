@@ -258,6 +258,14 @@ func upsertTOMLBlock(existing, header, block string) string {
 			break
 		}
 	}
+	// Keep the blank lines that separated this block from whatever follows
+	// (and the file's trailing newline when the block is last), so re-running
+	// an upsert with identical content is a no-op instead of eating a line
+	// every time.
+	for end-1 > start && strings.TrimSpace(lines[end-1]) == "" {
+		end--
+	}
+
 	out := append([]string{}, lines[:start]...)
 	out = append(out, strings.Split(block, "\n")...)
 	out = append(out, lines[end:]...)
