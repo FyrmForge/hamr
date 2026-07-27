@@ -27,7 +27,18 @@ func Set[T any](c echo.Context, key Key[T], value T) {
 }
 
 // Get retrieves a typed value from the Echo context.
+//
+// A nil context returns (zero, false) rather than panicking. Components render
+// outside a request in normal use — middleware.ErrorPages builds its page from
+// a func(code int, message string) with no echo.Context to pass down, so the
+// scaffold's error page calls @Layout(nil, ...) — and every accessor built on
+// Get (GetFlash, GetSubject, GetSubjectID) would otherwise nil-dereference
+// there, turning a styled 404 into a recovered panic and a 500.
 func Get[T any](c echo.Context, key Key[T]) (T, bool) {
+	if c == nil {
+		var zero T
+		return zero, false
+	}
 	val := c.Get(key.name)
 	if val == nil {
 		var zero T
@@ -37,8 +48,13 @@ func Get[T any](c echo.Context, key Key[T]) (T, bool) {
 	return typed, ok
 }
 
-// MustGet retrieves a typed value from the Echo context or panics.
+// MustGet retrieves a typed value from the Echo context or panics. Panicking is
+// the contract; a nil context says so explicitly rather than surfacing as a bare
+// nil dereference from inside Echo.
 func MustGet[T any](c echo.Context, key Key[T]) T {
+	if c == nil {
+		panic("ctx: nil echo.Context for key " + key.name)
+	}
 	val, ok := Get(c, key)
 	if !ok {
 		panic("ctx: missing required value for key " + key.name)
@@ -47,8 +63,13 @@ func MustGet[T any](c echo.Context, key Key[T]) T {
 }
 
 // GetAs retrieves a value from the Echo context using an untyped key and
-// asserts it to type T. It returns (zero, false) on missing or mismatched type.
+// asserts it to type T. It returns (zero, false) on missing or mismatched type,
+// and on a nil context (see Get).
 func GetAs[T any](c echo.Context, key Key[any]) (T, bool) {
+	if c == nil {
+		var zero T
+		return zero, false
+	}
 	val := c.Get(key.name)
 	if val == nil {
 		var zero T
@@ -65,6 +86,9 @@ func GetAs[T any](c echo.Context, key Key[any]) (T, bool) {
 // MustGetAs retrieves a value from the Echo context using an untyped key and
 // asserts it to type T. It panics with a clear message on missing or mismatched type.
 func MustGetAs[T any](c echo.Context, key Key[any]) T {
+	if c == nil {
+		panic("ctx: nil echo.Context for key " + key.name)
+	}
 	val, ok := GetAs[T](c, key)
 	if !ok {
 		panic("ctx: value for key " + key.name + " is missing or not the expected type")

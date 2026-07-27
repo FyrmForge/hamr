@@ -1,8 +1,7 @@
 # Bug: every scaffolded project 500s on its first 404
 
-Status: **open** — bug report, not a feature. Filed here because `docs/` has no
-issues directory; `code-review-findings.md` is a dated one-off audit, not an
-ongoing tracker.
+Status: **fixed** — see the Unreleased section of `docs/changelog.md`. Kept for
+the diagnosis; the checklist below records what landed.
 
 Severity: **high**. Hits every generated project with `auth`/flash enabled, on
 the most ordinary request there is — a 404. No unusual configuration needed.
@@ -107,11 +106,14 @@ would stop the next person from `Layout(c)`-ing it and wondering why.
 
 ## Checklist
 
-- [ ] `ctx.Get` returns the zero value for a nil context
-- [ ] `ctx.MustGet` panics with a descriptive message on a nil context
-- [ ] Test: `GetFlash`/`GetSubject`/`GetSubjectID` with a nil context
-- [ ] Test: rendering the scaffolded `ErrorPage` does not panic
-- [ ] Comment in `error.templ.tmpl` explaining the deliberate nil
+- [x] `ctx.Get` returns the zero value for a nil context (`GetAs` too — same
+      dereference, same fix)
+- [x] `ctx.MustGet` / `MustGetAs` panic with `ctx: nil echo.Context for key <k>`
+- [x] Test: `GetFlash`/`GetSubject`/`GetSubjectID` with a nil context
+- [x] Test: `ErrorPages` end to end — a page calling the accessors with a nil
+      context returns 404, not a recovered panic and a 500. Verified by
+      reverting the guard: the test reproduces the reported trace exactly.
+- [x] Comment in `error.templ.tmpl` explaining the deliberate nil
 
 ## Unrelated to
 

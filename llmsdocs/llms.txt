@@ -210,6 +210,10 @@ Context-aware structured logging wrapping log/slog.
 Type-safe Echo context key helpers using generics.
 - `NewKey[T](name) Key[T]`
 - `Set[T](c, key, value)`, `Get[T](c, key) (T, bool)`, `MustGet[T](c, key) T`
+- `Get`/`GetAs` return `(zero, false)` on a nil `echo.Context` — components
+  render outside a request (the scaffold's error page calls `@Layout(nil, ...)`
+  because `middleware.ErrorPages` has no context to pass down). `MustGet`
+  panics with `ctx: nil echo.Context for key <name>`.
 - Pre-defined keys: `SubjectIDKey`, `SubjectKey`, `SessionKey`, `RequestIDKey`,
   `FlashKey`, `TranslatorKey`, `LocaleKey`
 

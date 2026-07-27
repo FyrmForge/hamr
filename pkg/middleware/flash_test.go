@@ -162,3 +162,9 @@ func TestGetFlash_returnsNil(t *testing.T) {
 
 	assert.Nil(t, middleware.GetFlash(c))
 }
+
+func TestGetFlash_NilContext(t *testing.T) {
+	assert.NotPanics(t, func() {
+		assert.Nil(t, middleware.GetFlash(nil))
+	})
+}

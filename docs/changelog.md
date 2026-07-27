@@ -108,6 +108,17 @@ the TL;DR on top of it.
 
 ### Fixes
 
+- **Scaffolded projects no longer 500 on their first 404.** `ctx.Get` (and
+  `GetAs`) dereferenced the `echo.Context` without a nil check, but components
+  legitimately render without a request: `middleware.ErrorPages` builds its page
+  from a `func(code int, message string)`, so the scaffold's error page calls
+  `@Layout(nil, ...)`. Any accessor the layout used — `GetFlash`, `GetSubject`,
+  `GetSubjectID` — then panicked, and Echo's `Recover` turned the intended
+  styled 404 into a 500 plus a stack trace in the log, on every miss including
+  the `/favicon.ico` browsers fetch unprompted. The accessors now return zero
+  values on a nil context; `MustGet`/`MustGetAs` still panic, but say
+  `ctx: nil echo.Context for key <name>` instead of dereferencing nil.
+
 - **Postgres healthcheck no longer reports ready mid-initdb.** The scaffold's
   compose healthcheck ran `pg_isready -U postgres`, which probes the unix
   socket. On a fresh volume the postgres entrypoint runs `initdb` against a

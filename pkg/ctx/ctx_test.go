@@ -201,3 +201,33 @@ func TestPreDefinedKeys(t *testing.T) {
 	assert.Equal(t, "request_id", ctx.RequestIDKey.String())
 	assert.Equal(t, "flash", ctx.FlashKey.String())
 }
+
+// Components render outside a request — the scaffold's error page calls
+// @Layout(nil, ...) because middleware.ErrorPages has no echo.Context to pass
+// down — so the accessors have to tolerate a nil context instead of taking the
+// whole page down with a recovered panic and a 500.
+func TestGet_NilContext(t *testing.T) {
+	key := ctx.NewKey[string]("subject_id")
+	anyKey := ctx.NewKey[any]("subject")
+
+	assert.NotPanics(t, func() {
+		val, ok := ctx.Get(nil, key)
+		assert.False(t, ok)
+		assert.Empty(t, val)
+	})
+
+	assert.NotPanics(t, func() {
+		val, ok := ctx.GetAs[string](nil, anyKey)
+		assert.False(t, ok)
+		assert.Empty(t, val)
+	})
+}
+
+func TestMustGet_NilContextPanicsClearly(t *testing.T) {
+	assert.PanicsWithValue(t, "ctx: nil echo.Context for key subject_id", func() {
+		ctx.MustGet(nil, ctx.NewKey[string]("subject_id"))
+	})
+	assert.PanicsWithValue(t, "ctx: nil echo.Context for key subject", func() {
+		ctx.MustGetAs[string](nil, ctx.NewKey[any]("subject"))
+	})
+}

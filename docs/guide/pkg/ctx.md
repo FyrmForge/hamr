@@ -51,6 +51,13 @@ if !ok {
 }
 ```
 
+A nil `echo.Context` returns `(zero, false)` rather than panicking. Components
+render outside a request in normal use — `middleware.ErrorPages` builds its page
+from a `func(code int, message string)`, so the scaffold's error page calls
+`@Layout(nil, ...)` — and the accessors built on `Get` (`GetFlash`,
+`GetSubject`, `GetSubjectID`) have to survive that. `MustGet` still panics, with
+`ctx: nil echo.Context for key <name>`.
+
 For values that must be present (panics if missing):
 
 ```go

@@ -312,6 +312,13 @@ func GetAs[T any](c echo.Context, key Key[any]) (T, bool)
 func MustGetAs[T any](c echo.Context, key Key[any]) T
 ```
 
+`Get`/`GetAs` tolerate a nil `echo.Context`, returning `(zero, false)`:
+components render outside a request in normal use — `middleware.ErrorPages`
+renders from a `func(code int, message string)`, so the scaffold's error page
+calls `@Layout(nil, ...)` and every accessor built on `Get` (`GetFlash`,
+`GetSubject`, `GetSubjectID`) hits it. `MustGet`/`MustGetAs` still panic, with
+`ctx: nil echo.Context for key <name>`.
+
 #### Pre-defined Keys
 
 ```go
