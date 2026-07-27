@@ -27,6 +27,16 @@ the TL;DR on top of it.
 
 ### Fixes
 
+- **Walked compose ports are now actually published.** When `hamr dev` walked a
+  docker-compose host port off a collision (e.g. a second project's postgres
+  taking 5432), the generated `.hamr/compose.<name>.override.yaml` tagged the
+  `ports:` list with `!override` — but previously used `!reset`, which Compose
+  treats as "delete this key", discarding the rewritten bindings. The services
+  came up with no published ports at all and the app hit connection-refused on
+  the walked port it had been handed via `.env`. Only triggered when a walk
+  actually happened. The override is regenerated on every `hamr dev` start, so
+  the fix applies with no manual cleanup.
+
 - **S3 `Save` accepts non-seekable readers.** Piping an `Open` result (or any
   non-seekable stream) straight into `S3Storage.Save` previously failed with
   "request stream is not seekable" because the AWS signer needs a seekable body

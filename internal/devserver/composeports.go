@@ -351,15 +351,17 @@ func renderShortPort(b composePortBinding) string {
 }
 
 // writeComposeOverride writes a YAML override file to path that replaces
-// each affected service's `ports:` list (using the !reset tag) with the
+// each affected service's `ports:` list (using the !override tag) with the
 // rewritten bindings. Only services whose names appear in affected are
 // emitted — unaffected services keep their original ports via the base
 // compose file's merge.
 //
 // Compose's default merge concatenates list fields, which is exactly the
 // wrong thing for `ports:` (we'd end up publishing both the original and
-// the walked port). The !reset tag clears the inherited value so the
-// override's list replaces it.
+// the walked port). The !override tag replaces the inherited list with
+// this one. Not !reset — that deletes the key outright and discards the
+// sequence under it, leaving the services with no published ports at all.
+// Both tags need Compose >= 2.24.4.
 func writeComposeOverride(path string, services []composeService, affected map[string]bool) error {
 	if len(affected) == 0 {
 		return nil
@@ -378,7 +380,7 @@ func writeComposeOverride(path string, services []composeService, affected map[s
 		if !affected[svc.Name] {
 			continue
 		}
-		seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!reset"}
+		seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!override"}
 		for _, p := range svc.Ports {
 			seq.Content = append(seq.Content, &yaml.Node{
 				Kind:  yaml.ScalarNode,

@@ -242,3 +242,23 @@ func TestEnsureDockerCompose_HardFailsOnDockerError(t *testing.T) {
 	_, statErr := os.Stat(override)
 	assert.NoError(t, statErr, "override file should be preserved on inspect failure")
 }
+
+// The override must use !override, not !reset. Compose treats !reset as
+// "delete this key" and discards the sequence under it, which silently
+// leaves the walked services with no published ports at all.
+func TestWriteComposeOverride_UsesOverrideTag(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "compose.deps.override.yaml")
+	services := []composeService{
+		{Name: "postgres", Ports: []composePortBinding{{HostPort: 5433, Container: 5432}}},
+		{Name: "untouched", Ports: []composePortBinding{{HostPort: 6379, Container: 6379}}},
+	}
+
+	require.NoError(t, writeComposeOverride(path, services, map[string]bool{"postgres": true}))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "!override")
+	assert.NotContains(t, string(data), "!reset")
+	assert.Contains(t, string(data), `"5433:5432"`)
+	assert.NotContains(t, string(data), "untouched")
+}
