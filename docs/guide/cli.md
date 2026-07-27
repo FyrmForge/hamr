@@ -7,6 +7,7 @@ hamr
 ├── new [name]              Scaffold a new project
 ├── dev                     Start dev server with file watching + live reload
 ├── setup                   Interactive AI-agent setup (MCP bridge, permissions, skills)
+├── compose [args...]       docker compose with hamr dev's merged config
 ├── add
 │   └── skill <target>      Install an AI agent skill describing hamr
 ├── ai
@@ -133,6 +134,37 @@ Both listeners bind all interfaces by default (`HAMR_MOCK_BIND` empty), which is
 | `HAMR_STRIPE_PERSIST_PATH` | state JSON path; empty → in-memory only | empty |
 
 Stripe has no sensible auto-default for its base URL in a container (`localhost:<port>` isn't reachable from the host's published port or sibling containers), so `HAMR_STRIPE_BASE_URL` is required whenever stripe is selected, alongside the webhook url + secret. Point your app at the mock by setting its `HAMR_DEV_URL` / Stripe base to `HAMR_MOCK_PORT`'s URL.
+
+---
+
+## hamr compose
+
+```
+hamr compose [--name <entry>] [docker compose args...]
+```
+
+Passthrough to `docker compose` with this project's compose file **and** the generated port-walk override when one exists.
+
+When a host port is busy, `hamr dev` walks it and records the result in `.hamr/compose.<name>.override.yaml`. A plain `docker compose -f docker/docker-compose.yaml ...` merges only the base file, decides the running stack has drifted, and recreates it on the original ports — which fails outright when those ports are busy, which is why they were walked:
+
+```
+Error response from daemon: Bind for 0.0.0.0:9000 failed: port is already allocated
+```
+
+`hamr compose` merges what hamr merges, so external callers stop fighting the dev server:
+
+```bash
+hamr compose up -d
+hamr compose down -v
+hamr compose exec -T postgres psql -U postgres
+hamr compose --name deps logs -f
+```
+
+`--name` picks the `[[dev.docker_compose]]` entry and is required when there is more than one. Everything after the first argument goes to docker untouched; stdin, stdout, stderr, and the exit code pass straight through. Runs from anywhere inside the project.
+
+This is the compose-side counterpart to [`hamr env`](#hamr-env), which solves the same problem for walked ports in shell scripts.
+
+The scaffold's `make docker-up` / `docker-down` / `docker-delete` targets use it. In an environment without the `hamr` binary (a CI image that only needs the stack up, with no walking in play), plain `docker compose -f docker/docker-compose.yaml ...` is still fine.
 
 ---
 

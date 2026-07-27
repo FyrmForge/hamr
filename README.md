@@ -63,6 +63,7 @@ HAMR is two things:
 | `hamr new <name>`           | Scaffold a new project with interactive options                     |
 | `hamr dev`                  | File watching, builds, process management, and live-reload proxy    |
 | `hamr setup`                | Interactive AI-agent setup: MCP bridge, tool permissions, skills     |
+| `hamr compose [args]`       | `docker compose` with hamr dev's port-walk override merged in        |
 | `hamr ai capture <url>`     | Capture a browser screenshot bundle, plus HTML/text/metadata        |
 | `hamr ai upgrade`           | Diff scaffold changes between project version and current HAMR      |
 | `hamr gen static`           | Fingerprint static assets into dist/ with compile-time manifest     |

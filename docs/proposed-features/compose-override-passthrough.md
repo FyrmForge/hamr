@@ -1,6 +1,7 @@
 # Proposed: `hamr compose` passthrough (+ two scaffold bugs it fixes)
 
-Status: **proposed**
+Status: **shipped** — see the Unreleased section of `docs/changelog.md`.
+Kept for the reasoning; the checklist below records what landed.
 
 `hamr dev` walks busy compose host ports and records the result in a generated
 override file. Anything else that runs `docker compose` against the same
@@ -153,11 +154,22 @@ hamr binary is not on PATH (CI images that only need the stack up, no walking).
 
 ## Checklist
 
-- [ ] `hamr compose` subcommand wrapping `composeArgs`
-- [ ] Scaffold Makefile `docker-*` targets use it
-- [ ] `pg_isready -h 127.0.0.1` in the compose template healthcheck
-- [ ] Guide note: why raw `docker compose` can fight a running `hamr dev`
-- [ ] `llms.txt` entry for `hamr compose`
+- [x] `hamr compose` subcommand wrapping `composeArgs`
+      (`internal/cli/cmd/compose.go`; `devserver.ComposeArgs` exports what the
+      dev server already computes)
+- [x] Scaffold Makefile `docker-*` targets use it, with a documented fallback
+      to raw `docker compose` where the hamr binary isn't on PATH
+- [x] `pg_isready -h 127.0.0.1` in the compose template healthcheck
+- [x] Guide note: [CLI reference](../guide/cli.md#hamr-compose)
+- [x] `llms.txt` / `llms-full.txt` entries for `hamr compose`
+
+One claim in this doc did not hold up: recreating the containers does **not**
+drop their volumes. `pg_data` is a named volume, and compose reuses named (and,
+absent `-V`, anonymous) volumes across a recreate. The port hard-failure is the
+real damage; data loss only comes from `down -v` (`make docker-delete`), which
+is deliberate. Also worth noting the blast radius is one session: the next
+`hamr dev` start adopts the running containers and rewrites the override from
+their actual published ports.
 
 ## Reproduction
 

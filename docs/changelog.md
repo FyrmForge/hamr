@@ -77,6 +77,19 @@ the TL;DR on top of it.
   said); disabling the gateway removes the section again. `--dry-run` previews.
   See [CLI reference](guide/cli.md#hamr-setup).
 
+- **`hamr compose` — docker compose with the config `hamr dev` is actually
+  using.** When a compose host port is busy, `hamr dev` walks it and records the
+  result in `.hamr/compose.<name>.override.yaml`. Anything else calling
+  `docker compose -f docker/docker-compose.yaml` merged only the base file, so
+  compose saw the running stack as drifted and recreated it on the original
+  ports — a hard failure (`Bind for 0.0.0.0:9000 failed: port is already
+  allocated`) precisely when the walk was needed. `hamr compose up -d` /
+  `down -v` / `exec …` merge what hamr merges; `--name` picks the entry when
+  there is more than one; streams and exit code pass through. The scaffold's
+  `make docker-up` / `docker-down` / `docker-delete` targets now use it. This is
+  the compose-side counterpart to `hamr env`.
+  See [CLI reference](guide/cli.md#hamr-compose).
+
 - **`dir` on watch rules and daemons.** `[[dev.watch]]` and `[[dev.daemon]]`
   accept `dir = "subdir"`, the working directory for `cmd`/`run`, relative to
   the project root (default: the project root). `watch`/`ignore` globs stay
@@ -94,6 +107,17 @@ the TL;DR on top of it.
   onto a separately-exposable listener. See [CLI reference](guide/cli.md).
 
 ### Fixes
+
+- **Postgres healthcheck no longer reports ready mid-initdb.** The scaffold's
+  compose healthcheck ran `pg_isready -U postgres`, which probes the unix
+  socket. On a fresh volume the postgres entrypoint runs `initdb` against a
+  temporary server that listens on the socket only, so the check passed while
+  the real server did not yet exist: `wait_ready = true` could be satisfied
+  early, and anything that then connected raced the shutdown with
+  `FATAL: the database system is shutting down`. Now probes TCP
+  (`pg_isready -U postgres -h 127.0.0.1`), which the bootstrap server does not
+  listen on. Existing projects: apply the same one-word change to
+  `docker/docker-compose.yaml`.
 
 - **Walked compose ports are now actually published.** When `hamr dev` walked a
   docker-compose host port off a collision (e.g. a second project's postgres

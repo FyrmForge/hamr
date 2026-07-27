@@ -2740,7 +2740,10 @@ When a port walks, values in `.env` referencing it (`DATABASE_URL`,
   pairs. The scaffold's `Makefile` ships an `ENV_LOAD := eval
   "$(hamr env --export)"` prefix on `migrate`, `db-sh`, `generate`,
   `e2e-local`. `hamr sync` invoked standalone reads `walks.json`
-  itself — no wrapping needed.
+  itself — no wrapping needed. For compose calls specifically, `hamr compose
+  [args...]` re-exports the same merged file set hamr uses (base +
+  `.hamr/compose.<name>.override.yaml`), so external `docker compose`
+  invocations don't reconcile the stack back onto un-walked ports.
 
 Match rules for which `.env` values get rewritten:
 

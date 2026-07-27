@@ -1401,3 +1401,15 @@ func (r *Runner) stopDockerCompose(dc *DockerCompose) {
 	}
 	_ = os.Remove(composeOverridePath(dc.Name))
 }
+
+// ComposeArgs returns the `docker` arguments hamr itself uses for a compose
+// entry — project directory, base file, and the generated port-walk override
+// when one exists. Exported so `hamr compose` can hand external callers the
+// same merged config the dev server is running, instead of them merging the
+// base file alone and reconciling the stack back onto un-walked ports.
+//
+// Paths are relative to the project root, so the caller must run docker from
+// there.
+func ComposeArgs(dc *DockerCompose) []string {
+	return composeArgs(dc)
+}

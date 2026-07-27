@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/FyrmForge/hamr/internal/devserver"
@@ -241,4 +243,30 @@ func TestWriteAgentMCPSection_SkipsMissingFile(t *testing.T) {
 		map[string]string{"logs": "read"}, false)
 	require.NoError(t, err)
 	assert.False(t, changed)
+}
+
+// Drives the real picker headlessly — huh reads scripted keystrokes and renders
+// into a discard writer — so the form itself is exercised without a TTY.
+// Keys: toggle the first agent, tab to the confirm and accept it, then move one
+// option down in the first access select (deny → read) and accept the rest.
+// The trailing input EOF ends the form, so the last group (skills) is left at
+// its default rather than driven.
+func TestSetupForm_DrivenHeadlessly(t *testing.T) {
+	c := &setupChoices{Access: map[string]string{}}
+	for _, area := range devserver.MCPAreaNames() {
+		c.Access[area] = "deny"
+	}
+
+	keys := "x\r\ty\r" + "j\r\r\r\r\r\r" + "x\r" + strings.Repeat("\r", 10)
+	form := newSetupForm(t.TempDir(), c).
+		WithInput(strings.NewReader(keys)).
+		WithOutput(io.Discard)
+
+	require.NoError(t, form.Run())
+	c.collectAccess()
+
+	assert.Equal(t, []string{"claude"}, c.Agents, "x toggled the first agent")
+	assert.True(t, c.Enabled, "y accepted the gateway confirm")
+	assert.Equal(t, "read", c.Access["build"], "one step down from deny is read")
+	assert.Equal(t, "deny", c.Access["stripe"], "untouched selects keep their seeded value")
 }

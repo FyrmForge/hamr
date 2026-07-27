@@ -105,17 +105,23 @@ templint:
 	hamr lint templ
 {{- if $hasCompose}}
 
+# `hamr compose` merges the port-walk override hamr dev generates when a host
+# port is busy. Plain `docker compose` sees only the base file, decides the
+# running stack has drifted, and recreates it on the original — busy — ports.
+# Fall back to `docker compose -f docker/docker-compose.yaml ...` in
+# environments without the hamr binary (CI images that only need the stack up).
+
 ## docker-up: Start Docker services
 docker-up:
-	docker compose -f docker/docker-compose.yaml up -d
+	hamr compose up -d
 
 ## docker-down: Stop Docker services
 docker-down:
-	docker compose -f docker/docker-compose.yaml down
+	hamr compose down
 
 ## docker-delete: Delete Docker containers and volumes
 docker-delete:
-	docker compose -f docker/docker-compose.yaml down -v
+	hamr compose down -v
 
 ## docker-reload: Delete and recreate Docker services
 docker-reload: docker-delete docker-up

@@ -14,7 +14,12 @@ services:
       - pg_data:/var/lib/postgresql
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      # -h 127.0.0.1 probes TCP on purpose. On a fresh volume the entrypoint
+      # runs initdb against a temporary server with listen_addresses='' — it
+      # answers on the unix socket, so a socket-based pg_isready reports ready
+      # while the real server doesn't exist yet, and whatever was waiting races
+      # the shutdown ("FATAL: the database system is shutting down").
+      test: ["CMD-SHELL", "pg_isready -U postgres -h 127.0.0.1"]
       interval: 2s
       timeout: 3s
       retries: 5

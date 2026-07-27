@@ -113,6 +113,12 @@ func loadSetupDefaults(root string) *setupChoices {
 }
 
 func runSetupForm(root string, c *setupChoices) error {
+	return newSetupForm(root, c).Run()
+}
+
+// newSetupForm builds the picker. Split from runSetupForm so tests can drive it
+// with scripted input via huh's WithInput/WithOutput instead of needing a TTY.
+func newSetupForm(root string, c *setupChoices) *huh.Form {
 	all := installers()
 	agentOpts := make([]huh.Option[string], 0, len(installOrder))
 	for _, name := range installOrder {
@@ -147,7 +153,7 @@ func runSetupForm(root string, c *setupChoices) error {
 		),
 	)
 
-	return form.Run()
+	return form
 }
 
 // accessSelects builds one read/write/deny picker per MCP area, each bound to

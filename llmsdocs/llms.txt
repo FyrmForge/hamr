@@ -131,6 +131,14 @@
   values containing `(localhost|127.0.0.1|0.0.0.0|[::1]):<walked-port>` or
   whole-value `:<walked-port>`. Values relying on scheme defaults (no
   explicit port) are not rewritten.
+- **hamr compose**: Passthrough to `docker compose` with the project's compose
+  file plus `.hamr/compose.<name>.override.yaml` (the port-walk override) when
+  it exists — the compose-side counterpart to `hamr env`. A plain
+  `docker compose -f <base>` call merges a different config than the running
+  stack and recreates it on the un-walked ports, which fails when those ports
+  are busy. `--name` selects the `[[dev.docker_compose]]` entry (required when
+  there is more than one); remaining args, streams, and exit code pass through.
+  The scaffold's `docker-*` Makefile targets use it.
 - **`[dev].port_walk`**: Default true. When a hamr-managed port is busy
   (proxy listen, spawned-app PORT, or any `[[dev.docker_compose]]`
   service's host-published port), hamr walks +1 up to a small cap and
