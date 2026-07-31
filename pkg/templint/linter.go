@@ -1,8 +1,11 @@
 package templint
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -68,6 +71,7 @@ func (l *Linter) LintFile(path string) ([]Diagnostic, error) {
 	for _, rule := range l.rules {
 		diags = append(diags, rule.Check(path, lines)...)
 	}
+	diags = l.applySuppressions(path, lines, diags)
 
 	sort.Slice(diags, func(i, j int) bool {
 		if diags[i].Line != diags[j].Line {
@@ -77,6 +81,129 @@ func (l *Linter) LintFile(path string) ([]Diagnostic, error) {
 	})
 
 	return diags, nil
+}
+
+// ignoreDirectiveRe matches a `templint:ignore` directive inside a `//`
+// comment. The submatch is everything after the directive keyword: the
+// optional comma-separated rule list and the optional ` -- reason`.
+var ignoreDirectiveRe = regexp.MustCompile(`//\s*templint:ignore\b(.*)$`)
+
+// suppression is one parsed `templint:ignore` directive.
+type suppression struct {
+	dirLine int      // 1-based line the directive itself sits on
+	col     int      // 1-based column of the `//`
+	target  int      // 1-based line whose diagnostics it suppresses
+	ruleIDs []string // empty means "every rule"
+}
+
+// parseSuppressions extracts every `templint:ignore` directive from the file.
+//
+// A directive on a line of its own targets the line below it; a directive
+// trailing source content targets the line it sits on. Only those two lines
+// are ever considered — there is no cascading lookback, so of two stacked
+// comment directives only the adjacent one applies.
+//
+// Because rules anchor their diagnostics to the line a tag *opens* on, a
+// directive for a multi-line tag goes directly above the opening `<form`,
+// not above the offending attribute further down.
+//
+// Rules run over the whole file including comments, so a reason string must
+// not contain markup a rule matches — an own-line directive targets the line
+// below and will not suppress a diagnostic raised on itself.
+func parseSuppressions(lines []string) []suppression {
+	var sups []suppression
+	for i, line := range lines {
+		m := ignoreDirectiveRe.FindStringSubmatchIndex(line)
+		if m == nil {
+			continue
+		}
+
+		target := i + 2 // own-line directive: the line below
+		if strings.TrimSpace(line[:m[0]]) != "" {
+			target = i + 1 // trailing directive: this same line
+		}
+
+		spec := line[m[2]:m[3]]
+		if reason := strings.Index(spec, " -- "); reason >= 0 {
+			spec = spec[:reason]
+		}
+		var ids []string
+		for id := range strings.SplitSeq(spec, ",") {
+			if id = strings.TrimSpace(id); id != "" {
+				ids = append(ids, id)
+			}
+		}
+
+		sups = append(sups, suppression{dirLine: i + 1, col: m[0] + 1, target: target, ruleIDs: ids})
+	}
+	return sups
+}
+
+// applySuppressions drops diagnostics covered by a `templint:ignore` directive
+// and reports the directives that are themselves broken: unknown rule IDs
+// (so typos do not silently suppress nothing) and directives that suppressed
+// nothing at all (so stale ones get cleaned up).
+//
+// A directive naming only rules that are known but not enabled is left alone —
+// turning a rule "off" in hamr.toml must not turn every existing suppression
+// into a warning.
+func (l *Linter) applySuppressions(path string, lines []string, diags []Diagnostic) []Diagnostic {
+	if len(l.rules) == 0 {
+		return diags
+	}
+	sups := parseSuppressions(lines)
+	if len(sups) == 0 {
+		return diags
+	}
+
+	enabled := make(map[string]bool, len(l.rules))
+	for _, r := range l.rules {
+		enabled[r.ID()] = true
+	}
+
+	kept := make([]Diagnostic, 0, len(diags))
+	used := make([]bool, len(sups))
+	for _, d := range diags {
+		suppressed := false
+		for i, s := range sups {
+			if s.target != d.Line {
+				continue
+			}
+			if len(s.ruleIDs) == 0 || slices.Contains(s.ruleIDs, d.Rule) {
+				suppressed = true
+				used[i] = true
+			}
+		}
+		if !suppressed {
+			kept = append(kept, d)
+		}
+	}
+
+	for i, s := range sups {
+		anyEnabled := len(s.ruleIDs) == 0
+		for _, id := range s.ruleIDs {
+			if _, known := rules[id]; !known {
+				kept = append(kept, Diagnostic{
+					File: path, Line: s.dirLine, Col: s.col,
+					Rule: "unknown-rule", Severity: Error,
+					Message: fmt.Sprintf("unknown rule %q in templint:ignore directive (known: %v)", id, AllRuleIDs()),
+				})
+				continue
+			}
+			if enabled[id] {
+				anyEnabled = true
+			}
+		}
+		if !used[i] && anyEnabled {
+			kept = append(kept, Diagnostic{
+				File: path, Line: s.dirLine, Col: s.col,
+				Rule: "unused-suppression", Severity: Warning,
+				Message: "templint:ignore directive suppresses nothing; remove it",
+			})
+		}
+	}
+
+	return kept
 }
 
 // LintDir walks a directory tree and lints all .templ files.

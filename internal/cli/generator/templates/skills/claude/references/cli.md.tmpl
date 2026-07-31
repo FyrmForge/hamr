@@ -175,6 +175,15 @@ Rules (default severities — what the scaffold writes):
 
 Configure in `hamr.toml` under `[lint.templ]` — each rule mapped to `"warning"`, `"error"`, or `"off"`. **Rules not listed are disabled.** Unknown rule IDs and invalid severities fail loudly. Use `make templint` to run it against the whole repo with project config.
 
+For a one-off deliberate exception, suppress inline instead of switching the rule off project-wide:
+
+```templ
+// templint:ignore no-native-form-actions -- OAuth manifest flow needs a browser POST
+<form method="post" action={ templ.SafeURL(action) }>
+```
+
+The directive covers the next line, or its own line when it trails source content. The rule list is comma-separated and optional (bare `// templint:ignore` covers everything); anything after ` -- ` is a reason. Rules anchor to the line a tag *opens* on, so on a multi-line tag it goes above the `<form`, not above the attribute. A mistyped rule ID is an error (`unknown-rule`) and a directive that suppresses nothing is a warning (`unused-suppression`) — don't leave stale ones behind.
+
 ## hamr gen locale
 
 Generate type-safe Go accessor methods from locale JSON. Reads the default locale, flattens keys, and emits a `T` struct with one typed method per key. Non-default locales are validated — missing keys are warnings, interpolation mismatches are errors.

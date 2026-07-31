@@ -1319,6 +1319,29 @@ func AllRuleIDs() []string                     // sorted IDs of every known rule
 func DefaultSeverity(id string) Severity       // recommended default; Warning for unknown IDs
 ```
 
+#### Inline suppression
+
+`LintFile` post-filters diagnostics against `templint:ignore` directives found
+in `//` comments. Rules never see them.
+
+```
+// templint:ignore <rule-id>[,<rule-id>...] [-- optional reason]
+// templint:ignore                          (suppresses every rule)
+```
+
+- Own-line directive targets the line below; a directive trailing source
+  content targets the line it sits on. Only the adjacent line — no cascading
+  lookback.
+- Rules anchor diagnostics to the line a tag *opens* on, so for a multi-line
+  tag the directive goes above the `<form`, not above the offending attribute.
+- Everything after ` -- ` is a human reason, ignored by the parser.
+- `unknown-rule` (Error) is emitted for a rule ID that is not in the registry,
+  so a typo cannot silently suppress nothing.
+- `unused-suppression` (Warning) is emitted for a directive that suppressed no
+  diagnostic, so stale directives get cleaned up.
+- Both are meta diagnostics: not in `AllRuleIDs()`, not configurable via
+  `[lint.templ]`. A directive naming a known-but-disabled rule reports neither.
+
 ```toml
 # Example [lint.templ] block. Rules omitted from this section are disabled;
 # "off" is equivalent to omitting the rule.

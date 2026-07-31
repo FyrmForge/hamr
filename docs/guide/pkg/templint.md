@@ -104,6 +104,46 @@ empty-class            = "warning"
 js-href                = "warning"
 ```
 
+## Inline Suppression
+
+A `templint:ignore` directive inside a `//` comment silences diagnostics for
+one line. On a line of its own it targets the line below; trailing source
+content it targets the line it sits on.
+
+```
+// templint:ignore <rule-id>[,<rule-id>...] [-- optional reason]
+// templint:ignore                          (suppresses every rule)
+```
+
+```
+// templint:ignore no-native-form-actions -- GitHub's manifest flow requires a browser form POST
+<form method="post" action={ templ.SafeURL(action) }>
+
+<img src="logo.png">                    // templint:ignore img-alt
+// templint:ignore img-alt, empty-class
+<img src="x.png" class="">
+```
+
+Everything after ` -- ` is a human reason and is ignored by the parser.
+
+**Multi-line tags.** Rules anchor their diagnostic to the line a tag *opens*
+on, so the directive belongs directly above the `<form`, not above the
+attribute further down inside it. Only the immediately adjacent line is
+covered — there is no cascading lookback, so of two stacked directives only
+the nearer one applies.
+
+Two diagnostics keep directives from rotting. Neither is configurable and
+neither appears in `[lint.templ]`:
+
+| ID | Severity | When |
+|----|----------|------|
+| `unknown-rule` | error | The directive names a rule ID that does not exist — a typo cannot silently suppress nothing |
+| `unused-suppression` | warning | The directive suppressed no diagnostic on its target line |
+
+A directive naming a rule that is known but switched `"off"` (or absent from
+`[lint.templ]`) reports neither — turning a rule off must not turn every
+existing suppression into a warning.
+
 ## Makefile Integration
 
 Generated projects include a `templint` target:

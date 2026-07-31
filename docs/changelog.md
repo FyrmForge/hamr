@@ -64,6 +64,26 @@ the TL;DR on top of it.
 
 ### Features
 
+- **`templint:ignore` — inline lint suppression for `.templ` files.** A
+  deliberate exception no longer forces you to switch a rule `"off"` project-wide:
+
+  ```
+  // templint:ignore no-native-form-actions -- GitHub's manifest flow requires a browser form POST
+  <form method="post" action={ templ.SafeURL(action) }>
+  ```
+
+  The directive lives in a `//` comment and covers the next line, or its own
+  line when it trails source content. The rule list is comma-separated and
+  optional (bare `// templint:ignore` covers everything); anything after ` -- `
+  is a human reason. Because rules anchor their diagnostic to the line a tag
+  *opens* on, the directive goes above the `<form`, not above the offending
+  attribute inside a multi-line tag. Two non-configurable diagnostics keep
+  directives honest: `unknown-rule` (error) for a mistyped rule ID, so a typo
+  cannot silently suppress nothing, and `unused-suppression` (warning) for a
+  directive that suppressed nothing, so stale ones get cleaned up. A directive
+  naming a rule that is switched `"off"` reports neither. See
+  [Templint](guide/pkg/templint.md#inline-suppression).
+
 - **`hamr setup` — interactive AI-agent setup.** One pass over the decisions
   that were previously a mix of CLI flags and hand-edited TOML: which agents
   (claude/codex/opencode) get the hamr MCP bridge registered, whether the

@@ -324,6 +324,10 @@ Static linter for .templ files.
 - `AllRuleIDs() []string`, `DefaultSeverity(id) Severity` — registry helpers
 - Rules: `inline-if`, `inline-for`, `inline-switch`, `no-native-form-actions`, `htmx-conflict` (Error default),
   `img-alt`, `no-href`, `inline-style`, `empty-class`, `js-href` (Warning default)
+- Inline suppression: `// templint:ignore <rule-id>[,<id>...] [-- reason]` in a `//` comment; bare form suppresses
+  all rules. Own-line directive targets the line below, trailing directive targets its own line. Rules anchor to
+  the line a tag opens on, so put it above the `<form`. Non-configurable meta diagnostics: `unknown-rule` (error,
+  typo'd ID), `unused-suppression` (warning, stale directive); a directive for a disabled rule reports neither.
 
 ## Optional Packages
 

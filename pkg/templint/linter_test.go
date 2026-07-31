@@ -690,6 +690,127 @@ func TestDiagnosticString(t *testing.T) {
 	}
 }
 
+// --- Inline suppression (templint:ignore) ---
+
+// lintSource writes content to a temp .templ file, lints it with the given
+// rules enabled, and returns the diagnostics.
+func lintSource(t *testing.T, content string, ruleIDs ...string) []Diagnostic {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "test.templ")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &Config{Rules: make(map[string]Severity, len(ruleIDs))}
+	for _, id := range ruleIDs {
+		cfg.Rules[id] = DefaultSeverity(id)
+	}
+	diags, err := New(cfg).LintFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return diags
+}
+
+func TestSuppressSingleRule(t *testing.T) {
+	src := "// templint:ignore no-native-form-actions -- manifest flow needs a browser POST\n" +
+		"<form method=\"post\">\n"
+	if diags := lintSource(t, src, "no-native-form-actions"); len(diags) != 0 {
+		t.Fatalf("expected directive to suppress the diagnostic, got %+v", diags)
+	}
+}
+
+func TestSuppressMultipleRules(t *testing.T) {
+	src := "// templint:ignore img-alt, empty-class\n" +
+		"<img src=\"x.png\" class=\"\">\n"
+	if diags := lintSource(t, src, "img-alt", "empty-class"); len(diags) != 0 {
+		t.Fatalf("expected both rules suppressed, got %+v", diags)
+	}
+}
+
+func TestSuppressBareFormSuppressesAll(t *testing.T) {
+	src := "// templint:ignore\n" +
+		"<img src=\"x.png\" class=\"\">\n"
+	if diags := lintSource(t, src, "img-alt", "empty-class"); len(diags) != 0 {
+		t.Fatalf("bare directive must suppress every rule, got %+v", diags)
+	}
+}
+
+func TestSuppressSameLine(t *testing.T) {
+	src := "<img src=\"x.png\"> // templint:ignore img-alt\n"
+	if diags := lintSource(t, src, "img-alt"); len(diags) != 0 {
+		t.Fatalf("trailing directive must suppress its own line, got %+v", diags)
+	}
+}
+
+// A trailing directive targets only its own line — it must not leak onto the
+// line below it.
+func TestSuppressSameLineDoesNotLeakToNextLine(t *testing.T) {
+	src := "<img src=\"a.png\" alt=\"a\"> // templint:ignore img-alt\n" +
+		"<img src=\"b.png\">\n"
+	diags := lintSource(t, src, "img-alt")
+	if len(diags) != 2 {
+		t.Fatalf("expected the line-2 diag plus unused-suppression, got %+v", diags)
+	}
+	assertDiag(t, diags[0], diags[0].File, 1, "unused-suppression", Warning)
+	assertDiag(t, diags[1], diags[1].File, 2, "img-alt", Warning)
+}
+
+func TestSuppressUnknownRuleID(t *testing.T) {
+	src := "// templint:ignore img-altt\n" +
+		"<img src=\"x.png\">\n"
+	diags := lintSource(t, src, "img-alt")
+	if len(diags) != 2 {
+		t.Fatalf("expected the unsuppressed diag plus unknown-rule, got %+v", diags)
+	}
+	assertDiag(t, diags[0], diags[0].File, 1, "unknown-rule", Error)
+	assertDiag(t, diags[1], diags[1].File, 2, "img-alt", Warning)
+}
+
+func TestSuppressUnusedDirectiveReported(t *testing.T) {
+	src := "// templint:ignore img-alt\n" +
+		"<img src=\"x.png\" alt=\"fine\">\n"
+	diags := lintSource(t, src, "img-alt")
+	if len(diags) != 1 {
+		t.Fatalf("expected one unused-suppression, got %+v", diags)
+	}
+	assertDiag(t, diags[0], diags[0].File, 1, "unused-suppression", Warning)
+}
+
+// The documented multi-line contract: rules anchor to the line a tag opens on,
+// so the directive belongs above the `<form`, not above the attribute.
+func TestSuppressMultilineTag(t *testing.T) {
+	src := "// templint:ignore no-native-form-actions -- manifest flow needs a browser POST\n" +
+		"<form\n" +
+		"  method=\"post\"\n" +
+		"  action={ templ.SafeURL(action) }>\n"
+	if diags := lintSource(t, src, "no-native-form-actions"); len(diags) != 0 {
+		t.Fatalf("directive above the opening <form must cover a multi-line tag, got %+v", diags)
+	}
+}
+
+// Only the directly adjacent line is covered — no cascading lookback.
+func TestSuppressNotAdjacentDoesNotSuppress(t *testing.T) {
+	src := "// templint:ignore img-alt\n" +
+		"<div>\n" +
+		"<img src=\"x.png\">\n"
+	diags := lintSource(t, src, "img-alt")
+	if len(diags) != 2 {
+		t.Fatalf("expected the unsuppressed diag plus unused-suppression, got %+v", diags)
+	}
+	assertDiag(t, diags[0], diags[0].File, 1, "unused-suppression", Warning)
+	assertDiag(t, diags[1], diags[1].File, 3, "img-alt", Warning)
+}
+
+// A directive naming a known-but-disabled rule is neither unknown nor unused —
+// switching a rule "off" must not turn every existing suppression into noise.
+func TestSuppressDisabledRuleIsSilent(t *testing.T) {
+	src := "// templint:ignore inline-style\n" +
+		"<img src=\"x.png\" alt=\"fine\">\n"
+	if diags := lintSource(t, src, "img-alt"); len(diags) != 0 {
+		t.Fatalf("directive for a disabled rule must report nothing, got %+v", diags)
+	}
+}
+
 func assertDiag(t *testing.T, d Diagnostic, file string, line int, rule string, sev Severity) {
 	t.Helper()
 	if d.File != file {

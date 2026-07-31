@@ -460,6 +460,19 @@ hamr lint templ --config my-hamr.toml    # use a custom config file
 
 Configure in `hamr.toml` under `[lint.templ]` — each rule mapped to `"warning"`, `"error"`, or `"off"`. Rules not listed are disabled. Unknown rule IDs and invalid severities fail loudly.
 
+**Inline suppression.** A `templint:ignore` directive in a `//` comment silences diagnostics on the next line, or on its own line when it trails source content:
+
+```
+// templint:ignore no-native-form-actions -- manifest flow needs a browser POST
+<form method="post" action={ templ.SafeURL(action) }>
+
+<img src="logo.png">           // templint:ignore img-alt
+// templint:ignore img-alt, empty-class    (comma-separated)
+// templint:ignore                          (all rules)
+```
+
+Everything after ` -- ` is a human reason. Rules anchor diagnostics to the line a tag *opens* on, so for a multi-line tag the directive goes above the `<form`, not above the offending attribute. Two extra diagnostics keep directives honest: `unknown-rule` (error) for a mistyped rule ID, and `unused-suppression` (warning) for a directive that suppresses nothing. Neither is configurable; a directive naming a rule that is switched `"off"` is silently ignored.
+
 **Guide:** [Templint](pkg/templint.md) covers rules, configuration, and library usage.
 
 ---
