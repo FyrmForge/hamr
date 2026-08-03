@@ -444,7 +444,7 @@ func EmptyOr(fn func(string) string) func(string) string  // wraps validator for
 func Email(value string) string
 func EmailMsg(value, msg string) string
 
-func Phone(value string) string                // accepts optional '+' + 7-15 digits
+func Phone(value string) string                // 7-15 digits, optional '+'; separators stripped via NormalizePhone
 func PhoneMsg(value, msg string) string
 
 func URL(value string) string         // absolute http/https only (rejects javascript:/data:/vbscript: XSS schemes)
@@ -517,11 +517,17 @@ func PasswordStrength(password string) string
 func PasswordStrengthMsg(password, msg string) string
 ```
 
-#### URL Normalisation
+#### Normalisation
 
 ```go
 func NormalizeURL(value string) string  // prepends "https://" when no scheme
+func NormalizePhone(value string) string  // strips whitespace, - . ( ) / and Unicode dashes
 ```
+
+`NormalizePhone` drops a bracketed trunk zero only in international form
+("+44 (0)7700 900123" -> "+447700900123"); a national number keeps its leading
+zero. Non-separator characters are preserved, so a non-phone string stays
+invalid. `Phone`/`PhoneMsg` call it before matching.
 
 #### Custom Validator Registry
 

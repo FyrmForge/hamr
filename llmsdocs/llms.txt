@@ -232,6 +232,7 @@ Pure-function validators returning "" on success or error message string.
 - `IntRange(value, min, max)`, `MinAge(birthDate, minAge)`, `MaxAge(birthDate, maxAge)`
 - `CheckPasswordRequirements(password) []PasswordRequirement`
 - `NormalizeURL(value)` — prepends "https://" when missing
+- `NormalizePhone(value)` — strips spaces/dashes/dots/brackets; `Phone` applies it first
 - `EmptyOr(fn)` — wraps a validator so empty values pass
 - Every validator has a `*Msg` variant for custom messages
 - `Register(name, fn)`, `Run(name, value)` — custom validator registry

@@ -52,6 +52,25 @@ func TestPhone(t *testing.T) {
 	check(t, "empty", validate.Phone(""), validate.MsgPhoneInvalid)
 	check(t, "too-short", validate.Phone("123"), validate.MsgPhoneInvalid)
 	check(t, "letters", validate.Phone("abc1234567"), validate.MsgPhoneInvalid)
+
+	// Formats people actually type.
+	check(t, "uk-national-spaced", validate.Phone("07700 900123"), "")
+	check(t, "uk-international", validate.Phone("+44 7700 900123"), "")
+	check(t, "uk-trunk-zero", validate.Phone("+44 (0)7700 900123"), "")
+	check(t, "us-brackets", validate.Phone("(415) 555-1234"), "")
+	check(t, "hyphens", validate.Phone("0161-496-0000"), "")
+	check(t, "dots", validate.Phone("+1.415.555.1234"), "")
+	check(t, "padded", validate.Phone("  4155551234  "), "")
+	check(t, "unicode-dash", validate.Phone("0161\u2011496\u20110000"), "")
+
+	// Separator tolerance must not become a hole.
+	check(t, "separators-only", validate.Phone("-- () --"), validate.MsgPhoneInvalid)
+	check(t, "zero-country-code", validate.Phone("+0000000"), validate.MsgPhoneInvalid)
+	check(t, "interior-plus", validate.Phone("44+7700900123"), validate.MsgPhoneInvalid)
+	check(t, "too-long", validate.Phone("+1234567890123456"), validate.MsgPhoneInvalid)
+	check(t, "letters-formatted", validate.Phone("(abc) 555-1234"), validate.MsgPhoneInvalid)
+	// Extensions are out of scope: the number must stand on its own.
+	check(t, "extension", validate.Phone("4155551234 x123"), validate.MsgPhoneInvalid)
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +253,34 @@ func TestNormalizeURL(t *testing.T) {
 	for _, tt := range tests {
 		if got := validate.NormalizeURL(tt.in); got != tt.want {
 			t.Errorf("NormalizeURL(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// NormalizePhone
+// ---------------------------------------------------------------------------
+
+func TestNormalizePhone(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"", ""},
+		{"07700 900123", "07700900123"},
+		{"+44 7700 900123", "+447700900123"},
+		{"(415) 555-1234", "4155551234"},
+		{"  +1-415-555-1234 ", "+14155551234"},
+		// Trunk zero only drops in international form; a national number keeps
+		// it and loses just the brackets.
+		{"+44 (0)7700 900123", "+447700900123"},
+		{"(0)7700900123", "07700900123"},
+		// Non-separator characters survive, so invalid input stays invalid.
+		{"abc", "abc"},
+		{"44+7700900123", "44+7700900123"},
+	}
+	for _, tt := range tests {
+		if got := validate.NormalizePhone(tt.in); got != tt.want {
+			t.Errorf("NormalizePhone(%q) = %q, want %q", tt.in, got, tt.want)
 		}
 	}
 }
