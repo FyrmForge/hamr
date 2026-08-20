@@ -109,7 +109,10 @@ func New(opts ...Option) (*Server, error) {
 	e.Use(echoMw.ContextTimeoutWithConfig(echoMw.ContextTimeoutConfig{
 		Timeout: s.timeout,
 	}))
-	e.Use(middleware.CacheControl(false))
+	// Dev mode disables caching entirely: static URLs aren't fingerprinted
+	// in dev, so a cached stylesheet would survive rebuilds for its whole
+	// max-age and serve day-old styles.
+	e.Use(middleware.CacheControl(s.devMode))
 	if s.gzipConfig.Enabled {
 		e.Use(echoMw.GzipWithConfig(echoMw.GzipConfig{
 			Skipper:   s.gzipConfig.Skipper,

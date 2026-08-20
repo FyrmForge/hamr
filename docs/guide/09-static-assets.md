@@ -205,6 +205,8 @@ git diff --exit-code frontend/dist/
 
 Fingerprinted assets (any URL matching `*.HASH.*`) are served with `public, max-age=31536000, immutable` headers — the filename itself is the cache buster, so they can be cached indefinitely. Non-fingerprinted assets fall back to extension-based cache policies.
 
+In dev mode (`WithDevMode(true)`) caching is disabled entirely — every response gets `no-cache, no-store, must-revalidate`, since dev serves unfingerprinted URLs that would otherwise go stale across rebuilds.
+
 ---
 
 ## CDN Patterns

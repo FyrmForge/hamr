@@ -36,7 +36,7 @@ if err := srv.Start(); err != nil {
 |--------|---------|-------------|
 | `WithHost(host)` | `""` | Bind address |
 | `WithPort(port)` | 8080 | Listen port (1-65535) |
-| `WithDevMode(bool)` | `false` | Skips security headers in dev mode |
+| `WithDevMode(bool)` | `false` | Dev mode: skips security headers and disables all response caching (`no-cache, no-store, must-revalidate` on every response — static URLs aren't fingerprinted in dev, so cached assets would go stale across rebuilds) |
 | `WithMiddleware(mw...)` | — | Append global middleware |
 | `WithStaticDir(path)` | — | Serve static files from filesystem at `/static` |
 | `WithStaticDistDir(path)` | — | Dist directory takes priority over static dir (layered serving) |

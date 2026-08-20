@@ -215,7 +215,7 @@ production middleware. Returns an error if any option value is invalid.
 ```go
 func WithHost(host string) Option                        // bind address
 func WithPort(port int) Option                           // listen port (1-65535)
-func WithDevMode(dev bool) Option                        // skip security headers in dev
+func WithDevMode(dev bool) Option                        // dev: skip security headers, disable all response caching (no-cache on everything)
 func WithMiddleware(mw ...echo.MiddlewareFunc) Option    // append global middleware
 func WithStaticDir(path string) Option                   // serve the static dir at /static
 func WithStaticDistDir(path string) Option               // dist dir takes priority over the static dir

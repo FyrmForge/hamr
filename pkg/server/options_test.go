@@ -181,7 +181,7 @@ func TestWithStaticDir_setsCacheControlForStaticAssets(t *testing.T) {
 	err := os.WriteFile(filepath.Join(dir, "app.css"), []byte("body{}"), 0o644)
 	require.NoError(t, err)
 
-	srv, err := server.New(server.WithDevMode(true), server.WithStaticDir(dir))
+	srv, err := server.New(server.WithStaticDir(dir))
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodGet, "/static/app.css", nil)
@@ -192,12 +192,28 @@ func TestWithStaticDir_setsCacheControlForStaticAssets(t *testing.T) {
 	assert.Equal(t, "public, max-age=86400", rec.Header().Get("Cache-Control"))
 }
 
+func TestWithStaticDir_devModeDisablesCaching(t *testing.T) {
+	dir := t.TempDir()
+	err := os.WriteFile(filepath.Join(dir, "app.css"), []byte("body{}"), 0o644)
+	require.NoError(t, err)
+
+	srv, err := server.New(server.WithDevMode(true), server.WithStaticDir(dir))
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/static/app.css", nil)
+	rec := httptest.NewRecorder()
+	srv.Echo().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "no-cache, no-store, must-revalidate", rec.Header().Get("Cache-Control"))
+}
+
 func TestWithStaticDir_setsImmutableCacheControlForImages(t *testing.T) {
 	dir := t.TempDir()
 	err := os.WriteFile(filepath.Join(dir, "logo.png"), []byte("png"), 0o644)
 	require.NoError(t, err)
 
-	srv, err := server.New(server.WithDevMode(true), server.WithStaticDir(dir))
+	srv, err := server.New(server.WithStaticDir(dir))
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodGet, "/static/logo.png", nil)
