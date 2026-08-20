@@ -134,15 +134,13 @@ the TL;DR on top of it.
   `+44 7700 900123`, `(415) 555-1234` and `0161-496-0000` were all rejected, as
   was any value with surrounding whitespace (`Form`'s `WithTrim` is opt-in and
   trims only the ends). The value is now run through the new
-  `validate.NormalizePhone`, which strips whitespace, hyphens (including Unicode
-  dashes), dots, slashes and brackets, and drops a bracketed trunk zero when the
-  number is in international form (`+44 (0)7700 900123` → `+447700900123`).
-  Characters outside that separator set are preserved, so `(abc) 555-1234` and
-  `44+7700900123` still fail. Two knock-on changes: a `+` prefix now requires a
-  country code starting `1`-`9`, so the previously-accepted `+0000000` is
-  rejected; and `NormalizePhone` is exported for storing numbers in a canonical
-  form. Digit bounds are unchanged at 7-15, and extensions (`x123`) are still
-  not accepted.
+  `validate.NormalizePhone`, which strips whitespace, hyphens and Unicode dash
+  punctuation, dots, slashes and brackets. Characters outside that separator set
+  are preserved, so `(abc) 555-1234` and `44+7700900123` still fail. Two
+  knock-on changes: a `+` prefix now requires a country code starting `1`-`9`,
+  so the previously-accepted `+0000000` is rejected; and `NormalizePhone` is
+  exported for storing numbers in a canonical form. Digit bounds are unchanged
+  at 7-15, and extensions (`x123`) are still not accepted.
 
 - **Scaffolded projects no longer 500 on their first 404.** `ctx.Get` (and
   `GetAs`) dereferenced the `echo.Context` without a nil check, but components

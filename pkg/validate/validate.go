@@ -56,11 +56,11 @@ func EmailMsg(value, msg string) string {
 // Phone returns "" if value is a plausible phone number, or MsgPhoneInvalid.
 // The value is run through NormalizePhone first, so the separators people
 // actually type are accepted: "07700 900123", "(415) 555-1234", "0161-496-0000"
-// and "+44 (0)7700 900123" are all valid.
+// and "+44 7700 900123" are all valid.
 //
 // What remains after normalisation must be 7-15 digits, optionally prefixed
-// with '+'. In that international form the country code may not begin with 0,
-// since no such code exists.
+// with '+'. In that international form '+' must be followed by a country code
+// starting 1-9, since no country code starts with 0.
 func Phone(value string) string {
 	return PhoneMsg(value, MsgPhoneInvalid)
 }
@@ -331,49 +331,30 @@ func NormalizeURL(value string) string {
 }
 
 // NormalizePhone strips the punctuation people type into phone fields —
-// whitespace, hyphens (including Unicode dashes), dots, slashes and brackets —
+// whitespace, hyphens and dash punctuation, dots, slashes and brackets —
 // and leaves every other character untouched. Anything outside that separator
 // set is preserved, so normalising a non-phone string still yields a non-phone
 // string that Phone rejects: "44+7700900123" keeps its interior '+' and
 // "(abc) 555-1234" keeps its letters.
-//
-// A bracketed trunk zero is dropped when the value is in international form:
-// "+44 (0)7700 900123" is a hybrid notation and the 0 is not part of the
-// international number, so keeping it would produce a broken "+4407700900123".
-// Only '+'-prefixed values are treated this way, so the brackets in a national
-// number like "(0)7700 900123" are stripped without losing its trunk zero.
 func NormalizePhone(value string) string {
 	value = strings.TrimSpace(value)
-	if strings.HasPrefix(value, "+") {
-		// Only the first group is removed: a value with several of them is
-		// malformed anyway, and rewriting it wholesale would hide that.
-		if loc := trunkZeroRe.FindStringIndex(value); loc != nil {
-			value = value[:loc[0]] + value[loc[1]:]
-		}
-	}
-	var b strings.Builder
-	b.Grow(len(value))
-	for _, r := range value {
+	return strings.Map(func(r rune) rune {
 		if isPhoneSeparator(r) {
-			continue
+			return -1
 		}
-		b.WriteRune(r)
-	}
-	return b.String()
+		return r
+	}, value)
 }
 
 // isPhoneSeparator reports whether r is formatting rather than part of the
 // number itself. unicode.IsSpace already covers NBSP and the other exotic
-// spaces that arrive via copy-paste. The dashes are spelled as escapes because
-// they are indistinguishable from '-' in source.
+// spaces that arrive via copy-paste.
 func isPhoneSeparator(r rune) bool {
 	switch r {
-	case '-', '.', '(', ')', '/',
-		'\u2010', '\u2011', '\u2012', '\u2013', '\u2014', '\u2015', // hyphen..horizontal bar
-		'\u2212': // minus sign
+	case '.', '(', ')', '/', '\u2212':
 		return true
 	}
-	return unicode.IsSpace(r)
+	return unicode.IsSpace(r) || unicode.Is(unicode.Pd, r)
 }
 
 // ---------------------------------------------------------------------------
@@ -413,6 +394,4 @@ var (
 	// International form: country code starts 1-9, 7-15 digits in total (E.164).
 	// National form: 7-15 digits, leading trunk 0 allowed.
 	phoneRe = regexp.MustCompile(`^(?:\+[1-9][0-9]{6,14}|[0-9]{7,15})$`)
-	// Bracketed trunk zero, e.g. the "(0)" in "+44 (0)7700 900123".
-	trunkZeroRe = regexp.MustCompile(`\(\s*0\s*\)`)
 )

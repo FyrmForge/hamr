@@ -56,12 +56,13 @@ func TestPhone(t *testing.T) {
 	// Formats people actually type.
 	check(t, "uk-national-spaced", validate.Phone("07700 900123"), "")
 	check(t, "uk-international", validate.Phone("+44 7700 900123"), "")
-	check(t, "uk-trunk-zero", validate.Phone("+44 (0)7700 900123"), "")
 	check(t, "us-brackets", validate.Phone("(415) 555-1234"), "")
 	check(t, "hyphens", validate.Phone("0161-496-0000"), "")
 	check(t, "dots", validate.Phone("+1.415.555.1234"), "")
 	check(t, "padded", validate.Phone("  4155551234  "), "")
 	check(t, "unicode-dash", validate.Phone("0161\u2011496\u20110000"), "")
+	check(t, "fullwidth-hyphen", validate.Phone("0161\uff0d496\uff0d0000"), "")
+	check(t, "italy-leading-zero", validate.Phone("+39 (0)6 69812345"), "")
 
 	// Separator tolerance must not become a hole.
 	check(t, "separators-only", validate.Phone("-- () --"), validate.MsgPhoneInvalid)
@@ -270,10 +271,11 @@ func TestNormalizePhone(t *testing.T) {
 		{"+44 7700 900123", "+447700900123"},
 		{"(415) 555-1234", "4155551234"},
 		{"  +1-415-555-1234 ", "+14155551234"},
-		// Trunk zero only drops in international form; a national number keeps
-		// it and loses just the brackets.
-		{"+44 (0)7700 900123", "+447700900123"},
+		{"+44 (0)7700 900123", "+4407700900123"},
 		{"(0)7700900123", "07700900123"},
+		{"+1 (415) 555-12(0)34", "+141555512034"},
+		{"+39 (0)6 69812345", "+390669812345"},
+		{"0161\uff0d496\u22120000", "01614960000"},
 		// Non-separator characters survive, so invalid input stays invalid.
 		{"abc", "abc"},
 		{"44+7700900123", "44+7700900123"},

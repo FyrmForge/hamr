@@ -26,7 +26,7 @@ validation and `ValidationHandler(paramName)` for automatic HTMX per-field endpo
 ```go
 validate.Required(value)             // non-empty check
 validate.Email(value)                // email format
-validate.Phone(value)                // 7-15 digits, optional +, common separators OK
+validate.Phone(value)                // 7-15 digits; + must be followed by 1-9; separators OK
 validate.URL(value)                  // absolute http/https URL (rejects javascript:, data:, etc.)
 validate.MinLength(value, 3)         // at least 3 runes
 validate.MaxLength(value, 100)       // at most 100 runes
@@ -180,22 +180,21 @@ validate.NormalizeURL("")                  // ""
 ```
 
 `NormalizePhone` strips the punctuation people type into phone fields —
-whitespace, hyphens (including Unicode dashes), dots, slashes and brackets.
+whitespace, hyphens and Unicode dash punctuation, dots, slashes and brackets.
 `Phone` calls it internally, so you only need it directly when you want to
 store a number in a canonical form:
 
 ```go
 validate.NormalizePhone("07700 900123")        // "07700900123"
 validate.NormalizePhone("(415) 555-1234")      // "4155551234"
-validate.NormalizePhone("+44 (0)7700 900123")  // "+447700900123"
+validate.NormalizePhone("+44 7700 900123")     // "+447700900123"
 validate.NormalizePhone("abc")                 // "abc" (unchanged)
 ```
 
-A bracketed trunk zero is dropped only when the number is in international
-form, where it is not part of the number. A national number keeps its leading
-zero and loses just the brackets. Characters outside the separator set are left
-alone, so normalizing a non-phone string still yields something `Phone`
-rejects.
+`NormalizePhone` does not infer country-specific trunk rules; bracketed digits
+are kept as digits after their brackets are stripped. Characters outside the
+separator set are left alone, so normalizing a non-phone string still yields
+something `Phone` rejects.
 
 ## Form API
 
@@ -298,7 +297,7 @@ func EmptyOr(fn func(string) string) func(string) string
 // String validators
 func Required(value string) string
 func Email(value string) string
-func Phone(value string) string   // normalizes separators first; 7-15 digits
+func Phone(value string) string   // normalizes separators first; 7-15 digits; + then 1-9
 func URL(value string) string
 func MinLength(value string, min int) string
 func MaxLength(value string, max int) string
