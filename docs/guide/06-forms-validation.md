@@ -54,7 +54,7 @@ Every validator is a pure function: `func(value) string`. Empty string means val
 ```go
 validate.Required(value)             // non-empty check
 validate.Email(value)                // email format
-validate.Phone(value)                // optional +, 7-15 digits
+validate.Phone(value)                // 7-15 digits; + must be followed by 1-9; separators OK
 validate.URL(value)                  // valid absolute URL
 validate.MinLength(value, 3)         // at least 3 runes
 validate.MaxLength(value, 100)       // at most 100 runes

@@ -54,14 +54,20 @@ func EmailMsg(value, msg string) string {
 }
 
 // Phone returns "" if value is a plausible phone number, or MsgPhoneInvalid.
-// It accepts optional leading '+' followed by 7-15 digits.
+// The value is run through NormalizePhone first, so the separators people
+// actually type are accepted: "07700 900123", "(415) 555-1234", "0161-496-0000"
+// and "+44 7700 900123" are all valid.
+//
+// What remains after normalisation must be 7-15 digits, optionally prefixed
+// with '+'. In that international form '+' must be followed by a country code
+// starting 1-9, since no country code starts with 0.
 func Phone(value string) string {
 	return PhoneMsg(value, MsgPhoneInvalid)
 }
 
 // PhoneMsg is like Phone with a custom message.
 func PhoneMsg(value, msg string) string {
-	if !phoneRe.MatchString(value) {
+	if !phoneRe.MatchString(NormalizePhone(value)) {
 		return msg
 	}
 	return ""
@@ -309,7 +315,7 @@ func HasSpecialMsg(value, msg string) string {
 }
 
 // ---------------------------------------------------------------------------
-// URL normalisation
+// Normalisation
 // ---------------------------------------------------------------------------
 
 // NormalizeURL prepends "https://" when value has no scheme. Returns the
@@ -322,6 +328,33 @@ func NormalizeURL(value string) string {
 		return "https://" + value
 	}
 	return value
+}
+
+// NormalizePhone strips the punctuation people type into phone fields —
+// whitespace, hyphens and dash punctuation, dots, slashes and brackets —
+// and leaves every other character untouched. Anything outside that separator
+// set is preserved, so normalising a non-phone string still yields a non-phone
+// string that Phone rejects: "44+7700900123" keeps its interior '+' and
+// "(abc) 555-1234" keeps its letters.
+func NormalizePhone(value string) string {
+	value = strings.TrimSpace(value)
+	return strings.Map(func(r rune) rune {
+		if isPhoneSeparator(r) {
+			return -1
+		}
+		return r
+	}, value)
+}
+
+// isPhoneSeparator reports whether r is formatting rather than part of the
+// number itself. unicode.IsSpace already covers NBSP and the other exotic
+// spaces that arrive via copy-paste.
+func isPhoneSeparator(r rune) bool {
+	switch r {
+	case '.', '(', ')', '/', '\u2212':
+		return true
+	}
+	return unicode.IsSpace(r) || unicode.Is(unicode.Pd, r)
 }
 
 // ---------------------------------------------------------------------------
@@ -358,5 +391,7 @@ func Run(name, value string) string {
 
 var (
 	emailRe = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
-	phoneRe = regexp.MustCompile(`^\+?[0-9]{7,15}$`)
+	// International form: country code starts 1-9, 7-15 digits in total (E.164).
+	// National form: 7-15 digits, leading trunk 0 allowed.
+	phoneRe = regexp.MustCompile(`^(?:\+[1-9][0-9]{6,14}|[0-9]{7,15})$`)
 )
