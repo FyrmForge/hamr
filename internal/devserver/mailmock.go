@@ -587,7 +587,7 @@ func checkSameOrigin(w http.ResponseWriter, r *http.Request) bool {
 //
 // Routes that must NOT be guarded are simply registered without this wrapper:
 // the server-to-server /v1 Stripe API (hit by the app's SDK, never a browser)
-// and the SMTP /__hamr/mail/ingest sink. Keeping those carve-outs at the
+// and the /__hamr/mail/ingest and /__hamr/sms/ingest sinks. Keeping those carve-outs at the
 // registration site makes them visible rather than buried in handler logic.
 func guardUnsafe(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

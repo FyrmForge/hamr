@@ -26,7 +26,7 @@ func newTestActions() (*DevActions, *http.ServeMux) {
 		},
 	}
 	pm := NewProcessManager(slog.Default())
-	broker := NewSSEBroker(nil, nil, nil, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
 	es := NewErrorState()
 	graph := NewGraph(cfg.Dev.Watch)
 	actions := &DevActions{

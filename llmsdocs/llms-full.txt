@@ -67,7 +67,8 @@
   request log: method/path/status/durationMs incl /__hamr/*, static, SSE/WS —
   the proxy-level view the app's own access log can't give]), `docker`
   (logs/status read; restart/wipe write), `mail` (list/get read; clear/ingest
-  write), `build` (rule.run, rebuild.all, make.run — write-only), `stripe`
+  write), `sms` (list/get read; clear/ingest write), `build` (rule.run,
+  rebuild.all, make.run — write-only), `stripe`
   (list read; complete/expire/refund write). The gateway advertises only
   granted tools and re-checks permission per call (the security boundary; the
   bridge's filtering is UX). Async semantics: reads return immediately;
@@ -88,16 +89,17 @@
   opencode `opencode.json` are project-scoped; Codex `~/.codex/config.toml` is
   global and gets `--project` pinned to this project. Requires `hamr` on PATH
   and `[proxy]` configured (the gateway lives on the proxy mux).
-- **hamr mock-serve**: Runs the dev mocks (mail, stripe) standalone — no proxy,
+- **hamr mock-serve**: Runs the dev mocks (mail, sms, stripe) standalone — no proxy,
   TUI, build, or watch — built for a dedicated container in a dev environment.
   Unlike the mocks embedded in `hamr dev` (which mount on the proxy mux and read
-  `[dev.email]`/`[dev.stripe]` from hamr.toml), this command depends on no config
+  `[dev.email]`/`[dev.sms]`/`[dev.stripe]` from hamr.toml), this command depends on no config
   file: selection and all tuning come from env vars. `HAMR_MOCKS` (csv, required,
-  e.g. `mail,stripe`) selects which to start; unknown names fail loudly.
+  e.g. `mail,sms,stripe`) selects which to start; unknown names fail loudly.
   Two listeners: `HAMR_MOCK_PORT` (default 4500) carries the app-facing surface
-  (stripe `/v1/*` API + mail `/__hamr/mail/ingest` sink); optional
+  (stripe `/v1/*` API + mail `/__hamr/mail/ingest` + sms `/__hamr/sms/ingest`
+  sinks); optional
   `HAMR_MOCK_UI_PORT` splits the human dashboards (stripe `/__hamr/stripe/*`,
-  mail inbox `/__hamr/mail`) onto a second listener you can bind to loopback or
+  mail inbox `/__hamr/mail`, SMS inbox `/__hamr/sms`) onto a second listener you can bind to loopback or
   firewall separately (unset → UI shares the app-facing port). Invalid or out-of-range port values
   error loudly rather than silently falling back to a default. Both listeners bind all interfaces by
   default (correct in a container, where siblings reach it by service name); `HAMR_MOCK_BIND` restricts
@@ -110,7 +112,9 @@
   host's published port or from sibling containers), plus `HAMR_STRIPE_WEBHOOK_URL`
   and `HAMR_STRIPE_WEBHOOK_SECRET` (must match the app's `STRIPE_WEBHOOK_SECRET`).
   Mail tuning: `HAMR_MAIL_MAX_MESSAGES` (500), `HAMR_MAIL_MAX_MESSAGE_BYTES`
-  (10MiB), `HAMR_MAIL_PERSIST_PATH` (empty → in-memory only); stripe persist:
+  (10MiB), `HAMR_MAIL_PERSIST_PATH` (empty → in-memory only); SMS tuning:
+  `HAMR_SMS_MAX_MESSAGES` (500), `HAMR_SMS_PERSIST_PATH` (empty → in-memory
+  only); stripe persist:
   `HAMR_STRIPE_PERSIST_PATH`. Graceful shutdown on SIGINT/SIGTERM. Reuses the
   same mock implementations as `hamr dev` via split route-registration methods.
 - **hamr ai capture**: Browser screenshot capture with HTML/text/metadata sidecars.
@@ -2523,8 +2527,9 @@ also set `DEV_MODE=true`.
 
 **Hamr-injected env vars.** When `hamr dev` spawns the site process it
 sets two env vars derived from `hamr.toml` config:
-- `HAMR_DEV_URL=http://localhost:<proxy_port>` when either `[dev.email]`
-  or `[dev.stripe]` is enabled. The scaffold's email mock client uses it.
+- `HAMR_DEV_URL=http://localhost:<proxy_port>` when `[dev.email]`,
+  `[dev.sms]`, or `[dev.stripe]` is enabled. The scaffold's email mock
+  client uses it, as does `smsmock.New`.
 - `HAMR_STRIPE_MOCK_URL=http://localhost:<proxy_port>` when
   `[dev.stripe].enabled = true`. Scaffolded `main.go` points stripe-go
   at this URL when `STRIPE_MOCK=true`.
@@ -2733,6 +2738,112 @@ not bind `hamr dev`'s proxy to a public interface.
 - Raw view is reconstructed, not true MIME wire bytes
 - Single shared inbox — no per-user segmentation
 - No webhook simulation, no open/click tracking simulation
+
+### sms
+
+> Package sms defines a provider-agnostic `Sender` interface for
+> transactional SMS and the value types that flow through it. Apps depend on
+> the interface; concrete implementations (real provider adapters, smsmock)
+> plug in at startup.
+
+```go
+type Sender interface {
+    Send(ctx context.Context, msg Message) (*Result, error) // concurrency-safe
+}
+
+type Message struct {
+    From string            // sender: E.164 number ("+15551230000") or short code
+    To   string            // recipient: E.164 number
+    Body string            // message text
+    Ref  string // correlation reference (Vonage client-ref, MessageBird reference)
+}
+
+type Result struct { ID string } // provider-assigned message id, may be empty
+```
+
+Provider-specific features (alphanumeric sender IDs, MMS media, delivery
+callbacks, messaging services) live in the app's own adapter — not the
+interface.
+
+**Typical wiring:**
+```go
+var sender sms.Sender
+if os.Getenv("SMS_MOCK") == "true" {
+    sender = smsmock.New(os.Getenv("HAMR_DEV_URL"))
+} else {
+    sender = myapp.NewTwilioSender(sid, token)
+}
+```
+
+### smsmock
+
+> Package smsmock is a dev-only `sms.Sender` that ships messages to the hamr
+> dev server's in-memory inbox at `/__hamr/sms`. It validates how the app
+> uses `sms.Sender`, not the production provider adapter's wire format.
+
+```go
+func New(baseURL string) *Client
+func (c *Client) Send(ctx context.Context, msg sms.Message) (*sms.Result, error)
+
+var (
+    ErrInvalidNumber = errors.New("smsmock: invalid recipient number")
+    ErrUndeliverable = errors.New("smsmock: recipient undeliverable")
+)
+```
+
+JSON-encodes `msg` and POSTs to `<baseURL>/__hamr/sms/ingest`. On 200 returns
+the server-assigned `*sms.Result{ID}`; on 422 maps the magic-number body to a
+sentinel error. Request timeout 10s. Trailing slashes on baseURL stripped.
+
+**Magic recipient numbers** (digits-only suffix of `To`; formatting like
+spaces/dashes ignored, so `+1 500 555-0001` matches; the fictional 555
+exchange keeps real numbers from matching):
+- ends `5550001` → `ErrInvalidNumber` (server refuses with `{"error":"invalid_number"}`)
+- ends `5550002` → `ErrUndeliverable` (`{"error":"undeliverable"}`)
+Matching messages are never stored.
+
+**Dev inbox UI** (served at `/__hamr/sms` on the hamr dev proxy):
+- Newest-first list, substring search across from/to/body
+- Detail view: full body, correlation ref, character count
+- Outcome simulation: per-message "mark failed" (with note) / "mark delayed"
+  (seconds) — post-hoc status tagging, distinct from send-time magic numbers
+- Per-message delete + full-inbox clear
+- Dev panel renders an "Open SMS inbox" shortcut when `sse_config.sms_mock`
+  is set
+
+**HTTP ingest** (plain HTTP, any language):
+```
+POST /__hamr/sms/ingest
+{"From":"+15551230000","To":"+15559870000","Body":"your code is 123456"}
+→ 200 {"ID":"sms_..."} | 413 {"error":"message too large"} (64 KiB cap)
+→ 422 {"error":"invalid_number"} | {"error":"undeliverable"}
+```
+
+**Server-side config** (in `hamr.toml`):
+```toml
+[dev.sms]
+enabled      = true                     # opt-in; default false
+max_messages = 500                      # ring-buffer size; oldest evicted first
+persist      = true                     # default; mirror inbox to JSONL file
+persist_path = ".hamr/sms/inbox.jsonl"  # default
+```
+Requires `[proxy]` — inbox UI lives on the proxy mux; `hamr dev` refuses to
+start otherwise.
+
+**Persistence format.** JSONL: one JSON message per line, oldest first.
+Atomic whole-file rewrite on evict/delete/clear/status change; O_APPEND fast
+path for new messages. Corrupt lines are skipped on load. Survives `hamr dev`
+restart; set `persist = false` for in-memory only.
+
+**CSRF guard.** Same as the mail mock: mutating POSTs reject cross-origin
+requests (Origin set and ≠ Host); absent Origin passes. Unauthenticated —
+don't bind the proxy to a public interface.
+
+**Dev-only.** No production guards. Gate on `SMS_MOCK=true` in `main.go`.
+
+**Known limits.**
+- Text only: no MMS media, delivery receipts, or inbound-reply simulation
+- Single shared inbox — no per-user segmentation
 
 ---
 

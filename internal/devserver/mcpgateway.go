@@ -76,6 +76,7 @@ type mcpGateway struct {
 	actions     *DevActions
 	logBuf      *LogBuffer
 	mailMock    *MailMock
+	smsMock     *SMSMock
 	stripeMock  *StripeMock
 	errorState  *ErrorState
 	consoleSink *ConsoleSink // structured browser-console buffer, for console.read
@@ -97,6 +98,7 @@ type mcpGatewayDeps struct {
 	actions     *DevActions
 	logBuf      *LogBuffer
 	mailMock    *MailMock
+	smsMock     *SMSMock
 	stripeMock  *StripeMock
 	errorState  *ErrorState
 	auditPath   string
@@ -132,6 +134,7 @@ func newMCPGateway(d mcpGatewayDeps) (*mcpGateway, error) {
 		actions:     d.actions,
 		logBuf:      d.logBuf,
 		mailMock:    d.mailMock,
+		smsMock:     d.smsMock,
 		stripeMock:  d.stripeMock,
 		errorState:  d.errorState,
 		consoleSink: d.consoleSink,
@@ -399,6 +402,17 @@ func (g *mcpGateway) dispatch(tool string, body []byte) (any, error) {
 		return okResult{OK: true}, nil
 	case "mail.ingest":
 		return g.mailIngest(body)
+	case "sms.list":
+		return g.smsList(), nil
+	case "sms.get":
+		return g.smsGet(body)
+	case "sms.clear":
+		if g.smsMock != nil {
+			g.smsMock.Clear()
+		}
+		return okResult{OK: true}, nil
+	case "sms.ingest":
+		return g.smsIngest(body)
 	case "stripe.list":
 		return g.stripeList()
 	case "stripe.complete":

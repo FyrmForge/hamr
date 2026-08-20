@@ -21,6 +21,7 @@ type devInfoResult struct {
 	MakeTargets []string       `json:"makeTargets"`
 	Errors      []devInfoError `json:"errors"`
 	Mail        devInfoMail    `json:"mail"`
+	SMS         devInfoMail    `json:"sms"`
 	Stripe      devInfoStripe  `json:"stripe"`
 	Gateway     devInfoGateway `json:"gateway"`
 }
@@ -174,6 +175,18 @@ type mailDetail struct {
 	Text    string            `json:"text"`
 	HTML    string            `json:"html"`
 	Headers map[string]string `json:"headers"`
+}
+
+// --- sms ---
+
+// smsSummary doubles as the sms.get detail — an SMS has no fields beyond
+// these, so list and get share one shape.
+type smsSummary struct {
+	ID   string `json:"id"`
+	From string `json:"from"`
+	To   string `json:"to"`
+	Body string `json:"body"`
+	Date string `json:"date"`
 }
 
 // --- stripe ---

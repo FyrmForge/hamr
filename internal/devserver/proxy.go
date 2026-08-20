@@ -33,11 +33,12 @@ func init() {
 // If errorState is non-nil, HTML requests are intercepted with an error page
 // when there are active build errors.
 // If mailMock is non-nil, the mail inbox UI and ingest endpoint are mounted
-// under /__hamr/mail.
+// under /__hamr/mail. If smsMock is non-nil, the SMS equivalents are mounted
+// under /__hamr/sms.
 // If console is non-nil, the browser console transport is mounted as a
 // WebSocket at /__hamr/console; the injected reload script connects to it
 // and pipes window.console.* + uncaught errors back into the dev TUI/log.
-func NewProxyHandler(target string, broker *SSEBroker, errorState *ErrorState, logBuf *LogBuffer, actions *DevActions, mailMock *MailMock, stripeMock *StripeMock, console *ConsoleSink, gateway *mcpGateway, requestLog *RequestLog, injectReload bool) http.Handler {
+func NewProxyHandler(target string, broker *SSEBroker, errorState *ErrorState, logBuf *LogBuffer, actions *DevActions, mailMock *MailMock, smsMock *SMSMock, stripeMock *StripeMock, console *ConsoleSink, gateway *mcpGateway, requestLog *RequestLog, injectReload bool) http.Handler {
 	targetURL := &url.URL{
 		Scheme: "http",
 		Host:   normalizeHost(target),
@@ -107,6 +108,9 @@ func NewProxyHandler(target string, broker *SSEBroker, errorState *ErrorState, l
 	}
 	if mailMock != nil {
 		mailMock.RegisterRoutes(mux)
+	}
+	if smsMock != nil {
+		smsMock.RegisterRoutes(mux)
 	}
 	if stripeMock != nil {
 		stripeMock.RegisterRoutes(mux)

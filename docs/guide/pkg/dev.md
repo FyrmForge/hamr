@@ -195,6 +195,25 @@ view.
 See [emailmock](emailmock.md) for usage, magic-recipient failure simulation,
 and the HTTP ingest API.
 
+### SMS Mock
+
+Opt-in, in-memory SMS inbox viewable at `/__hamr/sms` on the proxy. Apps send
+through [`pkg/smsmock`](smsmock.md) (which implements [`sms.Sender`](sms.md))
+when running locally; real providers are swapped in for production.
+
+```toml
+[dev.sms]
+enabled      = true                     # opt-in; default false
+max_messages = 500                      # ring-buffer size; oldest evicted first
+persist      = true                     # default; mirror to JSONL file
+persist_path = ".hamr/sms/inbox.jsonl"  # default
+```
+
+Same proxy requirement and restart-survival behaviour as the mail mock;
+persistence uses a JSONL file (one JSON message per line) instead of mbox.
+See [smsmock](smsmock.md) for usage, magic-number failure simulation, and the
+HTTP ingest API.
+
 ## MCP Gateway (AI agents)
 
 With `[dev.mcp].enabled` (or toggled on with `M`), `hamr dev` exposes a
@@ -214,7 +233,7 @@ and restarts.
 **Tools** mirror the dev panel's actions, gated by `[dev.mcp.access]`
 (per-area `read`/`write`): `dev.info` (discovery), `logs.read`, `console.read`,
 `docker.logs`/`status`/`restart`/`wipe`, `rule.run`, `rebuild.all`, `make.run`
-(bounded-wait), the mail-mock tools, and the stripe-mock lifecycle tools. Reads
+(bounded-wait), the mail- and SMS-mock tools, and the stripe-mock lifecycle tools. Reads
 return immediately; `docker.restart`/`wipe` and `rule.run` dispatch async (poll
 `docker.status` / `logs.read`); `make.run` waits up to `make_wait` then returns
 "still running" for slow targets.

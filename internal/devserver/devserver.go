@@ -192,9 +192,10 @@ func (r *Runner) baseLogWriter() io.Writer {
 //     configured so the app and the proxy.target stay aligned even after a
 //     +1 walk. Apps read PORT to know where to listen; this is hamr taking
 //     ownership of that value when it controls the proxy.
-//   - HAMR_DEV_URL: proxy origin, set when [dev.email] OR [dev.stripe] is
-//     enabled (the email mock uses it as its ingest target; the scaffold's
-//     emailmock.New(envHamrDevURL) reads it).
+//   - HAMR_DEV_URL: proxy origin, set when [dev.email], [dev.sms], OR
+//     [dev.stripe] is enabled (the email/SMS mocks use it as their ingest
+//     target; the scaffold's emailmock.New(envHamrDevURL) reads it, as does
+//     smsmock.New).
 //   - HAMR_STRIPE_MOCK_URL: proxy origin, set only when [dev.stripe].enabled.
 //     Scaffolded main.go points stripe-go at this URL when STRIPE_MOCK=true.
 //
@@ -211,7 +212,7 @@ func buildHamrInjectedEnv(cfg *Config, proxyOrigin string, appPort int) []string
 		injected = append(injected, fmt.Sprintf("PORT=%d", appPort))
 	}
 	if proxyOrigin != "" {
-		if cfg.Dev.Email.Enabled || cfg.Dev.Stripe.Enabled {
+		if cfg.Dev.Email.Enabled || cfg.Dev.SMS.Enabled || cfg.Dev.Stripe.Enabled {
 			injected = append(injected, "HAMR_DEV_URL="+proxyOrigin)
 		}
 		if cfg.Dev.Stripe.Enabled {
@@ -259,7 +260,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	if r.procStdout != nil || r.procStderr != nil {
 		pm.SetOutputSinks(r.procStdout, r.procStderr)
 	}
-	broker := NewSSEBroker(r.cfg.Dev.Watch, r.cfg.Dev.Daemons, r.cfg.Dev.DockerCompose, r.cfg.Dev.Email.Enabled, r.cfg.Dev.Stripe.Enabled, consoleCapture)
+	broker := NewSSEBroker(r.cfg.Dev.Watch, r.cfg.Dev.Daemons, r.cfg.Dev.DockerCompose, r.cfg.Dev.Email.Enabled, r.cfg.Dev.SMS.Enabled, r.cfg.Dev.Stripe.Enabled, consoleCapture)
 	errorState := NewErrorState()
 	logBuf := NewLogBuffer(1000)
 	requestLog := NewRequestLog(1000)
@@ -399,6 +400,33 @@ func (r *Runner) Run(ctx context.Context) error {
 		)
 	}
 
+	// SMS mock: same proxy gating as the mail mock.
+	var smsMock *SMSMock
+	if r.cfg.Dev.SMS.Enabled {
+		if !r.cfg.ProxyConfigured {
+			return fmt.Errorf("dev.sms.enabled = true requires a [proxy] section in hamr.toml (the SMS UI lives on the proxy mux)")
+		}
+		if r.noProxy {
+			return fmt.Errorf("dev.sms.enabled = true cannot be used with --no-proxy (the SMS UI lives on the proxy mux)")
+		}
+		opts := SMSMockOptions{
+			MaxMessages: r.cfg.Dev.SMS.MaxMessages,
+			OnPersistError: func(err error) {
+				r.logger.Warn("sms mock persistence error", "err", err)
+			},
+		}
+		if r.cfg.Dev.SMS.PersistEnabled() {
+			opts.PersistPath = r.cfg.Dev.SMS.ResolvedPersistPath()
+		}
+		smsMock = NewSMSMock(opts)
+		r.logger.Info("sms mock enabled",
+			"ui", "/__hamr/sms",
+			"ingest", "/__hamr/sms/ingest",
+			"max_messages", r.cfg.Dev.SMS.MaxMessages,
+			"persist", opts.PersistPath,
+		)
+	}
+
 	// Stripe mock validation. The mock is constructed below — once we know
 	// the actual proxy port — so its BaseURL reflects any +1-on-busy walk
 	// rather than the originally-configured listen value.
@@ -524,6 +552,7 @@ func (r *Runner) Run(ctx context.Context) error {
 			actions:     actions,
 			logBuf:      logBuf,
 			mailMock:    mailMock,
+			smsMock:     smsMock,
 			stripeMock:  stripeMock,
 			errorState:  errorState,
 			auditPath:   r.cfg.Dev.MCP.ResolvedLogFile(),
@@ -557,7 +586,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 
 		inject := r.cfg.Proxy.InjectReload != nil && *r.cfg.Proxy.InjectReload
-		handler := NewProxyHandler(r.cfg.Proxy.Target, broker, errorState, logBuf, actions, mailMock, stripeMock, consoleSink, mcpGw, requestLog, inject)
+		handler := NewProxyHandler(r.cfg.Proxy.Target, broker, errorState, logBuf, actions, mailMock, smsMock, stripeMock, consoleSink, mcpGw, requestLog, inject)
 		proxySrv = serveProxy(ln, handler)
 
 		// Single-line banner that surfaces the actual reachable URL +

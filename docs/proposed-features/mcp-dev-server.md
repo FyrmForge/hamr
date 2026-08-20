@@ -80,6 +80,7 @@ level exposes:
 | `logs`   | `logs.read`, `console.read` | —                 |
 | `docker` | `docker.logs`, `docker.status` | `docker.restart`, `docker.wipe` |
 | `mail`   | `mail.list`, `mail.get` | `mail.clear`, `mail.ingest` |
+| `sms`    | `sms.list`, `sms.get` | `sms.clear`, `sms.ingest` |
 | `build`  | — (write-only area)   | `rule.run`, `rebuild.all`, `make.run` |
 | `stripe` | `stripe.list`         | `stripe.complete`, `stripe.expire`, `stripe.refund` |
 
@@ -136,7 +137,7 @@ the access table above.
 - **`dev.info`** — _(read)_ the controllable surface so the agent can discover
   valid names before acting.
   - inputs: none
-  - output: `{ proxyURL, appPort, rules:[{name,status}…], stacks:[{name,services:[…],status}…], makeTargets:[…], errors:[{source,message}…], mail:{…}, stripe:{…}, gateway:{enabled,access:{…},tools:[…]} }`
+  - output: `{ proxyURL, appPort, rules:[{name,status}…], stacks:[{name,services:[…],status}…], makeTargets:[…], errors:[{source,message}…], mail:{…}, sms:{…}, stripe:{…}, gateway:{enabled,access:{…},tools:[…]} }`
   - **Ports/URLs reflect resolved runtime values** (post port-walk), not the
     originally-configured `hamr.toml` values.
   - `makeTargets` reflects what the agent may actually run — the Makefile
@@ -209,6 +210,13 @@ the access table above.
 - **`mail.get`** — one message. inputs: `id` → `{headers, text, html}`
 - **`mail.clear`** — empty inbox. inputs: none → `{ok: true}`
 - **`mail.ingest`** — inject a message. inputs: `{From, To, Subject, Text, HTML}` (From/To accept a plain email string) → `{id}`
+
+### SMS (mock state)
+
+- **`sms.list`** — inbox summaries. inputs: none → `[{id, from, to, body, date}…]`
+- **`sms.get`** — one message. inputs: `id` → `{id, from, to, body, date}`
+- **`sms.clear`** — empty inbox. inputs: none → `{ok: true}`
+- **`sms.ingest`** — inject a message. inputs: `{From, To, Body}` → `{id}`
 
 ### Stripe (in v1)
 

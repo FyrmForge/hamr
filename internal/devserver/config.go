@@ -34,6 +34,7 @@ type DevConfig struct {
 	ProxyTarget     string          `toml:"proxy_target"`
 	InjectReload    *bool           `toml:"inject_reload"`
 	Email           EmailConfig     `toml:"email"`
+	SMS             SMSConfig       `toml:"sms"`
 	Stripe          StripeConfig    `toml:"stripe"`
 	MCP             MCPConfig       `toml:"mcp"`
 
@@ -115,6 +116,37 @@ func (c EmailConfig) ResolvedPersistPath() string {
 		return c.PersistPath
 	}
 	return ".hamr/mail/inbox.mbox"
+}
+
+// SMSConfig holds the [dev.sms] table for the SMS mock. When Enabled is true,
+// hamr dev runs an SMS inbox at /__hamr/sms on the reverse proxy. Requires
+// [proxy] to be configured.
+//
+// Persistence defaults to on: the inbox is mirrored to a JSONL file at
+// PersistPath so it survives hamr dev restart. Set Persist=false for an
+// ephemeral in-memory-only inbox.
+type SMSConfig struct {
+	Enabled     bool   `toml:"enabled"`
+	MaxMessages int    `toml:"max_messages"` // default 500
+	Persist     *bool  `toml:"persist"`      // default true
+	PersistPath string `toml:"persist_path"` // default ".hamr/sms/inbox.jsonl"
+}
+
+// PersistEnabled returns whether persistence is on. Defaults to true when the
+// field is unset (nil) — matches the email mock's behaviour.
+func (c SMSConfig) PersistEnabled() bool {
+	if c.Persist == nil {
+		return true
+	}
+	return *c.Persist
+}
+
+// ResolvedPersistPath returns PersistPath with the default applied.
+func (c SMSConfig) ResolvedPersistPath() string {
+	if c.PersistPath != "" {
+		return c.PersistPath
+	}
+	return ".hamr/sms/inbox.jsonl"
 }
 
 // StripeConfig holds the [dev.stripe] table for the local Stripe mock. When
@@ -616,14 +648,14 @@ func validate(cfg *Config) error {
 		}
 	}
 
-	// Email / Stripe mocks mount their routes on the proxy mux and derive
+	// Email / SMS / Stripe mocks mount their routes on the proxy mux and derive
 	// HAMR_DEV_URL / HAMR_STRIPE_MOCK_URL from the actual bound port. A
 	// proxy section is still required (the mock UIs live on the proxy
 	// mux), but ":0" / random-bind is now allowed — the runner derives
 	// the URL after the listener has bound rather than at config-load.
-	if cfg.Dev.Email.Enabled || cfg.Dev.Stripe.Enabled {
+	if cfg.Dev.Email.Enabled || cfg.Dev.SMS.Enabled || cfg.Dev.Stripe.Enabled {
 		if !cfg.ProxyConfigured {
-			return fmt.Errorf("[proxy] is required when [dev.email] or [dev.stripe] is enabled: the mocks live on the proxy mux and their client-reachable URL is derived from the bound proxy port")
+			return fmt.Errorf("[proxy] is required when [dev.email], [dev.sms], or [dev.stripe] is enabled: the mocks live on the proxy mux and their client-reachable URL is derived from the bound proxy port")
 		}
 	}
 

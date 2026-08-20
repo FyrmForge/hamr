@@ -18,7 +18,7 @@ type MCPConfig struct {
 	// flip the live gateway without rewriting this. Default false.
 	Enabled bool `toml:"enabled"`
 
-	// Access maps a functional area (dev, logs, docker, mail, build, stripe) to
+	// Access maps a functional area (dev, logs, docker, mail, sms, build, stripe) to
 	// a level ("read", "write", or "deny"). "write" implies "read". Areas absent
 	// from the map are denied. With no table at all, zero tools are exposed.
 	Access map[string]string `toml:"access"`
@@ -51,6 +51,7 @@ var mcpAreas = map[string]mcpArea{
 	"logs":   {readTools: []string{"logs.read", "console.read", "http.read"}},
 	"docker": {readTools: []string{"docker.logs", "docker.status"}, writeTools: []string{"docker.restart", "docker.wipe"}},
 	"mail":   {readTools: []string{"mail.list", "mail.get"}, writeTools: []string{"mail.clear", "mail.ingest"}},
+	"sms":    {readTools: []string{"sms.list", "sms.get"}, writeTools: []string{"sms.clear", "sms.ingest"}},
 	"build":  {writeTools: []string{"rule.run", "rebuild.all", "make.run"}},
 	"stripe": {readTools: []string{"stripe.list"}, writeTools: []string{"stripe.complete", "stripe.expire", "stripe.refund"}},
 }
@@ -135,7 +136,7 @@ func (c MCPConfig) ResolvedLogFile() string {
 func (c MCPConfig) validate() error {
 	for area, level := range c.Access {
 		if _, ok := mcpAreas[area]; !ok {
-			return fmt.Errorf("[dev.mcp.access] unknown area %q (want one of dev, logs, docker, mail, build, stripe)", area)
+			return fmt.Errorf("[dev.mcp.access] unknown area %q (want one of dev, logs, docker, mail, sms, build, stripe)", area)
 		}
 		switch level {
 		case "read", "write", "deny":

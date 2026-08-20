@@ -97,7 +97,7 @@ func TestRunner_HandleEvent(t *testing.T) {
 	r := NewRunner(cfg, WithLogger(discardLogger()), WithNoProxy(true))
 	graph := NewGraph(cfg.Dev.Watch)
 	pm := NewProcessManager(discardLogger())
-	broker := NewSSEBroker(nil, nil, nil, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
 
 	rule := r.findRule("echo")
 	evt := FileEvent{Rule: rule, Path: "main.go", Time: time.Now()}
@@ -121,7 +121,7 @@ func TestRunner_HandleEvent_WithProcess(t *testing.T) {
 	r := NewRunner(cfg, WithLogger(discardLogger()), WithNoProxy(true))
 	graph := NewGraph(cfg.Dev.Watch)
 	pm := NewProcessManager(discardLogger())
-	broker := NewSSEBroker(nil, nil, nil, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
 
 	rule := r.findRule("server")
 	evt := FileEvent{Rule: rule, Path: "main.go", Time: time.Now()}
@@ -150,7 +150,7 @@ func TestRunner_HandleEvent_BuildFailure(t *testing.T) {
 	r := NewRunner(cfg, WithLogger(discardLogger()), WithNoProxy(true))
 	graph := NewGraph(cfg.Dev.Watch)
 	pm := NewProcessManager(discardLogger())
-	broker := NewSSEBroker(nil, nil, nil, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
 
 	rule := r.findRule("fail")
 	evt := FileEvent{Rule: rule, Path: "main.go", Time: time.Now()}
@@ -180,7 +180,7 @@ func TestRunner_HandleEvent_NoReload(t *testing.T) {
 	r := NewRunner(cfg, WithLogger(discardLogger()), WithNoProxy(true))
 	graph := NewGraph(cfg.Dev.Watch)
 	pm := NewProcessManager(discardLogger())
-	broker := NewSSEBroker(nil, nil, nil, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
 
 	rule := r.findRule("quiet")
 	evt := FileEvent{Rule: rule, Path: "main.go", Time: time.Now()}
@@ -201,7 +201,7 @@ func TestRunner_HandleEvent_CSSReload(t *testing.T) {
 	r := NewRunner(cfg, WithLogger(discardLogger()), WithNoProxy(true))
 	graph := NewGraph(cfg.Dev.Watch)
 	pm := NewProcessManager(discardLogger())
-	broker := NewSSEBroker(nil, nil, nil, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
 
 	rule := r.findRule("css")
 	evt := FileEvent{Rule: rule, Path: "style.css", Time: time.Now()}
@@ -223,7 +223,7 @@ func TestRunner_HandleEvent_Cancelled(t *testing.T) {
 	r := NewRunner(cfg, WithLogger(discardLogger()), WithNoProxy(true))
 	graph := NewGraph(cfg.Dev.Watch)
 	pm := NewProcessManager(discardLogger())
-	broker := NewSSEBroker(nil, nil, nil, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
 
 	// Mark templ as running so go will block.
 	graph.MarkRunning("templ")
@@ -506,7 +506,7 @@ func TestRunner_HandleEvent_BuildFailure_BroadcastsError(t *testing.T) {
 	r := NewRunner(cfg, WithLogger(discardLogger()), WithNoProxy(true))
 	graph := NewGraph(cfg.Dev.Watch)
 	pm := NewProcessManager(discardLogger())
-	broker := NewSSEBroker(nil, nil, nil, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
 	srv := httptest.NewServer(broker.Handler())
 	defer srv.Close()
 
@@ -545,7 +545,7 @@ func TestRunner_HandleEvent_BuildSuccess_BroadcastsOk(t *testing.T) {
 	r := NewRunner(cfg, WithLogger(discardLogger()), WithNoProxy(true))
 	graph := NewGraph(cfg.Dev.Watch)
 	pm := NewProcessManager(discardLogger())
-	broker := NewSSEBroker(nil, nil, nil, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
 	srv := httptest.NewServer(broker.Handler())
 	defer srv.Close()
 

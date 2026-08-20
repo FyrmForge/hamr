@@ -17,7 +17,7 @@ hamr
 ├── gen
 │   ├── static              Fingerprint static assets into dist/
 │   └── locale              Generate type-safe Go accessors from locale JSON
-├── mock-serve              Serve the dev mocks (mail, stripe) headlessly
+├── mock-serve              Serve the dev mocks (mail, sms, stripe) headlessly
 ├── sync                    Sync local directory to S3-compatible bucket
 ├── vendor [dep[@version]]  Download/checksum frontend JS deps
 ├── lint
@@ -111,24 +111,26 @@ The TUI shows an MCP indicator when `[dev.mcp]` is configured; press `M` to togg
 hamr mock-serve
 ```
 
-Runs the dev mocks (mail, stripe) standalone — no proxy, TUI, build, or watch — for running in a dedicated container in a dev environment. Unlike the mocks embedded in `hamr dev` (which live on the proxy mux and read `hamr.toml`), this command is configured entirely through environment variables and depends on no config file.
+Runs the dev mocks (mail, sms, stripe) standalone — no proxy, TUI, build, or watch — for running in a dedicated container in a dev environment. Unlike the mocks embedded in `hamr dev` (which live on the proxy mux and read `hamr.toml`), this command is configured entirely through environment variables and depends on no config file.
 
 Two listeners:
 
-- **app-facing** (`HAMR_MOCK_PORT`): the surface your app talks to — stripe `/v1/*` API and the mail ingest sink.
+- **app-facing** (`HAMR_MOCK_PORT`): the surface your app talks to — stripe `/v1/*` API and the mail/SMS ingest sinks.
 - **UI** (`HAMR_MOCK_UI_PORT`): the human dashboards (captured email, fake payments). Optional — when unset the UI mounts on the app-facing port too. Splitting it onto its own port lets your deployment expose the two surfaces differently — e.g. publish the app-facing port to the app while keeping the dashboards on a port you only publish to `127.0.0.1`.
 
 Both listeners bind all interfaces by default (`HAMR_MOCK_BIND` empty), which is correct inside a container where sibling containers reach the mock by service name; isolate by controlling which ports you publish. **The mock surfaces are unauthenticated** — the UI serves every captured email (which can contain password-reset tokens and magic-login links) over plain GET, and the Stripe surface will fire a correctly-signed webhook at your app on request. Do not expose them on a reachable interface in a shared environment. When running outside a container on a shared host, set `HAMR_MOCK_BIND=127.0.0.1`.
 
 | Env | Purpose | Default |
 | --- | --- | --- |
-| `HAMR_MOCKS` | comma-separated mocks to start (required), e.g. `mail,stripe` | — |
-| `HAMR_MOCK_PORT` | app-facing port (stripe `/v1`, mail ingest) | `4500` |
+| `HAMR_MOCKS` | comma-separated mocks to start (required), e.g. `mail,sms,stripe` | — |
+| `HAMR_MOCK_PORT` | app-facing port (stripe `/v1`, mail/sms ingest) | `4500` |
 | `HAMR_MOCK_UI_PORT` | dashboards port; unset → UI on `HAMR_MOCK_PORT` | unset |
 | `HAMR_MOCK_BIND` | bind host for both listeners; empty → all interfaces | empty |
 | `HAMR_MAIL_MAX_MESSAGES` | inbox cap | `500` |
 | `HAMR_MAIL_MAX_MESSAGE_BYTES` | per-message byte cap | `10MiB` |
 | `HAMR_MAIL_PERSIST_PATH` | mbox path; empty → in-memory only | empty |
+| `HAMR_SMS_MAX_MESSAGES` | SMS inbox cap | `500` |
+| `HAMR_SMS_PERSIST_PATH` | JSONL path; empty → in-memory only | empty |
 | `HAMR_STRIPE_BASE_URL` | browser-reachable origin of the mock UI (required for stripe) | — |
 | `HAMR_STRIPE_WEBHOOK_URL` | app's webhook handler (required for stripe) | — |
 | `HAMR_STRIPE_WEBHOOK_SECRET` | matches the app's `STRIPE_WEBHOOK_SECRET` (required for stripe) | — |
@@ -179,7 +181,7 @@ Interactive picker for this project's AI-agent integration. One screen per decis
 
 1. **MCP bridge** — which agents (`claude`, `codex`, `opencode`) get the hamr bridge registered. Already-installed agents start ticked. Writes the same per-agent config as [`hamr mcp install`](#hamr-mcp-install) — merged, never clobbered.
 2. **Gateway enabled** — sets `[dev.mcp].enabled` in `hamr.toml`.
-3. **Tool permissions** — `deny` / `read` / `write` per area (`dev`, `logs`, `docker`, `mail`, `build`, `stripe`), seeded from the current `[dev.mcp.access]`. `write` implies `read`; a denied area exposes none of its tools.
+3. **Tool permissions** — `deny` / `read` / `write` per area (`dev`, `logs`, `docker`, `mail`, `sms`, `build`, `stripe`), seeded from the current `[dev.mcp.access]`. `write` implies `read`; a denied area exposes none of its tools.
 4. **Agent skills** — installs the hamr framework skill, the same content as [`hamr add skill`](#hamr-add-skill). Overwrites an existing skill directory. `claude` only for now.
 
 It also upserts a `## hamr MCP` section into `AGENTS.md` and `CLAUDE.md`, listing only the tools the granted areas actually expose — agents that never read the config otherwise default to doing the same work by hand (tailing logs, running `make build`, asking what an email said). Disabling the gateway removes the section again, so the instructions never point at tools that aren't there. Missing instruction files are skipped, not created.

@@ -184,6 +184,7 @@ var areaHelp = map[string]string{
 	"logs":   "app, browser-console, and HTTP request logs",
 	"docker": "compose status/logs; write adds restart + wipe",
 	"mail":   "the mail mock inbox; write adds clear + ingest",
+	"sms":    "the SMS mock inbox; write adds clear + ingest",
 	"build":  "run watch rules, rebuild, run make targets (write-only area)",
 	"stripe": "the Stripe mock; write adds complete/expire/refund",
 }
@@ -343,6 +344,9 @@ var mcpHabits = []struct{ area, read, write string }{
 	{area: "mail",
 		read:  "Never ask what an email said — `mail.list` and `mail.get` read the dev inbox.",
 		write: "`mail.clear` empties it; `mail.ingest` injects a message."},
+	{area: "sms",
+		read:  "Never ask what an SMS said — `sms.list` and `sms.get` read the dev inbox.",
+		write: "`sms.clear` empties it; `sms.ingest` injects a message."},
 	{area: "stripe",
 		read:  "Never guess at payment state — `stripe.list` reads the mock's objects.",
 		write: "`stripe.complete` / `stripe.expire` / `stripe.refund` drive a payment to an outcome."},

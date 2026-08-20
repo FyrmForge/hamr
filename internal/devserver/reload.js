@@ -530,6 +530,12 @@
                 '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg>' +
                 'Open mail inbox</a>';
         }
+        if (config.sms_mock) {
+            html += '<a class="hp-mail-btn" href="/__hamr/sms" target="_blank" rel="noopener" title="Open captured SMS inbox in a new tab">' +
+                '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+                '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' +
+                'Open SMS inbox</a>';
+        }
         if (config.stripe_mock) {
             html += '<a class="hp-mail-btn" href="/__hamr/stripe" target="_blank" rel="noopener" title="Open Stripe mock dashboard in a new tab">' +
                 '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +

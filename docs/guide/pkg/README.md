@@ -36,21 +36,23 @@ API reference for every `hamr/pkg` package.
 18. [Sync](sync.md) — File synchronization (local to S3)
 19. [WebSocket](websocket.md) — Session and room-based real-time hub
 
-## Email
+## Messaging
 
 20. [Email](email.md) — Provider-agnostic `Sender` interface for outbound mail
+21. [SMS](sms.md) — Provider-agnostic `Sender` interface for outbound SMS
 
 ## Third-party Mocks
 
-21. [Stripemock](stripemock.md) — Local Stripe-compatible HTTP backend that real `stripe-go` talks to in dev
-22. [Emailmock](emailmock.md) — Local mock `email.Sender` with inbox viewer at `/__hamr/mail`
+22. [Stripemock](stripemock.md) — Local Stripe-compatible HTTP backend that real `stripe-go` talks to in dev
+23. [Emailmock](emailmock.md) — Local mock `email.Sender` with inbox viewer at `/__hamr/mail`
+24. [Smsmock](smsmock.md) — Local mock `sms.Sender` with inbox viewer at `/__hamr/sms`
 
 ## Testing
 
-23. [E2E](e2e.md) — Reusable Go-Rod browser helpers for end-to-end tests
+25. [E2E](e2e.md) — Reusable Go-Rod browser helpers for end-to-end tests
 
 ## Tooling
 
-24. [Templint](templint.md) — Static linter for `.templ` files
-25. [Static Generation](static-generation.md) — Build-time page generation
-26. [Dev](dev.md) — Live reload development environment
+26. [Templint](templint.md) — Static linter for `.templ` files
+27. [Static Generation](static-generation.md) — Build-time page generation
+28. [Dev](dev.md) — Live reload development environment

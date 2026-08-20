@@ -49,6 +49,11 @@ func (g *mcpGateway) devInfo() devInfoResult {
 		mail.URL = g.proxyURL + "/__hamr/mail"
 	}
 
+	smsInfo := devInfoMail{Enabled: g.cfg.Dev.SMS.Enabled}
+	if smsInfo.Enabled {
+		smsInfo.URL = g.proxyURL + "/__hamr/sms"
+	}
+
 	return devInfoResult{
 		ProxyURL:    g.proxyURL,
 		AppPort:     g.appPort,
@@ -57,6 +62,7 @@ func (g *mcpGateway) devInfo() devInfoResult {
 		MakeTargets: makeTargets,
 		Errors:      errlist,
 		Mail:        mail,
+		SMS:         smsInfo,
 		Stripe:      devInfoStripe{Enabled: g.cfg.Dev.Stripe.Enabled},
 		Gateway: devInfoGateway{
 			Enabled: g.IsEnabled(),
@@ -266,6 +272,62 @@ func (g *mcpGateway) mailIngest(body []byte) (any, error) {
 	msg.ReceivedAt = time.Now()
 	msg.Status = "delivered"
 	g.mailMock.append(&msg)
+	return mailIngestResult{ID: msg.ID}, nil
+}
+
+// --- sms ---
+
+func (g *mcpGateway) smsList() []smsSummary {
+	if g.smsMock == nil {
+		return []smsSummary{}
+	}
+	msgs := g.smsMock.List()
+	out := make([]smsSummary, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, smsSummary{
+			ID:   m.ID,
+			From: m.From,
+			To:   m.To,
+			Body: m.Body,
+			Date: m.ReceivedAt.Format(time.RFC3339),
+		})
+	}
+	return out
+}
+
+func (g *mcpGateway) smsGet(body []byte) (any, error) {
+	if g.smsMock == nil {
+		return nil, fmt.Errorf("sms mock not enabled")
+	}
+	var a mailGetArgs
+	if err := decodeArgs(body, &a); err != nil {
+		return nil, err
+	}
+	m := g.smsMock.Get(a.ID)
+	if m == nil {
+		return nil, fmt.Errorf("message %q not found", a.ID)
+	}
+	return smsSummary{
+		ID:   m.ID,
+		From: m.From,
+		To:   m.To,
+		Body: m.Body,
+		Date: m.ReceivedAt.Format(time.RFC3339),
+	}, nil
+}
+
+func (g *mcpGateway) smsIngest(body []byte) (any, error) {
+	if g.smsMock == nil {
+		return nil, fmt.Errorf("sms mock not enabled")
+	}
+	var msg smsMessage
+	if err := decodeArgs(body, &msg); err != nil {
+		return nil, fmt.Errorf("invalid message: %w", err)
+	}
+	msg.ID = newSMSMessageID()
+	msg.ReceivedAt = time.Now()
+	msg.Status = "delivered"
+	g.smsMock.append(&msg)
 	return mailIngestResult{ID: msg.ID}, nil
 }
 

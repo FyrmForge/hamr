@@ -308,7 +308,7 @@ func TestProcessManager_OnProcessExit(t *testing.T) {
 
 func TestProcessManager_LogOutput(t *testing.T) {
 	logBuf := NewLogBuffer(100)
-	broker := NewSSEBroker(nil, nil, nil, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
 
 	pm := NewProcessManager(testLogger())
 	pm.SetLogOutput(logBuf, broker)

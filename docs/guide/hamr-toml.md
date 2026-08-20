@@ -22,6 +22,7 @@ This is a schema reference. For tutorial-style usage see
 | `[proxy]`               | `hamr dev`                    | Reverse proxy + live reload |
 | `[dev]`                 | `hamr dev`                    | Watch rules, daemons, mocks |
 | `[dev.email]`           | `hamr dev`                    | Mail mock at `/__hamr/mail` |
+| `[dev.sms]`             | `hamr dev`                    | SMS mock at `/__hamr/sms` |
 | `[dev.stripe]`          | `hamr dev`                    | Stripe mock at `/v1/*` + `/__hamr/stripe/*` |
 | `[dev.mcp]`             | `hamr dev` / `hamr mcp`       | MCP gateway for AI agents at `/__hamr/mcp/*` |
 | `[[dev.docker_compose]]`| `hamr dev`                    | Compose deps lifecycle |
@@ -104,13 +105,13 @@ file watching still runs but the browser-side reload pipeline does not.
 | `inject_reload` | bool   | `true`           | Inject the SSE live-reload script into HTML responses. |
 
 Both `listen` and `target` must be `host:port` or `:port` form. Required by
-`[dev.email]`, `[dev.stripe]`, and `[dev.mcp]` (their surfaces live on the proxy mux).
+`[dev.email]`, `[dev.sms]`, `[dev.stripe]`, and `[dev.mcp]` (their surfaces live on the proxy mux).
 
 ---
 
 ## `[dev]` — Watch rules, daemons, mocks
 
-Top-level fields apply to logging. Sub-tables (`[dev.email]`, `[dev.stripe]`)
+Top-level fields apply to logging. Sub-tables (`[dev.email]`, `[dev.sms]`, `[dev.stripe]`)
 and array tables (`[[dev.watch]]`, `[[dev.daemon]]`, `[[dev.docker_compose]]`)
 configure the rest. At least one of watch / daemon / docker_compose must be
 present.
@@ -235,6 +236,19 @@ Pair with `pkg/emailmock` as your `email.Sender` impl in dev. Requires
 | `persist`           | bool   | `true`                     | Mirror to mbox file. `false` = in-memory only. |
 | `persist_path`      | string | `.hamr/mail/inbox.mbox`    | mbox file path. |
 
+### `[dev.sms]` — SMS mock
+
+When `enabled = true`, an inbox is mounted at `/__hamr/sms` on the proxy.
+Pair with `pkg/smsmock` as your `sms.Sender` impl in dev. Requires
+`[proxy]`. See [`pkg/smsmock`](pkg/smsmock.md).
+
+| Field          | Type   | Default                   | Notes |
+|----------------|--------|---------------------------|-------|
+| `enabled`      | bool   | `false`                   | |
+| `max_messages` | int    | `500`                     | Ring buffer cap; oldest evicted. |
+| `persist`      | bool   | `true`                    | Mirror to JSONL file. `false` = in-memory only. |
+| `persist_path` | string | `.hamr/sms/inbox.jsonl`   | JSONL file path. |
+
 ### `[dev.stripe]` — Stripe mock
 
 When `enabled = true`, a Stripe-compatible HTTP backend mounts at `/v1/*`
@@ -274,6 +288,7 @@ See [`hamr mcp`](cli.md) and the security notes below.
 | `logs`   | `logs.read`, `console.read`, `http.read` | —                          |
 | `docker` | `docker.logs`, `docker.status`| `docker.restart`, `docker.wipe`       |
 | `mail`   | `mail.list`, `mail.get`       | `mail.clear`, `mail.ingest`           |
+| `sms`    | `sms.list`, `sms.get`         | `sms.clear`, `sms.ingest`             |
 | `build`  | — (write-only)                | `rule.run`, `rebuild.all`, `make.run` |
 | `stripe` | `stripe.list`                 | `stripe.complete`, `stripe.expire`, `stripe.refund` |
 

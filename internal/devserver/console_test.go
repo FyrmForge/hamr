@@ -153,7 +153,7 @@ func TestHamrConsoleCaptureEnabled_RespectsExplicitTrue(t *testing.T) {
 }
 
 func TestSSEBroker_ConfigPayload_IncludesConsoleCaptureWhenOn(t *testing.T) {
-	broker := NewSSEBroker(nil, nil, nil, false, false, true)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, true)
 
 	srv := httptest.NewServer(broker.Handler())
 	defer srv.Close()
@@ -170,7 +170,7 @@ func TestSSEBroker_ConfigPayload_IncludesConsoleCaptureWhenOn(t *testing.T) {
 }
 
 func TestSSEBroker_ConfigPayload_OmitsConsoleCaptureWhenOff(t *testing.T) {
-	broker := NewSSEBroker(nil, nil, nil, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
 
 	srv := httptest.NewServer(broker.Handler())
 	defer srv.Close()

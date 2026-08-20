@@ -93,6 +93,26 @@ var bridgeTools = []bridgeTool{
 		inputSchema: `{"type":"object","properties":{"From":{"type":"string","description":"sender email, e.g. a@b.com"},"To":{"type":"array","items":{"type":"string"},"description":"recipient emails"},"Subject":{"type":"string"},"Text":{"type":"string"},"HTML":{"type":"string"}}}`,
 	},
 	{
+		name:        "sms.list",
+		description: "List messages in the dev SMS mock inbox (id, from, to, body, date).",
+		inputSchema: noArgs,
+	},
+	{
+		name:        "sms.get",
+		description: "Fetch one SMS-mock message by id.",
+		inputSchema: `{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}`,
+	},
+	{
+		name:        "sms.clear",
+		description: "Empty the dev SMS mock inbox.",
+		inputSchema: noArgs,
+	},
+	{
+		name:        "sms.ingest",
+		description: "Inject a message into the SMS mock inbox.",
+		inputSchema: `{"type":"object","properties":{"From":{"type":"string","description":"sender number, e.g. +15551230000"},"To":{"type":"string","description":"recipient number"},"Body":{"type":"string"}}}`,
+	},
+	{
 		name:        "stripe.list",
 		description: "Read-only snapshot of the Stripe mock state: sessions, payment intents, payouts, refunds, accounts (id/status/amount).",
 		inputSchema: noArgs,

@@ -1,6 +1,6 @@
 # Deploying Mocks (`hamr mock-serve`)
 
-`hamr mock-serve` runs the mail and Stripe mocks as a standalone process — no
+`hamr mock-serve` runs the mail, SMS, and Stripe mocks as a standalone process — no
 proxy, TUI, build, or file-watching. It is designed for a dedicated container
 in a Docker Compose dev environment.
 
@@ -34,7 +34,7 @@ services:
       dockerfile: Dockerfile.hamr
     command: ["mock", "serve"]
     environment:
-      HAMR_MOCKS: "mail,stripe"
+      HAMR_MOCKS: "mail,sms,stripe"
       HAMR_MOCK_PORT: "4500"
       HAMR_MOCK_UI_PORT: "4501"
       HAMR_STRIPE_BASE_URL: "http://localhost:4501"
@@ -57,12 +57,13 @@ services:
 **3. Open the dashboards.**
 
 - Mail inbox: `http://localhost:4501/__hamr/mail`
+- SMS inbox: `http://localhost:4501/__hamr/sms`
 - Stripe dashboard: `http://localhost:4501/__hamr/stripe`
 
 ## Two Ports
 
 `HAMR_MOCK_PORT` (default `4500`) is the surface your app talks to — Stripe
-`/v1/*` API and the mail ingest sink. `HAMR_MOCK_UI_PORT` is the human
+`/v1/*` API and the mail/SMS ingest sinks. `HAMR_MOCK_UI_PORT` is the human
 dashboards. Splitting them lets you expose the two surfaces differently: publish
 the app-facing port internally between containers, and publish the UI port only
 to localhost (or not at all on shared hosts).
@@ -76,6 +77,12 @@ to the mock's app-facing address as seen from the app container:
 
 ```go
 sender = emailmock.New(os.Getenv("HAMR_DEV_URL")) // "http://mocks:4500"
+```
+
+**SMS** — `smsmock.New` reads the same `HAMR_DEV_URL`:
+
+```go
+sender = smsmock.New(os.Getenv("HAMR_DEV_URL")) // "http://mocks:4500"
 ```
 
 **Stripe** — point `stripe-go`'s backend at `HAMR_STRIPE_MOCK_URL`:
@@ -110,5 +117,6 @@ Full reference: [CLI reference — hamr mock-serve](../cli.md#hamr-mock-serve).
 ## See Also
 
 - [emailmock](emailmock.md) — mail mock used by `hamr dev` and `hamr mock-serve`
+- [smsmock](smsmock.md) — SMS mock used by `hamr dev` and `hamr mock-serve`
 - [stripemock](stripemock.md) — Stripe mock used by `hamr dev` and `hamr mock-serve`
 - [CLI reference](../cli.md#hamr-mock-serve) — full env var table

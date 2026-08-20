@@ -16,13 +16,13 @@ import (
 )
 
 // Mock serve is the headless entry point: it stands up the dev mocks (mail,
-// stripe) on plain listeners with no proxy, TUI, build, or watch — built for
+// sms, stripe) on plain listeners with no proxy, TUI, build, or watch — built for
 // running in a dedicated container in a dev environment. All configuration
 // comes from environment variables (the container's natural config surface);
 // there is no hamr.toml dependency.
 //
 // Two listeners:
-//   - the app-facing port (HAMR_MOCK_PORT): stripe /v1/* API + mail ingest sink
+//   - the app-facing port (HAMR_MOCK_PORT): stripe /v1/* API + mail/sms ingest sinks
 //   - the UI port (HAMR_MOCK_UI_PORT): the human dashboards. Optional — when
 //     unset the UI mounts on the app-facing port too (single listener).
 //
@@ -40,7 +40,7 @@ import (
 // MountedMock is what a provider returns: the route registrations for each
 // surface. Either may be nil if a mock has no routes on that surface.
 type MountedMock struct {
-	RegisterAPI func(*http.ServeMux) // app-facing (stripe /v1, mail ingest)
+	RegisterAPI func(*http.ServeMux) // app-facing (stripe /v1, mail/sms ingest)
 	RegisterUI  func(*http.ServeMux) // human-facing dashboards
 }
 
@@ -53,6 +53,7 @@ type MockProvider struct {
 
 var mockProviders = []MockProvider{
 	{Name: "mail", Build: buildMailMock},
+	{Name: "sms", Build: buildSMSMock},
 	{Name: "stripe", Build: buildStripeMock},
 }
 
@@ -72,6 +73,20 @@ func buildMailMock(logger *slog.Logger) (*MountedMock, error) {
 		PersistPath:     os.Getenv("HAMR_MAIL_PERSIST_PATH"),
 		OnPersistError: func(err error) {
 			logger.Warn("mail mock persistence error", "err", err)
+		},
+	})
+	return &MountedMock{
+		RegisterAPI: m.RegisterIngestRoutes,
+		RegisterUI:  m.RegisterUIRoutes,
+	}, nil
+}
+
+func buildSMSMock(logger *slog.Logger) (*MountedMock, error) {
+	m := NewSMSMock(SMSMockOptions{
+		MaxMessages: config.GetEnvOrDefaultInt("HAMR_SMS_MAX_MESSAGES", 0),
+		PersistPath: os.Getenv("HAMR_SMS_PERSIST_PATH"),
+		OnPersistError: func(err error) {
+			logger.Warn("sms mock persistence error", "err", err)
 		},
 	})
 	return &MountedMock{
@@ -246,7 +261,7 @@ func selectedMocks(names []string) ([]MockProvider, error) {
 		want[name] = true
 	}
 	if len(want) == 0 {
-		return nil, errors.New("HAMR_MOCKS is empty: set it to a comma-separated list, e.g. HAMR_MOCKS=mail,stripe")
+		return nil, errors.New("HAMR_MOCKS is empty: set it to a comma-separated list, e.g. HAMR_MOCKS=mail,sms,stripe")
 	}
 
 	var out []MockProvider
