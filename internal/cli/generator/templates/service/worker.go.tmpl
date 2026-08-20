@@ -1,0 +1,37 @@
+// Package {{.PkgName}} implements the {{.Name}} background worker.
+package {{.PkgName}}
+
+import (
+	"context"
+	"log/slog"
+	"time"
+{{- if .WithDB}}
+
+	"{{.Module}}/internal/repo"
+{{- end}}
+)
+
+// Deps holds the worker's dependencies.
+type Deps struct {
+{{- if .WithDB}}
+	Store repo.Store
+{{- end}}
+	Log *slog.Logger
+}
+
+// Run executes the worker loop until ctx is cancelled.
+func Run(ctx context.Context, deps Deps) error {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			deps.Log.Info("{{.Name}} shutting down")
+			return nil
+		case <-ticker.C:
+			// TODO: do the actual work here.
+			deps.Log.Info("{{.Name}} tick")
+		}
+	}
+}

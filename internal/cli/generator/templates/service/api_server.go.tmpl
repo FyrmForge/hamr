@@ -1,0 +1,60 @@
+package api
+
+import (
+{{- if .WithAuth}}
+	"context"
+{{- end}}
+	"net/http"
+
+	"github.com/labstack/echo/v4"
+
+{{- if .WithAuth}}
+	"github.com/FyrmForge/hamr/pkg/auth"
+	hamrmw "github.com/FyrmForge/hamr/pkg/middleware"
+{{- end}}
+	"github.com/FyrmForge/hamr/pkg/server"
+
+	"{{.Module}}/internal/middleware"
+{{- if .WithDB}}
+	"{{.Module}}/internal/repo"
+{{- end}}
+)
+
+// Deps holds the dependencies for API route registration.
+type Deps struct {
+{{- if .WithDB}}
+	Store repo.Store
+{{- end}}
+{{- if .WithAuth}}
+	SessionManager *auth.SessionManager
+{{- end}}
+}
+
+// RegisterRoutes registers all {{.Name}} API route handlers on the server.
+func RegisterRoutes(srv *server.Server, deps *Deps) {
+	api := srv.Echo().Group("/api")
+	api.Use(middleware.Logging())
+{{- if .WithAuth}}
+
+	authmw := hamrmw.NewBrowserAuth(deps.SessionManager,
+		hamrmw.WithSubjectLoader(func(reqCtx context.Context, id string) (any, error) {
+			return deps.Store.GetUserByID(reqCtx, id)
+		}),
+	)
+	api.Use(authmw.Load())
+	// Protect individual routes with authmw.RequireAuth(), e.g.:
+	//   api.GET("/me", meHandler, authmw.RequireAuth())
+{{- end}}
+
+	api.GET("/health", func(c echo.Context) error {
+{{- if .WithDB}}
+		if err := deps.Store.Health(c.Request().Context()); err != nil {
+			return c.JSON(http.StatusServiceUnavailable, map[string]string{
+				"status": "unhealthy",
+				"error":  err.Error(),
+			})
+		}
+{{- end}}
+		return c.JSON(http.StatusOK, map[string]string{"status": "healthy"})
+	})
+}

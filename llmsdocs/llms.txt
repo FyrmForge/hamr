@@ -167,6 +167,7 @@
   with the manifest baked in at compile time. Config in [static] section of
   hamr.toml. `--clean` removes the dist dir and resets the manifest.
 - **hamr completion install**: Installs shell completion scripts for bash, zsh, or fish. Auto-detects shell from $SHELL. Supports --system for system-wide install (requires root) and --shell to override detection.
+- **hamr add service [name]**: Adds a new Go binary to an existing project. Types: `worker` (background loop with graceful shutdown), `api` (JSON server on its own `<NAME>_PORT`), `html` (templ server reusing the project layout), `empty` (bare `Run()` stub). Creates `cmd/<name>/` + `internal/<name>/`, appends a `[[dev.watch]]` rule to hamr.toml, and appends `<NAME>_PORT` to `.env` for HTTP types. Optional `--db`/`--auth`/`--locale` wire the project's store, session middleware, and locale bundle. Interactive wizard for anything not flagged. HTTP services are not behind the dev proxy — hit their port directly.
 - **hamr add skill <target>**: Installs an AI agent skill describing the hamr framework. Target selects the AI tool (currently `claude`). Writes to `./.claude/skills/hamr/` by default; `--global` writes to `~/.claude/skills/hamr/`. Requires `hamr.toml` in CWD for project installs. `--force` overwrites.
 - **respond.Redirect**: HTMX-aware redirect that sets HX-Redirect for HTMX
   requests and falls back to HTTP 303.

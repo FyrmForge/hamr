@@ -4,6 +4,8 @@ Some work — like cleaning expired sessions or resetting rate limits — should
 
 **Package references:** [Janitor](pkg/janitor.md), [Async](pkg/async.md)
 
+For background work that should live in its own process (own deploy cadence, own resource budget) rather than inside the site binary, scaffold a separate worker binary with [`hamr add service --type worker`](cli.md#hamr-add-service).
+
 ---
 
 ## Janitor Scheduler

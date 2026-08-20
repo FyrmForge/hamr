@@ -1,0 +1,71 @@
+package web
+
+import (
+{{- if .WithAuth}}
+	"context"
+
+{{- end}}
+{{- if .WithAuth}}
+	"github.com/FyrmForge/hamr/pkg/auth"
+{{- end}}
+{{- if .WithLocale}}
+	"github.com/FyrmForge/hamr/pkg/i18n"
+{{- end}}
+	hamrmw "github.com/FyrmForge/hamr/pkg/middleware"
+	"github.com/FyrmForge/hamr/pkg/server"
+
+	"{{.Module}}/internal/middleware"
+{{- if .WithDB}}
+	"{{.Module}}/internal/repo"
+{{- end}}
+	"{{.Module}}/internal/web/components"
+)
+
+// Deps holds the dependencies for route registration.
+type Deps struct {
+{{- if .WithDB}}
+	Store repo.Store
+{{- end}}
+	DevMode bool
+{{- if .WithAuth}}
+	SessionManager *auth.SessionManager
+{{- end}}
+{{- if .WithLocale}}
+	LocaleBundle *i18n.Bundle
+{{- end}}
+}
+
+// RegisterRoutes registers all {{.Name}} web route handlers on the server.
+func RegisterRoutes(srv *server.Server, deps *Deps) {
+	site := srv.Echo().Group("")
+	site.Use(middleware.Logging())
+	site.Use(hamrmw.ErrorPages(components.ErrorPage))
+	site.Use(hamrmw.SecureWithConfig(hamrmw.SecureConfig{
+		ContentSecurityPolicy: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'",
+	}))
+{{- if .WithAuth}}
+	site.Use(hamrmw.FlashWithConfig(hamrmw.FlashConfig{Secure: !deps.DevMode}))
+	site.Use(hamrmw.CSRFWithConfig(hamrmw.CSRFConfig{Secure: !deps.DevMode}))
+{{- end}}
+{{- if .WithLocale}}
+	site.Use(hamrmw.LocaleFromPreference(hamrmw.LocaleConfig{
+		Bundle:       deps.LocaleBundle,
+		CookieSecure: !deps.DevMode,
+	}))
+{{- end}}
+{{- if .WithAuth}}
+
+	authmw := hamrmw.NewBrowserAuth(deps.SessionManager,
+		hamrmw.WithSubjectLoader(func(reqCtx context.Context, id string) (any, error) {
+			return deps.Store.GetUserByID(reqCtx, id)
+		}),
+		hamrmw.WithLoginRedirect("/login"),
+		hamrmw.WithHomeRedirect("/"),
+	)
+	site.Use(authmw.Load())
+	// Protect individual routes with authmw.RequireAuth().
+{{- end}}
+
+	homeHandler := newHomeHandler()
+	site.GET("/", homeHandler.Index)
+}

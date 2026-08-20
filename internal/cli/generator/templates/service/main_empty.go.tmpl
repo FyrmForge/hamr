@@ -1,0 +1,30 @@
+package main
+
+import (
+	"context"
+	"log/slog"
+	"os"
+
+	_ "github.com/joho/godotenv/autoload"
+
+	"github.com/FyrmForge/hamr/pkg/config"
+	"github.com/FyrmForge/hamr/pkg/logging"
+
+	{{.PkgName}} "{{.Module}}/internal/{{.Name}}"
+)
+
+// version is set at build time via ldflags.
+var version = "dev"
+
+var envDevMode = config.GetEnvOrDefaultBool("DEV_MODE", false)
+
+func main() {
+	log := logging.New(!envDevMode)
+	slog.SetDefault(log)
+
+	log.Info("starting {{.Name}}", "version", version)
+	if err := {{.PkgName}}.Run(context.Background()); err != nil {
+		log.Error("{{.Name}} failed", "error", err)
+		os.Exit(1)
+	}
+}

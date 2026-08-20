@@ -1,0 +1,28 @@
+FROM golang:{{.GoVersion}}-alpine AS builder
+
+ARG VERSION=dev
+
+WORKDIR /app
+COPY go.mod go.sum* ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -ldflags "-X main.version=${VERSION}" -o /{{.Name}} ./cmd/{{.Name}}
+
+FROM alpine:3.21
+RUN apk --no-cache add ca-certificates
+COPY --from=builder /{{.Name}} /{{.Name}}
+{{- if eq .Type "html"}}
+COPY --from=builder /app/frontend /frontend
+{{- end}}
+{{- if and .WithDB (eq .Database "sqlite")}}
+
+# SQLite database file directory — mount a volume here for persistence.
+RUN mkdir -p /data
+VOLUME ["/data"]
+ENV DATABASE_PATH=/data/{{.ProjectSlug}}.db
+{{- end}}
+{{- if .HTTP}}
+
+EXPOSE {{.Port}}
+{{- end}}
+ENTRYPOINT ["/{{.Name}}"]

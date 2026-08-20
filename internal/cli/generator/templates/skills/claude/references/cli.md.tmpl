@@ -58,6 +58,18 @@ hamr dev -v              # verbose: watcher/rebuild detail
 
 Mirrors recent logs to `.hamr/dev_logs.txt` (rolling 200 lines, escape codes stripped) so an LLM agent can read the current dev state. Configure via `[dev] log_file` and `log_file_max_lines`; `log_file = "none"` disables. The injected reload script also pipes browser `console.*`, uncaught errors, unhandled rejections, resource-load failures, and CSP violations into the same file tagged `[site:console]` (transport: WebSocket at `/__hamr/console`); gated by `[dev] hamr_console_capture` (default `true`; set `false` to disable the whole transport with zero overhead). Set `[dev] hamr_console_filter = true` to drop frames containing `[hamr]` (the reload script's own chatter).
 
+## hamr add service [name]
+
+Add a new Go binary to the project: `cmd/<name>/` (main.go + Dockerfile), `internal/<name>/`, a dev.watch rule appended to `hamr.toml` (so `hamr dev` builds and runs it), and a `<NAME>_PORT` line appended to `.env`/`.env.example` for HTTP types. Options not passed as flags are asked interactively.
+
+```bash
+hamr add service mailer --type worker --db
+hamr add service billing --type api --db --auth --port 8081
+hamr add service admin --type html --db --auth=false --port 8082
+```
+
+Types: `worker` (background loop, graceful shutdown), `api` (JSON server on its own port), `html` (templ server reusing the project layout), `empty` (bare `Run()` stub). `--db` wires the project's repo store; `--auth` wires session validation against the shared store (site keeps owning login); `--locale` loads the locale bundle (`html` only). HTTP services are not behind the dev proxy — hit `http://localhost:<port>` directly.
+
 ## hamr add skill <target>
 
 Install an AI agent skill describing the HAMR framework. Currently supports `claude`; more targets (`codex`, `opencode`, etc.) will follow.

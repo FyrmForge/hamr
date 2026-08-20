@@ -2933,6 +2933,47 @@ Long log lines soft-wrap to the viewport width (CSI escapes are passed through a
 
 Mouse-click selection: a left-press inside the viewport selects the whole logical line (reverse-video, including every wrap row of the same line). Holding the button and dragging extends the selection — and dragging past the top or bottom viewport edge auto-scrolls (one line per ~50 ms via tea.Tick) so the user can pick a range larger than the viewport. The auto-scroll loop stops once the cursor moves back inside or the viewport hits its scroll limit. Shift+click extends from the existing anchor; Ctrl+click toggles one line and disables drag-extend (ctrl is a single-line gesture, not a range). Selection is **global, not per-tab** — switching tabs drops it because the stored buffer indices wouldn't translate to the destination tab's buffer. While at least one line is selected, the bottom hint bar swaps to `[N selected]   y copy   esc clear` and log auto-scroll is paused so the picked lines aren't yanked off-screen by incoming output. `y` joins the selected lines (in original buffer order), strips ANSI escapes, and writes the result to the system clipboard via `atotto/clipboard` (`xclip`/`xsel`/`wl-copy` on Linux, `pbcopy` on macOS, `clip.exe` on Windows). On clipboard error the failure is appended as a `[hamr:tui] clipboard: <err>` line on the hamr tab so the user can see why instead of getting silence; otherwise the selection clears post-copy. The bounded log buffer eviction shifts selection indices in lockstep, dropping anything that scrolls off the start.
 
+### hamr add service
+
+> Add a new Go binary (service) to an existing HAMR project.
+
+Creates `cmd/<name>/` (main.go + Dockerfile) and `internal/<name>/`, appends a
+`[[dev.watch]]` rule to `hamr.toml` so `hamr dev` builds and runs the binary
+alongside the site, and — for HTTP types — appends a `<NAME>_PORT` entry to
+`.env` and `.env.example`. Must be run from a HAMR project root. Any option not
+provided as a flag is asked interactively, mirroring `hamr new`.
+
+```text
+hamr add service [name] [flags]
+```
+
+Service types:
+- `worker` — background worker: signal handling, graceful shutdown, ticker loop stub, optional DB.
+- `api` — JSON API server: `pkg/server` on its own port, `/api/health` route, optional DB and session auth.
+- `html` — HTML web server: `pkg/server` + templ on its own port, reuses the project's `internal/web/components` layout, optional DB/auth/locale.
+- `empty` — bare binary: env/logging bootstrap and a `Run()` stub in `internal/<name>/`.
+
+Flags:
+- `--type` — service type: `empty`, `worker`, `api`, or `html` (prompted if omitted)
+- `--db` — wire the project's repo store; the database and connector come from `hamr.toml [options]` so the wiring matches the site
+- `--auth` — wire session auth middleware against the shared store (`api`/`html` only; requires `--db` and a project scaffolded with session auth). The site keeps owning login; the service only validates sessions.
+- `--locale` — load the project's locale bundle + middleware (`html` only; requires a project scaffolded with locale)
+- `--port` — listen port for `api`/`html` (default `8081`), read from `<NAME>_PORT` (name upper-snake-cased: `billing-svc` → `BILLING_SVC_PORT`)
+
+Examples:
+```bash
+hamr add service                                   # fully interactive
+hamr add service mailer --type worker --db
+hamr add service billing --type api --db --auth --port 8081
+hamr add service admin --type html --db --auth=false --port 8082
+```
+
+Behavior notes:
+- HTTP services are **not** behind the `hamr dev` proxy (`:3000` targets the site only) — hit them directly at `http://localhost:<port>`. Live-reload injection and browser console capture apply to the proxied site; the appended watch rule still rebuilds and restarts the service on file changes.
+- The service name becomes the binary (`bin/<name>`), the watch-rule name, and the env prefix. Names colliding with an existing `cmd/`/`internal/` directory or a `[[dev.watch]]`/`[[dev.daemon]]` name are rejected.
+- Migrations stay owned by the site / `cmd/migrate`; services connect to the schema as-is.
+- The `html` type's home page renders through the project's shared `components.Layout`, so it picks up the project CSS and static asset pipeline.
+
 ### hamr add skill
 
 > Install an AI agent skill describing the HAMR framework.

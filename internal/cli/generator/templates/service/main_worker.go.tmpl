@@ -1,0 +1,96 @@
+package main
+
+import (
+	"context"
+	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
+{{- if .WithDB}}
+	"time"
+{{- end}}
+
+	_ "github.com/joho/godotenv/autoload"
+
+	"github.com/FyrmForge/hamr/pkg/config"
+	"github.com/FyrmForge/hamr/pkg/logging"
+{{- if .WithDB}}
+{{- if eq .DBConnector "sqlx"}}
+{{- if eq .Database "sqlite"}}
+	db "github.com/FyrmForge/hamr/pkg/db/sqlite"
+{{- else}}
+	"github.com/FyrmForge/hamr/pkg/db"
+{{- end}}
+{{- else}}
+	appdb "{{.Module}}/internal/db"
+{{- end}}
+{{- if eq .Database "sqlite"}}
+	"{{.Module}}/internal/repo/sqlite"
+{{- else}}
+	"{{.Module}}/internal/repo/postgres"
+{{- end}}
+{{- end}}
+
+	{{.PkgName}} "{{.Module}}/internal/{{.Name}}"
+)
+
+// version is set at build time via ldflags.
+var version = "dev"
+
+var (
+	envDevMode = config.GetEnvOrDefaultBool("DEV_MODE", false)
+{{- if .WithDB}}
+{{- if eq .Database "sqlite"}}
+	envDatabasePath = config.GetEnvOrDefault("DATABASE_PATH", "./data/{{.ProjectSlug}}.db")
+{{- else}}
+	envDatabaseURL = config.GetEnvOrDefault("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/{{.ProjectSlug}}?sslmode=disable")
+{{- end}}
+{{- end}}
+)
+
+func main() {
+	log := logging.New(!envDevMode)
+	slog.SetDefault(log)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+{{- if .WithDB}}
+
+	// Database.
+	connectCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+{{- if eq .DBConnector "sqlx"}}
+{{- if eq .Database "sqlite"}}
+	database, err := db.ConnectContext(connectCtx, envDatabasePath)
+{{- else}}
+	database, err := db.ConnectContext(connectCtx, envDatabaseURL)
+{{- end}}
+{{- else}}
+{{- if eq .Database "sqlite"}}
+	database, err := appdb.ConnectContext(connectCtx, envDatabasePath)
+{{- else}}
+	database, err := appdb.ConnectContext(connectCtx, envDatabaseURL)
+{{- end}}
+{{- end}}
+	if err != nil {
+		log.Error("failed to connect to database", "error", err)
+		os.Exit(1)
+	}
+{{- if eq .Database "sqlite"}}
+	store := sqlite.NewStore(database)
+{{- else}}
+	store := postgres.NewStore(database)
+{{- end}}
+{{- end}}
+
+	log.Info("starting {{.Name}}", "version", version)
+	if err := {{.PkgName}}.Run(ctx, {{.PkgName}}.Deps{
+{{- if .WithDB}}
+		Store: store,
+{{- end}}
+		Log: log,
+	}); err != nil {
+		log.Error("{{.Name}} failed", "error", err)
+		os.Exit(1)
+	}
+}

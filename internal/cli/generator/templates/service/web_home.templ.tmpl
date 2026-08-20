@@ -1,0 +1,15 @@
+package web
+
+import (
+	"github.com/labstack/echo/v4"
+	"{{.Module}}/internal/web/components"
+)
+
+templ homePage(c echo.Context) {
+	@components.Layout(c, "{{.Name}}") {
+		<main class="container">
+			<h1>{{.Name}}</h1>
+			<p>The {{.Name}} service is up and running.</p>
+		</main>
+	}
+}

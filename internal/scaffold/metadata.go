@@ -16,11 +16,17 @@ type AIConfig struct {
 	Dir string `toml:"dir"`
 }
 
-// Metadata represents the [hamr], [options], and [ai] sections of hamr.toml.
+// Metadata represents the [hamr], [options], [ai], and [locale] sections of hamr.toml.
 type Metadata struct {
-	Hamr    HamrSection `toml:"hamr"`
-	Options Options     `toml:"options"`
-	AI      AIConfig    `toml:"ai"`
+	Hamr    HamrSection   `toml:"hamr"`
+	Options Options       `toml:"options"`
+	AI      AIConfig      `toml:"ai"`
+	Locale  LocaleSection `toml:"locale"`
+}
+
+// LocaleSection holds the [locale] table fields the CLI reads.
+type LocaleSection struct {
+	Default string `toml:"default"`
 }
 
 // HamrSection holds the HAMR scaffold tracking fields.

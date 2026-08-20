@@ -16,7 +16,7 @@ This is a schema reference. For tutorial-style usage see
 | Table                   | Used by                       | Notes |
 |-------------------------|-------------------------------|-------|
 | `[hamr]`                | `hamr dev` (version check)    | Scaffold metadata |
-| `[options]`             | `hamr add skill`              | Records `hamr new` choices (only `alpine` is read at runtime today) |
+| `[options]`             | `hamr add skill` / `hamr add service` | Records `hamr new` choices |
 | `[ai]`                  | `hamr ai install/upgrade`     | AI artifact directory |
 | `[static]`              | `hamr gen static`             | Static asset fingerprinting |
 | `[proxy]`               | `hamr dev`                    | Reverse proxy + live reload |
@@ -49,10 +49,11 @@ scaffolded_at = "2026-04-24"
 
 ## `[options]` — Recorded `hamr new` choices
 
-Informational record of what was opted into at scaffold time. Only `alpine`
-is currently read at runtime (by `hamr add skill`, to tailor installed skill
-content). The rest are kept as an audit trail for humans and for tooling
-that may want to compare against current state.
+Informational record of what was opted into at scaffold time. Read at runtime
+by `hamr add skill` (`alpine`, to tailor installed skill content) and
+`hamr add service` (`database`, `db_connector`, `auth`, `locale`, so a new
+service's wiring matches the project). The rest are kept as an audit trail for
+humans and for tooling that may want to compare against current state.
 
 | Field         | Type   | Values |
 |---------------|--------|--------|

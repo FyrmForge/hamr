@@ -64,6 +64,18 @@ the TL;DR on top of it.
 
 ### Features
 
+- **`hamr add service` — add a new Go binary to an existing project.** A
+  stepped wizard (or flags) scaffolds one of four service types — `worker`
+  (background loop with graceful shutdown), `api` (JSON server on its own
+  port), `html` (templ server reusing the project layout), or `empty` (bare
+  `Run()` stub) — as `cmd/<name>/` (main.go + Dockerfile) plus
+  `internal/<name>/`, appends a `[[dev.watch]]` rule to `hamr.toml` so `hamr
+  dev` builds and runs it alongside the site, and appends `<NAME>_PORT` to
+  `.env`/`.env.example` for the HTTP types. `--db`, `--auth`, and `--locale`
+  optionally wire the project's repo store, session validation against the
+  shared store, and the locale bundle, matching the choices recorded in
+  `hamr.toml [options]`.
+
 - **`templint:ignore` — inline lint suppression for `.templ` files.** A
   deliberate exception no longer forces you to switch a rule `"off"` project-wide:
 
@@ -127,6 +139,17 @@ the TL;DR on top of it.
   onto a separately-exposable listener. See [CLI reference](guide/cli.md).
 
 ### Fixes
+
+- **Dev mode no longer caches static assets.** `server.New` mounted
+  `middleware.CacheControl(false)` unconditionally, so `.css`/`.js` under
+  `/static` were served with `public, max-age=86400` even with
+  `WithDevMode(true)`. Dev URLs aren't fingerprinted, so after any rebuild the
+  browser kept serving the stale stylesheet for up to a day — pages looked
+  broken until a hard refresh. The middleware now receives `s.devMode`: dev
+  sends `no-cache, no-store, must-revalidate` on every response; production
+  behavior is unchanged. The two static-cache tests asserted the prod headers
+  under `WithDevMode(true)` — which is exactly how this slipped through — and
+  now run in prod mode, with a new dev-mode test pinning the no-cache header.
 
 - **Scaffolded projects no longer 500 on their first 404.** `ctx.Get` (and
   `GetAs`) dereferenced the `echo.Context` without a nil check, but components

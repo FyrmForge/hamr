@@ -1,0 +1,17 @@
+
+[[dev.watch]]
+name = "{{.Name}}"
+{{- if eq .Type "html"}}
+watch = ["**/*.go", "**/*.templ", ".env"]
+{{- else}}
+watch = ["**/*.go", ".env"]
+{{- end}}
+ignore = ["*_templ.go", "*_test.go"]
+cmd = "go build -o ./bin/{{.Name}} ./cmd/{{.Name}}"
+run = "./bin/{{.Name}}"
+{{- if eq .Type "html"}}
+{{- if .HasTemplRule}}
+depends = ["templ"]
+{{- end}}
+reload = "full"
+{{- end}}

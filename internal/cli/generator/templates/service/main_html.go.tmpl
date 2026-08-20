@@ -1,0 +1,164 @@
+package main
+
+import (
+{{- if .WithDB}}
+	"context"
+{{- end}}
+	"log/slog"
+	"os"
+{{- if .WithDB}}
+	"time"
+{{- end}}
+
+	_ "github.com/joho/godotenv/autoload"
+{{- if .WithAuth}}
+
+	"github.com/FyrmForge/hamr/pkg/auth"
+{{- end}}
+
+	"github.com/FyrmForge/hamr/pkg/config"
+{{- if .WithDB}}
+{{- if eq .DBConnector "sqlx"}}
+{{- if eq .Database "sqlite"}}
+	db "github.com/FyrmForge/hamr/pkg/db/sqlite"
+{{- else}}
+	"github.com/FyrmForge/hamr/pkg/db"
+{{- end}}
+{{- end}}
+{{- end}}
+{{- if .WithLocale}}
+	"github.com/FyrmForge/hamr/pkg/i18n"
+{{- end}}
+	"github.com/FyrmForge/hamr/pkg/logging"
+{{- if .WithLocale}}
+	"github.com/FyrmForge/hamr/pkg/ptr"
+{{- end}}
+	"github.com/FyrmForge/hamr/pkg/server"
+
+{{- if .WithDB}}
+{{- if eq .DBConnector "gorm"}}
+	appdb "{{.Module}}/internal/db"
+{{- end}}
+{{- if eq .Database "sqlite"}}
+	"{{.Module}}/internal/repo/sqlite"
+{{- else}}
+	"{{.Module}}/internal/repo/postgres"
+{{- end}}
+{{- end}}
+	"{{.Module}}/internal/web/components"
+	{{.PkgName}}web "{{.Module}}/internal/{{.Name}}/web"
+)
+
+// version is set at build time via ldflags.
+var version = "dev"
+
+var (
+	envPort          = config.GetEnvOrDefaultInt("{{.EnvPrefix}}_PORT", {{.Port}})
+	envDevMode       = config.GetEnvOrDefaultBool("DEV_MODE", false)
+	envBaseURL       = config.GetEnvOrDefault("BASE_URL", "")
+{{- if .WithDB}}
+{{- if eq .Database "sqlite"}}
+	envDatabasePath  = config.GetEnvOrDefault("DATABASE_PATH", "./data/{{.ProjectSlug}}.db")
+{{- else}}
+	envDatabaseURL   = config.GetEnvOrDefault("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/{{.ProjectSlug}}?sslmode=disable")
+{{- end}}
+{{- end}}
+	envStaticBaseURL  = config.GetEnvOrDefault("STATIC_BASE_URL", "/static")
+	envTrustedProxies = config.GetEnvCSV("TRUSTED_PROXIES")
+)
+
+func main() {
+	log := logging.New(!envDevMode)
+	slog.SetDefault(log)
+	log.Info("starting {{.Name}}", "version", version)
+
+	components.StaticBaseURL = envStaticBaseURL
+
+	// Base URL (cookie domain).
+	baseOrigin, {{if .WithAuth}}baseDomain{{else}}_{{end}}, err := config.ParseBaseURL(envBaseURL)
+	if err != nil {
+		log.Error("invalid BASE_URL", "error", err)
+		os.Exit(1)
+	}
+	components.BaseURL = baseOrigin
+
+	srv, err := server.New(
+		server.WithPort(envPort),
+		server.WithDevMode(envDevMode),
+		server.WithStaticDir("frontend/static"),
+		server.WithStaticDistDir("frontend/dist"),
+		server.WithTrustedProxies(envTrustedProxies...),
+	)
+	if err != nil {
+		log.Error("failed to create server", "error", err)
+		os.Exit(1)
+	}
+{{- if .WithDB}}
+
+	// Database.
+	connectCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+{{- if eq .DBConnector "sqlx"}}
+{{- if eq .Database "sqlite"}}
+	database, err := db.ConnectContext(connectCtx, envDatabasePath)
+{{- else}}
+	database, err := db.ConnectContext(connectCtx, envDatabaseURL)
+{{- end}}
+{{- else}}
+{{- if eq .Database "sqlite"}}
+	database, err := appdb.ConnectContext(connectCtx, envDatabasePath)
+{{- else}}
+	database, err := appdb.ConnectContext(connectCtx, envDatabaseURL)
+{{- end}}
+{{- end}}
+	if err != nil {
+		log.Error("failed to connect to database", "error", err)
+		os.Exit(1)
+	}
+{{- if eq .Database "sqlite"}}
+	store := sqlite.NewStore(database)
+{{- else}}
+	store := postgres.NewStore(database)
+{{- end}}
+{{- end}}
+{{- if .WithAuth}}
+
+	// Sessions (validated against the shared store; the site owns login).
+	sessionManager := auth.NewSessionManager(store,
+		auth.WithCookieSecure(!envDevMode),
+		auth.WithCookieDomain(baseDomain),
+	)
+{{- end}}
+{{- if .WithLocale}}
+
+	// Locale bundle.
+	localeBundle, err := i18n.NewBundle(i18n.BundleConfig{
+		LocaleDir:         "locales",
+		DefaultLocale:     "{{.DefaultLocale}}",
+		FallbackToDefault: ptr.To(true),
+	})
+	if err != nil {
+		log.Error("failed to load locale bundle", "error", err)
+		os.Exit(1)
+	}
+{{- end}}
+
+	{{.PkgName}}web.RegisterRoutes(srv, &{{.PkgName}}web.Deps{
+{{- if .WithDB}}
+		Store: store,
+{{- end}}
+		DevMode: envDevMode,
+{{- if .WithAuth}}
+		SessionManager: sessionManager,
+{{- end}}
+{{- if .WithLocale}}
+		LocaleBundle: localeBundle,
+{{- end}}
+	})
+
+	log.Info("listening", "port", envPort, "devMode", envDevMode)
+	if err := srv.Start(); err != nil {
+		log.Error("server stopped", "error", err)
+		os.Exit(1)
+	}
+}

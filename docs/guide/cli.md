@@ -9,6 +9,7 @@ hamr
 ├── setup                   Interactive AI-agent setup (MCP bridge, permissions, skills)
 ├── compose [args...]       docker compose with hamr dev's merged config
 ├── add
+│   ├── service [name]      Add a new Go binary (worker, api, html, or empty)
 │   └── skill <target>      Install an AI agent skill describing hamr
 ├── ai
 │   ├── capture <url>       Capture a browser screenshot of a page
@@ -210,6 +211,48 @@ hamr mcp install [--client claude|codex|opencode] [--dry-run]
 ```
 
 Registers the bridge with an agent by writing its config (merging, never clobbering; idempotent). With no `--client`, auto-detects installed agents and configures each. Claude (`.mcp.json`) and opencode (`opencode.json`) are project-scoped; Codex (`~/.codex/config.toml`) is global, so its entry is pinned to this project with `--project`. `--dry-run` previews without writing. Requires `hamr` on your `PATH`.
+
+---
+
+## hamr add service
+
+Add a new Go binary to an existing HAMR project. Creates `cmd/<name>/` (main.go + Dockerfile) and `internal/<name>/`, appends a `[[dev.watch]]` rule to `hamr.toml` so `hamr dev` builds and runs the binary alongside the site, and — for the HTTP types — appends a `<NAME>_PORT` entry to `.env` and `.env.example`.
+
+```bash
+hamr add service [name] [flags]
+```
+
+Must be run from the root of a HAMR project (a directory containing `hamr.toml`). Any option not provided as a flag is asked interactively, mirroring `hamr new`.
+
+Service types:
+
+| Type | What you get |
+|------|--------------|
+| `worker` | Background worker — signal handling, graceful shutdown, ticker loop stub, optional DB |
+| `api` | JSON API server — `pkg/server` on its own port, `/api/health` route, optional DB and session auth |
+| `html` | HTML web server — `pkg/server` + templ on its own port, reuses the project's `internal/web/components` layout, optional DB/auth/locale |
+| `empty` | Bare binary — env/logging bootstrap and a `Run()` stub |
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--type` | prompted | Service type: `empty`, `worker`, `api`, or `html` |
+| `--db` | prompted | Wire the project's repo store (uses the database/connector from `hamr.toml [options]`) |
+| `--auth` | prompted | Wire session auth middleware against the shared store (`api`/`html`; requires `--db` and a project scaffolded with session auth). The site keeps owning login — the service only validates sessions. |
+| `--locale` | prompted | Load the project's locale bundle + middleware (`html`; requires a project scaffolded with locale) |
+| `--port` | `8081` | Listen port for `api`/`html` services, exposed as `<NAME>_PORT` |
+
+```bash
+hamr add service                                   # fully interactive
+hamr add service mailer --type worker --db
+hamr add service billing --type api --db --auth --port 8081
+hamr add service admin --type html --db --auth=false --port 8082
+```
+
+Notes:
+
+- HTTP services run on their own port and are **not** behind the `hamr dev` proxy at `:3000` — hit them directly (`http://localhost:<port>`). Live-reload injection and the browser console capture apply to the proxied site only; the appended watch rule still rebuilds and restarts the service on change.
+- The service name becomes the binary (`bin/<name>`), the watch-rule name, and the env prefix (`billing-svc` → `BILLING_SVC_PORT`). Names already used by a directory or watch rule are rejected.
+- Migrations stay owned by the site / `cmd/migrate`; services connect to the schema as-is.
 
 ---
 
