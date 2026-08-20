@@ -172,7 +172,7 @@ JSON translation files, CLDR plural rules, `text/template` interpolation.
 Pluggable file storage interface.
 
 - `FileStorage` interface: `Save`, `Open`, `Delete`, `Exists`, `List`
-- `SignableStorage` extends with `SignURL`
+- `SignableStorage` extends with `SignURL(ctx, path, expiry, opts...)` — `WithAttachment(filename)` signs a forced-download URL (Content-Disposition: attachment)
 - `NewLocalStorage(basePath, opts...)`, `NewS3Storage(cfg, opts...)`
 
 ### `media` (on top of `storage`)

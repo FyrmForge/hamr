@@ -535,6 +535,57 @@ func TestS3Storage_SignURL(t *testing.T) {
 	assert.Equal(t, "https://example.com/signed", url)
 }
 
+func TestS3Storage_SignURL_withAttachment(t *testing.T) {
+	mp := &mockPresigner{
+		fn: func(_ context.Context, in *s3.GetObjectInput) (*v4.PresignedHTTPRequest, error) {
+			require.NotNil(t, in.ResponseContentDisposition)
+			assert.Equal(t, `attachment; filename="report with spaces.pdf"`, *in.ResponseContentDisposition)
+			return &v4.PresignedHTTPRequest{URL: "https://example.com/signed?response-content-disposition=x"}, nil
+		},
+	}
+	store := newTestS3(&mockS3Client{}, mp)
+	_, err := store.SignURL(context.Background(), "docs/report.pdf", time.Minute, WithAttachment("report with spaces.pdf"))
+	require.NoError(t, err)
+}
+
+func TestS3Storage_SignURL_withAttachment_nonASCII(t *testing.T) {
+	mp := &mockPresigner{
+		fn: func(_ context.Context, in *s3.GetObjectInput) (*v4.PresignedHTTPRequest, error) {
+			require.NotNil(t, in.ResponseContentDisposition)
+			assert.Equal(t, `attachment; filename=r_sum_.pdf; filename*=utf-8''r%C3%A9sum%C3%A9.pdf`, *in.ResponseContentDisposition)
+			return &v4.PresignedHTTPRequest{URL: "https://example.com/signed"}, nil
+		},
+	}
+	store := newTestS3(&mockS3Client{}, mp)
+	_, err := store.SignURL(context.Background(), "docs/cv.pdf", time.Minute, WithAttachment("résumé.pdf"))
+	require.NoError(t, err)
+}
+
+func TestS3Storage_SignURL_withAttachment_emptyName(t *testing.T) {
+	mp := &mockPresigner{
+		fn: func(_ context.Context, in *s3.GetObjectInput) (*v4.PresignedHTTPRequest, error) {
+			require.NotNil(t, in.ResponseContentDisposition)
+			assert.Equal(t, `attachment`, *in.ResponseContentDisposition)
+			return &v4.PresignedHTTPRequest{URL: "https://example.com/signed"}, nil
+		},
+	}
+	store := newTestS3(&mockS3Client{}, mp)
+	_, err := store.SignURL(context.Background(), "docs/x.pdf", time.Minute, WithAttachment(""))
+	require.NoError(t, err)
+}
+
+func TestS3Storage_SignURL_noOpts_noDisposition(t *testing.T) {
+	mp := &mockPresigner{
+		fn: func(_ context.Context, in *s3.GetObjectInput) (*v4.PresignedHTTPRequest, error) {
+			assert.Nil(t, in.ResponseContentDisposition)
+			return &v4.PresignedHTTPRequest{URL: "https://example.com/signed"}, nil
+		},
+	}
+	store := newTestS3(&mockS3Client{}, mp)
+	_, err := store.SignURL(context.Background(), "img.png", time.Minute)
+	require.NoError(t, err)
+}
+
 func TestS3Storage_SignURL_error(t *testing.T) {
 	mp := &mockPresigner{
 		fn: func(context.Context, *s3.GetObjectInput) (*v4.PresignedHTTPRequest, error) {

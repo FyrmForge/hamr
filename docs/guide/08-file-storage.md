@@ -68,7 +68,15 @@ Pre-signed URLs are temporary, time-limited links that grant access to private S
 
 ```go
 url, err := store.SignURL(ctx, "avatars/user-123.jpg", 15*time.Minute)
+
+// Force a download instead of inline display:
+url, err := store.SignURL(ctx, "docs/report-v2.pdf", 15*time.Minute,
+    storage.WithAttachment("Quarterly Report.pdf"))
 ```
+
+`WithAttachment` bakes a `Content-Disposition: attachment` header into the
+signature — it cannot be appended to an already-signed URL, since S3 signs the
+query parameters.
 
 ---
 

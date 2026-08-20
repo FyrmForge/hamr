@@ -311,12 +311,13 @@ func (s *ImageStore) GetMediaCtx(ctx context.Context, id string) ImageRef {
 }
 
 // SignedURL generates a pre-signed URL for a specific storage path with a
-// custom expiry. Only works with S3-backed stores.
-func (s *ImageStore) SignedURL(ctx context.Context, path string, expiry time.Duration) (string, error) {
+// custom expiry. Only works with S3-backed stores. Options such as
+// storage.WithAttachment are forwarded to the underlying SignURL.
+func (s *ImageStore) SignedURL(ctx context.Context, path string, expiry time.Duration, opts ...storage.SignOption) (string, error) {
 	if s.signable == nil {
 		return "", fmt.Errorf("media: signed URLs not available for local storage")
 	}
-	return s.signable.SignURL(ctx, path, expiry)
+	return s.signable.SignURL(ctx, path, expiry, opts...)
 }
 
 // ServeHandler returns an Echo handler that serves image files from the store.

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -534,28 +535,30 @@ func (m *MailMock) handleInline(w http.ResponseWriter, _ *http.Request, msg *mai
 }
 
 // contentDispositionAttachment builds an RFC 6266 Content-Disposition header.
-// For non-ASCII filenames it emits both a sanitized ASCII fallback (filename)
-// and an RFC 5987-encoded UTF-8 parameter (filename*) so browsers render the
-// original name correctly.
+// mime.FormatMediaType handles the RFC 5987 ext-value encoding; when it emits
+// the authoritative filename* form (non-ASCII or control chars in name) we
+// prepend a sanitized plain-ASCII filename as a fallback for legacy parsers.
+// Keep in sync with the copy in pkg/storage/storage.go (importing pkg/storage
+// here would pull the AWS SDK into the dev binary).
 func contentDispositionAttachment(name string) string {
-	asciiOnly := true
-	for _, r := range name {
-		if r > 0x7F || r == '"' || r == '\\' {
-			asciiOnly = false
-			break
-		}
+	name = strings.ToValidUTF8(name, "_")
+	if name == "" {
+		return "attachment"
 	}
-	if asciiOnly {
-		return fmt.Sprintf(`attachment; filename=%q`, name)
+	cd := mime.FormatMediaType("attachment", map[string]string{"filename": name})
+	if cd == "" {
+		return "attachment"
 	}
-	// Build an ASCII fallback by mapping non-ASCII bytes to '_'.
+	if !strings.Contains(cd, "filename*") {
+		return cd
+	}
 	ascii := strings.Map(func(r rune) rune {
-		if r > 0x7F || r == '"' || r == '\\' {
+		if r < 0x20 || r > 0x7E || r == '"' || r == '\\' {
 			return '_'
 		}
 		return r
 	}, name)
-	return fmt.Sprintf(`attachment; filename=%q; filename*=UTF-8''%s`, ascii, url.PathEscape(name))
+	return mime.FormatMediaType("attachment", map[string]string{"filename": ascii}) + strings.TrimPrefix(cd, "attachment")
 }
 
 // checkSameOrigin rejects state-changing POSTs whose Origin header is present

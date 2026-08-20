@@ -306,12 +306,13 @@ func (s *VideoStore) GetMediaCtx(ctx context.Context, id string) VideoRef {
 	return s.GetMedia(id)
 }
 
-// SignedURL generates a pre-signed URL for a specific storage path.
-func (s *VideoStore) SignedURL(ctx context.Context, path string, expiry time.Duration) (string, error) {
+// SignedURL generates a pre-signed URL for a specific storage path. Options
+// such as storage.WithAttachment are forwarded to the underlying SignURL.
+func (s *VideoStore) SignedURL(ctx context.Context, path string, expiry time.Duration, opts ...storage.SignOption) (string, error) {
 	if s.signable == nil {
 		return "", fmt.Errorf("media: signed URLs not available for local storage")
 	}
-	return s.signable.SignURL(ctx, path, expiry)
+	return s.signable.SignURL(ctx, path, expiry, opts...)
 }
 
 // ServeHandler returns an Echo handler that serves video files from the store.

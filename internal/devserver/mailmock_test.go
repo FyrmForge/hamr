@@ -299,7 +299,7 @@ func TestAttachmentAndInlineEndpoints(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "application/pdf", rec.Header().Get("Content-Type"))
-	assert.Contains(t, rec.Header().Get("Content-Disposition"), `filename="report.pdf"`)
+	assert.Contains(t, rec.Header().Get("Content-Disposition"), `filename=report.pdf`)
 	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
 	got, _ := io.ReadAll(rec.Body)
 	assert.Equal(t, data, got)
@@ -610,10 +610,14 @@ func TestContentDispositionAttachment(t *testing.T) {
 		in   string
 		want string
 	}{
-		{"plain ascii", "report.pdf", `attachment; filename="report.pdf"`},
-		{"ascii with quote", `weird"name.pdf`, `attachment; filename="weird_name.pdf"; filename*=UTF-8''weird%22name.pdf`},
-		{"unicode", "résumé.pdf", `attachment; filename="r_sum_.pdf"; filename*=UTF-8''r%C3%A9sum%C3%A9.pdf`},
+		{"plain ascii", "report.pdf", `attachment; filename=report.pdf`},
+		{"ascii with quote", `weird"name.pdf`, `attachment; filename="weird\"name.pdf"`},
+		{"unicode", "résumé.pdf", `attachment; filename=r_sum_.pdf; filename*=utf-8''r%C3%A9sum%C3%A9.pdf`},
 		{"spaces", "my file.pdf", `attachment; filename="my file.pdf"`},
+		{"control char", "a\nb.pdf", `attachment; filename=a_b.pdf; filename*=utf-8''a%0Ab.pdf`},
+		{"empty", "", `attachment`},
+		{"equals in unicode name", "Übersicht Q1=Q2.pdf", `attachment; filename="_bersicht Q1=Q2.pdf"; filename*=utf-8''%C3%9Cbersicht%20Q1%3DQ2.pdf`},
+		{"invalid utf-8", "caf\xe9.pdf", `attachment; filename=caf_.pdf`},
 	}
 	for _, c := range cases {
 		got := contentDispositionAttachment(c.in)

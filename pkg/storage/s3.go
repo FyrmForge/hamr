@@ -266,11 +266,19 @@ func (s *S3Storage) Exists(ctx context.Context, path string) (bool, error) {
 	return true, nil
 }
 
-func (s *S3Storage) SignURL(ctx context.Context, path string, expiry time.Duration) (string, error) {
-	req, err := s.presigner.PresignGetObject(ctx, &s3.GetObjectInput{
+func (s *S3Storage) SignURL(ctx context.Context, path string, expiry time.Duration, opts ...SignOption) (string, error) {
+	var cfg signConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
+	input := &s3.GetObjectInput{
 		Bucket: &s.bucket,
 		Key:    &path,
-	}, s3.WithPresignExpires(expiry))
+	}
+	if cfg.contentDisposition != "" {
+		input.ResponseContentDisposition = &cfg.contentDisposition
+	}
+	req, err := s.presigner.PresignGetObject(ctx, input, s3.WithPresignExpires(expiry))
 	if err != nil {
 		return "", fmt.Errorf("storage: s3 presign %q: %w", path, err)
 	}

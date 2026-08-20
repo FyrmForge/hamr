@@ -1731,8 +1731,11 @@ type FileStorage interface {
 
 type SignableStorage interface {
     FileStorage
-    SignURL(ctx context.Context, path string, expiry time.Duration) (string, error)
+    SignURL(ctx context.Context, path string, expiry time.Duration, opts ...SignOption) (string, error)
 }
+
+type SignOption func(*signConfig)
+func WithAttachment(filename string) SignOption  // sign with Content-Disposition: attachment; filename=... to force download (RFC 6266; non-ASCII names get authoritative UTF-8 filename* plus ASCII fallback; empty name emits bare "attachment")
 ```
 Save overwrites existing files. Delete is idempotent. List returns all file
 paths under the given prefix.
@@ -1921,7 +1924,7 @@ func (s *ImageStore) UploadFromReaderWithID(ctx context.Context, id string, r io
 func (s *ImageStore) Delete(ctx context.Context, id string) error
 func (s *ImageStore) GetMedia(id string) ImageRef
 func (s *ImageStore) GetMediaCtx(ctx context.Context, id string) ImageRef  // may use signed URLs
-func (s *ImageStore) SignedURL(ctx context.Context, path string, expiry time.Duration) (string, error)
+func (s *ImageStore) SignedURL(ctx context.Context, path string, expiry time.Duration, opts ...storage.SignOption) (string, error)
 func (s *ImageStore) ServeHandler() echo.HandlerFunc
 ```
 
@@ -1964,7 +1967,7 @@ func (s *VideoStore) UploadFromReaderWithID(ctx context.Context, id string, r io
 func (s *VideoStore) Delete(ctx context.Context, id string) error
 func (s *VideoStore) GetMedia(id string) VideoRef
 func (s *VideoStore) GetMediaCtx(ctx context.Context, id string) VideoRef
-func (s *VideoStore) SignedURL(ctx context.Context, path string, expiry time.Duration) (string, error)
+func (s *VideoStore) SignedURL(ctx context.Context, path string, expiry time.Duration, opts ...storage.SignOption) (string, error)
 func (s *VideoStore) ServeHandler() echo.HandlerFunc
 ```
 

@@ -54,11 +54,20 @@ Extends `FileStorage` with pre-signed URL generation:
 ```go
 type SignableStorage interface {
     FileStorage
-    SignURL(ctx context.Context, path string, expiry time.Duration) (string, error)
+    SignURL(ctx context.Context, path string, expiry time.Duration, opts ...SignOption) (string, error)
 }
 ```
 
 Only `S3Storage` implements this interface.
+
+`SignOption` configures a single call. `WithAttachment(filename)` signs the
+URL so the response carries `Content-Disposition: attachment` with that
+filename (RFC 6266: non-ASCII names get the authoritative UTF-8 `filename*`
+parameter plus a plain-ASCII `filename` fallback), forcing browsers to
+download instead of display. An empty filename emits bare `attachment`.
+With no options the signed URL does not set a disposition — S3 serves
+whatever disposition the object's stored metadata has (usually none), and
+the browser decides display-vs-download from the Content-Type.
 
 ## Local Storage
 
@@ -105,6 +114,10 @@ Same `FileStorage` API, plus pre-signed URLs:
 
 ```go
 url, err := store.SignURL(ctx, "avatars/user-123.jpg", 15*time.Minute)
+
+// Force a download with a friendly filename:
+url, err := store.SignURL(ctx, "docs/report-v2.pdf", 15*time.Minute,
+    storage.WithAttachment("Quarterly Report.pdf"))
 ```
 
 ### S3Config
@@ -186,8 +199,12 @@ type FileStorage interface {
 }
 type SignableStorage interface {
     FileStorage
-    SignURL(ctx context.Context, path string, expiry time.Duration) (string, error)
+    SignURL(ctx context.Context, path string, expiry time.Duration, opts ...SignOption) (string, error)
 }
+
+// Sign options
+type SignOption func(*signConfig)
+func WithAttachment(filename string) SignOption  // Content-Disposition: attachment
 
 // Local
 func NewLocalStorage(basePath string, opts ...LocalOption) (*LocalStorage, error)
