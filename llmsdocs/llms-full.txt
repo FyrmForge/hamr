@@ -3034,7 +3034,7 @@ exists. Selecting a target closes the palette, opens a small floating
 "running" box, and runs `make <target>` from the project root with
 stdout/stderr piped into the hamr tab line-prefixed `[make:<target>] `.
 Only one target runs at a time. While running, every key is suppressed
-except `q` (sends `SIGINT` to the make process) and `Ctrl+C` (cancels
+except `q` (kills the `make` process group, children included) and `Ctrl+C` (cancels
 the run and quits the TUI so children aren't orphaned). On exit the box
 switches to a `Done ✓` / `Failed ✗ (exit N)` summary that stays until
 the user dismisses it with any key. The earlier dedicated `d` docker

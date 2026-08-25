@@ -372,7 +372,7 @@ The 🔨 emoji reflects overall state:
 | `r` | Rebuild all watch rules in topological order | |
 | `o` | Open the proxy URL in the default browser | Requires `[proxy]` configured |
 | `c` | Clear the active tab's log buffer | |
-| `m` | Run a Makefile target | Opens a fuzzy palette listing every target in `./Makefile` (declaration order). Type to filter, `↑/↓` to move, `↩` to run, `Esc` to cancel. Hidden when no `Makefile` exists. Output streams to the hamr tab prefixed `[make:<target>]`. While running, only `q` (cancel — `SIGINT`) and `Ctrl+C` (quit TUI) work. On exit a Done/Failed summary stays until any key dismisses it. |
+| `m` | Run a Makefile target | Opens a fuzzy palette listing every target in `./Makefile` (declaration order). Type to filter, `↑/↓` to move, `↩` to run, `Esc` to cancel. Hidden when no `Makefile` exists. Output streams to the hamr tab prefixed `[make:<target>]`. While running, only `q` (cancel — kills the `make` process group) and `Ctrl+C` (quit TUI) work. On exit a Done/Failed summary stays until any key dismisses it. |
 | `M` | Toggle the MCP gateway | Runtime kill-switch for `[dev.mcp]` — flips the gateway on/off for the session without rewriting `hamr.toml`. The status bar shows `MCP on/<n>` (exposed tool count) or `MCP off`. Shown only when a proxy is running. |
 | `Tab` / `Shift+Tab` | Cycle log tabs (hamr → docker stacks → mcp) | One tab per `[[dev.docker_compose]]` entry, fed by `docker compose logs -f --tail=50`; plus a dedicated **mcp** tab (last) when `[dev.mcp]` is configured, showing one line per agent request. |
 | `/` | Search the active tab (case-insensitive substring) | Live: highlights and `[k/n]` counter update as you type. `↩` locks in, `Esc` cancels; per-tab persistent. |

@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 func TestConnectContext_ReconnectsAfterBackendTermination(t *testing.T) {
@@ -26,11 +25,7 @@ func TestConnectContext_ReconnectsAfterBackendTermination(t *testing.T) {
 		tcpostgres.WithDatabase("hamr_db_test"),
 		tcpostgres.WithUsername("postgres"),
 		tcpostgres.WithPassword("postgres"),
-		tcpostgres.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).
-				WithStartupTimeout(60*time.Second),
-		),
+		tcpostgres.BasicWaitStrategies(),
 	)
 	if err != nil {
 		if dockerUnavailable(err) {

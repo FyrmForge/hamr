@@ -160,3 +160,29 @@ func TestRunState_FinishedFailedRetainsExitInfo(t *testing.T) {
 		t.Fatalf("running=%q want 'build'", r.running)
 	}
 }
+
+// TestSpinTick_AdvancesWhileRunningAndStops checks the spinner chain is
+// self-limiting: it advances a frame and reschedules while the target is
+// running, and returns no follow-up command once the run is over — a
+// leaked chain would repaint forever after the box is gone.
+func TestSpinTick_AdvancesWhileRunningAndStops(t *testing.T) {
+	m := &Model{}
+	m.run.markRunning("build")
+
+	_, cmd := m.Update(spinTickMsg{})
+	if m.spinFrame != 1 {
+		t.Fatalf("spinFrame=%d want 1", m.spinFrame)
+	}
+	if cmd == nil {
+		t.Fatal("expected the tick chain to reschedule while running")
+	}
+
+	m.run.markFinished(0, false, "")
+	_, cmd = m.Update(spinTickMsg{})
+	if cmd != nil {
+		t.Fatal("tick chain should stop once the run is finished")
+	}
+	if m.spinFrame != 1 {
+		t.Fatalf("spinFrame=%d want 1 (no advance after finish)", m.spinFrame)
+	}
+}

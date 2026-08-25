@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/FyrmForge/hamr/internal/devserver"
@@ -52,6 +53,24 @@ func scrollKeyMap() viewport.KeyMap {
 // ErrorState changes so the model can refresh the status line.
 type errorChangedMsg struct {
 	rules []string
+}
+
+// spinTickMsg advances the spinner in the "running" box. The chain is
+// started by dispatchRun and stops itself as soon as the run leaves
+// runRunning, so no tick fires while nothing is running.
+type spinTickMsg struct{}
+
+// spinFrames is the braille spinner used in the running box, same
+// rotation as the CLI spinner in internal/cli/cmd/spinner.go.
+var spinFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+// spinInterval is the spinner cadence — fast enough to read as motion,
+// slow enough not to repaint the frame constantly.
+const spinInterval = 100 * time.Millisecond
+
+// spinTick schedules the next spinner frame.
+func spinTick() tea.Cmd {
+	return tea.Tick(spinInterval, func(time.Time) tea.Msg { return spinTickMsg{} })
 }
 
 // runFinishedMsg fires when the goroutine running `make <target>`
@@ -134,6 +153,9 @@ type Model struct {
 	// (Update) and the dispatch goroutine (cmd.Wait) touch it.
 	runProcMu sync.Mutex
 	runProc   *exec.Cmd
+
+	// spinFrame indexes spinFrames for the running box's spinner.
+	spinFrame int
 
 	help helpState
 
@@ -299,6 +321,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.runProcMu.Unlock()
 		m.run.markFinished(msg.exitCode, msg.failed, msg.msg)
 		return m, nil
+
+	case spinTickMsg:
+		if m.run.stage != runRunning {
+			return m, nil
+		}
+		m.spinFrame++
+		return m, spinTick()
 
 	case versionStatusMsg:
 		m.versionStatus = msg.status
@@ -1273,6 +1302,10 @@ func (m *Model) dispatchRun(target string) tea.Cmd {
 	cmd := exec.Command("make", target)
 	cmd.Stdout = pw
 	cmd.Stderr = pw
+	// Own process group so cancelling can kill the whole tree — make's
+	// children (go build/test/...) hold the output pipe open, and
+	// cmd.Wait blocks on it until they're gone.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := cmd.Start(); err != nil {
 		m.run.markRunning(target)
@@ -1283,11 +1316,12 @@ func (m *Model) dispatchRun(target string) tea.Cmd {
 	}
 
 	m.run.markRunning(target)
+	m.spinFrame = 0
 	m.runProcMu.Lock()
 	m.runProc = cmd
 	m.runProcMu.Unlock()
 
-	return func() tea.Msg {
+	wait := func() tea.Msg {
 		err := cmd.Wait()
 		pw.Flush()
 		exitCode := 0
@@ -1305,11 +1339,15 @@ func (m *Model) dispatchRun(target string) tea.Cmd {
 		}
 		return runFinishedMsg{exitCode: exitCode, failed: failed, msg: msg}
 	}
+	// Spinner ticks alongside the wait; the tick chain ends itself once
+	// runFinishedMsg moves the stage off runRunning.
+	return tea.Batch(wait, spinTick())
 }
 
-// signalRunCancel sends SIGINT to the in-flight `make` process if any,
-// so the cancel hotkey lets graceful shutdown handlers run before the
-// goroutine's cmd.Wait returns. Safe to call when no process is running.
+// signalRunCancel kills the in-flight `make` process group if any, so
+// the cancel hotkey stops make and everything it spawned — otherwise a
+// surviving grandchild keeps the output pipe open and cmd.Wait never
+// returns. Safe to call when no process is running.
 func (m *Model) signalRunCancel() {
 	m.runProcMu.Lock()
 	cmd := m.runProc
@@ -1317,7 +1355,11 @@ func (m *Model) signalRunCancel() {
 	if cmd == nil || cmd.Process == nil {
 		return
 	}
-	_ = cmd.Process.Signal(os.Interrupt)
+	if pgid, err := syscall.Getpgid(cmd.Process.Pid); err == nil {
+		_ = syscall.Kill(-pgid, syscall.SIGKILL)
+		return
+	}
+	_ = cmd.Process.Kill()
 }
 
 // printableRune extracts a single printable rune from a tea.KeyMsg if
@@ -1908,8 +1950,9 @@ func (m *Model) runOverlayView() string {
 // runRunningView renders the floating "running" box. While visible all
 // keys are suppressed except `q` (cancel) and ctrl+c (quit TUI).
 func (m *Model) runRunningView() string {
+	frame := spinFrames[m.spinFrame%len(spinFrames)]
 	body := strings.Join([]string{
-		modalTitle.Render("Running: " + m.run.running),
+		modalTitle.Render(frame + " Running: " + m.run.running),
 		"",
 		modalDim.Render("output streaming to the hamr tab"),
 		"",
