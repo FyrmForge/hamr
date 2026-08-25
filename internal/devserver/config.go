@@ -2,7 +2,9 @@ package devserver
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -314,8 +316,30 @@ func (r *ReloadScope) UnmarshalTOML(data any) error {
 	return nil
 }
 
-// LoadConfig reads and parses a hamr.toml file, applies defaults, and validates.
-func LoadConfig(path string) (*Config, error) {
+// PrefsFileName is the per-developer override read from the same directory
+// as the main config. Gitignored by the scaffold: it holds preferences a
+// developer wants locally without imposing them on the team.
+const PrefsFileName = ".pref.hamr.toml"
+
+// PrefsPathFor returns the override path that pairs with the given config
+// file — a sibling of it, so `hamr dev --config /elsewhere/hamr.toml` reads
+// /elsewhere/.pref.hamr.toml.
+func PrefsPathFor(configPath string) string {
+	return filepath.Join(filepath.Dir(configPath), PrefsFileName)
+}
+
+// LoadConfig reads and parses a hamr.toml file, merges the per-developer
+// .pref.hamr.toml override over it if present, applies defaults, and
+// validates.
+func LoadConfig(path string) (*Config, error) { return loadConfig(path, true) }
+
+// LoadConfigNoPrefs is LoadConfig without the .pref.hamr.toml merge. Use it
+// anywhere the loaded values are written back to hamr.toml — merging first
+// would promote a developer's gitignored local preference into the team's
+// committed config.
+func LoadConfigNoPrefs(path string) (*Config, error) { return loadConfig(path, false) }
+
+func loadConfig(path string, withPrefs bool) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
@@ -327,7 +351,19 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
 
-	cfg.ProxyConfigured = meta.IsDefined("proxy") || meta.IsDefined("dev", "proxy_listen") || meta.IsDefined("dev", "proxy_target") || meta.IsDefined("dev", "inject_reload")
+	// Decoding the override into the same struct gives a per-key merge at
+	// any depth: only keys present in the override are touched.
+	// ponytail: arrays of tables ([[dev.watch]], [[dev.docker_compose]])
+	// replace the whole list rather than merging — decoder behaviour, not a
+	// choice. Merge-by-name if partial rule overrides are ever needed.
+	var prefsMeta toml.MetaData
+	if withPrefs {
+		if prefsMeta, err = mergePrefs(PrefsPathFor(path), &cfg); err != nil {
+			return nil, err
+		}
+	}
+
+	cfg.ProxyConfigured = proxyConfigured(meta) || proxyConfigured(prefsMeta)
 	if err := applyProxyAliases(&cfg, path); err != nil {
 		return nil, fmt.Errorf("validate config: %w", err)
 	}
@@ -348,6 +384,33 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// mergePrefs decodes the .pref.hamr.toml override (if any) over cfg and
+// returns its metadata. A missing file is not an error — the override is
+// optional by design. The zero MetaData is safe to query.
+func mergePrefs(path string, cfg *Config) (toml.MetaData, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return toml.MetaData{}, nil
+	}
+	if err != nil {
+		return toml.MetaData{}, fmt.Errorf("read %s: %w", PrefsFileName, err)
+	}
+	meta, err := toml.Decode(string(data), cfg)
+	if err != nil {
+		return toml.MetaData{}, fmt.Errorf("parse %s: %w", PrefsFileName, err)
+	}
+	return meta, nil
+}
+
+// proxyConfigured reports whether a decoded file mentions any proxy key, so
+// an override that only sets a proxy field still flips the flag.
+func proxyConfigured(meta toml.MetaData) bool {
+	return meta.IsDefined("proxy") ||
+		meta.IsDefined("dev", "proxy_listen") ||
+		meta.IsDefined("dev", "proxy_target") ||
+		meta.IsDefined("dev", "inject_reload")
 }
 
 // validateRuleDirs checks every rule/daemon `dir` against root (the working

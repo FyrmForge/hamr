@@ -1029,7 +1029,9 @@ func (r *Runner) watchConfigFile(ctx context.Context, ch chan<- struct{}) {
 			if !ok {
 				return
 			}
-			if filepath.Base(event.Name) != base {
+			// The per-developer override lives beside the config and is
+			// merged into it, so a change there is a config change.
+			if b := filepath.Base(event.Name); b != base && b != PrefsFileName {
 				continue
 			}
 			if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) {

@@ -11,6 +11,53 @@ This is a schema reference. For tutorial-style usage see
 
 ---
 
+## `.pref.hamr.toml` — per-developer overrides
+
+A `.pref.hamr.toml` sitting next to `hamr.toml` is merged over it at load
+time, so a developer can keep local preferences out of the team's committed
+config. It is optional and gitignored by the scaffold. With
+`--config /elsewhere/hamr.toml` the override is looked for at
+`/elsewhere/.pref.hamr.toml`.
+
+**What it overrides:** the dev-server config — `[proxy]`, `[dev]` and every
+`[dev.*]` table — as read by `hamr dev`, `hamr compose`, `hamr mcp` and
+`hamr add service`, plus `[static].dir` as read by `hamr gen static` and
+`hamr sync`.
+
+**What it does not override:** `[lint.templ]` (`hamr lint templ` loads it
+through `pkg/templint`), and `[hamr]` / `[options]` / `[ai]` — project
+identity and scaffold metadata, which are not preferences. `hamr setup`
+deliberately ignores the override too: it writes the `[dev.mcp]` values it
+shows straight back into `hamr.toml`, and a local preference must not end up
+in the committed file.
+
+The merge is per-key at any depth — write only what you want to change:
+
+```toml
+# .pref.hamr.toml — everything else in hamr.toml is untouched
+[proxy]
+listen = ":9999"
+```
+
+Editing it while `hamr dev` is running triggers the same config reload as
+editing `hamr.toml`.
+
+**Sharp edge:** arrays of tables (`[[dev.watch]]`, `[[dev.daemon]]`,
+`[[dev.docker_compose]]`) *replace* the whole list rather than merging into
+it. One `[[dev.watch]]` block in the override means the override's rules are
+the only watch rules. Scalar and table keys merge per-key as described above.
+Watch out for this after `hamr add service`, which appends a `[[dev.watch]]`
+rule to `hamr.toml`: the new rule is invisible while your override defines
+any watch rules of its own.
+
+**Second sharp edge:** the override must spell a setting the same way the
+base file does. `[proxy].listen` in `hamr.toml` and `[dev].proxy_listen` in
+the override are aliases for one setting, but both fields end up populated
+with different values and the config fails to load with
+`proxy.listen and dev.proxy_listen both set with different values`.
+
+---
+
 ## Top-level tables
 
 | Table                   | Used by                       | Notes |

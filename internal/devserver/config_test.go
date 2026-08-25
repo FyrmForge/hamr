@@ -992,3 +992,144 @@ func TestValidateRuleDir(t *testing.T) {
 		})
 	}
 }
+
+// writePrefs drops a .pref.hamr.toml next to an already-written config.
+func writePrefs(t *testing.T, configPath, content string) {
+	t.Helper()
+	require.NoError(t, os.WriteFile(PrefsPathFor(configPath), []byte(content), 0o644))
+}
+
+func TestLoadConfig_PrefsOverrideMergesPerKey(t *testing.T) {
+	path := writeConfig(t, `
+[proxy]
+listen = ":8080"
+target = "localhost:3000"
+
+[[dev.watch]]
+name = "go"
+watch = "**/*.go"
+cmd = "go build ./cmd/site"
+`)
+	// Only the one key the developer cares about — everything else in the
+	// team config must survive.
+	writePrefs(t, path, `
+[proxy]
+listen = ":9999"
+`)
+
+	cfg, err := LoadConfig(path)
+	require.NoError(t, err)
+
+	assert.Equal(t, ":9999", cfg.Proxy.Listen)
+	assert.Equal(t, "localhost:3000", cfg.Proxy.Target)
+	require.Len(t, cfg.Dev.Watch, 1)
+	assert.Equal(t, "go", cfg.Dev.Watch[0].Name)
+}
+
+func TestLoadConfig_PrefsOverrideAloneConfiguresProxy(t *testing.T) {
+	path := writeConfig(t, `
+[[dev.watch]]
+name = "go"
+watch = "**/*.go"
+cmd = "go build ./cmd/site"
+`)
+	writePrefs(t, path, `
+[proxy]
+listen = ":8080"
+target = "localhost:3000"
+`)
+
+	cfg, err := LoadConfig(path)
+	require.NoError(t, err)
+
+	// The base file has no proxy keys at all — the flag must come from the
+	// override, or defaults never get applied and the proxy never starts.
+	assert.True(t, cfg.ProxyConfigured)
+	assert.Equal(t, ":8080", cfg.Proxy.Listen)
+}
+
+func TestLoadConfig_PrefsOverrideReplacesWholeWatchList(t *testing.T) {
+	path := writeConfig(t, `
+[[dev.watch]]
+name = "go"
+watch = "**/*.go"
+cmd = "go build ./cmd/site"
+
+[[dev.watch]]
+name = "templ"
+watch = "**/*.templ"
+cmd = "templ generate"
+`)
+	writePrefs(t, path, `
+[[dev.watch]]
+name = "go"
+watch = "**/*.go"
+cmd = "go build -race ./cmd/site"
+`)
+
+	cfg, err := LoadConfig(path)
+	require.NoError(t, err)
+
+	// Documented sharp edge: arrays of tables replace, they don't merge.
+	require.Len(t, cfg.Dev.Watch, 1)
+	assert.Equal(t, "go build -race ./cmd/site", cfg.Dev.Watch[0].Cmd)
+}
+
+func TestLoadConfig_PrefsOverrideInvalidTOMLErrors(t *testing.T) {
+	path := writeConfig(t, `
+[[dev.watch]]
+name = "go"
+watch = "**/*.go"
+cmd = "go build ./cmd/site"
+`)
+	writePrefs(t, path, "[proxy\nlisten = \":9999\"\n")
+
+	_, err := LoadConfig(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), PrefsFileName)
+}
+
+func TestLoadConfig_PrefsOverrideUsingProxyAliasConflicts(t *testing.T) {
+	// The base file spells it [proxy].listen; the override spells it
+	// [dev].proxy_listen. Both land in the merged struct with different
+	// values, which applyProxyAliases treats as a conflict.
+	path := writeConfig(t, `
+[proxy]
+listen = ":8080"
+target = "localhost:3000"
+
+[[dev.watch]]
+name = "go"
+watch = "**/*.go"
+cmd = "go build ./cmd/site"
+`)
+	writePrefs(t, path, `
+[dev]
+proxy_listen = ":9999"
+`)
+
+	_, err := LoadConfig(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "proxy.listen and dev.proxy_listen")
+}
+
+func TestLoadConfig_NoPrefsIgnoresOverride(t *testing.T) {
+	path := writeConfig(t, `
+[proxy]
+listen = ":8080"
+target = "localhost:3000"
+
+[[dev.watch]]
+name = "go"
+watch = "**/*.go"
+cmd = "go build ./cmd/site"
+`)
+	writePrefs(t, path, `
+[proxy]
+listen = ":9999"
+`)
+
+	cfg, err := LoadConfigNoPrefs(path)
+	require.NoError(t, err)
+	assert.Equal(t, ":8080", cfg.Proxy.Listen)
+}

@@ -95,8 +95,11 @@ func loadSetupDefaults(root string) *setupChoices {
 		c.Access[area] = "deny"
 	}
 	// A partially-valid hamr.toml is not worth failing over — the picker just
-	// falls back to the all-deny baseline.
-	if cfg, err := devserver.LoadConfig(filepath.Join(root, "hamr.toml")); err == nil {
+	// falls back to the all-deny baseline. Loaded without the .pref.hamr.toml
+	// merge on purpose: whatever the picker shows is written straight back to
+	// hamr.toml, so a local preference must not ride along into the committed
+	// file.
+	if cfg, err := devserver.LoadConfigNoPrefs(filepath.Join(root, "hamr.toml")); err == nil {
 		c.Enabled = cfg.Dev.MCP.Enabled
 		for area, level := range cfg.Dev.MCP.Access {
 			if _, ok := c.Access[area]; ok {

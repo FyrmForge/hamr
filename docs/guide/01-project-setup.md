@@ -104,6 +104,11 @@ depends = ["templ"]
 reload = "full"
 ```
 
+Anything you want changed only on your own machine goes in a gitignored
+`.pref.hamr.toml` next to `hamr.toml` — it is merged over the committed
+config per-key, so you write just the keys you're changing. See
+[`hamr.toml` Reference → `.pref.hamr.toml`](hamr-toml.md#prefhamrtoml--per-developer-overrides).
+
 See [`hamr.toml` Reference](hamr-toml.md) for the full schema, or
 [Development Workflow](02-dev-workflow.md) for tutorial-style usage.
 

@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/BurntSushi/toml"
+	"github.com/FyrmForge/hamr/internal/devserver"
 	"github.com/FyrmForge/hamr/pkg/fingerprint"
 	"github.com/spf13/cobra"
 )
@@ -33,6 +34,12 @@ func staticDirFromConfig(fallback string) string {
 	var f staticTomlFile
 	if err := toml.Unmarshal(data, &f); err != nil {
 		return fallback
+	}
+	// Same per-developer override devserver.LoadConfig honours; a bad
+	// override is ignored here rather than fatal, matching how this
+	// function already treats an unparseable hamr.toml.
+	if pref, err := os.ReadFile(devserver.PrefsFileName); err == nil {
+		_ = toml.Unmarshal(pref, &f)
 	}
 	if f.Static.Dir == "" {
 		return fallback

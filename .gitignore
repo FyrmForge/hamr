@@ -3,3 +3,4 @@ sandbox/
 .claude/
 .codex
 .codex-tmp/
+.pref.hamr.toml
