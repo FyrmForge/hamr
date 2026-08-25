@@ -20,6 +20,10 @@ jobs:
         with:
           version: v2.10
           args: --help
+          # Skip `config verify`: it fetches a JSON schema from
+          # golangci-lint.run on every run and times out at random.
+          # make lint below still fails on a broken .golangci.yml.
+          verify: false
 
       - run: make build
 
