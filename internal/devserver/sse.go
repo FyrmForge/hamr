@@ -64,6 +64,11 @@ type SSEBroker struct {
 	clients    map[uint64]chan SSEEvent
 	nextID     atomic.Uint64
 	configJSON string // pre-serialized config payload
+	// darkFilter is the live state of the dark comfort filter over the
+	// proxied site. It lives here rather than in the pre-serialized config
+	// so a tab connecting after a runtime toggle gets the current state, not
+	// the [dev].dark_filter seed. Flipped by DevActions.handleDark.
+	darkFilter atomic.Bool
 }
 
 // NewSSEBroker creates a new SSE broker. The provided watch rules, daemons, and
@@ -71,8 +76,9 @@ type SSEBroker struct {
 // as a "config" event. The mock flags decide which mock-shortcut buttons
 // the dev panel renders. consoleCaptureEnabled toggles the browser-console
 // transport client-side: true tells the injected reload script to patch
-// console + open /__hamr/console; false tells it to do nothing.
-func NewSSEBroker(rules []WatchRule, daemons []Daemon, dockerCompose []DockerCompose, mailMockEnabled, smsMockEnabled, stripeMockEnabled, consoleCaptureEnabled bool) *SSEBroker {
+// console + open /__hamr/console; false tells it to do nothing. darkFilter
+// seeds the dark comfort filter state (see SSEBroker.darkFilter).
+func NewSSEBroker(rules []WatchRule, daemons []Daemon, dockerCompose []DockerCompose, mailMockEnabled, smsMockEnabled, stripeMockEnabled, consoleCaptureEnabled, darkFilter bool) *SSEBroker {
 	cfg := sseConfig{
 		Rules:          make([]sseRule, len(rules)),
 		Daemons:        make([]sseDaemon, len(daemons)),
@@ -105,10 +111,12 @@ func NewSSEBroker(rules []WatchRule, daemons []Daemon, dockerCompose []DockerCom
 		}
 	}
 	data, _ := json.Marshal(cfg)
-	return &SSEBroker{
+	b := &SSEBroker{
 		clients:    make(map[uint64]chan SSEEvent),
 		configJSON: string(data),
 	}
+	b.darkFilter.Store(darkFilter)
+	return b
 }
 
 // Handler returns an http.HandlerFunc that serves SSE connections.
@@ -141,6 +149,11 @@ func (b *SSEBroker) Handler() http.HandlerFunc {
 		// Send initial connected event, followed by config.
 		_, _ = fmt.Fprintf(w, "event: connected\ndata: ok\n\n")
 		_, _ = fmt.Fprintf(w, "event: config\ndata: %s\n\n", b.configJSON)
+		// Only sent when on: the client defaults to off, so the common case
+		// costs no frame.
+		if b.darkFilter.Load() {
+			_, _ = fmt.Fprintf(w, "event: dark_filter\ndata: on\n\n")
+		}
 		flusher.Flush()
 
 		for {
@@ -156,6 +169,15 @@ func (b *SSEBroker) Handler() http.HandlerFunc {
 			}
 		}
 	}
+}
+
+// onOff renders a bool as the "on"/"off" wire form used by the dark_filter
+// event.
+func onOff(v bool) string {
+	if v {
+		return "on"
+	}
+	return "off"
 }
 
 // Broadcast sends an event to all connected clients. Non-blocking: if a

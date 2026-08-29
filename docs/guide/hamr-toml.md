@@ -169,6 +169,7 @@ present.
 | `log_file_max_lines` | int    | `200`                   | Lines retained. Must be > 0. |
 | `port_walk`          | bool   | `true`                  | When a hamr-managed port is busy, walk +1 up to a small cap and warn (see below). Set `false` to fail fast on EADDRINUSE. |
 | `hamr_console_capture`| bool  | `true`                  | Pipe browser `console.*` + uncaught errors + unhandled rejections + resource-load failures + CSP violations into the dev TUI/log over `/__hamr/console` WebSocket. Set `false` to disable: the WS endpoint isn't mounted, the injected reload script doesn't patch console, and there's zero overhead. See [browser console transport](#browser-console-transport-siteconsole) below. |
+| `dark_filter`        | bool   | `false`                 | Initial state of the dev panel's **Dark filter** — an `invert(1) hue-rotate(180deg)` CSS filter over the proxied site so a light-mode app is bearable to work on. Toggle it live from the dev panel (bottom-left widget); the toggle lives in the `hamr dev` process only and is never written back to `hamr.toml`. Set it in `.pref.hamr.toml` to keep it a per-developer preference. |
 | `hamr_console_filter`| bool   | `false`                 | Drop browser-console frames whose message contains `[hamr]` (i.e. hamr's own injected reload-script chatter like `[hamr] page swapped`). Default `false` shows everything; flip `true` if the per-save chatter drowns out app logs. No effect when `hamr_console_capture = false`. |
 
 #### `port_walk` — collision-tolerant port binding

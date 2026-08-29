@@ -23,7 +23,7 @@ func TestInjectReloadScript_HTML(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
 	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, nil, nil, nil, nil, nil, nil, nil, nil, nil, true)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()
@@ -53,7 +53,7 @@ func TestInjectReloadScript_ContentLength(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
 	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, nil, nil, nil, nil, nil, nil, nil, nil, nil, true)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()
@@ -90,7 +90,7 @@ func TestInjectReloadScript_Chunked(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
 	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, nil, nil, nil, nil, nil, nil, nil, nil, nil, true)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()
@@ -128,7 +128,7 @@ func TestInjectReloadScript_OversizedChunkedNotTruncated(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
 	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, nil, nil, nil, nil, nil, nil, nil, nil, nil, true)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()
@@ -154,7 +154,7 @@ func TestInjectReloadScript_NonHTML(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
 	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, nil, nil, nil, nil, nil, nil, nil, nil, nil, true)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()
@@ -176,7 +176,7 @@ func TestInjectReloadScript_NoBodyTag(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
 	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, nil, nil, nil, nil, nil, nil, nil, nil, nil, true)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()
@@ -202,7 +202,7 @@ func TestInjectReloadScript_EmptyBody(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
 	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, nil, nil, nil, nil, nil, nil, nil, nil, nil, true)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()
@@ -226,7 +226,7 @@ func TestInjectReloadScript_MultipleBodyTags(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
 	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, nil, nil, nil, nil, nil, nil, nil, nil, nil, true)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()
@@ -254,7 +254,7 @@ func TestInjectReloadScript_Disabled(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
 	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, nil, nil, nil, nil, nil, nil, nil, nil, nil, false)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()
@@ -276,7 +276,7 @@ func TestInjectReloadScript_CSSResponse(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
 	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, nil, nil, nil, nil, nil, nil, nil, nil, nil, true)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()
@@ -327,7 +327,7 @@ func TestNewProxyHandler_StripsAcceptEncodingForInjection(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
 	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, nil, nil, nil, nil, nil, nil, nil, nil, nil, true)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()
@@ -348,7 +348,7 @@ func TestNewProxyHandler_StripsAcceptEncodingForInjection(t *testing.T) {
 }
 
 func TestSSEEndpoint(t *testing.T) {
-	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
 	handler := NewProxyHandler("localhost:9999", broker, nil, nil, nil, nil, nil, nil, nil, nil, nil, true)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()
@@ -382,7 +382,7 @@ func TestNormalizeHost(t *testing.T) {
 }
 
 func TestListenAndServeProxy(t *testing.T) {
-	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
 	handler := NewProxyHandler("localhost:9999", broker, nil, nil, nil, nil, nil, nil, nil, nil, nil, false)
 
 	srv, ln, err := ListenAndServeProxy(":0", handler)
@@ -400,7 +400,7 @@ func TestListenAndServeProxy(t *testing.T) {
 }
 
 func TestListenAndServeProxy_InvalidAddr(t *testing.T) {
-	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
 	handler := NewProxyHandler("localhost:9999", broker, nil, nil, nil, nil, nil, nil, nil, nil, nil, false)
 
 	_, _, err := ListenAndServeProxy("invalid-not-an-addr", handler)
@@ -416,7 +416,7 @@ func TestErrorPage_ServedOnBuildError(t *testing.T) {
 
 	es := NewErrorState()
 	es.Set("go", "cannot find package main")
-	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
 	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, es, nil, nil, nil, nil, nil, nil, nil, nil, true)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()
@@ -447,7 +447,7 @@ func TestErrorPage_SkippedForAPI(t *testing.T) {
 
 	es := NewErrorState()
 	es.Set("go", "error")
-	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
 	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, es, nil, nil, nil, nil, nil, nil, nil, nil, false)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()
@@ -475,7 +475,7 @@ func TestErrorPage_SkippedForHTMX(t *testing.T) {
 
 	es := NewErrorState()
 	es.Set("go", "error")
-	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
 	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, es, nil, nil, nil, nil, nil, nil, nil, nil, false)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()
@@ -503,7 +503,7 @@ func TestErrorPage_NotServedWhenNoErrors(t *testing.T) {
 	defer backend.Close()
 
 	es := NewErrorState()
-	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
 	handler := NewProxyHandler(backend.Listener.Addr().String(), broker, es, nil, nil, nil, nil, nil, nil, nil, nil, false)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()
@@ -527,7 +527,7 @@ func TestLogsEndpoint(t *testing.T) {
 	logBuf.Append(LogLine{Rule: "go", Text: "building..."})
 	logBuf.Append(LogLine{Rule: "templ", Text: "generating templates"})
 
-	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
 	handler := NewProxyHandler("localhost:9999", broker, nil, logBuf, nil, nil, nil, nil, nil, nil, nil, false)
 	proxy := httptest.NewServer(handler)
 	defer proxy.Close()

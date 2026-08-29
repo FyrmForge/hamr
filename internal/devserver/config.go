@@ -40,6 +40,13 @@ type DevConfig struct {
 	Stripe          StripeConfig    `toml:"stripe"`
 	MCP             MCPConfig       `toml:"mcp"`
 
+	// DarkFilter sets the initial state of the dev-panel "Dark filter"
+	// toggle: an invert(1) hue-rotate(180deg) CSS filter over the proxied
+	// site so a light-mode app is bearable to work on. Default false. The
+	// panel toggle flips it at runtime in the hamr dev process only — the
+	// value is never written back to hamr.toml.
+	DarkFilter bool `toml:"dark_filter"`
+
 	// HamrConsoleCapture toggles the entire browser-console transport
 	// (window.console.* + uncaught errors + unhandled rejections +
 	// resource-load failures + CSP violations → /__hamr/console WS →

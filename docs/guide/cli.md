@@ -85,11 +85,13 @@ hamr dev [flags]
 | `--no-proxy` | `false` | Skip the reverse proxy, just run watchers |
 | `--verbose`, `-v` | `false` | Enable verbose (debug) logging |
 | `--skip-version-check` | `false` | Skip the "scaffold newer than CLI" guard |
+| `--headless` | `false` | No TUI: plain log lines on stdout. Automatic when stdout is not a terminal (see [dev guide](pkg/dev.md#headless-mode)). |
 
 ```bash
 hamr dev                    # reads hamr.toml from current directory
 hamr dev --config my.toml   # custom config path
 hamr dev --no-proxy         # skip proxy, just run watchers
+hamr dev --headless > dev.log &   # background, e.g. from an AI agent or CI
 hamr dev --verbose          # detailed watcher/rebuild logs
 ```
 

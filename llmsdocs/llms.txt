@@ -24,7 +24,10 @@
   Generated projects define a Store interface in their internal/repo/repo.go;
   it is not part of the hamr framework itself.
 - **hamr dev**: Dev server with file watching, auto-rebuild, and live reload.
-  Mirrors its recent output to a rolling log file (default
+  `--headless` (automatic when stdout is not a terminal) skips the TUI and
+  streams every line — hamr, rules, daemons, docker logs — to stdout, for
+  agents/CI running `hamr dev --headless > dev.log &`; no hotkeys, stop
+  with SIGTERM. Mirrors its recent output to a rolling log file (default
   `.hamr/dev_logs.txt`, 200 lines) for LLM consumption. The file contains
   `[hamr dev]` messages plus watched command/daemon stdout-stderr with terminal
   escapes stripped. The injected reload script also pipes browser
@@ -39,7 +42,12 @@
   `fetch`/`XHR` network errors are not catchable from page JS, so they
   aren't captured. Set `[dev].hamr_console_filter = true` to drop
   frames whose message contains `[hamr]` (the reload script's own
-  chatter); default false shows everything. Configure via `log_file`
+  chatter); default false shows everything. `[dev].dark_filter`
+  (default false) sets the initial state of the dev panel's "Dark
+  filter" — an invert(1) hue-rotate(180deg) CSS filter over the proxied
+  site for working on light-mode apps; the panel checkbox POSTs
+  `/__hamr/dark` to flip it, state lives in the `hamr dev` process and
+  is never written back to `hamr.toml`. Configure via `log_file`
   and `log_file_max_lines` in `[dev]`; set `log_file = "none"` to
   disable. Refuses to start (released
   builds only) when `[hamr] version` in `hamr.toml` is newer than the CLI;

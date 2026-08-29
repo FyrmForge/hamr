@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,6 +13,7 @@ import (
 	"github.com/FyrmForge/hamr/internal/devserver/tui"
 	"github.com/FyrmForge/hamr/internal/scaffold"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var devCmd = &cobra.Command{
@@ -32,13 +34,68 @@ func init() {
 	devCmd.Flags().Bool("no-proxy", false, "skip the reverse proxy, just run watchers")
 	devCmd.Flags().BoolP("verbose", "v", false, "enable verbose (debug) logging")
 	devCmd.Flags().Bool("skip-version-check", false, "skip the \"scaffold newer than CLI\" guard")
+	devCmd.Flags().Bool("headless", false, "no TUI: plain log lines on stdout (automatic when stdout is not a terminal)")
 }
+
+// devUI is what runDevLoop needs from its front end. *tui.Runtime is the
+// interactive implementation; headlessUI is the plain-stdout one used when
+// an agent or CI runs `hamr dev` in the background.
+type devUI interface {
+	Log(line string)
+	SetVersion(label string)
+	SetVersionStatus(status devserver.VersionStatus, msg string)
+	SetVersionUpdateIfOK(msg string)
+	RegisterDockerStacks(names []string) map[string]io.Writer
+	Wire(opts []devserver.Option) []devserver.Option
+	HotkeyActions() <-chan devserver.HotkeyAction
+}
+
+// headlessUI writes everything — hamr's own lines, rule/daemon output,
+// docker logs — to stdout so `hamr dev --headless > dev.log &` captures a
+// single stream. No hotkeys: Ctrl+C / SIGTERM via the signal context is the
+// only way out, and the status-bar setters degrade to log lines.
+type headlessUI struct{}
+
+func (headlessUI) Log(line string) { fmt.Fprintln(os.Stdout, line) } //nolint:errcheck
+func (headlessUI) SetVersion(label string) {
+	headlessUI{}.Log(fmt.Sprintf("%s hamr %s (headless)", devserver.HamrDevTag(), label))
+}
+func (headlessUI) SetVersionStatus(_ devserver.VersionStatus, msg string) {
+	if msg != "" {
+		headlessUI{}.Log(fmt.Sprintf("%s %s", devserver.HamrDevTag(), msg))
+	}
+}
+func (headlessUI) SetVersionUpdateIfOK(string) {} // already logged by the caller
+
+// RegisterDockerStacks maps every compose entry to stdout. compose's own
+// `service-1 |` prefix identifies lines.
+// ponytail: the follower forces --ansi=always, so colour codes land in the
+// log file; plumb --ansi=never through WithDockerLogSinks if that bites.
+func (headlessUI) RegisterDockerStacks(names []string) map[string]io.Writer {
+	out := make(map[string]io.Writer, len(names))
+	for _, n := range names {
+		out[n] = os.Stdout
+	}
+	return out
+}
+
+func (headlessUI) Wire(opts []devserver.Option) []devserver.Option {
+	return append(opts,
+		devserver.WithLogWriter(os.Stdout),
+		devserver.WithProcessOutput(os.Stdout, os.Stdout),
+	)
+}
+
+// HotkeyActions returns nil; WaitForConfigChangeOrQuit documents a nil
+// channel as safe (blocks until ctx cancels or the config changes).
+func (headlessUI) HotkeyActions() <-chan devserver.HotkeyAction { return nil }
 
 func runDev(cmd *cobra.Command, _ []string) error {
 	configPath, _ := cmd.Flags().GetString("config")
 	noProxy, _ := cmd.Flags().GetBool("no-proxy")
 	verbose, _ := cmd.Flags().GetBool("verbose")
 	skipVersionCheck, _ := cmd.Flags().GetBool("skip-version-check")
+	headless, _ := cmd.Flags().GetBool("headless")
 
 	if err := ensureCLINotBehindScaffold(configPath, skipVersionCheck); err != nil {
 		return err
@@ -46,6 +103,12 @@ func runDev(cmd *cobra.Command, _ []string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// No terminal on stdout (piped into a file by an agent or CI) means the
+	// TUI can't render anyway — fall back to headless without the flag.
+	if headless || !term.IsTerminal(int(os.Stdout.Fd())) {
+		return runDevLoop(ctx, headlessUI{}, configPath, noProxy, verbose)
+	}
 
 	rt := tui.NewRuntime()
 
@@ -70,7 +133,7 @@ func runDev(cmd *cobra.Command, _ []string) error {
 // runDevLoop is the runner-side counterpart to the bubbletea program. It
 // owns the config-reload retry behavior and writes status lines into the
 // TUI viewport via rt.Log.
-func runDevLoop(ctx context.Context, rt *tui.Runtime, configPath string, noProxy, verbose bool) error {
+func runDevLoop(ctx context.Context, rt devUI, configPath string, noProxy, verbose bool) error {
 	// Fire the version check once: the result lives for the whole TUI
 	// session (a config reload doesn't change the CLI binary's version).
 	var versionChecked bool

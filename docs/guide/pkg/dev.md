@@ -11,13 +11,25 @@ hamr dev [flags]
 | `--config` | `hamr.toml` | Path to config file |
 | `--no-proxy` | `false` | Skip the reverse proxy, just run watchers |
 | `--verbose`, `-v` | `false` | Enable verbose (debug) logging |
+| `--headless` | `false` | No TUI: plain log lines on stdout. Automatic when stdout is not a terminal. |
 
 ```bash
 hamr dev                    # reads hamr.toml from current directory
 hamr dev --config my.toml   # custom config path
 hamr dev --no-proxy         # skip proxy, just run watchers
 hamr dev --verbose          # detailed watcher/rebuild logs
+hamr dev --headless > dev.log &   # background, e.g. from an AI agent or CI
 ```
+
+### Headless mode
+
+`--headless` skips the TUI and writes everything — hamr's own lines, rule and
+daemon output, `docker compose logs` — to stdout as one stream, so an agent
+working in a throwaway worktree can run `hamr dev --headless > dev.log &`,
+drive the server through `hamr mcp` / `/__hamr/*` HTTP, and kill it when done.
+It switches on by itself whenever stdout is not a terminal (piped or
+redirected), so forgetting the flag is harmless. Terminal hotkeys don't exist
+in this mode; stop with Ctrl+C / SIGTERM. Output keeps its ANSI colour codes.
 
 ---
 
@@ -338,7 +350,25 @@ The injected script adds a small widget (bottom-left corner) that opens a panel 
 - **Daemons** — status dots (running/error) with command info
 - **Docker containers** — per-service health LEDs with a settings menu (restart, wipe & recreate)
 - **Logs toggle** — checkbox to open the logs overlay
+- **Dark filter** — checkbox that inverts the proxied site (see below)
 - **Errors** — build error output when a rule fails
+
+### Dark Filter
+
+A comfort filter for working on a light-mode app: `invert(1) hue-rotate(180deg)`
+over the whole document, with images, video, canvas, iframes and hamr's own
+overlay re-inverted so they render true. Inline `<svg>` icons flip with the text
+around them by design.
+
+Off by default. `[dev].dark_filter = true` in `hamr.toml` (or `.pref.hamr.toml`
+for a per-developer preference) sets the initial state; the panel checkbox
+`POST`s `/__hamr/dark` to flip it. The state lives in the `hamr dev` process,
+is broadcast to every open tab over SSE, dies with the process, and is never
+written back to `hamr.toml`.
+
+Caveat: a CSS filter makes `<html>` a containing block, so a site's
+`position: fixed` elements anchor to it — rare, but it can shift a fixed layout
+while the filter is on.
 
 ### Logs Overlay
 

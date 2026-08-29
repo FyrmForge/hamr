@@ -260,7 +260,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	if r.procStdout != nil || r.procStderr != nil {
 		pm.SetOutputSinks(r.procStdout, r.procStderr)
 	}
-	broker := NewSSEBroker(r.cfg.Dev.Watch, r.cfg.Dev.Daemons, r.cfg.Dev.DockerCompose, r.cfg.Dev.Email.Enabled, r.cfg.Dev.SMS.Enabled, r.cfg.Dev.Stripe.Enabled, consoleCapture)
+	broker := NewSSEBroker(r.cfg.Dev.Watch, r.cfg.Dev.Daemons, r.cfg.Dev.DockerCompose, r.cfg.Dev.Email.Enabled, r.cfg.Dev.SMS.Enabled, r.cfg.Dev.Stripe.Enabled, consoleCapture, r.cfg.Dev.DarkFilter)
 	errorState := NewErrorState()
 	logBuf := NewLogBuffer(1000)
 	requestLog := NewRequestLog(1000)

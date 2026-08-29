@@ -61,6 +61,24 @@ func (a *DevActions) wipe(dc *DockerCompose, service string) {
 func (a *DevActions) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/__hamr/rule/", guardUnsafe(a.handleRule))
 	mux.HandleFunc("/__hamr/docker/", guardUnsafe(a.handleDocker))
+	mux.HandleFunc("/__hamr/dark", guardUnsafe(a.handleDark))
+}
+
+// handleDark flips the dark comfort filter and tells every connected browser
+// the new state. The state is held on the broker (seeded from
+// [dev].dark_filter, never written back to hamr.toml, dies with the process)
+// so tabs connecting later get the current value, not the config seed.
+// POST only; the response echoes the state for callers off the SSE stream.
+func (a *DevActions) handleDark(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	on := !a.broker.darkFilter.Load()
+	a.broker.darkFilter.Store(on)
+	a.broker.Broadcast(SSEEvent{Type: "dark_filter", Data: onOff(on)})
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"ok":true,"on":%t}`, on) //nolint:errcheck
 }
 
 // ErrorState returns the underlying error state so non-HTTP consumers (the

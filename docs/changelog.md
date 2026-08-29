@@ -64,6 +64,20 @@ the TL;DR on top of it.
 
 ### Features
 
+- **`hamr dev --headless` — no TUI, one plain stream on stdout.** For an AI
+  agent or CI running the dev server in the background
+  (`hamr dev --headless > dev.log &`): hamr's own lines, rule/daemon output
+  and `docker compose logs` all go to stdout; no hotkeys, stop with SIGTERM.
+  Switches on automatically whenever stdout is not a terminal. `hamr mcp` and
+  the `/__hamr/*` endpoints work as before.
+
+- **Dark comfort filter for the proxied site.** A "Dark filter" checkbox in
+  the browser dev panel inverts the page (`invert(1) hue-rotate(180deg)`,
+  media and hamr's own overlay re-inverted) so a light-mode app is bearable
+  to work on. `[dev].dark_filter = true` (or in `.pref.hamr.toml`) sets the
+  initial state; the toggle lives in the `hamr dev` process, is kept in sync
+  across open tabs over SSE, and is never written back to `hamr.toml`.
+
 - **`hamr add service` — add a new Go binary to an existing project.** A
   stepped wizard (or flags) scaffolds one of four service types — `worker`
   (background loop with graceful shutdown), `api` (JSON server on its own

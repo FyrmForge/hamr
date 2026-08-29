@@ -23,6 +23,7 @@
     var dockerStatus = {};    // compose name -> [{service, state, health, status}]
     var dockerPollTimer = null;
     var closeMenusListener = null;  // stored to avoid leak on re-render
+    var darkOn = false;       // dark comfort filter state (server-owned)
 
     // --- Logs State ---
 
@@ -110,6 +111,17 @@
         }
         if (open) result += "</span>";
         return result;
+    }
+
+    // --- Dark Comfort Filter ---
+
+    function setDark(on) {
+        darkOn = !!on;
+        document.documentElement.classList.toggle("__hamr-dark", darkOn);
+        if (panel) {
+            var cb = panel.querySelector(".hp-dark-toggle");
+            if (cb) cb.checked = darkOn;
+        }
     }
 
     // --- Status Widget ---
@@ -228,6 +240,18 @@
             "background:#2A2E33;transition:color 0.15s,border-color 0.15s,background 0.15s;}" +
             "#__hamr-panel .hp-mail-btn:hover{color:#E8E8E8;border-color:#FFB347;background:#2F3438;}" +
             "#__hamr-panel .hp-mail-btn svg{flex-shrink:0;}" +
+
+            // Dark comfort filter: invert the whole document, then re-invert
+            // media and hamr's own overlay so photos and the panel stay true.
+            // Inline <svg> is deliberately left inverted — icons should flip
+            // with the text they sit next to.
+            // ponytail: the filter makes <html> a containing block, so a site's
+            // position:fixed elements anchor to it; rare layout shift, accepted.
+            "html.__hamr-dark{filter:invert(1) hue-rotate(180deg);}" +
+            "html.__hamr-dark img,html.__hamr-dark video,html.__hamr-dark canvas," +
+            "html.__hamr-dark picture,html.__hamr-dark iframe,html.__hamr-dark #__hamr-status," +
+            "html.__hamr-dark #__hamr-panel,html.__hamr-dark #__hamr-logs" +
+            "{filter:invert(1) hue-rotate(180deg);}" +
 
             // Logs overlay — to the right of the widget, fills remaining width
             "#__hamr-logs{position:fixed;bottom:16px;left:86px;right:16px;z-index:100000;" +
@@ -523,7 +547,8 @@
         // Logs toggle + optional mail-inbox shortcut.
         var logsChecked = isLogOverlayOpen();
         html += '<div class="hp-footer">' +
-            '<label><input type="checkbox" class="hp-logs-toggle"' + (logsChecked ? " checked" : "") + '> Show logs</label>';
+            '<label><input type="checkbox" class="hp-logs-toggle"' + (logsChecked ? " checked" : "") + '> Show logs</label>' +
+            '<label><input type="checkbox" class="hp-dark-toggle"' + (darkOn ? " checked" : "") + '> Dark filter</label>';
         if (config.mail_mock) {
             html += '<a class="hp-mail-btn" href="/__hamr/mail" target="_blank" rel="noopener" title="Open captured email inbox in a new tab">' +
                 '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
@@ -557,6 +582,18 @@
                     closeLogOverlay();
                     try { localStorage.setItem(STORAGE_KEY, "0"); } catch(e) {}
                 }
+            });
+        }
+
+        // Wire up dark-filter toggle. The state is owned by the hamr dev
+        // process: POST the flip and let the "dark_filter" SSE event apply it,
+        // so every open tab stays in sync.
+        var darkToggle = panel.querySelector(".hp-dark-toggle");
+        if (darkToggle) {
+            darkToggle.addEventListener("change", function() {
+                darkToggle.checked = darkOn;  // SSE decides, not the click
+                fetch("/__hamr/dark", {method: "POST"})
+                    .catch(function(err) { console.warn("[hamr] dark filter toggle failed", err); });
             });
         }
 
@@ -854,6 +891,10 @@
             delay = MIN_DELAY;
             buildingRules = {};
             ruleErrors = {};
+            // Server state may have reset (hamr dev restarted) — drop the
+            // filter; a dark_filter "on" event follows in the same flush if
+            // it is still on, so there is no visible flash.
+            setDark(false);
             setState("connected");
             console.log("[hamr] live reload connected");
         });
@@ -867,6 +908,10 @@
             } catch (err) {
                 console.warn("[hamr] bad config payload", err);
             }
+        });
+
+        source.addEventListener("dark_filter", function(e) {
+            setDark(e.data === "on");
         });
 
         source.addEventListener("output", function(e) {

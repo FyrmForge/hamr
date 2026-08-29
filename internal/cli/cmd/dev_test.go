@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/FyrmForge/hamr/internal/devserver/tui"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -79,4 +80,17 @@ func TestEnsureCLINotBehindScaffoldNoHamrSection(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, []byte("[options]\ndatabase = \"postgres\"\n"), 0o600))
 
 	require.NoError(t, ensureCLINotBehindScaffold(path, false))
+}
+
+// Both front ends must keep satisfying what runDevLoop needs.
+var (
+	_ devUI = headlessUI{}
+	_ devUI = (*tui.Runtime)(nil)
+)
+
+func TestHeadlessUI_DockerStacksToStdout(t *testing.T) {
+	sinks := headlessUI{}.RegisterDockerStacks([]string{"infra", "cache"})
+	if len(sinks) != 2 || sinks["infra"] != os.Stdout || sinks["cache"] != os.Stdout {
+		t.Fatalf("expected both stacks mapped to stdout, got %v", sinks)
+	}
 }

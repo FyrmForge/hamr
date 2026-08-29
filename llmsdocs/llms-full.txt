@@ -22,7 +22,10 @@
   Generated projects define a Store interface in their internal/repo/repo.go;
   it is not part of the hamr framework itself.
 - **hamr dev**: Dev server with file watching, auto-rebuild, and live reload.
-  Mirrors its recent output to a rolling log file (default
+  `--headless` (automatic when stdout is not a terminal) skips the TUI and
+  streams every line — hamr, rules, daemons, docker logs — to stdout, for
+  agents/CI running `hamr dev --headless > dev.log &`; no hotkeys, stop
+  with SIGTERM. Mirrors its recent output to a rolling log file (default
   `.hamr/dev_logs.txt`, 200 lines) for LLM consumption. The file contains
   `[hamr dev]` messages plus watched command/daemon stdout-stderr with terminal
   escapes stripped. The injected reload script also pipes browser
@@ -46,7 +49,16 @@
   `[dev].hamr_console_filter = true` to drop frames whose message
   contains `[hamr]` (the reload script's own chatter — `[hamr] page
   swapped`, `[hamr] CSS reloaded`, etc.); default false shows
-  everything. Configure via `log_file` and `log_file_max_lines` in
+  everything. `[dev].dark_filter` (default false) seeds the dev panel's
+  "Dark filter" checkbox: an `invert(1) hue-rotate(180deg)` filter on
+  `<html>` (media, iframes and hamr's own overlay re-inverted) so a
+  light-mode app is bearable to work on. The SSE config payload carries
+  a `dark_filter` flag for the initial state; the checkbox POSTs
+  `/__hamr/dark`, which flips an in-process `atomic.Bool` and broadcasts
+  a `dark_filter` SSE event (`on`/`off`) to every open tab. The state
+  dies with the `hamr dev` process and is never written back to
+  `hamr.toml` — put it in `.pref.hamr.toml` for a per-developer
+  default. Configure via `log_file` and `log_file_max_lines` in
   `[dev]`; set `log_file = "none"` to disable. The TUI adds an `M` hotkey to
   toggle the MCP gateway (see **hamr mcp**); status bar shows `MCP on/<n>` or
   `MCP off`.

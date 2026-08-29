@@ -26,7 +26,7 @@ func newTestActions() (*DevActions, *http.ServeMux) {
 		},
 	}
 	pm := NewProcessManager(slog.Default())
-	broker := NewSSEBroker(nil, nil, nil, false, false, false, false)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
 	es := NewErrorState()
 	graph := NewGraph(cfg.Dev.Watch)
 	actions := &DevActions{
@@ -224,5 +224,24 @@ func TestDockerCmd_QuotesArgs(t *testing.T) {
 	got = dockerCmd([]string{"-f", "a'b"})
 	if !strings.Contains(got, `'a'\''b'`) {
 		t.Fatalf("single quote not escaped: %s", got)
+	}
+}
+
+// TestActions_DarkFilterToggle verifies POST /__hamr/dark flips the in-process
+// dark comfort filter state (on, then back off) and reports it.
+func TestActions_DarkFilterToggle(t *testing.T) {
+	actions, mux := newTestActions()
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	for _, want := range []bool{true, false} {
+		resp, err := http.Post(srv.URL+"/__hamr/dark", "", nil)
+		require.NoError(t, err)
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+		_ = resp.Body.Close()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, want, body["on"])
+		assert.Equal(t, want, actions.broker.darkFilter.Load())
 	}
 }
