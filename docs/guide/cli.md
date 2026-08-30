@@ -10,7 +10,7 @@ hamr
 ├── compose [args...]       docker compose with hamr dev's merged config
 ├── add
 │   ├── service [name]      Add a new Go binary (worker, api, html, or empty)
-│   └── skill <target>      Install an AI agent skill describing hamr
+│   └── skill [target]      Install AI agent skills (hamr, qa-loop, pr-publish)
 ├── ai
 │   ├── capture <url>       Capture a browser screenshot of a page
 │   └── upgrade             Show scaffold changes between versions via git diff
@@ -184,7 +184,7 @@ Interactive picker for this project's AI-agent integration. One screen per decis
 1. **MCP bridge** — which agents (`claude`, `codex`, `opencode`) get the hamr bridge registered. Already-installed agents start ticked. Writes the same per-agent config as [`hamr mcp install`](#hamr-mcp-install) — merged, never clobbered.
 2. **Gateway enabled** — sets `[dev.mcp].enabled` in `hamr.toml`.
 3. **Tool permissions** — `deny` / `read` / `write` per area (`dev`, `logs`, `docker`, `mail`, `sms`, `build`, `stripe`), seeded from the current `[dev.mcp.access]`. `write` implies `read`; a denied area exposes none of its tools.
-4. **Agent skills** — installs the hamr framework skill, the same content as [`hamr add skill`](#hamr-add-skill). Overwrites an existing skill directory. `claude` only for now.
+4. **Agent skills** — which agents get skills (`claude` → `.claude/skills/`, `codex`/`opencode` → shared `.agents/skills/`), then which skills (`hamr`, `qa-loop`, `pr-publish`) — the same content as [`hamr add skill`](#hamr-add-skill). Selected skills overwrite an existing install.
 
 It also upserts a `## hamr MCP` section into `AGENTS.md` and `CLAUDE.md`, listing only the tools the granted areas actually expose — agents that never read the config otherwise default to doing the same work by hand (tailing logs, running `make build`, asking what an email said). Disabling the gateway removes the section again, so the instructions never point at tools that aren't there. Missing instruction files are skipped, not created.
 
@@ -262,24 +262,33 @@ Notes:
 
 ## hamr add skill
 
-Install an AI agent skill that teaches the target tool about HAMR — the CLI, the `pkg/*` packages, and the project's Go + templ + HTMX conventions (plus Alpine.js guidance when the project opted in). The skill reads `hamr.toml` from the current project to tailor its content; `--global` installs skip this and use default-off assumptions.
+Install AI agent skills for working on a HAMR project. Three are available:
+
+- **`hamr`** — the framework skill: the CLI, the `pkg/*` packages, and the project's Go + templ + HTMX conventions (plus Alpine.js guidance when the project opted in). Rendered per project: it reads `hamr.toml` to tailor its content; `--global` installs skip this and use default-off assumptions.
+- **`qa-loop`** — an iterative QA test-and-fix loop that drives the app with Playwright MCP across device profiles, checks functional + UI/UX watch-lists, scores each round, and fixes findings. Uses hamr MCP for everything server-side.
+- **`pr-publish`** — creates or refreshes a GitHub PR with a structured body, gist-hosted screenshots, and a stepped flow GIF captured from the live dev server.
+
+With no arguments an interactive picker asks which agents and which skills to install (detected agents and already-installed skills start ticked — or an explicit `--skills` seeds the selection — and selected skills overwrite existing installs). With a target argument it runs non-interactively.
 
 ```bash
-hamr add skill <target> [flags]
+hamr add skill [target] [flags]
 ```
 
-| Flag       | Default | Description                                                           |
-|------------|---------|-----------------------------------------------------------------------|
-| `--global` | `false` | Install to `~/.<target>/skills/hamr/` instead of `./.<target>/skills/hamr/` |
-| `--force`  | `false` | Overwrite an existing skill directory                                 |
+| Flag        | Default | Description                                                           |
+|-------------|---------|-----------------------------------------------------------------------|
+| `--global`  | `false` | Install under the home directory instead of the project               |
+| `--force`   | `false` | Overwrite existing skill directories (non-interactive mode)           |
+| `--skills`  | all     | Which skills to install, comma-separated: `hamr`, `qa-loop`, `pr-publish` |
 
 ```bash
-hamr add skill claude            # project-local: ./.claude/skills/hamr/
-hamr add skill claude --global   # user-global:   ~/.claude/skills/hamr/
-hamr add skill claude --force    # replace an existing install
+hamr add skill                          # interactive picker
+hamr add skill claude                   # all skills → ./.claude/skills/{hamr,hamr-qa-loop,hamr-pr-publish}/
+hamr add skill codex                    # all skills → ./.agents/skills/…
+hamr add skill claude --skills hamr     # just the framework skill
+hamr add skill claude --global --force  # user-global, replacing existing installs
 ```
 
-Currently supported targets: `claude`. Support for `codex`, `opencode`, and other AI coding tools will follow.
+Supported targets: `claude`, `codex`, `opencode`. The SKILL.md format is a cross-tool standard, so all targets get identical content — only the destination differs. `claude` installs to `.claude/skills/` (global: `~/.claude/skills/`); `codex` and `opencode` both read the shared `.agents/skills/` (global: `~/.agents/skills/`), so selecting both writes once. opencode also reads `.claude/skills/` natively, so a claude install already covers opencode users.
 
 Project-local installs must be run from the root of a HAMR project (a directory containing `hamr.toml`) and are typically committed so the whole team benefits. Global installs work from any directory and persist per-user.
 

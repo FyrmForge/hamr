@@ -11,9 +11,25 @@ import (
 	"text/template"
 )
 
-// SupportedSkillTargets lists the AI agents we currently publish a skill for.
-// Extend this list when adding new targets (codex, opencode, etc.).
-var SupportedSkillTargets = []string{"claude"}
+// SupportedSkillTargets lists the AI agents skills can be installed for. The
+// SKILL.md format is a cross-tool standard, so targets differ only in where
+// the files go: claude reads .claude/skills/, codex and opencode read the
+// shared .agents/skills/ (opencode reads .claude/skills/ too).
+var SupportedSkillTargets = []string{"claude", "codex", "opencode"}
+
+// SkillNames lists the skills we publish, in install/picker order. Each maps to
+// a directory under templates/skills/<target>/<name>.
+var SkillNames = []string{"hamr", "qa-loop", "pr-publish"}
+
+// SkillDirName is the directory a skill installs into under .claude/skills/.
+// The framework skill keeps the bare "hamr" name it has always had; the
+// workflow skills are prefixed so they don't squat generic names.
+func SkillDirName(skill string) string {
+	if skill == "hamr" {
+		return "hamr"
+	}
+	return "hamr-" + skill
+}
 
 // SkillData is the render context passed to skill templates. Fields mirror
 // scaffold options that the skill's guidance depends on.
@@ -21,16 +37,17 @@ type SkillData struct {
 	IncludeAlpine bool
 }
 
-// InstallSkill copies the embedded skill tree for target into destDir.
+// InstallSkill copies the embedded tree for one skill into destDir. The tree
+// is target-independent (the SKILL.md format is a cross-tool standard).
 // Files with a .tmpl suffix are rendered as Go text/template (with [[ ]]
 // delimiters so they don't collide with templ's {{ ... }} references) and
 // written with the suffix stripped. All other files are copied verbatim.
 // When destDir already exists and force is false, it returns an error.
 // When force is true, the existing destDir is removed before writing.
-func InstallSkill(target, destDir string, force bool, data SkillData) error {
-	src := filepath.ToSlash(filepath.Join("templates", "skills", target))
+func InstallSkill(skill, destDir string, force bool, data SkillData) error {
+	src := filepath.ToSlash(filepath.Join("templates", "skills", skill))
 	if _, err := fs.Stat(templates, src); err != nil {
-		return fmt.Errorf("unknown skill target %q", target)
+		return fmt.Errorf("unknown skill %q", skill)
 	}
 
 	if _, err := os.Stat(destDir); err == nil {

@@ -22,7 +22,7 @@ var setupCmd = &cobra.Command{
 	Use:   "setup",
 	Short: "Interactively configure AI agent integration for this project",
 	Long: `Pick which AI agents get the hamr MCP bridge, what those agents are allowed to
-do through it, and which agents get the hamr skill installed.
+do through it, and which agent skills (hamr, qa-loop, pr-publish) get installed.
 
 Writes [dev.mcp] and [dev.mcp.access] to hamr.toml and the per-agent MCP config
 (the same files ` + "`hamr mcp install`" + ` writes). Existing agent config is merged,
@@ -42,10 +42,11 @@ func init() {
 
 // setupChoices is what the form collects.
 type setupChoices struct {
-	Agents  []string          // MCP bridge targets: claude, codex, opencode
-	Enabled bool              // [dev.mcp].enabled
-	Access  map[string]string // area → deny|read|write
-	Skills  []string          // skill install targets
+	Agents   []string          // MCP bridge targets: claude, codex, opencode
+	Enabled  bool              // [dev.mcp].enabled
+	Access   map[string]string // area → deny|read|write
+	Skills   []string          // skill install targets (agents)
+	SkillSel []string          // which skills to install for those targets
 
 	// accessPtrs holds the *string each access picker writes through — huh
 	// needs an addressable target and map elements aren't addressable.
@@ -108,8 +109,16 @@ func loadSetupDefaults(root string) *setupChoices {
 		}
 	}
 
-	if _, err := os.Stat(filepath.Join(root, skillToolDir("claude"), "skills", "hamr")); err == nil {
-		c.Skills = append(c.Skills, "claude")
+	for _, target := range generator.SupportedSkillTargets {
+		if installed := installedSkills(target, false); len(installed) > 0 {
+			c.Skills = append(c.Skills, target)
+			if len(c.SkillSel) == 0 {
+				c.SkillSel = installed
+			}
+		}
+	}
+	if len(c.SkillSel) == 0 {
+		c.SkillSel = slices.Clone(generator.SkillNames)
 	}
 
 	return c
@@ -150,9 +159,14 @@ func newSetupForm(root string, c *setupChoices) *huh.Form {
 		huh.NewGroup(
 			huh.NewMultiSelect[string]().
 				Title("Agent skills").
-				Description("Installs the hamr framework skill (CLI, packages, templ/HTMX practices).\nOverwrites an existing hamr skill directory. Only claude is supported today.").
-				Options(skillOptions()...).
+				Description("Which agents get skills installed. claude reads .claude/skills/;\ncodex and opencode share .agents/skills/ (written once).").
+				Options(skillTargetOptions()...).
 				Value(&c.Skills),
+			huh.NewMultiSelect[string]().
+				Title("Skills").
+				Description(skillPickerHelp).
+				Options(skillNameOptions()...).
+				Value(&c.SkillSel),
 		),
 	)
 
@@ -198,14 +212,6 @@ func (c *setupChoices) collectAccess() {
 	}
 }
 
-func skillOptions() []huh.Option[string] {
-	opts := make([]huh.Option[string], 0, len(generator.SupportedSkillTargets))
-	for _, t := range generator.SupportedSkillTargets {
-		opts = append(opts, huh.NewOption(t, t))
-	}
-	return opts
-}
-
 // applySetup writes hamr.toml and the per-agent configs, printing one line per
 // change. Nothing is written when dryRun is set.
 func applySetup(root string, c *setupChoices, dryRun bool) error {
@@ -249,19 +255,30 @@ func applySetup(root string, c *setupChoices, dryRun bool) error {
 		}
 	}
 
+	if len(c.Skills) > 0 && len(c.SkillSel) == 0 {
+		fmt.Println("  no skills selected — none installed")
+	}
+	seenBase := map[string]bool{} // codex and opencode share .agents/skills — write once
 	for _, target := range c.Skills {
-		dest, err := resolveSkillDest(target, false)
+		base, err := resolveSkillBase(target, false)
 		if err != nil {
 			return err
 		}
-		if dryRun {
-			fmt.Printf("  would install %s skill → %s\n", target, dest)
+		if seenBase[base] {
 			continue
 		}
-		if err := generator.InstallSkill(target, dest, true, loadSkillData(false)); err != nil {
-			return fmt.Errorf("install %s skill: %w", target, err)
+		seenBase[base] = true
+		for _, skill := range c.SkillSel {
+			dest := filepath.Join(base, generator.SkillDirName(skill))
+			if dryRun {
+				fmt.Printf("  would install %s skill %s → %s\n", target, skill, dest)
+				continue
+			}
+			if err := generator.InstallSkill(skill, dest, true, loadSkillData(false)); err != nil {
+				return fmt.Errorf("install %s skill %s: %w", target, skill, err)
+			}
+			fmt.Printf("  wrote %s skill %s → %s\n", target, skill, dest)
 		}
-		fmt.Printf("  wrote %s skill → %s\n", target, dest)
 	}
 
 	if dryRun {

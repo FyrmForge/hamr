@@ -64,6 +64,21 @@ the TL;DR on top of it.
 
 ### Features
 
+- **`hamr add skill` — interactive picker and two new skills.** Run with no
+  arguments for a huh picker (agents, then skills); `hamr add skill claude`
+  stays scriptable with `--skills hamr,qa-loop,pr-publish` (default all). New
+  alongside the framework skill: `qa-loop`, an iterative QA test-and-fix loop
+  over Playwright + hamr MCP with device profiles, watch-lists and a per-round
+  scorecard, installed as `.claude/skills/hamr-qa-loop/`; and `pr-publish`, a
+  GitHub PR workflow with a structured body, gist-hosted screenshots and a
+  stepped flow GIF, installed as `.claude/skills/hamr-pr-publish/`. The stale
+  `qa.md`/`qa-loop.md` files that previously sat undiscoverable inside the
+  hamr skill directory are gone (superseded by the `qa-loop` skill).
+  `hamr setup`'s skills screen gained the same skill multiselect. New targets
+  `codex` and `opencode` install the identical skills to the cross-tool
+  standard `.agents/skills/` (shared — picking both writes once; opencode
+  also reads `.claude/skills/` natively).
+
 - **`hamr dev --headless` — no TUI, one plain stream on stdout.** For an AI
   agent or CI running the dev server in the background
   (`hamr dev --headless > dev.log &`): hamr's own lines, rule/daemon output

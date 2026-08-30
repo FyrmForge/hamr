@@ -2,10 +2,13 @@ package cmd
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/FyrmForge/hamr/internal/cli/generator"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -14,11 +17,12 @@ import (
 func newAddSkillTestCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:  "skill",
-		Args: cobra.ExactArgs(1),
+		Args: cobra.MaximumNArgs(1),
 		RunE: runAddSkill,
 	}
 	cmd.Flags().Bool("global", false, "")
 	cmd.Flags().Bool("force", false, "")
+	cmd.Flags().StringSlice("skills", generator.SkillNames, "")
 	return cmd
 }
 
@@ -50,11 +54,11 @@ func TestAddSkill_ProjectInstall_WritesExpectedFiles(t *testing.T) {
 
 	for _, rel := range []string{
 		".claude/skills/hamr/SKILL.md",
-		".claude/skills/hamr/qa.md",
-		".claude/skills/hamr/qa-loop.md",
 		".claude/skills/hamr/references/cli.md",
 		".claude/skills/hamr/references/packages.md",
 		".claude/skills/hamr/references/practices.md",
+		".claude/skills/hamr-qa-loop/SKILL.md",
+		".claude/skills/hamr-pr-publish/SKILL.md",
 	} {
 		_, err := os.Stat(filepath.Join(dir, rel))
 		assert.NoErrorf(t, err, "expected %s to exist", rel)
@@ -192,6 +196,144 @@ func TestAddSkill_AlpineDetectedFromDisk(t *testing.T) {
 	practices, err := os.ReadFile(filepath.Join(dir, ".claude/skills/hamr/references/practices.md"))
 	require.NoError(t, err)
 	assert.Contains(t, string(practices), "## Alpine.js", "Alpine section should render when alpine.min.js is present on disk")
+}
+
+func TestAddSkill_SkillsFlagSelectsSubset(t *testing.T) {
+	dir := t.TempDir()
+	writeHamrToml(t, dir)
+	chdir(t, dir)
+
+	cmd := newAddSkillTestCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetArgs([]string{"claude"})
+	cmd.Flags().Set("skills", "qa-loop") //nolint:errcheck
+	require.NoError(t, cmd.Execute())
+
+	_, err := os.Stat(filepath.Join(dir, ".claude/skills/hamr-qa-loop/SKILL.md"))
+	assert.NoError(t, err)
+	_, err = os.Stat(filepath.Join(dir, ".claude/skills/hamr"))
+	assert.True(t, os.IsNotExist(err), "unselected skills should not be installed")
+	_, err = os.Stat(filepath.Join(dir, ".claude/skills/hamr-pr-publish"))
+	assert.True(t, os.IsNotExist(err), "unselected skills should not be installed")
+}
+
+func TestAddSkill_UnknownSkillErrors(t *testing.T) {
+	dir := t.TempDir()
+	writeHamrToml(t, dir)
+	chdir(t, dir)
+
+	cmd := newAddSkillTestCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"claude"})
+	cmd.Flags().Set("skills", "nope") //nolint:errcheck
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown skill")
+}
+
+func TestInstalledSkills_ReportsExisting(t *testing.T) {
+	dir := t.TempDir()
+	writeHamrToml(t, dir)
+	chdir(t, dir)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude", "skills", "hamr-qa-loop"), 0o755))
+
+	assert.Equal(t, []string{"qa-loop"}, installedSkills("claude", false))
+}
+
+// Drives the real picker headlessly, like TestSetupForm_DrivenHeadlessly.
+// Keys: in the agents multiselect toggle the pre-ticked claude off, then
+// accept the rest; the skills field (like setup's undriven last group) keeps
+// its seeded default through the trailing EOF.
+func TestAddSkillForm_DrivenHeadlessly(t *testing.T) {
+	dir := t.TempDir()
+	writeHamrToml(t, dir)
+	chdir(t, dir)
+
+	targets := []string{"claude"}
+	var skills []string // empty → seeded inside newAddSkillForm (fresh install: all)
+	form := newAddSkillForm(false, &targets, &skills).
+		WithInput(strings.NewReader("x\r" + strings.Repeat("\r", 5))).
+		WithOutput(io.Discard)
+
+	require.NoError(t, form.Run())
+	assert.Empty(t, targets, "x untoggled the pre-ticked claude")
+	assert.Equal(t, []string{"hamr", "qa-loop", "pr-publish"}, skills, "undriven skills field keeps the seeded default")
+}
+
+func TestAddSkillForm_SeedsFromInstalled(t *testing.T) {
+	dir := t.TempDir()
+	writeHamrToml(t, dir)
+	chdir(t, dir)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude", "skills", "hamr-pr-publish"), 0o755))
+
+	targets := []string{"claude"}
+	var skills []string
+	_ = newAddSkillForm(false, &targets, &skills)
+	assert.Equal(t, []string{"pr-publish"}, skills, "installed skills pre-ticked")
+
+	skills = []string{"qa-loop"} // explicit --skills wins over installed
+	_ = newAddSkillForm(false, &targets, &skills)
+	assert.Equal(t, []string{"qa-loop"}, skills)
+}
+
+func TestAddSkill_Interactive_FailsFastWithoutHamrToml(t *testing.T) {
+	dir := t.TempDir() // no hamr.toml
+	chdir(t, dir)
+
+	cmd := newAddSkillTestCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "hamr.toml", "should fail before showing the form")
+}
+
+func TestAddSkill_CodexInstallsToAgentsDir(t *testing.T) {
+	dir := t.TempDir()
+	writeHamrToml(t, dir)
+	chdir(t, dir)
+
+	cmd := newAddSkillTestCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetArgs([]string{"codex"})
+	require.NoError(t, cmd.Execute())
+
+	for _, rel := range []string{
+		".agents/skills/hamr/SKILL.md",
+		".agents/skills/hamr-qa-loop/SKILL.md",
+		".agents/skills/hamr-pr-publish/SKILL.md",
+	} {
+		_, err := os.Stat(filepath.Join(dir, rel))
+		assert.NoErrorf(t, err, "expected %s to exist", rel)
+	}
+	_, err := os.Stat(filepath.Join(dir, ".claude"))
+	assert.True(t, os.IsNotExist(err), "codex install should not touch .claude")
+}
+
+func TestAddSkill_OpencodeSharesAgentsDir(t *testing.T) {
+	dir := t.TempDir()
+	writeHamrToml(t, dir)
+	chdir(t, dir)
+
+	cmd := newAddSkillTestCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetArgs([]string{"opencode"})
+	require.NoError(t, cmd.Execute())
+
+	_, err := os.Stat(filepath.Join(dir, ".agents/skills/hamr/SKILL.md"))
+	assert.NoError(t, err)
+
+	// A second install for codex without --force hits the same dir and errors —
+	// proof both targets resolve to one location.
+	cmd = newAddSkillTestCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"codex"})
+	err = cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--force")
 }
 
 func TestAddSkill_UnsupportedTargetErrors(t *testing.T) {

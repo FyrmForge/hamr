@@ -3103,32 +3103,39 @@ Behavior notes:
 
 ### hamr add skill
 
-> Install an AI agent skill describing the HAMR framework.
+> Install AI agent skills for working on a HAMR project.
 
-Writes a self-contained skill directory the target AI coding tool can load. The skill covers the `hamr` CLI, the `github.com/FyrmForge/hamr/pkg/*` packages, and HAMR's Go + templ + HTMX coding practices (plus Alpine.js guidance when the project opted in via `hamr new --alpine`). The skill is rendered per project: project installs read `hamr.toml` to decide which sections to include; `--global` installs default Alpine off.
+Three skills are available, each a self-contained directory the target AI coding tool can load:
+- `hamr` — the framework skill: the `hamr` CLI, the `github.com/FyrmForge/hamr/pkg/*` packages, and HAMR's Go + templ + HTMX coding practices (plus Alpine.js guidance when the project opted in via `hamr new --alpine`). Rendered per project: project installs read `hamr.toml` to decide which sections to include; `--global` installs default Alpine off. Contains `SKILL.md` plus three progressive-disclosure references under `references/` (CLI, packages, practices).
+- `qa-loop` — an iterative QA test-and-fix loop: drives the app with Playwright MCP across device profiles, checks functional + UI/UX watch-lists, scores each round on a 1–10 scorecard, fixes findings root-cause-first, and loops (3 rounds default). All server-side actions go through hamr MCP (`dev.info`, `logs.read`, `make.run`, `mail.*`, `sms.*`, `stripe.*`).
+- `pr-publish` — creates or refreshes a GitHub PR with a short structured body, gist-hosted screenshots (uploaded via the gist's git remote — the gist API is text-only), and a stepped flow GIF captured live at 1440×900.
 
 ```text
-hamr add skill <target> [flags]
+hamr add skill [target] [flags]
 ```
 
-Currently supported targets: `claude`. Additional targets (`codex`, `opencode`, etc.) will follow.
+With no arguments, an interactive picker asks which agents and which skills to install; detected agents and already-installed skills start ticked (an explicit `--skills` seeds the selection instead) and selected skills overwrite existing installs. Requires a HAMR project root (or `--global`) — checked before the picker opens. With a target argument it runs non-interactively.
+
+Supported targets: `claude`, `codex`, `opencode`. The SKILL.md format is a cross-tool standard, so every target gets identical content — only the destination differs. opencode natively reads `.claude/skills/` too, so a claude install already covers opencode.
 
 Flags:
-- `--global` — install to `~/.<target>/skills/hamr/` instead of `./.<target>/skills/hamr/` (default: `false`)
-- `--force` — overwrite an existing skill directory (default: `false`)
+- `--skills` — comma-separated list of skills to install (default: all of `hamr,qa-loop,pr-publish`)
+- `--global` — install under the home directory instead of the project (default: `false`)
+- `--force` — overwrite existing skill directories in non-interactive mode (default: `false`)
 
 Destination resolution:
-- Default: `./.claude/skills/hamr/`, and the command **must** be run from a HAMR project root (directory containing `hamr.toml`).
-- `--global`: `~/.claude/skills/hamr/`, runnable from any directory.
+- `claude`: `./.claude/skills/<dir>/` (global: `~/.claude/skills/<dir>/`).
+- `codex` / `opencode`: the shared `./.agents/skills/<dir>/` (global: `~/.agents/skills/<dir>/`); selecting both targets writes once.
+- Project installs **must** run from a HAMR project root (directory containing `hamr.toml`); `--global` runs from anywhere.
+- Directory names: `hamr` installs as `hamr/`; the workflow skills are prefixed — `hamr-qa-loop/`, `hamr-pr-publish/`.
 
 Examples:
 ```bash
-hamr add skill claude
-hamr add skill claude --global
-hamr add skill claude --force
+hamr add skill                        # interactive picker
+hamr add skill claude                 # all skills, non-interactive
+hamr add skill codex --skills qa-loop # one skill → .agents/skills/
+hamr add skill claude --global --force
 ```
-
-The installed skill is a directory with `SKILL.md` plus three progressive-disclosure references under `references/` (CLI, packages, practices). The AI tool loads `SKILL.md` by default and pulls in a reference only when relevant to the current task.
 
 ### hamr ai capture
 
