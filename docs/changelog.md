@@ -64,6 +64,9 @@ the TL;DR on top of it.
 
 ### Features
 
+- **Licensed under Apache 2.0.** `LICENSE` and `NOTICE` added at the repo root;
+  copyright FyrmForge Limited. The README already pointed at `LICENSE`.
+
 - **`hamr add skill` — interactive picker and two new skills.** Run with no
   arguments for a huh picker (agents, then skills); `hamr add skill claude`
   stays scriptable with `--skills hamr,qa-loop,pr-publish` (default all). New

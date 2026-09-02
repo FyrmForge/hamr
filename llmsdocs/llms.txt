@@ -4,6 +4,7 @@
 > applications using templ + HTMX (with optional Alpine.js), backed by
 > PostgreSQL or SQLite.
 > Import path: github.com/FyrmForge/hamr
+> License: Apache 2.0
 
 ## Glossary
 
