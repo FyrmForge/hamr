@@ -21,6 +21,10 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Equal(t, "testdata/e2e-artifacts", cfg.ArtifactDir, "ArtifactDir default")
 	assert.True(t, cfg.ScreenshotOnFailure, "ScreenshotOnFailure default")
 	assert.True(t, cfg.HTMLDumpOnFailure, "HTMLDumpOnFailure default")
+	assert.False(t, cfg.GPU, "GPU default")
+	assert.Empty(t, cfg.BrowserPath, "BrowserPath default")
+	assert.Zero(t, cfg.WindowWidth, "WindowWidth default")
+	assert.Zero(t, cfg.WindowHeight, "WindowHeight default")
 }
 
 // ---------------------------------------------------------------------------
@@ -60,6 +64,22 @@ func TestWithHTMLDumpOnFailure(t *testing.T) {
 func TestWithNoSandbox(t *testing.T) {
 	cfg := buildConfig([]Option{WithNoSandbox(false)})
 	assert.False(t, cfg.NoSandbox)
+}
+
+func TestWithGPU(t *testing.T) {
+	cfg := buildConfig([]Option{WithGPU(true)})
+	assert.True(t, cfg.GPU)
+}
+
+func TestWithBrowserPath(t *testing.T) {
+	cfg := buildConfig([]Option{WithBrowserPath("/usr/bin/chromium")})
+	assert.Equal(t, "/usr/bin/chromium", cfg.BrowserPath)
+}
+
+func TestWithWindowSize(t *testing.T) {
+	cfg := buildConfig([]Option{WithWindowSize(1280, 800)})
+	assert.Equal(t, 1280, cfg.WindowWidth)
+	assert.Equal(t, 800, cfg.WindowHeight)
 }
 
 // ---------------------------------------------------------------------------
@@ -108,6 +128,25 @@ func TestEnvOverride_NoSandbox(t *testing.T) {
 	assert.False(t, cfg.NoSandbox)
 }
 
+func TestEnvOverride_GPU(t *testing.T) {
+	t.Setenv("E2E_GPU", "true")
+	cfg := buildConfig(nil)
+	assert.True(t, cfg.GPU)
+}
+
+func TestEnvOverride_BrowserPath(t *testing.T) {
+	t.Setenv("E2E_BROWSER_PATH", "/opt/chrome")
+	cfg := buildConfig([]Option{WithBrowserPath("/code/chrome")})
+	assert.Equal(t, "/opt/chrome", cfg.BrowserPath, "env should override code option")
+}
+
+func TestEnvOverride_WindowSize(t *testing.T) {
+	t.Setenv("E2E_WINDOW_SIZE", "1920X1080")
+	cfg := buildConfig([]Option{WithWindowSize(1, 1)})
+	assert.Equal(t, 1920, cfg.WindowWidth)
+	assert.Equal(t, 1080, cfg.WindowHeight)
+}
+
 // ---------------------------------------------------------------------------
 // Env vars take precedence over code options
 // ---------------------------------------------------------------------------
@@ -150,6 +189,15 @@ func TestEnvInvalid_SlowMotion(t *testing.T) {
 	t.Setenv("E2E_SLOW_MOTION", "bad")
 	cfg := buildConfig([]Option{WithSlowMotion(100 * time.Millisecond)})
 	assert.Equal(t, 100*time.Millisecond, cfg.SlowMotion, "invalid env should fall back to code option")
+}
+
+func TestEnvInvalid_WindowSize(t *testing.T) {
+	for _, bad := range []string{"1280", "1280x", "ax800", "0x800", "-1x5"} {
+		t.Setenv("E2E_WINDOW_SIZE", bad)
+		cfg := buildConfig([]Option{WithWindowSize(1280, 800)})
+		assert.Equal(t, 1280, cfg.WindowWidth, "invalid %q should fall back to code option", bad)
+		assert.Equal(t, 800, cfg.WindowHeight, "invalid %q should fall back to code option", bad)
+	}
 }
 
 func TestEnvInvalid_Timeout(t *testing.T) {

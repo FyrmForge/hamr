@@ -101,6 +101,16 @@ HAMR provides go-rod browser helpers for end-to-end tests.
 
 The `//go:build e2e` constraint ensures these tests only run when you pass `-tags=e2e`, keeping them out of `make test`.
 
+Projects scaffolded with `--e2e` get two ways to run them:
+
+- `make e2e` builds the Dockerfile and runs everything in testcontainers.
+- `make e2e-local` builds `bin/site`, spawns it on the first free port from
+  8080 (walking +1 past anything already listening, like `hamr dev` does),
+  seeds the local database, runs the tests and kills the server. Needs
+  `make docker-up` and `make migrate` first. Server output lands in
+  `e2e/testdata/e2e-artifacts/site.log`. Set `E2E_SERVER_URL` to attach to a
+  server you are already running instead of spawning one.
+
 ```go
 //go:build e2e
 
@@ -131,6 +141,8 @@ browser := e2e.SetupBrowser(t,
 ```
 
 All options can be overridden via env vars (`E2E_HEADLESS`, `E2E_TIMEOUT`, etc.).
+For headed debugging with a real GPU and a usable window: `E2E_HEADLESS=false E2E_GPU=true E2E_WINDOW_SIZE=1280x800`.
+See [pkg/e2e](pkg/e2e.md#configuration) for the full option table.
 
 ### Interaction Helpers
 

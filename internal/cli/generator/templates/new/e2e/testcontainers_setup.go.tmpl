@@ -7,7 +7,10 @@ import (
 	"database/sql"
 	_ "embed"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -34,7 +37,8 @@ type TestEnvironment struct {
 var sharedEnv *TestEnvironment
 
 // SetupSharedEnvironment initializes the test environment.
-// In local mode, it connects to a running local server and database.
+// In local mode, it spawns ../bin/site on a free port (walking +1 from 8080)
+// against the local database, or attaches to E2E_SERVER_URL when set.
 // In container mode, it starts PostgreSQL and the server via testcontainers.
 func SetupSharedEnvironment(local bool) {
 	if local {
@@ -218,16 +222,10 @@ func seedTestData(db *sql.DB) error {
 }
 
 func setupLocalEnvironment() *TestEnvironment {
-	srvURL := os.Getenv("E2E_SERVER_URL")
-	if srvURL == "" {
-		srvURL = "http://localhost:8080"
-	}
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		dbURL = "postgres://postgres:postgres@localhost:5432/{{.Name | slug}}?sslmode=disable"
 	}
-
-	fmt.Printf("E2E: using local server at %s\n", srvURL)
 
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
@@ -237,8 +235,47 @@ func setupLocalEnvironment() *TestEnvironment {
 		panic(fmt.Sprintf("E2E: failed to ping local database: %v", err))
 	}
 
-	// Seed test data into local DB.
+	// E2E_SERVER_URL set: attach to a server someone else is running.
+	if srvURL := os.Getenv("E2E_SERVER_URL"); srvURL != "" {
+		fmt.Printf("E2E: using local server at %s\n", srvURL)
+		if err := seedTestData(db); err != nil {
+			panic(fmt.Sprintf("E2E: failed to seed test data: %v", err))
+		}
+		return &TestEnvironment{DB: db, ServerURL: srvURL, Cleanup: func() { db.Close() }}
+	}
+
+	// Otherwise spawn our own server on the first free port from 8080.
+	port := freePort(8080, 50)
+	srvURL := fmt.Sprintf("http://localhost:%d", port)
+
+	bin, err := filepath.Abs("../bin/site")
+	if err != nil {
+		panic(fmt.Sprintf("E2E: resolve server binary: %v", err))
+	}
+	cmd := exec.Command(bin)
+	cmd.Dir = filepath.Dir(filepath.Dir(bin))
+	cmd.Env = append(os.Environ(), fmt.Sprintf("PORT=%d", port), "DATABASE_URL="+dbURL)
+	// Server output goes to a file, not our stdout: inheriting the test's
+	// stdout keeps go test's pipe open until the child exits.
+	_ = os.MkdirAll("testdata/e2e-artifacts", 0o755)
+	logFile, err := os.Create("testdata/e2e-artifacts/site.log")
+	if err != nil {
+		panic(fmt.Sprintf("E2E: create server log: %v", err))
+	}
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	if err := cmd.Start(); err != nil {
+		panic(fmt.Sprintf("E2E: start %s (run `make build` first?): %v", bin, err))
+	}
+	fmt.Printf("E2E: started local server at %s (pid %d, log testdata/e2e-artifacts/site.log)\n", srvURL, cmd.Process.Pid)
+
+	if err := waitForHealth(srvURL + "/api/health"); err != nil {
+		_ = cmd.Process.Kill()
+		panic(fmt.Sprintf("E2E: server did not become healthy: %v", err))
+	}
+
 	if err := seedTestData(db); err != nil {
+		_ = cmd.Process.Kill()
 		panic(fmt.Sprintf("E2E: failed to seed test data: %v", err))
 	}
 
@@ -246,7 +283,42 @@ func setupLocalEnvironment() *TestEnvironment {
 		DB:        db,
 		ServerURL: srvURL,
 		Cleanup: func() {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			logFile.Close()
 			db.Close()
 		},
 	}
+}
+
+// freePort returns the first port from start that accepts a TCP bind,
+// walking +1 up to maxAttempts times. Mirrors hamr dev's port walk.
+func freePort(start, maxAttempts int) int {
+	for port := start; port < start+maxAttempts; port++ {
+		ln, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", port))
+		if err != nil {
+			continue
+		}
+		ln.Close()
+		if port != start {
+			fmt.Printf("E2E: port %d busy, walked to %d\n", start, port)
+		}
+		return port
+	}
+	panic(fmt.Sprintf("E2E: no free port in %d-%d", start, start+maxAttempts-1))
+}
+
+func waitForHealth(url string) error {
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(url)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return nil
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return fmt.Errorf("%s not healthy within 30s", url)
 }

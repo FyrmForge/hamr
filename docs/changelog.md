@@ -64,6 +64,22 @@ the TL;DR on top of it.
 
 ### Features
 
+- **`make e2e-local` spawns its own server.** The scaffolded local e2e mode
+  builds `bin/site`, starts it on the first free port from 8080 (walking +1
+  past busy ports, like `hamr dev`), waits for `/api/health`, seeds, runs,
+  and kills it. Previously it assumed something was already listening on
+  8080 and silently tested whatever was there. `E2E_SERVER_URL` still
+  attaches to an existing server. Also fixed: the e2e Makefile targets were
+  not `.PHONY`, so `make e2e` reported "up to date" because the `e2e/`
+  directory exists, and `TestMain` deferred teardown past `os.Exit` so
+  nothing was ever cleaned up.
+
+- **`pkg/e2e` browser launch knobs.** `SetupBrowser` gains `WithGPU`
+  (`E2E_GPU`, default off — `--disable-gpu` was previously hardcoded),
+  `WithBrowserPath` (`E2E_BROWSER_PATH`, use a system Chrome instead of rod's
+  download) and `WithWindowSize` (`E2E_WINDOW_SIZE=1280x800`). Headed local
+  debugging: `E2E_HEADLESS=false E2E_GPU=true E2E_WINDOW_SIZE=1280x800`.
+
 - **Licensed under Apache 2.0.** `LICENSE` and `NOTICE` added at the repo root;
   copyright FyrmForge Limited. The README already pointed at `LICENSE`.
 

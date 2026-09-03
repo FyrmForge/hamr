@@ -9,8 +9,12 @@ and the HAMR `pkg/e2e` helpers.
 # Containerized (requires Docker)
 make e2e
 
-# Against a local server
+# Local: builds bin/site, spawns it on the first free port from 8080 against
+# the local DB (make docker-up + make migrate first), seeds, runs, kills it.
 make e2e-local
+
+# Attach to a server you are already running instead of spawning one
+E2E_SERVER_URL=http://localhost:3000 make e2e-local
 
 # Specific test
 make e2e-run T=TestHomePage_Loads

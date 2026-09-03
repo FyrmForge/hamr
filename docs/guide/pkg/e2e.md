@@ -55,6 +55,10 @@ browser := e2e.SetupBrowser(t,
 | `WithArtifactDir(path)` | `E2E_ARTIFACT_DIR` | `testdata/e2e-artifacts` | Where failure screenshots/HTML are saved |
 | `WithScreenshotOnFailure(bool)` | `E2E_SCREENSHOT_ON_FAIL` | `true` | Auto-capture PNG on test failure |
 | `WithHTMLDumpOnFailure(bool)` | `E2E_HTML_DUMP_ON_FAIL` | `true` | Auto-capture page DOM on test failure |
+| `WithNoSandbox(bool)` | `E2E_NO_SANDBOX` | `true` | Chrome `--no-sandbox`; set `false` when a sandbox is available |
+| `WithGPU(bool)` | `E2E_GPU` | `false` | `false` passes `--disable-gpu`; enable for headed local runs |
+| `WithBrowserPath(path)` | `E2E_BROWSER_PATH` | `""` | Use a system Chrome/Chromium instead of rod's auto-downloaded one |
+| `WithWindowSize(w, h)` | `E2E_WINDOW_SIZE` (`WxH`, e.g. `1280x800`) | Chrome default | Browser window size in pixels |
 
 Env vars let CI override behaviour without code changes:
 

@@ -10,6 +10,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -33,6 +34,10 @@ type Config struct {
 	ArtifactDir         string        // default: "testdata/e2e-artifacts", env: E2E_ARTIFACT_DIR
 	ScreenshotOnFailure bool          // default: true,  env: E2E_SCREENSHOT_ON_FAIL
 	HTMLDumpOnFailure   bool          // default: true,  env: E2E_HTML_DUMP_ON_FAIL
+	GPU                 bool          // default: false, env: E2E_GPU (false passes --disable-gpu)
+	BrowserPath         string        // default: "",    env: E2E_BROWSER_PATH (empty = rod's managed Chromium)
+	WindowWidth         int           // default: 0,     env: E2E_WINDOW_SIZE as "WxH" (0 = Chrome default)
+	WindowHeight        int
 }
 
 func defaultConfig() Config {
@@ -71,6 +76,20 @@ func WithScreenshotOnFailure(b bool) Option { return func(c *Config) { c.Screens
 
 // WithHTMLDumpOnFailure enables or disables automatic HTML dumps on test failure.
 func WithHTMLDumpOnFailure(b bool) Option { return func(c *Config) { c.HTMLDumpOnFailure = b } }
+
+// WithGPU enables GPU acceleration. Off by default (--disable-gpu), which is
+// what headless CI wants; turn on for headed local runs.
+func WithGPU(b bool) Option { return func(c *Config) { c.GPU = b } }
+
+// WithBrowserPath uses the Chrome/Chromium binary at path instead of rod's
+// auto-downloaded one.
+func WithBrowserPath(path string) Option { return func(c *Config) { c.BrowserPath = path } }
+
+// WithWindowSize sets the browser window size in pixels. Zero leaves Chrome's
+// default.
+func WithWindowSize(w, h int) Option {
+	return func(c *Config) { c.WindowWidth, c.WindowHeight = w, h }
+}
 
 // WithNoSandbox controls the Chrome --no-sandbox flag. Defaults to true for CI
 // environments. Set to false when running with a proper sandbox available.
@@ -111,6 +130,24 @@ func getEnvString(key, def string) string {
 	return def
 }
 
+// getEnvSize parses "WxH"; malformed values keep the defaults.
+func getEnvSize(key string, defW, defH int) (int, int) {
+	v := os.Getenv(key)
+	if v == "" {
+		return defW, defH
+	}
+	ws, hs, ok := strings.Cut(strings.ToLower(v), "x")
+	if !ok {
+		return defW, defH
+	}
+	w, errW := strconv.Atoi(ws)
+	h, errH := strconv.Atoi(hs)
+	if errW != nil || errH != nil || w <= 0 || h <= 0 {
+		return defW, defH
+	}
+	return w, h
+}
+
 // ---------------------------------------------------------------------------
 // Config registry (per-test)
 // ---------------------------------------------------------------------------
@@ -134,6 +171,9 @@ func buildConfig(opts []Option) Config {
 	cfg.NoSandbox = getEnvBool("E2E_NO_SANDBOX", cfg.NoSandbox)
 	cfg.ScreenshotOnFailure = getEnvBool("E2E_SCREENSHOT_ON_FAIL", cfg.ScreenshotOnFailure)
 	cfg.HTMLDumpOnFailure = getEnvBool("E2E_HTML_DUMP_ON_FAIL", cfg.HTMLDumpOnFailure)
+	cfg.GPU = getEnvBool("E2E_GPU", cfg.GPU)
+	cfg.BrowserPath = getEnvString("E2E_BROWSER_PATH", cfg.BrowserPath)
+	cfg.WindowWidth, cfg.WindowHeight = getEnvSize("E2E_WINDOW_SIZE", cfg.WindowWidth, cfg.WindowHeight)
 
 	return cfg
 }
@@ -162,8 +202,16 @@ func SetupBrowser(t *testing.T, opts ...Option) *rod.Browser {
 	l := launcher.New().
 		Headless(cfg.Headless).
 		NoSandbox(cfg.NoSandbox).
-		Set("disable-dev-shm-usage").
-		Set("disable-gpu")
+		Set("disable-dev-shm-usage")
+	if !cfg.GPU {
+		l.Set("disable-gpu")
+	}
+	if cfg.BrowserPath != "" {
+		l.Bin(cfg.BrowserPath)
+	}
+	if cfg.WindowWidth > 0 && cfg.WindowHeight > 0 {
+		l.Set("window-size", fmt.Sprintf("%d,%d", cfg.WindowWidth, cfg.WindowHeight))
+	}
 
 	u, err := l.Launch()
 	require.NoError(t, err, "e2e: failed to launch browser")

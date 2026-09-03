@@ -1,5 +1,5 @@
 {{- $hasCompose := or (ne .Database "sqlite") (eq .StorageBackend "s3") -}}
-.PHONY: build test lint templint{{- if not .MigrateAtStartup}} migrate{{- if eq .DBConnector "sqlx"}} migrate-down migrate-status migrate-create{{- end}}{{- end}} db-sh{{- if $hasCompose}} docker-up docker-down docker-delete docker-reload{{- end}} clean install check-templ generate{{- if eq .CSS "tailwind"}} check-node-modules css-build{{- end}}{{- if .StaticS3}} sync-static{{- end}}{{- if .IncludeLocale}} locale-gen{{- end}}
+.PHONY: build test lint templint{{- if not .MigrateAtStartup}} migrate{{- if eq .DBConnector "sqlx"}} migrate-down migrate-status migrate-create{{- end}}{{- end}} db-sh{{- if $hasCompose}} docker-up docker-down docker-delete docker-reload{{- end}} clean install check-templ generate{{- if eq .CSS "tailwind"}} check-node-modules css-build{{- end}}{{- if .StaticS3}} sync-static{{- end}}{{- if .IncludeLocale}} locale-gen{{- end}}{{- if .IncludeE2E}} e2e e2e-local e2e-run e2e-run-local{{- end}}
 
 # Force bash so the ENV_LOAD eval below works cross-shell (sh on Debian/Ubuntu
 # is dash, which doesn't grok `eval "$(...)"` quoting consistently).
@@ -132,8 +132,8 @@ docker-reload: docker-delete docker-up
 e2e:
 	go test -v -tags=e2e ./e2e -timeout 10m
 
-## e2e-local: Run E2E tests against local server
-e2e-local:
+## e2e-local: Build, then run E2E tests against a spawned bin/site (free port from 8080) and the local DB
+e2e-local: build
 	$(ENV_LOAD) go test -v -tags=e2e ./e2e -local -timeout 10m
 
 ## e2e-run: Run specific E2E test: make e2e-run T=TestName
@@ -141,7 +141,7 @@ e2e-run:
 	go test -v -tags=e2e ./e2e -run "$(T)" -timeout 5m
 
 ## e2e-run-local: Run specific E2E test locally: make e2e-run-local T=TestName
-e2e-run-local:
+e2e-run-local: build
 	$(ENV_LOAD) go test -v -tags=e2e ./e2e -local -run "$(T)" -timeout 2m
 {{- end}}
 

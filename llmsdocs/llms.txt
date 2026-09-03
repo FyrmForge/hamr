@@ -357,7 +357,7 @@ Reusable go-rod browser helpers for E2E testing.
 - HTMX: `WaitForHTMXIdle`, `WaitForHTMXSwap`, `ClickAndWaitHTMX`
 - Asserts: `AssertElementExists`, `AssertElementContainsText`, `AssertURL`,
   `AssertElementCount`, `AssertElementHasClass`, `AssertURLContains`
-- Options: `WithHeadless`, `WithSlowMotion`, `WithTimeout`, `WithArtifactDir`
+- Options: `WithHeadless`, `WithSlowMotion`, `WithTimeout`, `WithArtifactDir`, `WithNoSandbox`, `WithGPU`, `WithBrowserPath`, `WithWindowSize(w, h)` — all overridable via `E2E_*` env vars
 
 ### auth
 Password hashing (Argon2id) + session management.

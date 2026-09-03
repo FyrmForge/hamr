@@ -1417,6 +1417,10 @@ type Config struct {
     ArtifactDir         string        // default: "testdata/e2e-artifacts", env: E2E_ARTIFACT_DIR
     ScreenshotOnFailure bool          // default: true,  env: E2E_SCREENSHOT_ON_FAIL
     HTMLDumpOnFailure   bool          // default: true,  env: E2E_HTML_DUMP_ON_FAIL
+    GPU                 bool          // default: false, env: E2E_GPU (false passes --disable-gpu)
+    BrowserPath         string        // default: "",    env: E2E_BROWSER_PATH (empty = rod's managed Chromium)
+    WindowWidth         int           // default: 0,     env: E2E_WINDOW_SIZE as "WxH" (0 = Chrome default)
+    WindowHeight        int
 }
 
 type Option func(*Config)
@@ -1428,6 +1432,9 @@ func WithArtifactDir(path string) Option
 func WithScreenshotOnFailure(b bool) Option
 func WithHTMLDumpOnFailure(b bool) Option
 func WithNoSandbox(b bool) Option
+func WithGPU(b bool) Option
+func WithBrowserPath(path string) Option
+func WithWindowSize(w, h int) Option
 ```
 
 #### Browser Lifecycle

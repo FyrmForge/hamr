@@ -147,7 +147,7 @@ Reusable go-rod browser helpers for Playwright-free E2E testing.
 - Waits: `WaitForElement`, `WaitForURLChange`, `WaitForElementRemoved`
 - HTMX-aware: `WaitForHTMXIdle`, `WaitForHTMXSwap`, `ClickAndWaitHTMX`
 - Asserts: `AssertElementExists`, `AssertElementContainsText`, `AssertURL`, `AssertElementCount`, `AssertElementHasClass`, `AssertURLContains`
-- Options: `WithHeadless`, `WithSlowMotion`, `WithTimeout`, `WithArtifactDir`
+- Options: `WithHeadless`, `WithSlowMotion`, `WithTimeout`, `WithArtifactDir`, `WithNoSandbox`, `WithGPU`, `WithBrowserPath`, `WithWindowSize(w, h)` — all overridable via `E2E_*` env vars
 
 ### `auth` (scaffold default)
 Argon2id password hashing + session management.
