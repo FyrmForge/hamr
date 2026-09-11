@@ -32,6 +32,17 @@ func TestMCPEnabledTools(t *testing.T) {
 			want:   []string{"docker.logs", "docker.status", "docker.restart", "docker.wipe"},
 		},
 		{
+			name:   "dev read exposes info but not restart",
+			access: map[string]string{"dev": "read"},
+			want:   []string{"dev.info"},
+			absent: []string{"dev.restart"},
+		},
+		{
+			name:   "dev write adds restart",
+			access: map[string]string{"dev": "write"},
+			want:   []string{"dev.info", "dev.restart"},
+		},
+		{
 			name:   "build is write-only",
 			access: map[string]string{"build": "write"},
 			want:   []string{"rule.run", "rebuild.all", "make.run"},

@@ -2,12 +2,16 @@ package cmd
 
 import (
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/FyrmForge/hamr/internal/devserver"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/huh"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -245,28 +249,96 @@ func TestWriteAgentMCPSection_SkipsMissingFile(t *testing.T) {
 	assert.False(t, changed)
 }
 
-// Drives the real picker headlessly — huh reads scripted keystrokes and renders
-// into a discard writer — so the form itself is exercised without a TTY.
-// Keys: toggle the first agent, tab to the confirm and accept it, then move one
-// option down in the first access select (deny → read) and accept the rest.
-// The trailing input EOF ends the form, so the last group (skills) is left at
-// its default rather than driven.
+// Drives the first form group headlessly — huh reads scripted keystrokes and
+// renders into a discard writer — so the form itself is exercised without a TTY.
+// Keys: toggle the first agent, tab to the confirm and accept it. The trailing
+// input EOF ends the form, leaving later groups at their defaults.
+//
+// Deliberately stops at the first group. huh advances between groups with
+// tea.Sequence, which the bubbletea runtime resolves asynchronously while the
+// input reader keeps feeding keys, so a keystroke aimed at a later group can
+// land on the finished one and be swallowed. Driving a second group from here
+// is a coin flip; the access selects are covered field-by-field below instead.
 func TestSetupForm_DrivenHeadlessly(t *testing.T) {
 	c := &setupChoices{Access: map[string]string{}}
 	for _, area := range devserver.MCPAreaNames() {
 		c.Access[area] = "deny"
 	}
 
-	keys := "x\r\ty\r" + "j\r\r\r\r\r\r" + "x\r" + strings.Repeat("\r", 10)
+	// Group one is driven; the trailing Enters just accept defaults through the
+	// remaining groups so the form completes and Run returns. Input EOF alone
+	// does not end a form — it would sit there forever.
+	keys := "x\r\ty\r" + strings.Repeat("\r", 40)
 	form := newSetupForm(t.TempDir(), c).
 		WithInput(strings.NewReader(keys)).
 		WithOutput(io.Discard)
 
-	require.NoError(t, form.Run())
-	c.collectAccess()
+	done := make(chan error, 1)
+	go func() { done <- form.Run() }()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(30 * time.Second):
+		// A dropped Enter can leave the form waiting on input that will never
+		// come. Fail rather than hang the whole package until the go test
+		// timeout kills it.
+		t.Fatal("form never completed — a keystroke was dropped before the last group")
+	}
 
 	assert.Equal(t, []string{"claude"}, c.Agents, "x toggled the first agent")
 	assert.True(t, c.Enabled, "y accepted the gateway confirm")
-	assert.Equal(t, "read", c.Access["build"], "one step down from deny is read")
-	assert.Equal(t, "deny", c.Access["stripe"], "untouched selects keep their seeded value")
+}
+
+// pressDown sends one Down keypress to a form field, the way a user moving
+// through a select would. huh applies the new value on the keypress itself, so
+// the bound pointer is up to date as soon as this returns.
+//
+// The keymap has to be attached by hand: a form normally hands its fields one
+// when it takes ownership of them, and a field built outside a form carries a
+// zero keymap whose bindings match nothing.
+func pressDown(t *testing.T, f huh.Field) {
+	t.Helper()
+	f = f.WithKeyMap(huh.NewDefaultKeyMap())
+	f.Init()
+	_, _ = f.Update(tea.KeyMsg{Type: tea.KeyDown})
+}
+
+// The access selects are driven directly rather than through the form, so the
+// group-transition race above cannot make this flaky. Each select must own its
+// own value pointer: a shared one (the classic loop-variable capture) would let
+// one area's choice overwrite every other area's.
+func TestAccessSelects_MoveOneAreaOnly(t *testing.T) {
+	c := &setupChoices{Access: map[string]string{}}
+	for _, area := range devserver.MCPAreaNames() {
+		c.Access[area] = "deny"
+	}
+
+	fields := accessSelects(c)
+	require.Len(t, fields, len(devserver.MCPAreaNames()))
+
+	// Fields follow MCPAreaNames' stable order, so the first one is the first
+	// area alphabetically.
+	first := devserver.MCPAreaNames()[0]
+	pressDown(t, fields[0])
+	c.collectAccess()
+
+	assert.Equal(t, "read", c.Access[first], "one step down from deny is read")
+	for _, area := range devserver.MCPAreaNames()[1:] {
+		assert.Equal(t, "deny", c.Access[area], "untouched selects keep their seeded value")
+	}
+}
+
+// Seeded levels survive an untouched form: every select starts on the value
+// already in hamr.toml, so collecting without touching anything is a no-op.
+func TestAccessSelects_PreserveSeededLevels(t *testing.T) {
+	seeded := map[string]string{}
+	for i, area := range devserver.MCPAreaNames() {
+		seeded[area] = accessLevels[i%len(accessLevels)]
+	}
+	c := &setupChoices{Access: maps.Clone(seeded)}
+
+	accessSelects(c)
+	c.collectAccess()
+
+	assert.Equal(t, seeded, c.Access)
 }

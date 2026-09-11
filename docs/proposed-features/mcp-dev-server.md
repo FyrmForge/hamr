@@ -76,7 +76,7 @@ level exposes:
 
 | area     | `read` exposes        | `write` adds (⊇ read)   |
 |----------|-----------------------|-------------------------|
-| `dev`    | `dev.info`            | —                       |
+| `dev`    | `dev.info`            | `dev.restart`           |
 | `logs`   | `logs.read`, `console.read` | —                 |
 | `docker` | `docker.logs`, `docker.status` | `docker.restart`, `docker.wipe` |
 | `mail`   | `mail.list`, `mail.get` | `mail.clear`, `mail.ingest` |
@@ -177,6 +177,26 @@ the access table above.
   - inputs: `name` (rule)
   - output: `{ok: true}` (enqueued; async — poll `logs.read`)
 - **`rebuild.all`** — enqueue every watch rule.
+- **`dev.restart`** — _(write, `dev` area)_ restart the dev server in place:
+  `Run` unwinds with `ErrRestart` and the caller re-runs the whole startup
+  lifecycle (docker compose, port resolution, `.env` injection, builds,
+  daemons, watcher). The TUI survives. Same path as the `R` hotkey. For
+  startup-only state the runner can't otherwise re-read: a clashing port, an
+  edited `.env`, a container that came up wrong.
+  - inputs: none
+  - output: `{ ok: true }`, written **before** the restart is requested — the
+    handler replies and flushes first, then fires the restart through the
+    `afterResponder` seam, because the proxy carrying the call is one of the
+    things torn down. So the reply is never raced by the teardown, but it also
+    cannot report the outcome. The bridge re-reads `.hamr/dev.json` per call and
+    so finds the new port/token itself; calls made during teardown fail with a
+    connection error. Agents wait, then poll `dev.info`.
+  - **Cooldown:** refused with an error while the current run has been ready for
+    less than `restartCooldown` (5s). Measured from the ready flip rather than
+    from the last request, because the `Runner` is rebuilt on every restart and
+    nothing that survives it could hold a "last request" timestamp. Caps an
+    agent looping on `dev.restart` at one teardown-and-rebuild per cooldown. The
+    `R` hotkey shares the gate, so a double-press costs one restart.
   - inputs: none
   - output: `{ok: true}`
 - **`make.run`** — run a Makefile target via the new server-side action (a).

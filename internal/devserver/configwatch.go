@@ -8,9 +8,13 @@ import (
 )
 
 // WaitForConfigChangeOrQuit blocks until the file at path is written or
-// created, ctx is cancelled, or a HotkeyQuit comes in (in which case it
-// returns context.Canceled). Non-quit hotkeys are silently consumed. A
-// nil hotkeys channel is safe (blocks forever).
+// created (returns nil), ctx is cancelled, a HotkeyQuit comes in (returns
+// context.Canceled), or a HotkeyRestart comes in (returns ErrRestart — retry
+// now). Restart is honored here because a parse error is not the only reason
+// the last attempt failed: the config can be valid and startup still fail on a
+// clashing port or a bad .env, and neither of those touches hamr.toml, so
+// waiting on a file write would hang forever. Other hotkeys are silently
+// consumed. A nil hotkeys channel is safe (blocks forever).
 func WaitForConfigChangeOrQuit(ctx context.Context, path string, hotkeys <-chan HotkeyAction) error {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
@@ -34,10 +38,13 @@ func WaitForConfigChangeOrQuit(ctx context.Context, path string, hotkeys <-chan 
 		case <-ctx.Done():
 			return ctx.Err()
 		case action := <-hotkeys:
-			if action == HotkeyQuit {
+			switch action {
+			case HotkeyQuit:
 				return context.Canceled
+			case HotkeyRestart:
+				return ErrRestart
 			}
-			// Silently consume non-quit hotkeys.
+			// Silently consume every other hotkey.
 		case event, ok := <-fsw.Events:
 			if !ok {
 				return nil

@@ -13,6 +13,12 @@ const (
 	HotkeyOpenBrowser
 	HotkeyQuit
 	HotkeyMCPToggle
+	// HotkeyRestart tears the dev server down and re-runs its whole startup
+	// lifecycle (docker compose, port resolution, .env injection, builds,
+	// daemons, watcher) in-place, leaving the TUI running. The escape hatch
+	// for state the runner only reads at startup: a clashing port, an edited
+	// .env, a container that came up wrong.
+	HotkeyRestart
 )
 
 // HotkeySource emits hotkey actions for the dev runner to consume. The TUI

@@ -294,7 +294,29 @@ func (g *mcpGateway) handle(w http.ResponseWriter, r *http.Request) {
 		g.logger.With("component", "mcp").Info(msg)
 	}
 	g.writeJSON(w, result)
+	// Flush before any deferred effect runs: the bytes have to be on the wire
+	// before a tool like dev.restart tears the proxy down underneath them.
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+	if ar, ok := result.(afterResponder); ok {
+		ar.afterResponse()
+	}
 }
+
+// afterResponder lets a tool result defer its real effect until after its HTTP
+// response has been written and flushed. Only dev.restart needs it: the restart
+// closes the proxy this request arrived on, so firing it inline would race the
+// reply and could hand the agent a connection error for a restart that worked.
+type afterResponder interface{ afterResponse() }
+
+// restartResult replies {"ok":true} and requests the restart afterwards.
+type restartResult struct {
+	OK      bool        `json:"ok"`
+	actions *DevActions // unexported: not serialized
+}
+
+func (r restartResult) afterResponse() { r.actions.RestartServer() }
 
 // auditOutcomer lets a tool result describe its own audit outcome string (e.g.
 // "done exit=1") instead of the generic "ok", so the audit log reflects success
@@ -389,6 +411,15 @@ func (g *mcpGateway) dispatch(tool string, body []byte) (any, error) {
 	case "rebuild.all":
 		g.actions.RebuildAll()
 		return okResult{OK: true}, nil
+	case "dev.restart":
+		// The restart tears down the proxy carrying this very request, so it
+		// must not be requested here — handle() fires it through afterResponse
+		// once the reply is written and flushed. Availability is still checked
+		// now, so an impossible restart is a normal error result.
+		if err := g.actions.CheckRestart(); err != nil {
+			return nil, err
+		}
+		return restartResult{OK: true, actions: g.actions}, nil
 	case "make.run":
 		return g.makeRun(body)
 	case "mail.list":

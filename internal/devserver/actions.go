@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -31,12 +32,63 @@ type DevActions struct {
 	// running a process directly would race the scheduler and could orphan a
 	// process on the same port. Nil outside a live Run() (e.g. in unit tests).
 	requestRun func(rule *WatchRule)
+	// requestRestart signals Run to unwind and return ErrRestart so the caller
+	// re-runs the whole startup lifecycle. Non-blocking. Nil outside a live
+	// Run() (e.g. in unit tests).
+	requestRestart func()
+	// restartRefusal reports why a restart cannot be honored right now (nil =
+	// go ahead). Separate from requestRestart because the MCP handler must
+	// decide the answer before writing its response and only fire the restart
+	// afterwards. Nil means no gate — every available restart is accepted.
+	restartRefusal func() error
 	// restartFn/wipeFn are test seams for the docker actions. When nil the real
 	// docker compose commands run (production); tests set them to record the
 	// dispatch without executing docker (which would otherwise run real compose
 	// commands against the cwd in a detached goroutine that outlives the test).
 	restartFn func(dc *DockerCompose, service string)
 	wipeFn    func(dc *DockerCompose, service string)
+}
+
+// RestartServer asks the runner to tear down and re-run its entire startup
+// lifecycle — docker compose, port resolution, .env injection, builds, daemons,
+// watcher — without exiting the TUI. Use it for state the runner only reads at
+// startup: a clashing port, an edited .env, a container that came up wrong.
+// Returns false when no live runner is attached.
+//
+// Returns as soon as the request is queued, not when the restart completes: the
+// proxy that carried an MCP call is one of the things torn down, so the caller
+// has to get its response out first.
+//
+// ponytail: between teardown and the next Run's writeWalks(".", nil), walks.json
+// still holds the old run's port rewrites — so `hamr env --export` (and the
+// scaffold Makefile targets that shell it) can report pre-restart ports for a
+// second or two. Same window config reload has always had. Clear walks at
+// teardown instead if that ever bites.
+func (a *DevActions) RestartServer() bool {
+	if !a.canRestart() {
+		return false
+	}
+	a.requestRestart()
+	return true
+}
+
+// canRestart reports whether a live runner is attached, without requesting
+// anything — so a caller can reject an impossible restart up front and still
+// defer the actual request until after it has replied.
+func (a *DevActions) canRestart() bool { return a != nil && a.requestRestart != nil }
+
+// CheckRestart reports whether a restart would be accepted right now, returning
+// nil when it would and an explanation when it would not — no live runner, or
+// the current run is still inside the restart cooldown. It changes nothing, so
+// a caller can answer first and restart afterwards.
+func (a *DevActions) CheckRestart() error {
+	if !a.canRestart() {
+		return errors.New("restart unavailable (no live dev runner)")
+	}
+	if a.restartRefusal != nil {
+		return a.restartRefusal()
+	}
+	return nil
 }
 
 // restart dispatches a docker restart, honoring the test seam if set.

@@ -503,6 +503,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		m.hotkeys.Send(devserver.HotkeyRebuild)
 		return m, nil
+	case "R":
+		// Full restart: the runner unwinds (stopping children, compose and the
+		// proxy) and the dev loop re-runs it from scratch. The TUI process and
+		// its log buffers survive, so the restart is visible in place.
+		m.hotkeys.Send(devserver.HotkeyRestart)
+		return m, nil
 	case "o":
 		m.hotkeys.Send(devserver.HotkeyOpenBrowser)
 		return m, nil
@@ -1841,6 +1847,7 @@ func (m *Model) hintBar() string {
 	}
 	left := []string{
 		statusKey.Render("r") + statusDim.Render(" rebuild"),
+		statusKey.Render("R") + statusDim.Render(" restart"),
 		statusKey.Render("o") + statusDim.Render(" open"),
 		statusKey.Render("c") + statusDim.Render(" clear"),
 	}

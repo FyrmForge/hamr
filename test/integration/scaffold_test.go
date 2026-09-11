@@ -3,12 +3,16 @@
 package integration
 
 import (
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -61,7 +65,6 @@ func repoRoot() string {
 type preset struct {
 	name string
 	cfg  *generator.ProjectConfig
-	port int
 }
 
 func presets() []preset {
@@ -69,7 +72,6 @@ func presets() []preset {
 	return []preset{
 		{
 			name: "minimal",
-			port: 18080,
 			cfg: &generator.ProjectConfig{
 				Name:        "minimaltest",
 				Module:      "github.com/test/minimaltest",
@@ -80,7 +82,6 @@ func presets() []preset {
 		},
 		{
 			name: "full",
-			port: 18081,
 			cfg: &generator.ProjectConfig{
 				Name:           "fulltest",
 				Module:         "github.com/test/fulltest",
@@ -97,7 +98,6 @@ func presets() []preset {
 		},
 		{
 			name: "gorm",
-			port: 18082,
 			cfg: &generator.ProjectConfig{
 				Name:             "gormtest",
 				Module:           "github.com/test/gormtest",
@@ -148,6 +148,85 @@ func (h *harness) prepareEnv() {
 	require.NoError(h.t, err)
 	updated := strings.Replace(string(data), "PORT=8080", fmt.Sprintf("PORT=%d", h.port), 1)
 	require.NoError(h.t, os.WriteFile(envFile, []byte(updated), 0o644))
+
+	h.remapComposePorts()
+}
+
+// composePortLine matches a short-form published port in the scaffolded compose
+// file, e.g. `      - "5432:5432"`.
+var composePortLine = regexp.MustCompile(`(?m)^(\s*-\s*")(\d+):(\d+)(".*)$`)
+
+// freePort asks the kernel for an unused loopback port.
+//
+// The listener is closed before the port is returned, so something else could
+// in principle take it before the test binds. That window is far smaller than
+// the problem it replaces: the scaffold hardcodes 5432 for postgres and
+// 9000/9001 for the S3 mock, so any developer already running another
+// project's containers on those ports could not run these tests at all.
+func freePort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer func() { _ = ln.Close() }()
+	return ln.Addr().(*net.TCPAddr).Port
+}
+
+// remapComposePorts repoints every published host port in the scaffolded
+// compose file at a free one, then rewrites the matching .env values so the app
+// connects where the containers actually landed. Container-side ports are left
+// alone — only the host half of each mapping moves.
+//
+// Without this the test does not merely fail to bind: an unrelated postgres
+// already on 5432 makes compose fail, or worse, the app connects to THAT
+// database and fails much later with a confusing "database does not exist".
+func (h *harness) remapComposePorts() {
+	h.t.Helper()
+
+	composeFile := filepath.Join(h.dir, "docker", "docker-compose.yaml")
+	data, err := os.ReadFile(composeFile)
+	if errors.Is(err, os.ErrNotExist) {
+		return // sqlite + local storage scaffolds ship no compose file
+	}
+	require.NoError(h.t, err)
+
+	remapped := make(map[string]string)
+	out := composePortLine.ReplaceAllStringFunc(string(data), func(line string) string {
+		m := composePortLine.FindStringSubmatch(line)
+		host, container := m[2], m[3]
+		port := strconv.Itoa(freePort(h.t))
+		remapped[host] = port
+		h.t.Logf("compose port %s -> %s", host, port)
+		return m[1] + port + ":" + container + m[4]
+	})
+	require.NoError(h.t, os.WriteFile(composeFile, []byte(out), 0o644))
+
+	h.rewriteEnvPorts(remapped)
+}
+
+// rewriteEnvPorts points every ":<old>" in .env at its new host port. Done in
+// one pass over an alternation rather than a replace per entry, so a new port
+// that happens to equal another entry's old port cannot be rewritten twice.
+func (h *harness) rewriteEnvPorts(remapped map[string]string) {
+	h.t.Helper()
+
+	if len(remapped) == 0 {
+		return
+	}
+	alts := make([]string, 0, len(remapped))
+	for old := range remapped {
+		alts = append(alts, regexp.QuoteMeta(old))
+	}
+	// \b keeps ":5432" from matching inside ":54321".
+	re := regexp.MustCompile(`:(` + strings.Join(alts, "|") + `)\b`)
+
+	envFile := filepath.Join(h.dir, ".env")
+	data, err := os.ReadFile(envFile)
+	require.NoError(h.t, err)
+
+	out := re.ReplaceAllStringFunc(string(data), func(m string) string {
+		return ":" + remapped[m[1:]]
+	})
+	require.NoError(h.t, os.WriteFile(envFile, []byte(out), 0o644))
 }
 
 func (h *harness) templGenerate() {
@@ -315,7 +394,7 @@ func TestScaffold_Startup(t *testing.T) {
 				t:    t,
 				dir:  filepath.Join(t.TempDir(), p.cfg.Name),
 				cfg:  p.cfg,
-				port: p.port,
+				port: freePort(t),
 			}
 
 			h.scaffold()
@@ -341,7 +420,7 @@ func TestScaffold_GeneratedTests(t *testing.T) {
 				t:    t,
 				dir:  filepath.Join(t.TempDir(), p.cfg.Name),
 				cfg:  p.cfg,
-				port: p.port,
+				port: freePort(t),
 			}
 
 			h.scaffold()

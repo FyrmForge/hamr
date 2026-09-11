@@ -63,6 +63,11 @@ var bridgeTools = []bridgeTool{
 		inputSchema: `{"type":"object","properties":{"name":{"type":"string","description":"watch rule name"}},"required":["name"]}`,
 	},
 	{
+		name:        "dev.restart",
+		description: "Restart the dev server in place: full startup lifecycle (docker compose, port resolution, .env injection, builds, daemons, watcher) re-runs, the TUI stays up. Use for a clashing port, an edited .env or hamr.toml, or a container that came up wrong — never start a second server. Refused with an error if the dev server has been up less than 5s — if you get that, the last restart already happened, so read logs.read/dev.info instead of calling again. Returns as soon as the restart is queued; the connection drops for a few seconds, then poll dev.info until it answers — anything reading ports before that (dev.info, make.run targets shelling `hamr env`) can still report the pre-restart ones.",
+		inputSchema: noArgs,
+	},
+	{
 		name:        "rebuild.all",
 		description: "Enqueue every watch rule for a full rebuild. Poll logs.read for output.",
 		inputSchema: noArgs,

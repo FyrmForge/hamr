@@ -43,6 +43,7 @@ type helpEntry struct {
 // future bindings should be added here and tagged into both surfaces.
 var helpEntries = []helpEntry{
 	{"r", "rebuild all watch rules"},
+	{"R", "restart the dev server (full startup: docker, ports, .env, builds)"},
 	{"o", "open the proxy URL in browser"},
 	{"c", "clear the active tab's log buffer"},
 	{"m", "run a Makefile target (fuzzy palette; q cancels in-flight target)"},

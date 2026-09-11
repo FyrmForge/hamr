@@ -243,12 +243,24 @@ time — so the agent's config holds no secret and the wiring survives port walk
 and restarts.
 
 **Tools** mirror the dev panel's actions, gated by `[dev.mcp.access]`
-(per-area `read`/`write`): `dev.info` (discovery), `logs.read`, `console.read`,
+(per-area `read`/`write`): `dev.info` (discovery), `dev.restart` (full dev-server
+restart, the `R` hotkey's equivalent), `logs.read`, `console.read`,
 `docker.logs`/`status`/`restart`/`wipe`, `rule.run`, `rebuild.all`, `make.run`
 (bounded-wait), the mail- and SMS-mock tools, and the stripe-mock lifecycle tools. Reads
 return immediately; `docker.restart`/`wipe` and `rule.run` dispatch async (poll
 `docker.status` / `logs.read`); `make.run` waits up to `make_wait` then returns
 "still running" for slow targets.
+
+`dev.restart` replies before it restarts anything, because it tears down the very
+proxy the call arrived on — the handler writes and flushes `{"ok":true}`, then
+fires the restart. So the reply always lands, but it reports only that the
+restart was accepted, never how it went. A restart is refused outright while the
+dev server has been up for less than 5 seconds, so an agent that has decided the
+server is wedged cannot spend a full teardown-and-rebuild per call — the refusal
+is the signal that the restart already happened. The bridge re-reads `.hamr/dev.json` per call, so
+it finds the new port and token by itself — but calls made during the few seconds
+of teardown fail with a connection error. Wait, then poll `dev.info` until it
+answers.
 
 Every agent call is recorded three ways: to `.hamr/mcp_logs.txt` (the audit
 log), to a dedicated **mcp** TUI tab (last in the `Tab` cycle — one line per
@@ -400,6 +412,7 @@ The 🔨 emoji reflects overall state:
 | Key | Action | Notes |
 |-----|--------|-------|
 | `r` | Rebuild all watch rules in topological order | |
+| `R` | Restart the dev server | Full startup lifecycle re-runs in place: config re-read, docker compose brought up, ports re-resolved, `.env` re-injected, builds and daemons restarted, watcher rebuilt. The TUI and its log buffers survive. Use it when startup-only state went stale — a port now clashing, an edited `.env`, a container that came up wrong. Ignored while the server is still starting up, with a "still starting up" warning in the log (`q` still quits), and refused for the first 5 seconds after it becomes ready — so a double-press costs one restart, not two. Also works while parked on a `hamr.toml` parse error, where it retries immediately — the config can be valid and startup still have failed on a clashing port or a bad `.env`, neither of which touches `hamr.toml`. |
 | `o` | Open the proxy URL in the default browser | Requires `[proxy]` configured |
 | `c` | Clear the active tab's log buffer | |
 | `m` | Run a Makefile target | Opens a fuzzy palette listing every target in `./Makefile` (declaration order). Type to filter, `↑/↓` to move, `↩` to run, `Esc` to cancel. Hidden when no `Makefile` exists. Output streams to the hamr tab prefixed `[make:<target>]`. While running, only `q` (cancel — kills the `make` process group) and `Ctrl+C` (quit TUI) work. On exit a Done/Failed summary stays until any key dismisses it. |

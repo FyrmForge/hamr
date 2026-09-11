@@ -73,7 +73,7 @@
   `/__hamr/mcp/*` namespace is separate from the browser `/__hamr/*` routes, so
   the kill-switch and permissions never affect the dev panel. Permissions are
   per-area in `[dev.mcp.access]` (`read`/`write`/omit=deny; `write` implies
-  `read`): `dev` (dev.info), `logs` (logs.read [ANSI-stripped, timestamped,
+  `read`): `dev` (dev.info read; dev.restart write), `logs` (logs.read [ANSI-stripped, timestamped,
   rule prefix-matched so rule="site" catches site:build/site:run], console.read
   [structured timestamped frames: time/level/msg/src], http.read [dev-proxy
   request log: method/path/status/durationMs incl /__hamr/*, static, SSE/WS —
@@ -85,7 +85,15 @@
   granted tools and re-checks permission per call (the security boundary; the
   bridge's filtering is UX). Async semantics: reads return immediately;
   docker.restart/wipe and rule.run/rebuild.all dispatch (poll docker.status /
-  logs.read) — or pass `wait:true` (+ `wait_timeout`, default 60s) to
+  logs.read); dev.restart replies before it restarts anything (the handler writes
+  and flushes `{"ok":true}`, then fires the restart) because it tears down the
+  very proxy the call arrived on — so the reply always lands, but reports only
+  acceptance, never the outcome; a restart is refused outright while the run has
+  been up <5s (`restartCooldown`), measured from the ready flip so it survives
+  the Runner being rebuilt, capping an agent that loops on dev.restart at one
+  teardown-and-rebuild per cooldown — the bridge re-reads
+  `.hamr/dev.json` per call so it finds the new port/token, but calls during the
+  few-second teardown fail with a connection error, so wait and poll dev.info — or pass `wait:true` (+ `wait_timeout`, default 60s) to
   docker.restart/wipe to block until running/healthy and get final statuses;
   make.run returns inline `output` for fast targets, else waits `make_wait`
   (default 20s) and returns `status:running` for slow ones, and is constrained
@@ -3023,6 +3031,8 @@ and any other project-defined scripts can be triggered from inside dev.
 | Key                | Action                                                 |
 |--------------------|--------------------------------------------------------|
 | `r`                | Rebuild all watch rules in topological order           |
+| `R`                | Restart the dev server (full startup lifecycle, 5s cooldown) |
+| `R` (parked)       | Retry now when stuck on a `hamr.toml` parse error      |
 | `o`                | Open the proxy URL in the default browser              |
 | `c`                | Clear the active tab's log buffer                      |
 | `m`                | Run a Makefile target (fuzzy palette over `./Makefile`)|

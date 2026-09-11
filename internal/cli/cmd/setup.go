@@ -197,7 +197,7 @@ func accessSelects(c *setupChoices) []huh.Field {
 
 // areaHelp is a one-liner per area so the picker is readable without the docs.
 var areaHelp = map[string]string{
-	"dev":    "dev.info — rules, ports, versions",
+	"dev":    "dev.info — rules, ports, versions; write adds dev.restart",
 	"logs":   "app, browser-console, and HTTP request logs",
 	"docker": "compose status/logs; write adds restart + wipe",
 	"mail":   "the mail mock inbox; write adds clear + ingest",
@@ -371,7 +371,8 @@ var mcpHabits = []struct{ area, read, write string }{
 		read:  "Never guess at payment state — `stripe.list` reads the mock's objects.",
 		write: "`stripe.complete` / `stripe.expire` / `stripe.refund` drive a payment to an outcome."},
 	{area: "dev",
-		read: "`dev.info` reports the running rules, ports (including walked ones), and versions — read it before assuming a port."},
+		read:  "`dev.info` reports the running rules, ports (including walked ones), and versions — read it before assuming a port.",
+		write: "When startup-only state goes stale — a port now clashing, an edited `.env`, a container that came up wrong — call `dev.restart` (re-runs the whole startup lifecycle in place). Never start a second dev server. A restart within 5s of the last one is refused — that means it already happened, so read the logs instead of calling again."},
 }
 
 // buildAgentMCPSection renders the instruction block for the granted areas, or

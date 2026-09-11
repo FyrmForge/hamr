@@ -47,13 +47,14 @@ On startup, `hamr dev` compares `[hamr].version` in `hamr.toml` against the CLI.
 - Hotkey hints at the bottom.
 - Modal overlays for actions that need confirmation.
 
-`q` / `Ctrl+C` work even when the dev server is parked on a `hamr.toml` parse error — the TUI quits cleanly instead of getting stuck on "waiting for config fix...".
+`q` / `Ctrl+C` work even when the dev server is parked on a `hamr.toml` parse error — the TUI quits cleanly instead of getting stuck on "waiting for config fix...". `R` works there too, retrying immediately: the config can be valid and startup still have failed on a clashing port or a bad `.env`, and neither of those touches `hamr.toml`, so waiting on a file write would hang forever.
 
 Hotkeys include a Makefile-target runner, a help overlay, and per-stack log tabs:
 
 | Key | Action |
 |-----|--------|
 | `r` | Rebuild all watch rules |
+| `R` | **Restart the dev server** — re-runs the whole startup lifecycle (config, docker compose, port resolution, `.env` injection, builds, daemons, watcher) without dropping the TUI. For stale startup-only state: a clashing port, an edited `.env`, a bad container. Also retries while parked on a config error. Ignored while the server is still starting up, and refused for the first 5 seconds after it becomes ready. |
 | `o` | Open the proxy URL in the browser |
 | `c` | Clear the active tab's log buffer |
 | `m` | **Run a Makefile target** — opens a fuzzy palette listing every target in the project's `./Makefile` (in declaration order). Type to filter, `↑/↓` to move, `↩` to run, `Esc` to cancel. Hidden when no `Makefile` is present. |

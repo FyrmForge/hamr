@@ -64,6 +64,28 @@ the TL;DR on top of it.
 
 ### Fixes
 
+- **The scaffold integration tests pick free ports instead of hardcoded ones.**
+  They shell `docker compose up` directly rather than going through `hamr dev`,
+  so hamr's own compose port walk never applied to them, and the scaffold
+  hardcodes 5432 for postgres and 9000/9001 for the S3 mock. Any developer
+  already running another project's containers on those ports could not run
+  `make ai` at all — and the failure was not always a clean bind error: in one
+  case compose came up, the scaffolded app connected to the OTHER project's
+  postgres, and it failed much later with "database does not exist". The
+  harness now rewrites each published host port in the generated compose file
+  to a free one and repoints `.env` to match. The app's own port is picked the
+  same way instead of the hardcoded 18080-18082.
+
+- **`hamr setup`'s form test no longer fails at random.** It drove the whole
+  picker from a scripted keystroke string, but huh advances between form groups
+  with `tea.Sequence`, which bubbletea resolves asynchronously while the input
+  reader keeps feeding keys — so a keystroke aimed at a later group could land
+  on the finished one and be swallowed. It failed roughly half the time under
+  repetition and occasionally took the whole package with it. The headless run
+  now drives only the first group, the access selects are exercised
+  field-by-field with no group transitions in play, and the form runs under a
+  timeout so a dropped key fails the test instead of hanging it.
+
 - **Scaffolded inline field re-validation now works, without widening the CSP.**
   The auth forms' `input[this.closest(...).querySelector(...)]` trigger filter
   never fired as intended: htmx compiles `hx-trigger` `[...]` filters with
@@ -77,6 +99,33 @@ the TL;DR on top of it.
   unchanged — no `'unsafe-eval'`. Same change in `AGENTS.md` and the forms guide.
 
 ### Features
+
+- **Restart the dev server without leaving the TUI.** `R` in `hamr dev` tears
+  the runner down and re-runs its whole startup lifecycle in place: config
+  re-read, docker compose brought up, ports re-resolved, `.env` re-injected,
+  builds and daemons restarted, watcher rebuilt. The TUI and its log buffers
+  survive. This is the escape hatch for state the runner only reads at startup
+  — a port that is now clashing, an edited `.env`, a container that came up
+  wrong — which previously meant quitting and starting over. Same path the
+  runner already took on a `hamr.toml` change, now triggerable on demand.
+
+  `R` also works while `hamr dev` is parked on a `hamr.toml` parse error, where
+  it retries immediately. Previously only a write to `hamr.toml` got you out of
+  that state, which is useless when the config is valid and startup failed on a
+  clashing port or a bad `.env` — neither of which touches that file.
+
+  The matching MCP tool is **`dev.restart`**, added to the `dev` area at
+  `write` (the area was read-only before, so grant `dev = "write"` to expose
+  it). It lets an agent recover a wedged dev server itself instead of asking.
+  It returns as soon as the restart is queued, because the proxy carrying the
+  call is one of the things torn down; the bridge re-reads `.hamr/dev.json` per
+  call and finds the new port and token by itself, so an agent just waits a few
+  seconds and polls `dev.info`. The reply is written and flushed before the
+  restart is requested, so a successful restart never surfaces to the agent as a
+  connection error. Both `R` and `dev.restart` are refused while the dev server
+  has been up for less than 5 seconds: an agent that has decided the server is
+  wedged would otherwise spend a full teardown-and-rebuild per call, and a
+  double-press of `R` would cost two restarts.
 
 - **`make e2e-local` spawns its own server.** The scaffolded local e2e mode
   builds `bin/site`, starts it on the first free port from 8080 (walking +1

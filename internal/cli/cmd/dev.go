@@ -142,15 +142,18 @@ func runDevLoop(ctx context.Context, rt devUI, configPath string, noProxy, verbo
 		cfg, err := devserver.LoadConfig(configPath)
 		if err != nil {
 			rt.Log(fmt.Sprintf("%s config error: %v", devserver.HamrDevTag(), err))
-			rt.Log(fmt.Sprintf("%s waiting for config fix... (q to quit)", devserver.HamrDevTag()))
+			rt.Log(fmt.Sprintf("%s waiting for config fix... (R to retry, q to quit)", devserver.HamrDevTag()))
 			waitErr := devserver.WaitForConfigChangeOrQuit(ctx, configPath, rt.HotkeyActions())
-			if waitErr != nil {
-				if errors.Is(waitErr, context.Canceled) {
-					return nil
-				}
+			switch {
+			case waitErr == nil:
+				rt.Log(fmt.Sprintf("%s --- config changed, retrying ---", devserver.HamrDevTag()))
+			case errors.Is(waitErr, devserver.ErrRestart):
+				rt.Log(fmt.Sprintf("%s --- retrying ---", devserver.HamrDevTag()))
+			case errors.Is(waitErr, context.Canceled):
+				return nil
+			default:
 				return waitErr
 			}
-			rt.Log(fmt.Sprintf("%s --- config changed, retrying ---", devserver.HamrDevTag()))
 			continue
 		}
 
@@ -189,8 +192,15 @@ func runDevLoop(ctx context.Context, rt devUI, configPath string, noProxy, verbo
 		runner := devserver.NewRunner(cfg, opts...)
 
 		err = runner.Run(ctx)
-		if errors.Is(err, devserver.ErrConfigReload) {
+		switch {
+		case errors.Is(err, devserver.ErrConfigReload):
 			rt.Log(fmt.Sprintf("%s --- config changed, restarting ---", devserver.HamrDevTag()))
+			continue
+		case errors.Is(err, devserver.ErrRestart):
+			// Explicit R hotkey / dev.restart: the config is re-read at the top
+			// of the loop, so this picks up an edited .env, a freed port or a
+			// changed hamr.toml exactly like a config reload does.
+			rt.Log(fmt.Sprintf("%s --- restarting dev server ---", devserver.HamrDevTag()))
 			continue
 		}
 		return err

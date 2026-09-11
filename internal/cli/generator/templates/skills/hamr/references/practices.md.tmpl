@@ -301,6 +301,14 @@ version of this list into `AGENTS.md` and `CLAUDE.md`.
 - `stripe.list` (+ `stripe.complete`, `stripe.expire`, `stripe.refund`) — read
   and drive the Stripe mock instead of guessing at payment state.
 - `dev.info` — running rules, ports (including walked ones), versions.
+- `dev.restart` (at `dev = "write"`) — re-runs the dev server's whole startup
+  lifecycle in place: docker compose, port resolution, `.env` injection, builds,
+  daemons, watcher. Reach for it when startup-only state went stale — a clashing
+  port, an edited `.env`, a container that came up wrong — instead of asking the
+  developer to restart. It drops the connection for a few seconds; wait, then
+  poll `dev.info` until it answers. A second restart within 5s is refused — that
+  refusal means the restart already happened, so read the logs rather than
+  calling again.
 
 A call failing with "dev not running / gateway off" means `hamr dev` isn't up or
 the gateway is off — say so rather than silently falling back to manual steps.

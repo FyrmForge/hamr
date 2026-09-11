@@ -332,7 +332,7 @@ See [`hamr mcp`](cli.md) and the security notes below.
 
 | Area     | `read` exposes                | `write` adds                          |
 |----------|-------------------------------|---------------------------------------|
-| `dev`    | `dev.info`                    | —                                     |
+| `dev`    | `dev.info`                    | `dev.restart`                         |
 | `logs`   | `logs.read`, `console.read`, `http.read` | —                          |
 | `docker` | `docker.logs`, `docker.status`| `docker.restart`, `docker.wipe`       |
 | `mail`   | `mail.list`, `mail.get`       | `mail.clear`, `mail.ingest`           |

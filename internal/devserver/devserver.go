@@ -23,9 +23,24 @@ import (
 
 const schedulerBatchWindow = 20 * time.Millisecond
 
+// restartCooldown is how long a run must have been up before another restart is
+// accepted. Restarting is expensive (full teardown, docker, builds) and the
+// dev.restart MCP tool makes it callable in a loop by an agent that has decided
+// the server is wedged. Nothing the runner reads at startup can go stale this
+// fast, so a refusal here costs nothing and a missing one costs a rebuild per
+// call. Measured from when the run became ready rather than from the last
+// request, so it survives the Runner being rebuilt on every restart.
+const restartCooldown = 5 * time.Second
+
 // ErrConfigReload is returned by Run when the config file changes.
 // The caller should reload the config and call Run again.
 var ErrConfigReload = errors.New("config changed, reloading")
+
+// ErrRestart is returned by Run when a restart is requested explicitly (the
+// TUI's R hotkey or the dev.restart MCP tool). Identical handling to
+// ErrConfigReload — the caller reloads the config and calls Run again — but a
+// distinct sentinel so the caller can say why it is restarting.
+var ErrRestart = errors.New("restart requested")
 
 // Runner is the top-level dev server orchestrator.
 type Runner struct {
@@ -62,6 +77,33 @@ type Runner struct {
 	// are stable. Until then the startup hotkey-drain goroutine ignores
 	// system-dependent actions (open browser, rebuild) — only quit works.
 	ready atomic.Bool
+
+	// readyAt is the unix-nano timestamp of the ready flip, written just before
+	// it and read the same way. Backs the restart cooldown.
+	readyAt atomic.Int64
+}
+
+// markReady records the moment startup finished, then flips ready. Order
+// matters: readyAt must be visible to anything that observes ready as true.
+func (r *Runner) markReady() {
+	r.readyAt.Store(time.Now().UnixNano())
+	r.ready.Store(true)
+}
+
+// restartRefusal reports why a restart cannot be honored right now, or nil when
+// it can. Pure check with no side effect: the MCP handler has to decide the
+// answer before it writes its response, and only fire the restart afterwards.
+func (r *Runner) restartRefusal() error {
+	at := r.readyAt.Load()
+	if at == 0 {
+		return errors.New("dev server is still starting up")
+	}
+	up := time.Since(time.Unix(0, at))
+	if left := restartCooldown - up; left > 0 {
+		return fmt.Errorf("restart refused: dev server has only been up %s, retry in %s",
+			up.Round(100*time.Millisecond), left.Round(100*time.Millisecond))
+	}
+	return nil
 }
 
 // Option configures a Runner.
@@ -290,13 +332,20 @@ func (r *Runner) Run(ctx context.Context) error {
 	var followersWG sync.WaitGroup
 	var watcher *Watcher
 	configReloadCh := make(chan struct{}, 1)
-	var configReload bool
+	// Buffered so a restart request never blocks its caller (an MCP handler
+	// goroutine, which must return its HTTP response before the proxy this
+	// very request arrived on is torn down).
+	restartCh := make(chan struct{}, 1)
+	// restarting suppresses the SSE shutdown broadcast when Run is unwinding
+	// only to be re-run by the caller: the browser should wait for the reload,
+	// not be told the dev server is gone.
+	var restarting bool
 
 	// Start reverse proxy.
 	var proxySrv *http.Server
 	defer func() {
 		r.logger.Info("shutting down")
-		if !configReload {
+		if !restarting {
 			broker.Broadcast(SSEEvent{Type: "shutdown"})
 		}
 		pm.ClearCallbacks()
@@ -335,6 +384,13 @@ func (r *Runner) Run(ctx context.Context) error {
 	actions := &DevActions{
 		ctx: runCtx, cfg: r.cfg, pm: pm, broker: broker,
 		errorState: errorState, graph: graph, logger: r.logger,
+		requestRestart: func() {
+			select {
+			case restartCh <- struct{}{}:
+			default: // a restart is already queued; one is enough
+			}
+		},
+		restartRefusal: r.restartRefusal,
 		requestRun: func(rule *WatchRule) {
 			dirtyMu.Lock()
 			dirty[rule.Name] = FileEvent{Rule: rule}
@@ -728,7 +784,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	if len(r.cfg.Dev.Watch) == 0 {
 		r.logger.Info("no watch rules, running daemons only")
 		r.logger.Info("ready")
-		r.ready.Store(true)
+		r.markReady()
 		close(startupDone)
 		<-startupExited
 		if r.configPath != "" {
@@ -739,8 +795,11 @@ func (r *Runner) Run(ctx context.Context) error {
 			case <-runCtx.Done():
 				return nil
 			case <-configReloadCh:
-				configReload = true
+				restarting = true
 				return ErrConfigReload
+			case <-restartCh:
+				restarting = true
+				return ErrRestart
 			case action := <-hotkeys.Actions():
 				if r.handleHotkey(action, actions, cancel) {
 					return nil
@@ -761,7 +820,7 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	r.logger.Info("watching for changes")
 	r.logger.Info("ready")
-	r.ready.Store(true)
+	r.markReady()
 	close(startupDone)
 	<-startupExited
 
@@ -872,8 +931,11 @@ func (r *Runner) Run(ctx context.Context) error {
 			return nil
 		case <-configReloadCh:
 			r.logger.Info("config changed, reloading")
-			configReload = true
+			restarting = true
 			return ErrConfigReload
+		case <-restartCh:
+			restarting = true
+			return ErrRestart
 		case action := <-hotkeys.Actions():
 			if r.handleHotkey(action, actions, cancel) {
 				return nil
@@ -901,6 +963,16 @@ func (r *Runner) handleHotkey(action HotkeyAction, actions *DevActions, cancel c
 	// before the scheduler is up, and (b) keeps the drain goroutine from reading
 	// proxyURL / cfg.Proxy.* while Run() is still writing them.
 	if action != HotkeyQuit && !r.ready.Load() {
+		// Say so for restart rather than dropping it in silence: startup is
+		// exactly when a developer reaches for R (a compose bring-up that is
+		// hanging, a port that won't bind), so a dead key with no feedback
+		// reads as a broken TUI.
+		//
+		// ponytail: a mid-startup restart would have to unwind Run from an
+		// arbitrary point — worth it only if waiting for ready proves painful.
+		if action == HotkeyRestart {
+			r.logger.Warn("still starting up — restart ignored (q quits)")
+		}
 		return false
 	}
 	switch action {
@@ -923,6 +995,13 @@ func (r *Runner) handleHotkey(action HotkeyAction, actions *DevActions, cancel c
 		default:
 			r.logger.Warn("no proxy configured, cannot open browser")
 		}
+	case HotkeyRestart:
+		if err := actions.CheckRestart(); err != nil {
+			r.logger.Warn("restart refused", "err", err)
+			return false
+		}
+		r.logger.Info("restart requested")
+		actions.RestartServer()
 	case HotkeyMCPToggle:
 		if r.mcpGateway == nil {
 			r.logger.Warn("MCP unavailable (no reverse proxy running)")

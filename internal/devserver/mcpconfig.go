@@ -47,7 +47,7 @@ type mcpArea struct {
 // (which exposes endpoints) and the bridge (which advertises tools). Keep in
 // sync with the tool inventory in docs/proposed-features/mcp-dev-server.md.
 var mcpAreas = map[string]mcpArea{
-	"dev":    {readTools: []string{"dev.info"}},
+	"dev":    {readTools: []string{"dev.info"}, writeTools: []string{"dev.restart"}},
 	"logs":   {readTools: []string{"logs.read", "console.read", "http.read"}},
 	"docker": {readTools: []string{"docker.logs", "docker.status"}, writeTools: []string{"docker.restart", "docker.wipe"}},
 	"mail":   {readTools: []string{"mail.list", "mail.get"}, writeTools: []string{"mail.clear", "mail.ingest"}},
