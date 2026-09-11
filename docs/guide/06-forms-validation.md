@@ -266,15 +266,23 @@ The HTMX trigger pattern handles error clearing automatically:
 <input
     name="email"
     hx-post="/register/validate/email"
-    hx-trigger="blur, input[this.closest('div').querySelector('[data-has-error=true]')] delay:300ms"
+    hx-trigger="blur, hamr:revalidate"
     hx-swap="none"
 />
 @form.FieldError("email", form.GetError(errs, "email"))
 ```
 
 1. User types bad email, leaves field -> `blur` fires -> OOB swap with `data-has-error="true"`
-2. User corrects -> `input` fires (because `data-has-error="true"` matches) -> after 300ms -> passes -> OOB swap with empty span, `data-has-error="false"`
-3. Once `data-has-error="false"`, input trigger stops firing on keystrokes
+2. User corrects -> each keystroke is seen by the listener in `static/js/main.js` -> it sees `data-has-error="true"` -> 300ms after the last keystroke it fires `hamr:revalidate` -> passes -> OOB swap with empty span, `data-has-error="false"`
+3. Once `data-has-error="false"`, the listener returns early and no further requests are made until the next `blur`
+
+`hamr:revalidate` is a plain custom DOM event; htmx listens for it because it is
+named in `hx-trigger`. The "only while already in error" condition lives in
+`static/js/main.js`, not in an `hx-trigger` `[...]` filter, because htmx compiles
+those filters with `Function()` — which requires `'unsafe-eval'` in the CSP. The
+listener pairs an input with its error span by id convention: `name="email"` ->
+`id="error-email"`. Set `data-hamr-watch="other_field"` to gate on a different
+field's error span instead (see cross-field validation below).
 
 ### Cross-Field Validation (HTMX)
 
@@ -286,14 +294,14 @@ The HTMX trigger pattern handles error clearing automatically:
     name="password_confirm"
     hx-post="/register/validate/password_confirm"
     hx-include="[name='password']"
-    hx-trigger="blur, input[this.closest('.form-group').querySelector('[data-has-error=true]')] delay:300ms"
+    hx-trigger="blur, hamr:revalidate"
     hx-swap="none"
 />
 ```
 
 Without `hx-include`, `c.FormValue("password")` inside the `CtxRule` returns `""` and the comparison silently misbehaves (an empty `password_confirm` typically passes a `value != ""` check, masking the mismatch).
 
-The validation is also asymmetric: editing `password_confirm` re-runs the comparison, but editing `password` does not re-validate `password_confirm`. To keep the confirm error in sync, mirror the wiring on the password input — point its trigger at the confirm validator and include the confirm field:
+The validation is also asymmetric: editing `password_confirm` re-runs the comparison, but editing `password` does not re-validate `password_confirm`. To keep the confirm error in sync, mirror the wiring on the password input — point its trigger at the confirm validator, include the confirm field, and set `data-hamr-watch` so typing in `password` is gated on the *confirm* field's error rather than its own:
 
 ```html
 <input
@@ -301,7 +309,8 @@ The validation is also asymmetric: editing `password_confirm` re-runs the compar
     name="password"
     hx-post="/register/validate/password_confirm"
     hx-include="[name='password_confirm']"
-    hx-trigger="input[this.closest('form').querySelector('[name=password_confirm][data-has-error=true]')] delay:300ms"
+    data-hamr-watch="password_confirm"
+    hx-trigger="hamr:revalidate"
     hx-swap="none"
 />
 ```

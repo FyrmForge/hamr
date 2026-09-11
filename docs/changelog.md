@@ -62,6 +62,20 @@ the TL;DR on top of it.
   `hamr rename-module`. Update any scripts, `hamr.toml` `cmd =` hooks, and
   Makefiles. Scaffolded projects' Makefiles already use the new names.
 
+### Fixes
+
+- **Scaffolded inline field re-validation now works, without widening the CSP.**
+  The auth forms' `input[this.closest(...).querySelector(...)]` trigger filter
+  never fired as intended: htmx compiles `hx-trigger` `[...]` filters with
+  `Function()`, the scaffolded CSP has no `'unsafe-eval'`, so htmx dropped the
+  filter and every keystroke triggered a validation request. The condition now
+  lives in `static/js/main.js`, which debounces 300ms and fires a
+  `hamr:revalidate` event only while the field is already showing an error; the
+  inputs use `hx-trigger="blur, hamr:revalidate"`. Inputs pair with their error
+  span by id convention (`name="x"` <-> `id="error-x"`); `data-hamr-watch="y"`
+  gates on another field's error instead, for cross-field validation. The CSP is
+  unchanged — no `'unsafe-eval'`. Same change in `AGENTS.md` and the forms guide.
+
 ### Features
 
 - **`make e2e-local` spawns its own server.** The scaffolded local e2e mode

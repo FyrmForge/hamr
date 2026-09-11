@@ -337,7 +337,7 @@ templ createForm(c echo.Context, f CreateForm, errors map[string]string) {
             <label for="name">Name</label>
             <input type="text" id="name" name="name" value={ f.Name }
                 hx-post="/things/validate/name"
-                hx-trigger="blur, input[this.closest('.form-group').querySelector('[data-has-error=true]')] delay:300ms"
+                hx-trigger="blur, hamr:revalidate"
                 hx-swap="none"/>
             @form.FieldError("name", form.GetError(errors, "name"))
         </div>
@@ -351,7 +351,8 @@ Key HTMX attributes:
 - `hx-swap="outerHTML"` — Replace the entire form on validation errors
 - `hx-target="#create-form"` — Target the form element
 - `hx-swap="none"` on inputs — Field validation uses OOB swaps, no explicit target
-- `hx-trigger` — Validate on blur; re-validate on input only if an error is showing
+- `hx-trigger="blur, hamr:revalidate"` — Validate on blur; re-validate while typing only if an error is showing
+- `hamr:revalidate` — Custom event fired by `static/js/main.js`, 300ms after the last keystroke, and only while the field's `error-<name>` span has `data-has-error="true"`. Do NOT use an `hx-trigger` `[...]` filter for this: htmx compiles those with `Function()`, which the CSP blocks. Add `data-hamr-watch="other_field"` to gate on another field's error instead.
 
 ### Field Error Components
 
