@@ -83,12 +83,15 @@ that silently never updates, found weeks later.
 
 - Adding dev-server state is: broadcast a new `Ev*` constant, handle it where
   it matters. No plumbing.
-- The TUI status bar shows builds, restarts and make runs triggered from
+- The TUI status indicator (bottom-right of the hint bar) shows builds, restarts and make runs triggered from
   anywhere — hotkey, browser, or agent.
 - `logs.read` on `make:<target>` is now true for every run, as documented.
 - Per-target stable colours for `[make:<target>]` tags are gone; make output
   uses the same colour rotation as every other rule. Accepted trade for having
   one output path.
+- The `T` tunnel follows the rule: `EvTunnelStart` ("starting"/"stopping"),
+  `EvTunnelUp` (URL) and `EvTunnelDown` feed the TUI ticker and URL slot; there
+  is no tunnel hook.
 - The remaining hooks (`proxyURL`, `mcpStatus`, `mcpLog`, error state) still
   exist. They carry snapshots rather than events, and migrating them is
   follow-up work, not a reason to keep adding more.

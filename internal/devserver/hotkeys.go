@@ -19,6 +19,8 @@ const (
 	// for state the runner only reads at startup: a clashing port, an edited
 	// .env, a container that came up wrong.
 	HotkeyRestart
+	// HotkeyTunnelToggle starts or stops the public tunnel ([dev.tunnel]).
+	HotkeyTunnelToggle
 )
 
 // HotkeySource emits hotkey actions for the dev runner to consume. The TUI

@@ -22,18 +22,21 @@ type SSEEvent struct {
 // no compiler catches, and the mismatch only shows up as a consumer that
 // silently never updates.
 const (
-	EvBuilding   = "building"    // Data: rule name
-	EvBuildOK    = "build_ok"    // Data: rule name
-	EvBuildError = "build_error" // Data: JSON {rule, output}
-	EvOutput     = "output"      // Data: JSON {rule, text, color}
-	EvReload     = "reload"      // Data: reload mode
-	EvShutdown   = "shutdown"    // Data: ""
-	EvDarkFilter = "dark_filter" // Data: "on" / "off"
-	EvRestarting = "restarting"  // Data: ""
-	EvMakeStart  = "make_start"  // Data: target
-	EvMakeDone   = "make_done"   // Data: "<target> <exit code>"
-	EvComposeUp  = "compose_up"  // Data: compose entry name
-	EvComposeOK  = "compose_ok"  // Data: compose entry name
+	EvBuilding    = "building"     // Data: rule name
+	EvBuildOK     = "build_ok"     // Data: rule name
+	EvBuildError  = "build_error"  // Data: JSON {rule, output}
+	EvOutput      = "output"       // Data: JSON {rule, text, color}
+	EvReload      = "reload"       // Data: reload mode
+	EvShutdown    = "shutdown"     // Data: ""
+	EvDarkFilter  = "dark_filter"  // Data: "on" / "off"
+	EvRestarting  = "restarting"   // Data: ""
+	EvMakeStart   = "make_start"   // Data: target
+	EvMakeDone    = "make_done"    // Data: "<target> <exit code>"
+	EvComposeUp   = "compose_up"   // Data: compose entry name
+	EvComposeOK   = "compose_ok"   // Data: compose entry name
+	EvTunnelStart = "tunnel_start" // Data: "starting" / "stopping"
+	EvTunnelUp    = "tunnel_up"    // Data: public URL
+	EvTunnelDown  = "tunnel_down"  // Data: "" (off, or a start that failed)
 )
 
 // sseRule is a watch rule serialized for the config SSE event.
@@ -86,6 +89,9 @@ type SSEBroker struct {
 	clients    map[uint64]chan SSEEvent
 	nextID     atomic.Uint64
 	configJSON string // pre-serialized config payload
+	// tunnelConfigJSON is configJSON for tunnel visitors: names and mock
+	// flags only (no commands, globs or compose files), console capture off.
+	tunnelConfigJSON string
 	// darkFilter is the live state of the dark comfort filter over the
 	// proxied site. It lives here rather than in the pre-serialized config
 	// so a tab connecting after a runtime toggle gets the current state, not
@@ -133,9 +139,29 @@ func NewSSEBroker(rules []WatchRule, daemons []Daemon, dockerCompose []DockerCom
 		}
 	}
 	data, _ := json.Marshal(cfg)
+
+	pub := cfg
+	pub.ConsoleCapture = false // /__hamr/console is blocked through the tunnel
+	pub.Rules = make([]sseRule, len(cfg.Rules))
+	for i, r := range cfg.Rules {
+		pub.Rules[i] = sseRule{Name: r.Name, Reload: r.Reload}
+	}
+	pub.Daemons = make([]sseDaemon, len(cfg.Daemons))
+	for i, d := range cfg.Daemons {
+		pub.Daemons[i] = sseDaemon{Name: d.Name}
+	}
+	if cfg.DockerCompose != nil {
+		pub.DockerCompose = make([]sseDockerCompose, len(cfg.DockerCompose))
+		for i, dc := range cfg.DockerCompose {
+			pub.DockerCompose[i] = sseDockerCompose{Name: dc.Name}
+		}
+	}
+	pubData, _ := json.Marshal(pub)
+
 	b := &SSEBroker{
-		clients:    make(map[uint64]chan SSEEvent),
-		configJSON: string(data),
+		clients:          make(map[uint64]chan SSEEvent),
+		configJSON:       string(data),
+		tunnelConfigJSON: string(pubData),
 	}
 	b.darkFilter.Store(darkFilter)
 	return b
@@ -158,9 +184,15 @@ func (b *SSEBroker) Handler() http.HandlerFunc {
 		ch, unsubscribe := b.Subscribe()
 		defer unsubscribe()
 
+		tunneled := isTunnelRequest(r)
+		configJSON := b.configJSON
+		if tunneled {
+			configJSON = b.tunnelConfigJSON
+		}
+
 		// Send initial connected event, followed by config.
 		_, _ = fmt.Fprintf(w, "event: connected\ndata: ok\n\n")
-		_, _ = fmt.Fprintf(w, "event: config\ndata: %s\n\n", b.configJSON)
+		_, _ = fmt.Fprintf(w, "event: config\ndata: %s\n\n", configJSON)
 		// Only sent when on: the client defaults to off, so the common case
 		// costs no frame.
 		if b.darkFilter.Load() {
@@ -175,6 +207,11 @@ func (b *SSEBroker) Handler() http.HandlerFunc {
 			case evt, ok := <-ch:
 				if !ok {
 					return
+				}
+				if tunneled {
+					if evt, ok = redactForTunnel(evt); !ok {
+						continue
+					}
 				}
 				_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, evt.Data)
 				flusher.Flush()

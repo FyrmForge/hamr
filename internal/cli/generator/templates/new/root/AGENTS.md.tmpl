@@ -26,6 +26,8 @@ make e2e-local      # Run E2E tests locally
 {{- end}}
 ```
 
+`T` in the `hamr dev` TUI opens a public tunnel (`[dev.tunnel]` in `hamr.toml`) and sets `BASE_URL` to the public URL for the app it runs. Build absolute URLs from `BASE_URL`; don't hardcode `localhost`.
+
 ## Project Structure
 
 ```

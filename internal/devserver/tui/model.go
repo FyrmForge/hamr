@@ -215,6 +215,10 @@ type Model struct {
 	// fed by mcpLogMsg. mcpSearch is its per-tab search state.
 	mcpLogs   []string
 	mcpSearch *searchState
+
+	// tunnelURL is the public tunnel URL while it's on ("" when off), set off
+	// the tunnel_up / tunnel_down events. It replaces proxyURL in the bar.
+	tunnelURL string
 }
 
 // mcpStatusMsg updates the MCP gateway indicator in the status bar.
@@ -549,6 +553,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// hamr.toml). The runner flips the gateway and pushes new state back
 		// via mcpStatusMsg, so the indicator reflects the result.
 		m.hotkeys.Send(devserver.HotkeyMCPToggle)
+		return m, nil
+	case "T":
+		// Toggle the public tunnel ([dev.tunnel]). The runner pushes the URL
+		// (or "" when off) back via tunnel_up / tunnel_down on the event bus.
+		m.hotkeys.Send(devserver.HotkeyTunnelToggle)
 		return m, nil
 	case "?":
 		m.help.toggle()
@@ -1331,6 +1340,14 @@ func (m *Model) applyBrokerEvent(evt devserver.SSEEvent) {
 		m.deactivate("starting " + evt.Data)
 	case devserver.EvRestarting:
 		m.restarting = true
+		m.clearTunnel() // the restarted server comes up with the tunnel off
+	case devserver.EvTunnelStart:
+		m.activate("tunnel " + evt.Data)
+	case devserver.EvTunnelUp:
+		m.deactivate("tunnel starting")
+		m.tunnelURL = evt.Data
+	case devserver.EvTunnelDown:
+		m.clearTunnel()
 	case devserver.EvMakeStart:
 		m.activate("make " + evt.Data)
 	case devserver.EvMakeDone:
@@ -1340,6 +1357,13 @@ func (m *Model) applyBrokerEvent(evt devserver.SSEEvent) {
 			m.deactivate("make " + target)
 		}
 	}
+}
+
+// clearTunnel drops the tunnel URL and any in-flight tunnel label.
+func (m *Model) clearTunnel() {
+	m.tunnelURL = ""
+	m.deactivate("tunnel starting")
+	m.deactivate("tunnel stopping")
 }
 
 // activate adds a work label to the ticker, ignoring a repeat of one that is
@@ -1626,14 +1650,7 @@ func (m *Model) searchHintBar(s *searchState) string {
 			statusKey.Render("esc") + statusDim.Render(" clear")
 	}
 
-	leftW := lipgloss.Width(leftContent)
-	rightW := lipgloss.Width(right)
-	const trail = 1
-	gap := m.width - leftW - rightW - trail
-	if gap < 1 {
-		return fitBarLeft(leftContent, m.width, hintPad)
-	}
-	return leftContent + hintPad(gap) + right + hintPad(trail)
+	return m.bottomBar(leftContent, right)
 }
 
 // selectionHintBar swaps the regular keybinding row for the
@@ -1648,14 +1665,7 @@ func (m *Model) selectionHintBar(sel *selectionState) string {
 	right := statusKey.Render("y") + statusDim.Render(" copy  ") +
 		statusKey.Render("esc") + statusDim.Render(" clear")
 
-	leftW := lipgloss.Width(left)
-	rightW := lipgloss.Width(right)
-	const trail = 1
-	gap := m.width - leftW - rightW - trail
-	if gap < 1 {
-		return fitBarLeft(left, m.width, hintPad)
-	}
-	return left + hintPad(gap) + right + hintPad(trail)
+	return m.bottomBar(left, right)
 }
 
 // activeTabIcon returns the styled icon glyph for the current tab.
@@ -1831,12 +1841,14 @@ func (m *Model) statusBar() string {
 	if pos := m.tabPosition(); pos != "" {
 		parts = append(parts, barPad(2), statusDim.Render(pos))
 	}
-	parts = append(parts, barPad(2), statusLabel.Render("•"), barPad(2), m.systemStatus())
-	// Proxy URL renders at the end of the left cluster (after OK/ERR) so
-	// it's always visible — particularly useful when [dev].port_walk
-	// shifted the listener off the configured default.
-	if m.proxyURL != "" {
-		parts = append(parts, barPad(2), statusDim.Render(m.proxyURL))
+	// Proxy URL follows the tab label so it's always visible — particularly
+	// useful when [dev].port_walk shifted the listener off the configured
+	// default. A running tunnel's public URL takes the slot — it's what `o`
+	// opens. The system status lives bottom-right in the hint bar.
+	if m.tunnelURL != "" {
+		parts = append(parts, barPad(2), statusLabel.Render("•"), barPad(2), statusOK.Render(m.tunnelURL))
+	} else if m.proxyURL != "" {
+		parts = append(parts, barPad(2), statusLabel.Render("•"), barPad(2), statusDim.Render(m.proxyURL))
 	}
 	if m.mcpKnown {
 		parts = append(parts, barPad(2), statusLabel.Render("•"), barPad(2), m.mcpIndicator())
@@ -1890,32 +1902,41 @@ func (m *Model) hintBar() string {
 	if m.mcpKnown {
 		left = append(left, statusKey.Render("M")+statusDim.Render(" mcp"))
 	}
+	if m.proxyURL != "" {
+		left = append(left, statusKey.Render("T")+statusDim.Render(" tunnel"))
+	}
 	if m.tabCount() > 1 {
 		left = append(left, statusKey.Render("Tab")+statusDim.Render(" tabs"))
 	}
-	left = append(left, statusKey.Render("q")+statusDim.Render(" quit"))
-
-	// `? help` is right-aligned on the bar's far edge; users tend to
-	// look there for "where is everything?" affordances.
-	right := statusKey.Render("?") + statusDim.Render(" help")
+	left = append(left,
+		statusKey.Render("q")+statusDim.Render(" quit"),
+		statusKey.Render("?")+statusDim.Render(" help"),
+	)
 
 	// Explicitly bg-styled separators so the bar reads as a single
 	// unbroken block of colour; same reasoning as barPad.
-	sep := hintPad(2)
-	leftContent := hintPad(1) + strings.Join(left, sep)
-	leftW := lipgloss.Width(leftContent)
-	rightW := lipgloss.Width(right)
+	return m.bottomBar(hintPad(1)+strings.Join(left, hintPad(2)), "")
+}
 
-	// Reserve one trailing column so the help label isn't flush against
-	// the very last cell — matches the right padding on the status bar.
-	const rightTrailing = 1
-	gap := m.width - leftW - rightW - rightTrailing
-	if gap < 1 {
-		// Out of room for both — keep the left group, fitting it to width
-		// (truncating if the left cluster alone overflows the terminal).
-		return fitBarLeft(leftContent, m.width, hintPad)
+// bottomBar lays out the hint row: left hints, optional right hints, and the
+// system status pinned to the far right. The status is what the developer
+// must not miss (a failing build), so when room runs out the right hints go
+// first, then the left hints truncate — never the status.
+//
+//	r rebuild  R restart  …  ? help            n next  N prev    ⠙ building site
+func (m *Model) bottomBar(left, right string) string {
+	status := m.systemStatus()
+	const trail, statusGap = 1, 2
+	avail := m.width - lipgloss.Width(status) - statusGap - trail
+	if avail < 1 {
+		return fitBarLeft(status, m.width, hintPad)
 	}
-	return leftContent + hintPad(gap) + right + hintPad(rightTrailing)
+	if right != "" {
+		if gap := avail - lipgloss.Width(left) - lipgloss.Width(right); gap >= 1 {
+			return left + hintPad(gap) + right + hintPad(statusGap) + status + hintPad(trail)
+		}
+	}
+	return fitBarLeft(left, avail, hintPad) + hintPad(statusGap) + status + hintPad(trail)
 }
 
 // runOverlayView is the only run surface left: confirming a target closes

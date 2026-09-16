@@ -277,6 +277,32 @@ Set up an agent with `hamr mcp install` (see [CLI](../cli.md)). Config,
 permissions, and the full security model are in
 [`[dev.mcp]`](../hamr-toml.md).
 
+## Public Tunnel
+
+Press `T` to put the dev proxy on the internet — for webhooks, OAuth callbacks,
+or showing someone a page. `hamr dev` runs a locally installed `cloudflared`
+(default), `ngrok`, or any `cmd` from `[dev.tunnel]`, pointed at a second
+loopback listener that serves the same proxy handler:
+
+```
+internet  ⟶  cloudflared / ngrok  ⟶  127.0.0.1:<tunnel port>  ⟶  proxy handler  ⟶  app
+                                     (403 on /__hamr/rule, docker, mcp, logs, console)
+```
+
+Once the tunnel prints its URL (15s timeout; its output shows as `[tunnel]` in
+the hamr tab), `BASE_URL` — or the vars in `env` — is set to it and every
+running `run` rule and daemon restarts to pick it up. No rebuild; a rule whose
+build failed stays down. `T` again, or the tunnel process exiting, removes the
+vars and restarts the same processes. The status ticker shows
+`⠙ tunnel starting` / `⠙ tunnel stopping` until the apps are back. While on,
+the public URL replaces the localhost URL in the status bar and `o` opens it.
+
+Live reload, error pages, and the mail/SMS/Stripe mocks work through the
+tunnel, minus process output (no log lines in the reload stream, no build
+output on error pages); command-running and log routes don't. The tunnel is off at every start
+(including after `R` or a config reload). Config and the security notes are in
+[`[dev.tunnel]`](../hamr-toml.md).
+
 ## File Logging
 
 By default, `hamr dev` mirrors its recent output to a rolling log file at `.hamr/dev_logs.txt`. The file contains `[hamr dev]` infrastructure messages plus stdout/stderr from watched commands and daemons, with terminal escape sequences stripped. This is designed for LLM consumption: an AI assistant can read the file to understand what happened during the dev session without scraping the terminal.
@@ -399,8 +425,9 @@ The visible line count is adjustable and persists across page loads.
 
 ## Terminal Status Bar
 
-The TUI renders a status bar at the top with the active tab badge and
-health indicators, and a hint bar at the bottom with hotkey reminders.
+The TUI renders a status bar at the top with the active tab badge, the proxy
+(or tunnel) URL and MCP state, and a hint bar at the bottom with hotkey
+reminders (ending in `? help`) and the system indicator pinned bottom-right.
 The 🔨 emoji reflects overall state:
 
 | Color | Meaning |
@@ -411,7 +438,8 @@ The 🔨 emoji reflects overall state:
 
 ### System indicator
 
-One slot in the status bar says what the dev server is doing right now. It is
+One slot at the bottom-right of the hint bar says what the dev server is doing
+right now. When the terminal is narrow the hints truncate, never this slot. It is
 fed by the dev server's event stream, so it reflects work triggered from
 anywhere — a file save, a hotkey, the browser dev panel, or an MCP agent:
 
@@ -421,6 +449,7 @@ anywhere — a file save, a hotkey, the browser dev panel, or an MCP agent:
 | `⠙ building <rule>` | A watch rule is rebuilding — the initial build on startup counts |
 | `⠙ starting <name>` | A `[[dev.docker_compose]]` entry is coming up (pull, `up -d`, healthchecks) |
 | `⠙ make <target>` | A Makefile target is running (`m` hotkey or `make.run`) |
+| `⠙ tunnel starting` / `⠙ tunnel stopping` | The `T` tunnel is coming up or going down, including the app restart |
 | `⠙ restarting` | Restart or config reload in flight, new run not up yet |
 | `ERR: <rules>` | One or more rules are failing |
 
@@ -449,10 +478,11 @@ something is broken.
 |-----|--------|-------|
 | `r` | Rebuild all watch rules in topological order | |
 | `R` | Restart the dev server | Full startup lifecycle re-runs in place: config re-read, docker compose brought up, ports re-resolved, `.env` re-injected, builds and daemons restarted, watcher rebuilt. The TUI and its log buffers survive. Use it when startup-only state went stale — a port now clashing, an edited `.env`, a container that came up wrong. Ignored while the server is still starting up, with a "still starting up" warning in the log (`q` still quits), and refused for the first 5 seconds after it becomes ready — so a double-press costs one restart, not two. Also works while parked on a `hamr.toml` parse error, where it retries immediately — the config can be valid and startup still have failed on a clashing port or a bad `.env`, neither of which touches `hamr.toml`. |
-| `o` | Open the proxy URL in the default browser | Requires `[proxy]` configured |
+| `o` | Open the proxy URL in the default browser | Requires `[proxy]` configured. Opens the public tunnel URL instead while `T` is on. |
 | `c` | Clear the active tab's log buffer | |
-| `m` | Run a Makefile target | Opens a fuzzy palette listing every target in `./Makefile` (declaration order). Type to filter, `↑/↓` to move, `↩` to run, `Esc` to cancel. Hidden when no `Makefile` exists. The target runs through the dev server, not the TUI, so its output reaches every consumer at once: the hamr tab prefixed `[make:<target>]`, the browser log overlay, and `logs.read` with `rule: "make:<target>"` for an agent. Picking a target closes the palette immediately — the TUI is never locked while a target runs. The status bar shows a spinner and `make <target>` for the duration and the `[make:<target>] exited <n>` line is the result. |
+| `m` | Run a Makefile target | Opens a fuzzy palette listing every target in `./Makefile` (declaration order). Type to filter, `↑/↓` to move, `↩` to run, `Esc` to cancel. Hidden when no `Makefile` exists. The target runs through the dev server, not the TUI, so its output reaches every consumer at once: the hamr tab prefixed `[make:<target>]`, the browser log overlay, and `logs.read` with `rule: "make:<target>"` for an agent. Picking a target closes the palette immediately — the TUI is never locked while a target runs. The status indicator shows a spinner and `make <target>` for the duration and the `[make:<target>] exited <n>` line is the result. |
 | `M` | Toggle the MCP gateway | Runtime kill-switch for `[dev.mcp]` — flips the gateway on/off for the session without rewriting `hamr.toml`. The status bar shows `MCP on/<n>` (exposed tool count) or `MCP off`. Shown only when a proxy is running. |
+| `T` | Toggle the public tunnel | Starts/stops `cloudflared`, `ngrok`, or a custom command per [`[dev.tunnel]`](../hamr-toml.md) against a dedicated proxy listener that blocks `/__hamr/{rule,docker,mcp,logs,console}` and withholds process output from live reload and error pages. On: sets `BASE_URL` (or `env`) to the public URL and restarts running `run` rules and daemons (no rebuild). The status ticker shows `tunnel starting` / `tunnel stopping` while it works; once up, the public URL replaces the localhost URL in the status bar (and `o` opens it). Off at every start; shown only when a proxy is running. |
 | `Tab` / `Shift+Tab` | Cycle log tabs (hamr → docker stacks → mcp) | One tab per `[[dev.docker_compose]]` entry, fed by `docker compose logs -f --tail=50`; plus a dedicated **mcp** tab (last) when `[dev.mcp]` is configured, showing one line per agent request. |
 | `/` | Search the active tab (case-insensitive substring) | Live: highlights and `[k/n]` counter update as you type. `↩` locks in, `Esc` cancels; per-tab persistent. |
 | `n` / `N` | Jump to next / previous search match | Wraps at ends. |
@@ -496,7 +526,7 @@ your app's own logger) shows through.
 When a build command fails, hamr:
 1. Shows a full-page error overlay with the build output
 2. Sets a red border on the widget
-3. Shows `ERR` with failing rule names in the TUI status bar
+3. Shows `ERR` with failing rule names in the TUI's bottom-right status slot
 4. Continues watching for changes
 5. Automatically reloads when the error is fixed
 

@@ -72,6 +72,7 @@ with different values and the config fails to load with
 | `[dev.sms]`             | `hamr dev`                    | SMS mock at `/__hamr/sms` |
 | `[dev.stripe]`          | `hamr dev`                    | Stripe mock at `/v1/*` + `/__hamr/stripe/*` |
 | `[dev.mcp]`             | `hamr dev` / `hamr mcp`       | MCP gateway for AI agents at `/__hamr/mcp/*` |
+| `[dev.tunnel]`          | `hamr dev`                    | Public tunnel (cloudflared / ngrok) toggled with `T` |
 | `[[dev.docker_compose]]`| `hamr dev`                    | Compose deps lifecycle |
 | `[[dev.daemon]]`        | `hamr dev`                    | Long-running background processes |
 | `[[dev.watch]]`         | `hamr dev`                    | File watch + build/run pipelines |
@@ -152,7 +153,7 @@ file watching still runs but the browser-side reload pipeline does not.
 | `inject_reload` | bool   | `true`           | Inject the SSE live-reload script into HTML responses. |
 
 Both `listen` and `target` must be `host:port` or `:port` form. Required by
-`[dev.email]`, `[dev.sms]`, `[dev.stripe]`, and `[dev.mcp]` (their surfaces live on the proxy mux).
+`[dev.email]`, `[dev.sms]`, `[dev.stripe]`, and `[dev.mcp]` (their surfaces live on the proxy mux), and by the `[dev.tunnel]` hotkey (the tunnel forwards to the proxy).
 
 ---
 
@@ -370,6 +371,66 @@ file), permission-enforced per call, and has a runtime kill-switch (`M`).
 Granting `build` lets the agent run any Makefile target unless `make_targets`
 constrains it. Residual risk: any local process running as you can read the
 token while the gateway is on — acceptable on a single-user dev box.
+
+### `[dev.tunnel]` — public tunnel
+
+Press `T` in the `hamr dev` TUI to put the dev proxy on the internet through a
+locally installed tunnel binary — for webhooks, OAuth callbacks, or showing
+someone a page. The tunnel is never on at startup and never survives `R` or a
+config reload; press `T` again to turn it off. Requires `[proxy]`. The whole
+table is optional: with no `[dev.tunnel]`, `T` runs `cloudflared` with the
+defaults below.
+
+| Field      | Type           | Default         | Notes |
+|------------|----------------|-----------------|-------|
+| `provider` | string         | `"cloudflared"` | `"cloudflared"` (no account; new random `*.trycloudflare.com` URL on every start) or `"ngrok"` (needs `ngrok config add-authtoken`). |
+| `args`     | list of string | `[]`            | Extra flags appended to the built-in command, e.g. `["--url", "me.ngrok-free.app"]` for a fixed ngrok domain. |
+| `cmd`      | string         | (none)          | Custom shell command replacing `provider` + `args`. Must contain `{port}` (the local port to forward). The first `https://` URL it prints is used. |
+| `env`      | list of string | `["BASE_URL"]`  | Vars set to the public URL for every process `hamr dev` spawns. `[]` sets nothing. |
+
+Built-in commands (`<port>` is a loopback listener hamr picks):
+
+- cloudflared: `cloudflared tunnel --no-autoupdate --url http://127.0.0.1:<port> <args>`
+- ngrok: `ngrok http 127.0.0.1:<port> --log stdout --log-format logfmt <args>`
+
+```toml
+[dev.tunnel]
+provider = "ngrok"
+args = ["--url", "me.ngrok-free.app"]
+env = ["BASE_URL"]
+
+# or anything else that prints its public URL:
+# cmd = "ssh -R 80:localhost:{port} serveo.net"
+```
+
+**On `T`:** hamr binds the tunnel listener, starts the command, and waits up to
+15s for its URL (output shows in the hamr tab as `[tunnel]`; a failure logs the
+output tail). Then it sets each `env` var to the URL and restarts every running
+`run` rule and daemon so they pick it up — builds are not re-run, and a rule
+whose build failed stays down. **Off** (or the tunnel process dying) removes
+the vars and restarts the same processes. The status ticker shows
+`tunnel starting` / `tunnel stopping` meanwhile; while on, the public URL
+replaces the localhost URL in the status bar and `o` opens it.
+
+**Security.** The tunnel serves the same proxy — live reload, error pages, and
+the mail/SMS/Stripe mocks all work through it — on its own listener that
+refuses the routes which run commands, leak logs, or accept log lines:
+`/__hamr/rule/*`, `/__hamr/docker/*`, `/__hamr/mcp/*`, `/__hamr/logs`, and
+`/__hamr/console` (403). Process output is withheld too: the live-reload stream
+sends tunnel visitors no `output` lines, a config with rule/daemon/stack names
+only (no commands, globs or files), and build errors without their output; the
+build error page names the failing rule but hides its output. Everything else
+is public to anyone holding the URL, with no password: your app, the mock
+inboxes, and the Stripe mock API at `/v1/*`. Turn it off when you're done.
+
+Anyone you share the URL with also gets the injected hamr dev overlay (so rule
+and compose-stack names are visible); its rebuild/docker buttons return 403.
+
+An ngrok fixed domain is per-developer: put `[dev.tunnel]` in
+`.pref.hamr.toml` rather than the committed `hamr.toml`.
+
+The Stripe mock still hands out `localhost` checkout URLs (its base URL is the
+local proxy), so mock checkout flows only work from your own browser.
 
 ### `[[dev.docker_compose]]` — Compose deps
 

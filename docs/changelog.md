@@ -107,6 +107,15 @@ the TL;DR on top of it.
   a bad fetch keeps the current list. Mix with your own proxy's CIDR when
   stacking. See [server guide](guide/pkg/server.md#cloudflare).
 
+- **Public tunnel for `hamr dev`.** Press `T` to put the dev proxy on the
+  internet through your locally installed `cloudflared` (default, no account)
+  or `ngrok`, or any command via `[dev.tunnel] cmd`. hamr sets `BASE_URL` (or
+  the vars in `env`) to the public URL and restarts your app; `T` again turns it
+  off. The tunnel gets its own proxy listener that blocks the routes which run
+  commands or read and write logs (`/__hamr/rule`, `docker`, `mcp`, `logs`,
+  `console`) and keeps process output out of live reload and error pages; the mocks
+  stay reachable. See `[dev.tunnel]` in the hamr.toml guide.
+
 - **One event bus for the dev server, and a system indicator in the TUI status
   bar.** The status bar now says what `hamr dev` is doing right now —
   `⠙ building <rule>`, `⠙ make <target>`, `⠙ restarting` (all spinning while

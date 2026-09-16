@@ -105,6 +105,8 @@ By default, `hamr dev` also mirrors its recent log stream to `.hamr/dev_logs.txt
 
 The TUI shows an MCP indicator when `[dev.mcp]` is configured; press `M` to toggle the gateway on/off for the session (a runtime kill-switch that doesn't rewrite `hamr.toml`).
 
+Press `T` to open a public tunnel to the dev proxy (`cloudflared` by default, or `ngrok` / a custom command). hamr sets `BASE_URL` to the public URL and restarts your app; routes that run commands or read/write logs are blocked through the tunnel, and process output is kept out of live reload and error pages. See [`[dev.tunnel]`](hamr-toml.md).
+
 ---
 
 ## hamr mock-serve

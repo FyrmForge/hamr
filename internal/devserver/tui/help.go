@@ -44,9 +44,10 @@ type helpEntry struct {
 var helpEntries = []helpEntry{
 	{"r", "rebuild all watch rules"},
 	{"R", "restart the dev server (full startup: docker, ports, .env, builds)"},
-	{"o", "open the proxy URL in browser"},
+	{"o", "open the proxy URL in browser (the tunnel URL while it's on)"},
 	{"c", "clear the active tab's log buffer"},
 	{"m", "run a Makefile target (fuzzy palette; q cancels in-flight target)"},
+	{"T", "toggle the public tunnel ([dev.tunnel]; sets BASE_URL, restarts apps)"},
 	{"Tab / Shift+Tab", "cycle log tabs (hamr ↔ docker stacks)"},
 	{"/", "search the active tab — type live, ↩ commits, esc cancels"},
 	{"n / N", "next / previous match (after committing a search)"},

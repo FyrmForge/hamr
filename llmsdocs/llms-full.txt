@@ -61,7 +61,21 @@
   default. Configure via `log_file` and `log_file_max_lines` in
   `[dev]`; set `log_file = "none"` to disable. The TUI adds an `M` hotkey to
   toggle the MCP gateway (see **hamr mcp**); status bar shows `MCP on/<n>` or
-  `MCP off`.
+  `MCP off`. A `T` hotkey toggles a public tunnel from `[dev.tunnel]`
+  (`provider` = `cloudflared` default | `ngrok`, `args` appended to the built-in
+  command, or `cmd` with a `{port}` placeholder whose first printed https URL is
+  used; `env` default `["BASE_URL"]`). On: a loopback tunnel listener serves the
+  proxy handler with `/__hamr/rule`, `/__hamr/docker`, `/__hamr/mcp`,
+  `/__hamr/logs`, `/__hamr/console` returning 403 (mocks stay reachable) and
+  tunnel requests flagged in context so `/__hamr/reload` drops `output` events,
+  sends a names-only config, and the reload stream and error page hide build
+  error output; the `env` vars are set to
+  the public URL, and running `run` rules + daemons restart (no rebuild). Off,
+  or the tunnel process exiting, reverts. Off at every start. Progress goes out
+  on the event bus (`EvTunnelStart` "starting"/"stopping", `EvTunnelUp` with the
+  URL, `EvTunnelDown`): the ticker shows `tunnel starting`/`tunnel stopping`, and
+  while on the public URL replaces the localhost URL in the status bar (`o`
+  opens it).
 - **hamr mcp**: MCP (Model Context Protocol) bridge that lets an AI agent
   (Claude Code, Codex, opencode) drive a running `hamr dev`. Two hops:
   agent ⟷ `hamr mcp` over stdio, then `hamr mcp` ⟷ `hamr dev` over localhost
@@ -3045,9 +3059,10 @@ and any other project-defined scripts can be triggered from inside dev.
 | `r`                | Rebuild all watch rules in topological order           |
 | `R`                | Restart the dev server (full startup lifecycle, 5s cooldown) |
 | `R` (parked)       | Retry now when stuck on a `hamr.toml` parse error      |
-| `o`                | Open the proxy URL in the default browser              |
+| `o`                | Open the proxy URL (the tunnel URL while it's on)      |
 | `c`                | Clear the active tab's log buffer                      |
 | `m`                | Run a Makefile target (fuzzy palette over `./Makefile`)|
+| `T`                | Toggle the public tunnel (`[dev.tunnel]`)              |
 | `Tab` / Shift+Tab  | Cycle log tabs (hamr ↔ docker stacks)                  |
 | `/`                | Search active tab (case-insensitive substring, live)   |
 | `n` / `N`          | Next / previous search match                           |
@@ -3072,7 +3087,8 @@ browser dev panel over HTTP (`Handler()`), the TUI in-process
 (`Subscribe()`, which returns a buffered channel and a cancel func).
 Events are typed constants (`EvBuilding`, `EvBuildOK`, `EvBuildError`,
 `EvOutput`, `EvReload`, `EvShutdown`, `EvDarkFilter`, `EvRestarting`,
-`EvMakeStart`, `EvMakeDone`, `EvComposeUp`, `EvComposeOK`), never
+`EvMakeStart`, `EvMakeDone`, `EvComposeUp`, `EvComposeOK`,
+`EvTunnelStart`, `EvTunnelUp`, `EvTunnelDown`), never
 string literals.
 
 The rule, recorded in `docs/adr/004-dev-event-bus.md`:
@@ -3091,12 +3107,13 @@ checked in the `make.run` handler, not inside `RunMake`, so the
 whitelist that governs agents doesn't silently restrict the developer's
 own `m` hotkey.
 
-The TUI status bar carries a single system indicator fed entirely by
+The TUI hint bar carries a single system indicator, pinned bottom-right
+(the hints to its left truncate first on a narrow terminal), fed entirely by
 these events, so it lights up for work triggered from anywhere (file
 save, hotkey, browser, agent). It is a stock-ticker marquee, not a
 priority chain: every item in flight — `building <rule>` (the initial
 build included), `starting <name>` for a compose entry coming up,
-`make <target>` — is joined with ` • ` and scrolls right-to-left
+`make <target>`, `tunnel starting`/`tunnel stopping` — is joined with ` • ` and scrolls right-to-left
 through a window of `max(min(32, width/3), 10)` cells, wrapping around.
 Content that fits the window does not scroll. Each item carries a
 braille spinner frame (`⠋⠙⠹…`, 100ms cadence); travel is one cell per
@@ -3137,10 +3154,10 @@ project root via `DevActions.RunMake` — the TUI never spawns make
 itself, so the output fans out through the ProcessManager to the hamr
 tab line-prefixed `[make:<target>] `, the browser log overlay, and the
 shared log buffer MCP `logs.read` serves (rule `make:<target>`,
-terminated by a `[make:<target>] exited <n>` marker). The status bar
+terminated by a `[make:<target>] exited <n>` marker). The status indicator
 shows a spinner and `make <target>` for the duration, whoever started it.
 Nothing is modal: the TUI stays fully usable while the target runs, and
-the run is reported entirely by the status bar plus the streaming
+the run is reported entirely by the status indicator plus the streaming
 output — the `[make:<target>] exited <n>` marker is the result. There is
 no cancel key; `Ctrl+C` quits the TUI, which cancels the runner context
 the run hangs off and kills its process group. The earlier dedicated `d` docker

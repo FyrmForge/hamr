@@ -62,6 +62,9 @@ type Runner struct {
 	// mcpGateway is set by Run() when the proxy is up; the M hotkey toggles it.
 	mcpGateway *mcpGateway
 
+	// tunnel is set by Run() when the proxy is up; the T hotkey toggles it.
+	tunnel *tunnel
+
 	// proxyURL is set by Run() after the proxy listener has bound to its
 	// (possibly walked) port. Read by the o-open hotkey so it always points
 	// at the actual listening URL, not the value originally written in
@@ -367,6 +370,9 @@ func (r *Runner) Run(ctx context.Context) error {
 		if proxySrv != nil {
 			_ = proxySrv.Close()
 		}
+		if r.tunnel != nil {
+			r.tunnel.Close()
+		}
 		// Close the MCP audit log only after the proxy has stopped serving, so a
 		// late in-flight tool call can't write to an already-closed audit file.
 		if r.mcpGateway != nil {
@@ -645,6 +651,17 @@ func (r *Runner) Run(ctx context.Context) error {
 		handler := NewProxyHandler(r.cfg.Proxy.Target, broker, errorState, logBuf, actions, mailMock, smsMock, stripeMock, consoleSink, mcpGw, requestLog, inject)
 		proxySrv = serveProxy(ln, handler)
 
+		// The tunnel (T hotkey) serves the same handler on its own loopback
+		// listener with the command-running routes blocked. Off until toggled.
+		r.tunnel = &tunnel{
+			ctx:     runCtx,
+			cfg:     r.cfg,
+			handler: blockDevCommands(handler),
+			pm:      pm,
+			logger:  r.logger.With("component", "tunnel"),
+			broker:  broker,
+		}
+
 		// Single-line banner that surfaces the actual reachable URL +
 		// app port. With port_walk on, this is the one place the user
 		// sees what hamr picked when something was busy.
@@ -728,6 +745,9 @@ func (r *Runner) Run(ctx context.Context) error {
 	merged := append([]string(nil), envRewrites...)
 	merged = append(merged, buildHamrInjectedEnv(r.cfg, proxyOrigin, actualAppPort)...)
 	pm.SetInjectedEnv(merged)
+	if r.tunnel != nil {
+		r.tunnel.baseEnv = merged
+	}
 
 	// Initial build: run all rules in topological order.
 	// Track failures so dependents are skipped rather than started with stale artifacts.
@@ -999,8 +1019,13 @@ func (r *Runner) handleHotkey(action HotkeyAction, actions *DevActions, cancel c
 		// Prefer the URL the proxy actually bound to (post +1 walk) so the
 		// browser opens at the right place even when [dev].port_walk
 		// shifted the port off the configured default. Falls back to the
-		// configured listen value when the proxy isn't running yet.
+		// configured listen value when the proxy isn't running yet. A
+		// running tunnel wins: its public URL is what the dev is sharing.
 		switch {
+		case r.tunnel != nil && r.tunnel.URL() != "":
+			url := r.tunnel.URL()
+			r.logger.Info("opening browser", "url", url)
+			openBrowser(url)
 		case r.proxyURL != "":
 			r.logger.Info("opening browser", "url", r.proxyURL)
 			openBrowser(r.proxyURL)
@@ -1032,6 +1057,12 @@ func (r *Runner) handleHotkey(action HotkeyAction, actions *DevActions, cancel c
 		if r.mcpStatusHook != nil {
 			r.mcpStatusHook(on, r.mcpGateway.EnabledToolCount())
 		}
+	case HotkeyTunnelToggle:
+		if r.tunnel == nil {
+			r.logger.Warn("tunnel unavailable (no reverse proxy running)")
+			return false
+		}
+		go r.tunnel.Toggle()
 	case HotkeyQuit:
 		r.logger.Info("quit requested")
 		cancel()

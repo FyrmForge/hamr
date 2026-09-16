@@ -147,9 +147,15 @@ type errorInterceptor struct {
 
 func (e *errorInterceptor) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if e.errorState.HasErrors() && acceptsHTML(r) {
+		errs := e.errorState.Snapshot()
+		if isTunnelRequest(r) {
+			for rule := range errs {
+				errs[rule] = tunnelHiddenOutput
+			}
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusBadGateway)
-		w.Write(renderErrorPage(e.errorState.Snapshot())) //nolint:errcheck
+		w.Write(renderErrorPage(errs)) //nolint:errcheck
 		return
 	}
 	e.next.ServeHTTP(w, r)

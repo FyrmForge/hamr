@@ -32,4 +32,11 @@ func TestHandleHotkey_GatedUntilReady(t *testing.T) {
 	r.ready.Store(true)
 	r.handleHotkey(HotkeyOpenBrowser, nil, cancel)
 	assert.Equal(t, []string{"http://localhost:3000"}, opened)
+
+	// A running tunnel wins; once it's off, back to the proxy URL.
+	r.tunnel = &tunnel{url: "https://x.trycloudflare.com"}
+	r.handleHotkey(HotkeyOpenBrowser, nil, cancel)
+	r.tunnel.url = ""
+	r.handleHotkey(HotkeyOpenBrowser, nil, cancel)
+	assert.Equal(t, []string{"http://localhost:3000", "https://x.trycloudflare.com", "http://localhost:3000"}, opened)
 }

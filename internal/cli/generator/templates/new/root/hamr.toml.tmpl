@@ -29,6 +29,15 @@ proxy_target = "$PORT"
 inject_reload = true
 hamr_console_capture = true
 hamr_console_filter = false
+
+# Press T in hamr dev to open a public tunnel to the dev proxy (webhooks, OAuth
+# callbacks, demos). Defaults to a local cloudflared quick tunnel; BASE_URL is
+# set to the public URL.
+# [dev.tunnel]
+# provider = "cloudflared"  # or "ngrok"
+# args = []                 # extra flags for the provider command
+# cmd = ""                  # custom command instead; must contain {port}
+# env = ["BASE_URL"]
 {{if .IncludeEmailMock}}
 [dev.email]
 enabled = true

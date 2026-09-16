@@ -39,6 +39,7 @@ type DevConfig struct {
 	SMS             SMSConfig       `toml:"sms"`
 	Stripe          StripeConfig    `toml:"stripe"`
 	MCP             MCPConfig       `toml:"mcp"`
+	Tunnel          TunnelConfig    `toml:"tunnel"`
 
 	// DarkFilter sets the initial state of the dev-panel "Dark filter"
 	// toggle: an invert(1) hue-rotate(180deg) CSS filter over the proxied
@@ -624,6 +625,9 @@ func validate(cfg *Config) error {
 		return fmt.Errorf("[dev] log_file_max_lines must be greater than 0")
 	}
 	if err := cfg.Dev.MCP.validate(); err != nil {
+		return err
+	}
+	if err := cfg.Dev.Tunnel.validate(); err != nil {
 		return err
 	}
 

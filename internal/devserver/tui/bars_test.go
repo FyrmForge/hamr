@@ -17,12 +17,18 @@ func TestModel_Bars_TruncateOverflowingLeftCluster(t *testing.T) {
 	m := NewModel(NewHotkeySource())
 	m.width = 30
 
-	// Status bar: a long ERR rule list overflows the width.
+	// Hint bar: a long ERR rule list in the bottom-right status.
 	m.errors = []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf"}
+	if w := lipgloss.Width(m.hintBar()); w > m.width {
+		t.Fatalf("hint bar width %d exceeds terminal width %d", w, m.width)
+	}
+	m.errors = nil
+
+	// Status bar: a long proxy URL overflows the width.
+	m.proxyURL = "http://" + strings.Repeat("x", 80) + ":3000"
 	if w := lipgloss.Width(m.statusBar()); w > m.width {
 		t.Fatalf("status bar width %d exceeds terminal width %d", w, m.width)
 	}
-	m.errors = nil
 
 	// Hint bar: an active search with a long query overflows the left cluster.
 	s := m.activeSearch()
@@ -203,10 +209,10 @@ func TestMarquee(t *testing.T) {
 	})
 }
 
-// TestStatusBar_FitsNarrowTerminal guards the bar against the ticker: the
-// status slot is the one variable-width piece in the left cluster, and it now
-// has a real appetite. Overflowing it would push the version tag off-screen or
-// wrap the bar onto a second line.
+// TestStatusBar_FitsNarrowTerminal guards both bars against the ticker: the
+// status slot (bottom-right of the hint bar) is the variable-width piece with
+// a real appetite. Overflowing would wrap a bar onto a second line, and the
+// status must survive narrowing — the hints truncate instead.
 func TestStatusBar_FitsNarrowTerminal(t *testing.T) {
 	for _, width := range []int{40, 60, 100} {
 		m := NewModel(NewHotkeySource())
@@ -218,6 +224,33 @@ func TestStatusBar_FitsNarrowTerminal(t *testing.T) {
 		if got := lipgloss.Width(m.statusBar()); got != width {
 			t.Fatalf("width %d: status bar rendered %d cells", width, got)
 		}
+		if got := lipgloss.Width(m.hintBar()); got != width {
+			t.Fatalf("width %d: hint bar rendered %d cells", width, got)
+		}
+		if bar := m.hintBar(); !strings.Contains(bar, "building") {
+			t.Fatalf("width %d: status dropped from hint bar: %q", width, bar)
+		}
+	}
+}
+
+// TestStatusBar_TunnelURLReplacesProxyURL: while the tunnel is on its public
+// URL takes the proxy URL's slot (it's what `o` opens); off restores it.
+func TestStatusBar_TunnelURLReplacesProxyURL(t *testing.T) {
+	m := NewModel(NewHotkeySource())
+	m.width = 200
+	m.proxyURL = "http://localhost:3000"
+	m.applyBrokerEvent(devserver.SSEEvent{Type: devserver.EvTunnelStart, Data: "starting"})
+	if bar := m.hintBar(); !strings.Contains(bar, "tunnel starting") {
+		t.Fatalf("tunnel starting: %q", bar)
+	}
+	m.applyBrokerEvent(devserver.SSEEvent{Type: devserver.EvTunnelUp, Data: "https://x.trycloudflare.com"})
+	bar := m.statusBar()
+	if !strings.Contains(bar, "https://x.trycloudflare.com") || strings.Contains(bar, "localhost:3000") || strings.Contains(m.hintBar(), "tunnel starting") {
+		t.Fatalf("tunnel on: %q", bar)
+	}
+	m.applyBrokerEvent(devserver.SSEEvent{Type: devserver.EvTunnelDown})
+	if bar := m.statusBar(); !strings.Contains(bar, "localhost:3000") || strings.Contains(bar, "trycloudflare") {
+		t.Fatalf("tunnel off: %q", bar)
 	}
 }
 

@@ -98,7 +98,12 @@ type managedProc struct {
 
 // ProcessManager handles running one-shot commands and long-running processes.
 type ProcessManager struct {
-	mu            sync.Mutex
+	mu sync.Mutex
+	// startMu serializes StartProcess so stop+start of one name is atomic
+	// across goroutines (scheduler vs the tunnel toggle).
+	// ponytail: global lock held across a blocking stop, so restarting one
+	// rule delays starting another; per-name locks if that latency matters.
+	startMu       sync.Mutex
 	procs         map[string]*managedProc
 	logger        *slog.Logger
 	OnProcessExit func(rule string, err error, output string)
@@ -140,8 +145,29 @@ func (pm *ProcessManager) SetOutputSinks(stdout, stderr io.Writer) {
 // (e.g. HAMR_STRIPE_MOCK_URL=http://localhost:3000) so the scaffold's
 // main.go doesn't need to hardcode those URLs and they automatically track
 // hamr.toml's [proxy].listen.
+//
+// Safe to call while processes are running (the tunnel toggle swaps env at
+// runtime); only processes started afterwards see the new values.
 func (pm *ProcessManager) SetInjectedEnv(env []string) {
+	pm.mu.Lock()
 	pm.injectedEnv = env
+	pm.mu.Unlock()
+}
+
+// envFor returns the child env for rule: injected vars, then rule.Env on top.
+func (pm *ProcessManager) envFor(rule *WatchRule) []string {
+	pm.mu.Lock()
+	injected := pm.injectedEnv
+	pm.mu.Unlock()
+	return buildEnv(append(append([]string(nil), injected...), rule.Env...))
+}
+
+// isRunning reports whether a long-running process is tracked under name.
+func (pm *ProcessManager) isRunning(name string) bool {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	_, ok := pm.procs[name]
+	return ok
 }
 
 // NewProcessManager creates a new process manager.
@@ -165,7 +191,7 @@ func (pm *ProcessManager) RunCommand(ctx context.Context, rule *WatchRule) (stri
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", rule.Cmd)
 	cmd.Dir = rule.Dir
-	cmd.Env = buildEnv(append(append([]string(nil), pm.injectedEnv...), rule.Env...))
+	cmd.Env = pm.envFor(rule)
 	// Match StartProcess / compose invocations: put the child in its own
 	// process group, and bound the I/O wait on cancel. Without WaitDelay a
 	// compound command whose grandchildren inherit the stdout/stderr pipes
@@ -222,13 +248,15 @@ func (pm *ProcessManager) RunCommand(ctx context.Context, rule *WatchRule) (stri
 // StartProcess starts a long-running process, killing any previous instance.
 // The process is tracked and can be stopped via StopAll.
 func (pm *ProcessManager) StartProcess(ctx context.Context, rule *WatchRule) error {
+	pm.startMu.Lock()
+	defer pm.startMu.Unlock()
 	pm.stopProcess(rule.Name)
 
 	pm.logger.Info("starting", "rule", rule.Name, "run", rule.Run)
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", rule.Run)
 	cmd.Dir = rule.Dir
-	cmd.Env = buildEnv(append(append([]string(nil), pm.injectedEnv...), rule.Env...))
+	cmd.Env = pm.envFor(rule)
 	cmd.Stdin = pm.stdinR
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// Bound the post-exit I/O wait (same as RunCommand). A long-running Run
