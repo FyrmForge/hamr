@@ -252,6 +252,9 @@ e.Validator = myValidator
 e.IPExtractor = echo.ExtractIPFromXFFHeader()
 ```
 
+Overwriting `e.IPExtractor` discards the `WithTrustedProxies` config, including
+the Cloudflare refresh.
+
 ---
 
 ## Next Steps

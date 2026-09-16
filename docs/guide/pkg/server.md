@@ -46,7 +46,7 @@ if err := srv.Start(); err != nil {
 | `WithMaxBodySize(size)` | `"2M"` | Max request body (`"500K"`, `"2M"`, etc.) |
 | `WithShutdownTimeout(d)` | 10s | Graceful shutdown timeout |
 | `WithGeneratedDir(dir)` | — | Serve pre-rendered static pages from directory |
-| `WithTrustedProxies(cidrs...)` | — (direct) | Proxy CIDRs trusted to set `X-Forwarded-For`; unset ignores it so `RealIP()` can't be spoofed |
+| `WithTrustedProxies(cidrs...)` | — (direct) | Proxy CIDRs trusted to set `X-Forwarded-For`; unset ignores it so `RealIP()` can't be spoofed. `"cloudflare"` adds Cloudflare's ranges, refreshed every 24h |
 
 ## Trusted Proxies & Client IP
 
@@ -73,6 +73,8 @@ disabled), and `RealIP()` returns the **left-most untrusted hop** in
 | Deployment | `TRUSTED_PROXIES` |
 |---|---|
 | nginx / Caddy on the same host | `127.0.0.1/32` — loopback is *not* auto-trusted |
+| Cloudflare proxy (orange cloud) | `cloudflare` — see [Cloudflare](#cloudflare) |
+| Cloudflare Tunnel (`cloudflared`) / ngrok on the same host | `127.0.0.1/32` — traffic arrives from the tunnel daemon, not Cloudflare's edge (use its container IP/subnet if it runs in another container). Unset, every visitor is `127.0.0.1` and shares one rate-limit bucket |
 | Docker Compose behind a proxy container | the proxy's network subnet, e.g. `172.16.0.0/12` |
 | Self-hosted Traefik | the network Traefik runs on (its Docker subnet / host IP) — you control it |
 | AWS ALB / GCP LB | the VPC/subnet CIDR the LB sits in |
@@ -87,6 +89,40 @@ disabled), and `RealIP()` returns the **left-most untrusted hop** in
    most cloud LBs add it by default.
 2. **Never use `0.0.0.0/0`.** Trusting all sources re-enables spoofing — any
    client can forge `X-Forwarded-For`. Trust *only* your proxy's actual range.
+
+### Cloudflare
+
+Behind Cloudflare's proxy, the peer is a Cloudflare edge IP. Add the
+`cloudflare` keyword:
+
+```go
+server.WithTrustedProxies("cloudflare") // or TRUSTED_PROXIES=cloudflare
+```
+
+It trusts `server.CloudflareCIDRs` (Cloudflare's list, pinned at release) from
+startup, and `Start()` refreshes it from
+`https://api.cloudflare.com/client/v4/ips` right away and then every 24h. A
+failed or implausible fetch (error status, bad JSON, empty IPv4/IPv6 list,
+invalid CIDR, range wider than `/8` IPv4 or `/16` IPv6) logs a warning and keeps
+the current list. The server needs outbound HTTPS for the refresh.
+
+No outbound access? Pass the pinned list directly — it's static and never
+fetched, so you update hamr to pick up changes:
+
+```go
+server.WithTrustedProxies(server.CloudflareCIDRs...)
+```
+
+Only trust the header Cloudflare forwards via this list — never read
+`CF-Connecting-IP` on its own; anyone who can reach your origin directly can
+forge it.
+
+**Stacked proxies** (client → Cloudflare → your nginx → app): trust both hops,
+e.g. `TRUSTED_PROXIES=cloudflare,127.0.0.1/32`. `RealIP()` walks
+`X-Forwarded-For` right to left, skipping trusted hops. Your proxy must
+**append** to the header (nginx `$proxy_add_x_forwarded_for`), not overwrite it
+(`$remote_addr`) — overwriting drops the client and every request resolves to a
+Cloudflare edge IP.
 
 **Verify before relying on it.** Add a throwaway handler, hit it through the
 proxy from a known client (e.g. your phone on cellular), and read the values:
@@ -138,6 +174,9 @@ e := srv.Echo()
 e.Validator = myValidator
 e.IPExtractor = echo.ExtractIPFromXFFHeader()
 ```
+
+Overwriting `e.IPExtractor` discards the `WithTrustedProxies` config, including
+the Cloudflare refresh.
 
 ## Typical Usage
 

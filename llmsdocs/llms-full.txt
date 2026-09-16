@@ -250,7 +250,8 @@ func WithTimeout(d time.Duration) Option                 // request context time
 func WithMaxBodySize(size string) Option                 // e.g. "2M", "500K"
 func WithShutdownTimeout(d time.Duration) Option         // graceful shutdown (default 10s)
 func WithGeneratedDir(dir string) Option                 // pre-rendered static pages dir
-func WithTrustedProxies(cidrs ...string) Option          // proxy CIDRs trusted for X-Forwarded-For; unset = ignore XFF (RealIP unspoofable)
+func WithTrustedProxies(cidrs ...string) Option          // proxy CIDRs trusted for X-Forwarded-For; unset = ignore XFF (RealIP unspoofable); "cloudflare" = Cloudflare ranges, refreshed 24h
+var CloudflareCIDRs []string                             // Cloudflare edge ranges pinned at release (static)
 ```
 
 Behind a proxy you MUST pass its range (`WithTrustedProxies` / `TRUSTED_PROXIES`
@@ -261,6 +262,17 @@ Render) → the platform's internal proxy range, which you often can't pin and m
 change, so verify it. Requirements: the proxy must actually emit
 `X-Forwarded-For`; never trust `0.0.0.0/0` (re-enables IP spoofing). Verify by
 dumping `c.Request().RemoteAddr` (the peer → CIDR to trust) vs `c.RealIP()`.
+
+Cloudflare proxy → `cloudflare` entry: trusts `CloudflareCIDRs` at startup;
+`Start()` refetches `api.cloudflare.com/client/v4/ips` immediately and every 24h
+(needs outbound HTTPS). A failed/implausible fetch (non-200, bad JSON, empty
+v4/v6, invalid CIDR, wider than /8 v4 or /16 v6) logs a warning and keeps the
+current list. No egress → pass `CloudflareCIDRs...` (static). Stacked proxies
+(Cloudflare → nginx → app): `cloudflare,<nginx CIDR>`, and nginx must append
+XFF (`$proxy_add_x_forwarded_for`), not overwrite it. Cloudflare Tunnel
+(`cloudflared`)/ngrok on-host → `127.0.0.1/32`; unset, every client is
+`127.0.0.1` and shares one rate-limit bucket. Never trust `CF-Connecting-IP`
+alone (forgeable by direct origin hits).
 
 #### Methods
 

@@ -114,6 +114,11 @@ func WithGeneratedDir(dir string) Option {
 //     the left-most untrusted hop is used as the client IP.
 //
 // Set this to your load balancer / reverse-proxy ranges when running behind one.
+//
+// The entry "cloudflare" expands to CloudflareCIDRs and makes Start refresh
+// that list from Cloudflare every 24h (a failed or implausible fetch keeps the
+// current list). Combine it with your own proxy's CIDR when stacking proxies.
+// For a static list with no outbound fetch, pass CloudflareCIDRs instead.
 // Empty or blank entries are ignored; non-empty entries must be valid CIDRs or
 // New returns an error.
 func WithTrustedProxies(cidrs ...string) Option {

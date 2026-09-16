@@ -100,6 +100,13 @@ the TL;DR on top of it.
 
 ### Features
 
+- **Cloudflare as a trusted proxy.** `TRUSTED_PROXIES=cloudflare` (or
+  `server.WithTrustedProxies("cloudflare")`) trusts Cloudflare's edge ranges so
+  `RealIP()` returns the visitor, not a Cloudflare IP. The list ships pinned as
+  `server.CloudflareCIDRs` and `Start()` refreshes it from Cloudflare every 24h;
+  a bad fetch keeps the current list. Mix with your own proxy's CIDR when
+  stacking. See [server guide](guide/pkg/server.md#cloudflare).
+
 - **One event bus for the dev server, and a system indicator in the TUI status
   bar.** The status bar now says what `hamr dev` is doing right now —
   `⠙ building <rule>`, `⠙ make <target>`, `⠙ restarting` (all spinning while

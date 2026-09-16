@@ -136,6 +136,7 @@ func main() {
 		// balancers allowed to set X-Forwarded-For (drives client-IP detection
 		// and the rate-limit key). Empty/unset ignores X-Forwarded-For so a
 		// direct client can't spoof its IP; set it to your LB ranges behind one.
+		// "cloudflare" trusts Cloudflare's edge ranges, refreshed every 24h.
 		server.WithTrustedProxies(envTrustedProxies...),
 	)
 	if err != nil {

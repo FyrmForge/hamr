@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -34,7 +35,9 @@ type Server struct {
 	maxBodySize     string
 	shutdownTimeout time.Duration
 
-	trustedProxies []string
+	trustedProxies []string // CIDRs only; the cloudflare keyword is stripped in New
+	cloudflare     bool
+	ipExtractor    atomic.Pointer[echo.IPExtractor]
 
 	userMiddleware []echo.MiddlewareFunc
 	errorHandler   echo.HTTPErrorHandler
@@ -82,18 +85,25 @@ func New(opts ...Option) (*Server, error) {
 		return nil, fmt.Errorf("server: WithStaticDistDir requires WithStaticDir")
 	}
 
-	ipExtractor, err := buildIPExtractor(s.trustedProxies)
+	s.trustedProxies, s.cloudflare = stripCloudflareKeyword(s.trustedProxies)
+	cidrs := s.trustedProxies
+	if s.cloudflare {
+		cidrs = append(append([]string{}, cidrs...), CloudflareCIDRs...)
+	}
+	ipExtractor, err := buildIPExtractor(cidrs)
 	if err != nil {
 		return nil, err
 	}
+	s.ipExtractor.Store(&ipExtractor)
 
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
 	// Controls how c.RealIP() derives the client IP, which is the default
 	// rate-limit key. Without trusted proxies this ignores X-Forwarded-For,
-	// closing the spoof-a-header-to-get-a-fresh-bucket bypass.
-	e.IPExtractor = ipExtractor
+	// closing the spoof-a-header-to-get-a-fresh-bucket bypass. Read through a
+	// pointer so the Cloudflare refresh can swap it while serving.
+	e.IPExtractor = func(r *http.Request) string { return (*s.ipExtractor.Load())(r) }
 
 	// Production defaults — applied in order.
 	e.Use(echoMw.RecoverWithConfig(echoMw.RecoverConfig{
@@ -151,6 +161,21 @@ func New(opts ...Option) (*Server, error) {
 
 	s.echo = e
 	return s, nil
+}
+
+// stripCloudflareKeyword removes the "cloudflare" keyword (case-insensitive)
+// from cidrs and reports whether it was present.
+func stripCloudflareKeyword(cidrs []string) ([]string, bool) {
+	var out []string
+	found := false
+	for _, c := range cidrs {
+		if strings.EqualFold(strings.TrimSpace(c), cloudflareKeyword) {
+			found = true
+			continue
+		}
+		out = append(out, c)
+	}
+	return out, found
 }
 
 // buildIPExtractor returns the echo.IPExtractor implied by the configured
@@ -232,6 +257,12 @@ func (s *Server) Start() error {
 		return fmt.Errorf("server: listen %s: %w", addr, err)
 	}
 	s.echo.Listener = ln
+
+	if s.cloudflare {
+		refreshCtx, stopRefresh := context.WithCancel(context.Background())
+		defer stopRefresh()
+		go s.refreshCloudflare(refreshCtx)
+	}
 
 	errCh := make(chan error, 1)
 	go func() {

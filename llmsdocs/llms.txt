@@ -232,7 +232,7 @@ Echo wrapper with functional options, graceful shutdown.
 - `New(opts ...Option) (*Server, error)` — constructor
 - Options: `WithHost`, `WithPort`, `WithDevMode`, `WithMiddleware`, `WithStaticDir`,
   `WithStaticDistDir`, `WithEmbeddedStatic`, `WithErrorHandler`, `WithTimeout`, `WithMaxBodySize`,
-  `WithShutdownTimeout`, `WithGeneratedDir`, `WithTrustedProxies` (proxy CIDRs trusted for X-Forwarded-For; unset ignores XFF — behind a proxy you MUST set it to the proxy's range or RealIP returns the proxy IP; never `0.0.0.0/0`)
+  `WithShutdownTimeout`, `WithGeneratedDir`, `WithTrustedProxies` (proxy CIDRs trusted for X-Forwarded-For; unset ignores XFF — behind a proxy you MUST set it to the proxy's range or RealIP returns the proxy IP; never `0.0.0.0/0`; entry `cloudflare` trusts `CloudflareCIDRs` and refreshes them from Cloudflare every 24h in `Start()`, bad fetch keeps current list; pass `CloudflareCIDRs...` for a static list; tunnels (`cloudflared`/ngrok) → `127.0.0.1/32`)
 - Methods: `Echo()`, `Addr()`, `Start()`, `Shutdown(ctx)`, `GET/POST/PUT/DELETE/PATCH`,
   `Group(prefix, mw...)`, `StaticPage(path, handler)`, `GenerateStatic(dir)`
 

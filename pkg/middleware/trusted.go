@@ -33,6 +33,8 @@ type TrustedSubjectConfig struct {
 	// NOTE: this is only as trustworthy as c.RealIP(). Configure the server's
 	// trusted-proxy IP extractor (server.WithTrustedProxies) so X-Forwarded-For
 	// can't be spoofed; the default extractor uses the direct peer, which is safe.
+	// CIDRs only: the "cloudflare" keyword is a pkg/server feature and is
+	// dropped here like any other unparseable entry.
 	TrustedProxies []string
 }
 
