@@ -3052,6 +3052,65 @@ and any other project-defined scripts can be triggered from inside dev.
 | Ctrl+click         | Toggle one line in/out of the selection                |
 | `y`                | Copy selected lines to clipboard (raw text)            |
 
+### hamr dev (event bus)
+
+The dev server has exactly one event stream — `SSEBroker` in
+`internal/devserver/sse.go` — and every consumer subscribes to it: the
+browser dev panel over HTTP (`Handler()`), the TUI in-process
+(`Subscribe()`, which returns a buffered channel and a cancel func).
+Events are typed constants (`EvBuilding`, `EvBuildOK`, `EvBuildError`,
+`EvOutput`, `EvReload`, `EvShutdown`, `EvDarkFilter`, `EvRestarting`,
+`EvMakeStart`, `EvMakeDone`, `EvComposeUp`, `EvComposeOK`), never
+string literals.
+
+The rule, recorded in `docs/adr/004-dev-event-bus.md`:
+
+- **State goes out on the broker.** New dev-server state means a new
+  `Ev*` constant and a `case` in the consumers that care — never a new
+  `WithXHook` runner option.
+- **Actions go in through `DevActions`.** `RebuildAll`, `RestartServer`,
+  `RunMake`, the docker operations. A consumer never spawns a process
+  itself; one that does is the only consumer that can see the output,
+  which is exactly the bug this replaced (TUI-launched make runs used to
+  be invisible to MCP `logs.read`).
+
+MCP access control stays at the edge: `[dev.mcp] make_targets` is
+checked in the `make.run` handler, not inside `RunMake`, so the
+whitelist that governs agents doesn't silently restrict the developer's
+own `m` hotkey.
+
+The TUI status bar carries a single system indicator fed entirely by
+these events, so it lights up for work triggered from anywhere (file
+save, hotkey, browser, agent). It is a stock-ticker marquee, not a
+priority chain: every item in flight — `building <rule>` (the initial
+build included), `starting <name>` for a compose entry coming up,
+`make <target>` — is joined with ` • ` and scrolls right-to-left
+through a window of `max(min(32, width/3), 10)` cells, wrapping around.
+Content that fits the window does not scroll. Each item carries a
+braille spinner frame (`⠋⠙⠹…`, 100ms cadence); travel is one cell per
+two frames (5 cells/sec), driven off the same counter so there is one
+timer, and the tick chain starts when the bar goes busy and stops the
+moment it goes idle, so an idle TUI repaints nothing.
+
+`restarting` is exclusive and shows alone (the server is unwinding).
+`ERR: <rules>` joins as a final item without a spinner and turns the
+whole strip red, so a rebuild fixing a failing rule stays visible
+instead of being hidden behind the error — one style per frame, because
+slicing ANSI mid-escape as the window moves isn't worth it. Idle and
+healthy is `● OK`. Concurrent runs are allowed; an item leaves the
+ticker only when the rule or target it names reports done, and
+`EvBuildError` is matched by the `rule` field of its JSON payload so a
+failure clears only the entry that failed.
+
+The TUI model holds this as one flat `active []string` of formatted
+labels rather than a field per kind: the ticker only ever needs "what
+is happening", and every kind shares the same add-on-start /
+remove-on-finish lifecycle. Startup events are not a race — the actions
+hook (and so the TUI's `Subscribe()`) fires at devserver.go:405, well
+before the compose loop and the initial-build loop, and
+`program.Send(actionsReadyMsg)` on the runner goroutine blocks until
+the bubbletea program is actually running.
+
 The runner also spawns one `docker compose --ansi=always -f <file> logs -f --tail=50` follower per `[[dev.docker_compose]]` entry. Output flows into a dedicated per-entry buffer that Tab cycles through; the status bar's left badge switches between 🔨 `hamr dev` and 🐳 `<stack-name>` to indicate which buffer the viewport is showing. Followers self-restart after a wipe so the stream resumes once `up -d` brings the project back. `--ansi=always` is the top-level compose flag that forces colour through despite the no-TTY pipe target, so per-service prefix colours and any container ANSI render correctly inside the bubbles viewport.
 
 Search (`/`) is per-tab, case-insensitive substring, and incremental — matches recompute on every keystroke and the viewport jumps to the first hit as you type, with yellow highlights for matches and a brighter orange for the cursored one. `↩` locks the query in so `n`/`N` start navigating instead of being treated as more query characters; `Esc` cancels. After commit, `f` toggles a filter view that shows only lines containing the search term (press `f` again to restore the full view); n/N still navigates inside the filtered view. New log lines arriving while a search is in progress are scanned and the `[k/n]` counter updates automatically.
@@ -3060,14 +3119,19 @@ Search (`/`) is per-tab, case-insensitive substring, and incremental — matches
 `./Makefile` (parsed lazily on press; targets appear in declaration
 order on empty query, ranked by `sahilm/fuzzy` as the user types).
 The hotkey is hidden from the hint bar and ignored when no Makefile
-exists. Selecting a target closes the palette, opens a small floating
-"running" box, and runs `make <target>` from the project root with
-stdout/stderr piped into the hamr tab line-prefixed `[make:<target>] `.
-Only one target runs at a time. While running, every key is suppressed
-except `q` (kills the `make` process group, children included) and `Ctrl+C` (cancels
-the run and quits the TUI so children aren't orphaned). On exit the box
-switches to a `Done ✓` / `Failed ✗ (exit N)` summary that stays until
-the user dismisses it with any key. The earlier dedicated `d` docker
+exists. Selecting a target closes the palette and asks the dev server to
+run `make <target>` from the
+project root via `DevActions.RunMake` — the TUI never spawns make
+itself, so the output fans out through the ProcessManager to the hamr
+tab line-prefixed `[make:<target>] `, the browser log overlay, and the
+shared log buffer MCP `logs.read` serves (rule `make:<target>`,
+terminated by a `[make:<target>] exited <n>` marker). The status bar
+shows a spinner and `make <target>` for the duration, whoever started it.
+Nothing is modal: the TUI stays fully usable while the target runs, and
+the run is reported entirely by the status bar plus the streaming
+output — the `[make:<target>] exited <n>` marker is the result. There is
+no cancel key; `Ctrl+C` quits the TUI, which cancels the runner context
+the run hangs off and kills its process group. The earlier dedicated `d` docker
 wipe hotkey was removed in favour of letting projects define their own
 `docker-wipe`, `migrate`, etc. Makefile targets and chain whatever
 recovery they need — the browser dev panel's `/__hamr/docker/{name}/wipe`

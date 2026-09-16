@@ -74,6 +74,8 @@ Hotkeys include a Makefile-target runner, a help overlay, and per-stack log tabs
 | Ctrl+Click | Toggle one line in or out of the selection |
 | `y` | Copy the selected lines to the system clipboard (raw text, ANSI stripped) |
 
+The status bar carries a system indicator next to the tab label: a stock-ticker marquee of everything `hamr dev` is doing right now — `building <rule>` (including the initial build on startup), `starting <name>` while a `[[dev.docker_compose]]` entry comes up, `make <target>` — each with a spinner, joined by `•` and scrolling when there's more than fits. A single item sits still. `restarting` shows alone. `ERR: <rules>` joins the ticker and turns it red, so a rebuild fixing a broken rule stays visible while it runs. `● OK` when idle. Everything in it comes off the dev server's event stream, so work started from the browser panel or an MCP agent shows up the same as a hotkey.
+
 The status bar's left side reflects the active tab: 🔨 `hamr dev` for the framework view, 🐳 `<name>` for each docker stack (the `name` from `[[dev.docker_compose]]`). When more than one tab exists the status bar shows `[k/n]` so you know where in the cycle you are.
 
 Search state is **per tab** — committing a query on the docker stack tab and cycling away to hamr keeps both searches alive independently; cycle back and the highlights and `n`/`N` cursor are right where you left them. New log lines arriving while a search is active are scanned and the match counter updates without you having to re-commit.
@@ -82,7 +84,7 @@ Line selection (click, then `y` to copy) is reverse-video and replaces the botto
 
 `Shift+Click` and `Ctrl+Click` rely on the terminal forwarding the modifier flag through its mouse encoding. Modern terminals (Alacritty, WezTerm, Kitty, Ghostty, iTerm2) do; some others (older gnome-terminal, certain PuTTY builds) intercept shift to trigger native text selection instead — if the modifier doesn't reach the TUI, those clicks behave as plain clicks. Plain click and `y`/`esc` work everywhere mouse capture itself works.
 
-While a `make` target is running the floating "running" box (spinner in its title while it works) swallows every key except `q` (cancel — kills the `make` process group, children included) and `Ctrl+C` (quits the TUI, taking children with it). Stdout and stderr stream into the hamr tab, prefixed `[make:<target>] ` per line. On exit the box switches to a `Done ✓` / `Failed ✗ (exit N)` summary that stays until you press any key. Define `docker-wipe`, `migrate`, or whatever else you need as Makefile targets and chain them however you like — `m` then becomes the single front door for project-specific scripts.
+Picking a target closes the palette straight away — nothing is modal, so the TUI stays usable while the target runs. The status bar shows a spinner and `make <target>` for the duration, and stdout and stderr stream into the hamr tab, prefixed `[make:<target>] ` per line, ending with `[make:<target>] exited <n>`. `Ctrl+C` quits the TUI, taking the run and its children with it. Define `docker-wipe`, `migrate`, or whatever else you need as Makefile targets and chain them however you like — `m` then becomes the single front door for project-specific scripts.
 
 ---
 

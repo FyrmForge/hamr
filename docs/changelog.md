@@ -100,6 +100,46 @@ the TL;DR on top of it.
 
 ### Features
 
+- **One event bus for the dev server, and a system indicator in the TUI status
+  bar.** The status bar now says what `hamr dev` is doing right now —
+  `⠙ building <rule>`, `⠙ make <target>`, `⠙ restarting` (all spinning while
+  the work is in flight), `ERR: <rules>`, or `● OK` — for work triggered from anywhere: a file save, a hotkey, the browser
+  dev panel, or an MCP agent.
+
+  Underneath, the TUI stopped being wired a callback at a time and became a
+  subscriber to the same event stream the browser dev panel reads, and the `m`
+  hotkey stopped spawning its own `make`. It now goes through
+  `DevActions.RunMake` like every other command, which **fixes make output being
+  invisible to agents**: `logs.read` with `rule: "make:<target>"` returned
+  nothing for TUI-launched runs, despite the `make.run` tool description
+  promising otherwise. Output from any make run now reaches the hamr tab, the
+  browser log overlay and `logs.read` together, ending with a
+  `[make:<target>] exited <n>` marker.
+
+  The indicator is a stock ticker, not a single slot: everything in flight
+  scrolls past, joined by `•`, each item spinning. That includes two phases
+  that used to report nothing at all — the **initial build** on startup and
+  **docker compose coming up** (`⠙ starting postgres`), which between them are
+  most of what a cold start spends its time on. A single item that fits sits
+  still rather than scrolling for no reason.
+
+  `ERR: <rules>` now joins the ticker and reddens it instead of outranking
+  everything, so a rebuild you triggered to fix a failing rule is visible while
+  it runs rather than hidden behind the error it's fixing.
+
+  With the status bar reporting the run, the modal that used to sit over the TUI
+  while a target ran is gone: `↩` closes the palette and hands the keyboard
+  straight back, so you can scroll logs, switch tabs and search while `make`
+  works. The `Done ✓` / `Failed ✗` box went with it — the
+  `[make:<target>] exited <n>` line is the result.
+
+  The rule going forward is in `docs/adr/004-dev-event-bus.md`: dev-server state
+  goes out as a typed broker event, consumer actions come in through
+  `DevActions`, and neither gets a bespoke hook. Two visible trades: `[make:...]`
+  prefixes no longer keep a stable per-target colour, they use the same rotation
+  as every other rule; and there is no longer a key that cancels a running make
+  — `Ctrl+C` quits the TUI, which kills the run with it.
+
 - **Restart the dev server without leaving the TUI.** `R` in `hamr dev` tears
   the runner down and re-runs its whole startup lifecycle in place: config
   re-read, docker compose brought up, ports re-resolved, `.env` re-injected,

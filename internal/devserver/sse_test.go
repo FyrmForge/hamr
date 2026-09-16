@@ -332,3 +332,54 @@ func TestSSEBroker_DarkFilterOnConnect(t *testing.T) {
 	assert.Equal(t, "dark_filter", events[2].typ)
 	assert.Equal(t, "on", events[2].data)
 }
+
+// TestSSEBroker_Subscribe covers the in-process consumer path the TUI uses:
+// events arrive, cancel removes and closes the channel, and a broadcast after
+// cancel neither blocks nor panics on the closed channel.
+func TestSSEBroker_Subscribe(t *testing.T) {
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
+
+	ch, cancel := broker.Subscribe()
+	broker.Broadcast(SSEEvent{Type: EvBuilding, Data: "site"})
+
+	select {
+	case evt := <-ch:
+		assert.Equal(t, EvBuilding, evt.Type)
+		assert.Equal(t, "site", evt.Data)
+	case <-time.After(time.Second):
+		t.Fatal("subscriber never received the broadcast")
+	}
+
+	cancel()
+	if _, open := <-ch; open {
+		t.Fatal("cancel must close the subscriber channel so forwarders exit")
+	}
+	assert.Equal(t, 0, broker.ClientCount())
+
+	// Must not send on the closed channel.
+	broker.Broadcast(SSEEvent{Type: EvBuildOK, Data: "site"})
+
+	// Cancel is idempotent — the TUI calls the stored cancel on every restart.
+	cancel()
+}
+
+// TestSSEBroker_SubscribeDropsWhenFull guards the non-blocking contract for
+// in-process consumers: a stalled TUI must not wedge a build goroutine.
+func TestSSEBroker_SubscribeDropsWhenFull(t *testing.T) {
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
+	_, cancel := broker.Subscribe()
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		for range 100 { // buffer is 16
+			broker.Broadcast(SSEEvent{Type: EvOutput, Data: "x"})
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Broadcast blocked on a full in-process subscriber")
+	}
+}

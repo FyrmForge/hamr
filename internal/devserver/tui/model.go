@@ -1,16 +1,13 @@
 package tui
 
 import (
-	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
-	"os/exec"
+	"slices"
 	"strings"
-	"sync"
-	"syscall"
 	"time"
 
 	"github.com/FyrmForge/hamr/internal/devserver"
@@ -55,17 +52,37 @@ type errorChangedMsg struct {
 	rules []string
 }
 
-// spinTickMsg advances the spinner in the "running" box. The chain is
-// started by dispatchRun and stops itself as soon as the run leaves
-// runRunning, so no tick fires while nothing is running.
+// brokerEventMsg carries one event off the dev server's bus. The runtime
+// subscribes to the same broker the browser dev panel reads, so the TUI
+// sees builds, restarts and make runs no matter what triggered them —
+// a file save, the browser, an MCP tool, or a hotkey.
+type brokerEventMsg struct {
+	evt devserver.SSEEvent
+}
+
+// makeRunner is the dev server's RunMake, injected rather than called
+// through a stored *DevActions so tests can stub it (DevActions has no
+// exported constructor).
+type makeRunner func(target string) (<-chan devserver.MakeResult, func())
+
+// actionsReadyMsg lands once per Run() when the dev server's action
+// surface exists. It both delivers the make entry point and marks the end
+// of a restart — a fresh DevActions means the new run is up.
+type actionsReadyMsg struct {
+	runMake makeRunner
+}
+
+// spinTickMsg advances the status-bar spinner. The chain is started when
+// the bar enters a busy state and stops itself the moment it leaves one, so
+// no tick fires — and nothing repaints — while the dev server is idle.
 type spinTickMsg struct{}
 
-// spinFrames is the braille spinner used in the running box, same
-// rotation as the CLI spinner in internal/cli/cmd/spinner.go.
+// spinFrames is the braille spinner, same rotation as the CLI spinner in
+// internal/cli/cmd/spinner.go.
 var spinFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 // spinInterval is the spinner cadence — fast enough to read as motion,
-// slow enough not to repaint the frame constantly.
+// slow enough not to repaint the status bar constantly.
 const spinInterval = 100 * time.Millisecond
 
 // spinTick schedules the next spinner frame.
@@ -73,13 +90,13 @@ func spinTick() tea.Cmd {
 	return tea.Tick(spinInterval, func(time.Time) tea.Msg { return spinTickMsg{} })
 }
 
-// runFinishedMsg fires when the goroutine running `make <target>`
-// returns. The model transitions runState to runFinished so the post-
-// run box stays visible until the user dismisses it with any key.
+// runFinishedMsg fires when the goroutine waiting on `make <target>`
+// returns. The palette closed the moment the target was confirmed and the
+// status bar tracks the run off the event bus, so the only thing left to
+// report is a failure that never produced an exit code — the
+// `[make:<target>] exited <n>` log line covers every other outcome.
 type runFinishedMsg struct {
-	exitCode int
-	failed   bool
-	msg      string // populated when start/exec failed without an exit code
+	msg string // non-empty when the run failed without an exit status
 }
 
 // versionStatusMsg updates the persistent version indicator on the
@@ -137,25 +154,28 @@ type Model struct {
 	hotkeys *HotkeySource
 
 	run runState
-	// makeOut is the writer to which `make <target>` stdout/stderr is
-	// piped, line-prefixed with [make:<target>]. The runtime sets this
-	// to the hamr Sink so output appears in the hamr log tab.
-	makeOut io.Writer
-	// targetColors assigns each Makefile target a stable ANSI colour
-	// for its prefix tag, so re-running the same target keeps a
-	// consistent visual cue across the session. nextTargetColor walks
-	// the makeTargetColors palette round-robin for unseen targets.
-	targetColors    map[string]string
-	nextTargetColor int
-	// runProc holds the running `make` process so the cancel hotkey can
-	// signal it. Cleared once the goroutine waiting on the process
-	// returns. Guarded by runProcMu — both the bubbletea goroutine
-	// (Update) and the dispatch goroutine (cmd.Wait) touch it.
-	runProcMu sync.Mutex
-	runProc   *exec.Cmd
+	// runMake dispatches `make <target>` through the dev server so its
+	// output reaches every consumer (this viewport, the browser panel, MCP
+	// logs.read). Nil until the runner reports its actions are up.
+	runMake makeRunner
 
-	// spinFrame indexes spinFrames for the running box's spinner.
+	// active is every piece of work in flight, as the label the status bar
+	// shows ("building site", "make db-refresh", "starting postgres"), in
+	// the order it started. Fed entirely by the event bus, so work started
+	// anywhere — a file save, the browser panel, an MCP agent — shows up
+	// here. One flat list rather than a field per kind: the ticker only
+	// ever needs "what is happening", and every kind has the same
+	// add-on-start / remove-on-finish lifecycle.
+	active []string
+	// restarting is set between a restart request and the next run coming
+	// up. It is exclusive, not an active item: the server is tearing down,
+	// so nothing else it was doing is still meaningful.
+	restarting bool
+
+	// spinFrame indexes spinFrames; spinning guards against two tick chains
+	// running at once when busy states overlap (a make during a rebuild).
 	spinFrame int
+	spinning  bool
 
 	help helpState
 
@@ -217,12 +237,6 @@ func NewModel(hotkeys *HotkeySource) *Model {
 		dockerSearches: make(map[string]*searchState),
 	}
 }
-
-// SetMakeOutput wires the writer that receives `make <target>` output.
-// In the TUI runtime this is the hamr Sink so make logs land in the
-// hamr tab. Tests that don't exercise the run feature can leave it nil
-// — dispatchRun fails gracefully with an explanatory message.
-func (m *Model) SetMakeOutput(w io.Writer) { m.makeOut = w }
 
 // activeSelection returns the lazily-allocated selection state. A
 // single state covers the whole TUI because switching tabs clears
@@ -315,19 +329,37 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.errors = msg.rules
 		return m, nil
 
-	case runFinishedMsg:
-		m.runProcMu.Lock()
-		m.runProc = nil
-		m.runProcMu.Unlock()
-		m.run.markFinished(msg.exitCode, msg.failed, msg.msg)
-		return m, nil
+	case brokerEventMsg:
+		m.applyBrokerEvent(msg.evt)
+		return m, m.spinIfBusy()
 
 	case spinTickMsg:
-		if m.run.stage != runRunning {
+		if !m.busy() {
+			m.spinning = false
 			return m, nil
 		}
 		m.spinFrame++
 		return m, spinTick()
+
+	case actionsReadyMsg:
+		m.runMake = msg.runMake
+		// A fresh action surface means the new run is up. Anything the old
+		// one had in flight died with it, and this arrives before the new
+		// run's first build event, so dropping the list is safe on startup
+		// too.
+		m.restarting = false
+		m.active = nil
+		// Going idle without passing through a tick would otherwise latch
+		// spinning true with no chain left to clear it — and spinIfBusy would
+		// then refuse to start one for the rest of the session.
+		m.spinning = false
+		return m, nil
+
+	case runFinishedMsg:
+		if msg.msg != "" {
+			return m, func() tea.Msg { return LogLineMsg(msg.msg) }
+		}
+		return m, nil
 
 	case versionStatusMsg:
 		m.versionStatus = msg.status
@@ -412,36 +444,17 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Run overlay owns the keyboard while open. Ctrl+C is the one
-	// exception — a long-running target shouldn't trap the user inside
-	// the modal with no escape hatch. `q` is rebound to "cancel running
-	// target" while a process is in flight; quit goes through Ctrl+C
-	// in that case.
+	// Run overlay owns the keyboard while open — but only until a target is
+	// confirmed, at which point it closes and the keyboard comes back. Ctrl+C
+	// still quits from inside it.
 	if m.run.active() {
 		if key == "ctrl+c" {
-			// Cancel any running process before quitting so children
-			// aren't orphaned (the runner shutdown will also kill them
-			// but signalling first lets graceful handlers run).
-			m.signalRunCancel()
 			m.hotkeys.Send(devserver.HotkeyQuit)
 			return m, nil
 		}
-		switch {
-		case m.run.overlayActive():
-			decision := m.run.handleOverlayKey(key, printableRune(msg))
-			if decision.trigger {
-				return m, m.dispatchRun(decision.triggerTgt)
-			}
-			return m, nil
-		case m.run.stage == runRunning:
-			decision := m.run.handleRunningKey(key)
-			if decision.cancel {
-				m.signalRunCancel()
-			}
-			return m, nil
-		case m.run.stage == runFinished:
-			m.run.handleFinishedKey(key)
-			return m, nil
+		decision := m.run.handleOverlayKey(key, printableRune(msg))
+		if decision.trigger {
+			return m, m.dispatchRun(decision.triggerTgt)
 		}
 		return m, nil
 	}
@@ -1288,84 +1301,92 @@ func (m *Model) cycleTab(forward bool) {
 	m.view.GotoBottom()
 }
 
-// dispatchRun launches `make <target>` in a goroutine, piping output
-// (line-prefixed) into the hamr log sink and returning runFinishedMsg
-// when the process exits. The state machine has already been moved to
-// runRunning by the caller; on start failure we transition straight to
-// runFinished so the user sees the error and can dismiss with any key.
-func (m *Model) dispatchRun(target string) tea.Cmd {
-	if m.makeOut == nil {
-		// No sink wired — surface in the post-run box rather than silently
-		// hanging. Tests that don't inject a sink shouldn't be triggering
-		// the run path anyway.
-		m.run.markRunning(target)
-		return func() tea.Msg {
-			return runFinishedMsg{exitCode: -1, failed: true, msg: "internal: make output sink not wired"}
+// applyBrokerEvent folds one dev-server event into the status-bar state.
+// Only the events the bar renders are handled; the rest (output, reload,
+// dark_filter) already reach the TUI by other routes or mean nothing here.
+func (m *Model) applyBrokerEvent(evt devserver.SSEEvent) {
+	switch evt.Type {
+	case devserver.EvBuilding:
+		m.activate("building " + evt.Data)
+		m.restarting = false // a build means the server is live again
+	case devserver.EvBuildOK:
+		m.deactivate("building " + evt.Data)
+	case devserver.EvBuildError:
+		// Data is JSON {rule, output}. The rule name has to come out of the
+		// payload: clearing every entry instead would blank sibling builds
+		// that are still running, and clearing none would leave the failed
+		// one spinning forever.
+		var payload struct {
+			Rule string `json:"rule"`
+		}
+		if json.Unmarshal([]byte(evt.Data), &payload) == nil && payload.Rule != "" {
+			// A compose entry fails through this same event, and its name is
+			// its own namespace, so both labels are safe to try.
+			m.deactivate("building " + payload.Rule)
+			m.deactivate("starting " + payload.Rule)
+		}
+	case devserver.EvComposeUp:
+		m.activate("starting " + evt.Data)
+	case devserver.EvComposeOK:
+		m.deactivate("starting " + evt.Data)
+	case devserver.EvRestarting:
+		m.restarting = true
+	case devserver.EvMakeStart:
+		m.activate("make " + evt.Data)
+	case devserver.EvMakeDone:
+		// Data is "<target> <exit code>". Concurrent runs are allowed, so
+		// only the target that actually finished leaves the list.
+		if target, _, ok := strings.Cut(evt.Data, " "); ok {
+			m.deactivate("make " + target)
 		}
 	}
-
-	pw := newMakePrefixWriter(m.makeOut, target, m.colorForTarget(target))
-	cmd := exec.Command("make", target)
-	cmd.Stdout = pw
-	cmd.Stderr = pw
-	// Own process group so cancelling can kill the whole tree — make's
-	// children (go build/test/...) hold the output pipe open, and
-	// cmd.Wait blocks on it until they're gone.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
-	if err := cmd.Start(); err != nil {
-		m.run.markRunning(target)
-		failMsg := err.Error()
-		return func() tea.Msg {
-			return runFinishedMsg{exitCode: -1, failed: true, msg: failMsg}
-		}
-	}
-
-	m.run.markRunning(target)
-	m.spinFrame = 0
-	m.runProcMu.Lock()
-	m.runProc = cmd
-	m.runProcMu.Unlock()
-
-	wait := func() tea.Msg {
-		err := cmd.Wait()
-		pw.Flush()
-		exitCode := 0
-		failed := false
-		var msg string
-		if err != nil {
-			failed = true
-			var exitErr *exec.ExitError
-			if errors.As(err, &exitErr) {
-				exitCode = exitErr.ExitCode()
-			} else {
-				exitCode = -1
-				msg = err.Error()
-			}
-		}
-		return runFinishedMsg{exitCode: exitCode, failed: failed, msg: msg}
-	}
-	// Spinner ticks alongside the wait; the tick chain ends itself once
-	// runFinishedMsg moves the stage off runRunning.
-	return tea.Batch(wait, spinTick())
 }
 
-// signalRunCancel kills the in-flight `make` process group if any, so
-// the cancel hotkey stops make and everything it spawned — otherwise a
-// surviving grandchild keeps the output pipe open and cmd.Wait never
-// returns. Safe to call when no process is running.
-func (m *Model) signalRunCancel() {
-	m.runProcMu.Lock()
-	cmd := m.runProc
-	m.runProcMu.Unlock()
-	if cmd == nil || cmd.Process == nil {
+// activate adds a work label to the ticker, ignoring a repeat of one that is
+// already showing (a rule rebuilt twice before the first finished).
+func (m *Model) activate(label string) {
+	if slices.Contains(m.active, label) {
 		return
 	}
-	if pgid, err := syscall.Getpgid(cmd.Process.Pid); err == nil {
-		_ = syscall.Kill(-pgid, syscall.SIGKILL)
-		return
+	m.active = append(m.active, label)
+}
+
+// deactivate removes a work label. Unknown labels are ignored — a finish
+// event whose start was dropped (the subscriber channel drops when full)
+// must not corrupt the rest of the list.
+func (m *Model) deactivate(label string) {
+	if i := slices.Index(m.active, label); i >= 0 {
+		m.active = slices.Delete(m.active, i, i+1)
 	}
-	_ = cmd.Process.Kill()
+}
+
+// dispatchRun asks the dev server to run `make <target>`. The palette has
+// already closed, and the output is not ours to route: the dev server's
+// ProcessManager fans it out to this viewport, the browser panel and the
+// shared log buffer MCP logs.read serves, all tagged [make:<target>], while
+// the status bar reports the run off the event bus. So the only thing we
+// wait for is the failure case that produces no exit code.
+func (m *Model) dispatchRun(target string) tea.Cmd {
+	if m.runMake == nil {
+		// Runner not up yet (or a test that doesn't exercise the run path).
+		return func() tea.Msg {
+			return runFinishedMsg{msg: "[make:" + target + "] dev server not ready"}
+		}
+	}
+
+	// The cancel handle is dropped deliberately: nothing in the TUI cancels a
+	// make any more, and quitting cancels the runner context this run hangs
+	// off, which kills the process group.
+	done, _ := m.runMake(target)
+	return func() tea.Msg {
+		r := <-done
+		if r.Err != nil && r.ExitCode == 0 {
+			// Failed without an exit status (make missing, spawn error) —
+			// no `exited <n>` line will appear, so say why here.
+			return runFinishedMsg{msg: "[make:" + target + "] " + r.Err.Error()}
+		}
+		return runFinishedMsg{}
+	}
 }
 
 // printableRune extracts a single printable rune from a tea.KeyMsg if
@@ -1384,100 +1405,6 @@ func printableRune(msg tea.KeyMsg) rune {
 		return ' '
 	}
 	return 0
-}
-
-// makeTargetColors is the rotation used to colour [make:<target>]
-// prefix tags. Same five-colour set as the rule prefix writer
-// (process.go) so the hamr tab reads as one visual family. Reset
-// follows the tag so the body of each line renders in the terminal's
-// default fg colour.
-var makeTargetColors = []string{
-	"\033[36m", // cyan
-	"\033[33m", // yellow
-	"\033[35m", // magenta
-	"\033[32m", // green
-	"\033[34m", // blue
-}
-
-const makeColorReset = "\033[0m"
-
-// colorForTarget returns the ANSI start sequence for a target's
-// prefix, assigning a fresh colour on first sight and reusing it on
-// re-runs so the same target always looks the same within a session.
-// Called from dispatchRun on the bubbletea Update goroutine — no
-// locking required.
-func (m *Model) colorForTarget(target string) string {
-	if m.targetColors == nil {
-		m.targetColors = make(map[string]string)
-	}
-	if c, ok := m.targetColors[target]; ok {
-		return c
-	}
-	c := makeTargetColors[m.nextTargetColor%len(makeTargetColors)]
-	m.nextTargetColor++
-	m.targetColors[target] = c
-	return c
-}
-
-// makePrefixWriter is a line-buffered io.Writer that prefixes every
-// completed line with a coloured "[make:<target>] " tag before
-// forwarding to the hamr Sink. The Sink itself splits on '\n', so we
-// forward each prefixed line including its newline terminator. Flush
-// emits any trailing partial line at process exit.
-type makePrefixWriter struct {
-	mu     sync.Mutex
-	out    io.Writer
-	prefix []byte
-	buf    []byte
-}
-
-func newMakePrefixWriter(out io.Writer, target, color string) *makePrefixWriter {
-	return &makePrefixWriter{
-		out:    out,
-		prefix: []byte(color + "[make:" + target + "]" + makeColorReset + " "),
-	}
-}
-
-func (w *makePrefixWriter) Write(p []byte) (int, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.buf = append(w.buf, p...)
-	for {
-		i := bytes.IndexByte(w.buf, '\n')
-		if i < 0 {
-			break
-		}
-		line := w.buf[:i+1] // include '\n' so Sink emits a complete line
-		out := make([]byte, 0, len(w.prefix)+len(line))
-		out = append(out, w.prefix...)
-		out = append(out, line...)
-		if _, err := w.out.Write(out); err != nil {
-			// All of p was already appended to w.buf, so it is fully consumed.
-			// Report len(p) (not 0) with the error: returning 0 would invite an
-			// io.Writer-contract-respecting caller to retry the same bytes,
-			// which we'd append again and duplicate.
-			return len(p), err
-		}
-		w.buf = w.buf[i+1:]
-	}
-	return len(p), nil
-}
-
-// Flush emits any unterminated trailing bytes as a final prefixed line.
-// Called once after `make` exits so the user sees the last partial
-// chunk (e.g. an error message without a trailing newline).
-func (w *makePrefixWriter) Flush() {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if len(w.buf) == 0 {
-		return
-	}
-	out := make([]byte, 0, len(w.prefix)+len(w.buf)+1)
-	out = append(out, w.prefix...)
-	out = append(out, w.buf...)
-	out = append(out, '\n')
-	_, _ = w.out.Write(out)
-	w.buf = w.buf[:0]
 }
 
 // makefileExists reports whether the project-root Makefile is present.
@@ -1512,7 +1439,7 @@ func (m *Model) View() string {
 		return overlay(b.String(), m.helpView(), m.width, m.height)
 	}
 	if m.run.active() {
-		return overlay(b.String(), m.runView(), m.width, m.height)
+		return overlay(b.String(), m.runOverlayView(), m.width, m.height)
 	}
 	return b.String()
 }
@@ -1781,6 +1708,117 @@ func (m *Model) mcpIndicator() string {
 	return statusKey.Render("MCP") + statusOK.Render(fmt.Sprintf(" on/%d", m.mcpTools))
 }
 
+// The status bar's system indicator is a one-slot ticker: what the dev server
+// is doing right now, or OK when it is idle and healthy. Everything it shows
+// comes off the event bus, so a build, a compose start or a make triggered
+// from the browser or an MCP agent lights it up the same as a hotkey does.
+//
+// busy reports whether the status bar has work in flight — the states that
+// animate. Errors and idle are steady: a stuck error would otherwise keep the
+// tick chain repainting at 10Hz forever with nothing to show for it.
+func (m *Model) busy() bool {
+	return m.restarting || len(m.active) > 0
+}
+
+// spinIfBusy starts the tick chain if work just began and nothing is already
+// driving it. Returns nil when idle or already spinning.
+func (m *Model) spinIfBusy() tea.Cmd {
+	if !m.busy() || m.spinning {
+		return nil
+	}
+	m.spinning = true
+	return spinTick()
+}
+
+// spinnerFrame is the current braille frame for the busy states.
+func (m *Model) spinnerFrame() string {
+	return spinFrames[m.spinFrame%len(spinFrames)]
+}
+
+// Ticker geometry. statusMaxWidth caps the marquee on a wide terminal so it
+// can't crowd out the proxy URL and MCP indicator that follow it in the bar;
+// tickerSep separates items and also provides the visual gap when the strip
+// wraps around; tickerCellTicks is how many spinner frames pass per cell of
+// travel — 2 frames at 100ms each gives 5 cells/sec, fast enough to read as
+// motion and slow enough to actually read.
+const (
+	statusMaxWidth  = 32
+	statusMinWidth  = 10
+	tickerSep       = "  •  "
+	tickerCellTicks = 2
+)
+
+// statusWidth is the marquee window, scaled to the terminal so a narrow
+// tmux pane doesn't hand the whole bar to the status slot.
+func (m *Model) statusWidth() int {
+	if m.width <= 0 {
+		return statusMaxWidth
+	}
+	return max(min(statusMaxWidth, m.width/3), statusMinWidth)
+}
+
+// marquee renders items as a stock-ticker strip inside a fixed-width window.
+// Items that fit are left alone — nothing scrolls unless it has to. Once they
+// overflow, the strip runs right-to-left and wraps around seamlessly, offset
+// driven by the same spinner counter so there is only ever one timer.
+//
+// ponytail: indexes by rune, not grapheme cluster, so a rule or compose entry
+// named with a double-width or combining character will wobble by a cell.
+// Swap in a width-aware slicer if anyone ever hits it.
+func marquee(items []string, width, offset int) string {
+	if len(items) == 0 || width <= 0 {
+		return ""
+	}
+	content := strings.Join(items, tickerSep)
+	if lipgloss.Width(content) <= width {
+		return content
+	}
+	strip := []rune(content + tickerSep)
+	off := offset % len(strip)
+	out := make([]rune, width)
+	for i := range out {
+		out[i] = strip[(off+i)%len(strip)]
+	}
+	return string(out)
+}
+
+// systemStatus is the status bar's one answer to "what is hamr dev doing?".
+//
+// A restart outranks everything: the server is unwinding, so whatever it was
+// working on is already gone. Otherwise every piece of work in flight becomes
+// a ticker item, each carrying the spinner, and errors join as a final item so
+// a stuck failure can't hide a running build the way a priority chain did:
+//
+//	● OK                                    idle
+//	⠙ building site                         one thing, sitting still
+//	⠙ building site  •  ⠙ make db-refresh   several, scrolling
+//	ERR: site                               idle but broken
+//
+// Errors also turn the whole strip red. Styling per item would mean slicing
+// ANSI sequences mid-escape as the window moves; one style per frame is the
+// honest colour anyway, since something being broken outranks something being
+// slow.
+func (m *Model) systemStatus() string {
+	if m.restarting {
+		return statusWarn.Render(m.spinnerFrame() + " restarting")
+	}
+	if len(m.active) == 0 && len(m.errors) == 0 {
+		return statusOK.Render("● OK")
+	}
+
+	items := make([]string, 0, len(m.active)+1)
+	for _, label := range m.active {
+		items = append(items, m.spinnerFrame()+" "+label)
+	}
+	style := statusWarn
+	if len(m.errors) > 0 {
+		// No spinner: an error is a state, not work in progress.
+		items = append(items, "ERR: "+strings.Join(m.errors, ", "))
+		style = statusErr
+	}
+	return style.Render(marquee(items, m.statusWidth(), m.spinFrame/tickerCellTicks))
+}
+
 func (m *Model) statusBar() string {
 	if m.width <= 0 {
 		return ""
@@ -1793,12 +1831,7 @@ func (m *Model) statusBar() string {
 	if pos := m.tabPosition(); pos != "" {
 		parts = append(parts, barPad(2), statusDim.Render(pos))
 	}
-	parts = append(parts, barPad(2), statusLabel.Render("•"), barPad(2))
-	if len(m.errors) == 0 {
-		parts = append(parts, statusOK.Render("OK"))
-	} else {
-		parts = append(parts, statusErr.Render(fmt.Sprintf("ERR: %s", strings.Join(m.errors, ", "))))
-	}
+	parts = append(parts, barPad(2), statusLabel.Render("•"), barPad(2), m.systemStatus())
 	// Proxy URL renders at the end of the left cluster (after OK/ERR) so
 	// it's always visible — particularly useful when [dev].port_walk
 	// shifted the listener off the configured default.
@@ -1885,22 +1918,8 @@ func (m *Model) hintBar() string {
 	return leftContent + hintPad(gap) + right + hintPad(rightTrailing)
 }
 
-// runView renders whichever surface the run state machine is in: the
-// fuzzy palette, the in-flight "running" box, or the post-run dismiss
-// box. Returns "" when closed (View checks active() first, but defending
-// against a stale call is cheap).
-func (m *Model) runView() string {
-	switch m.run.stage {
-	case runOverlay:
-		return m.runOverlayView()
-	case runRunning:
-		return m.runRunningView()
-	case runFinished:
-		return m.runFinishedView()
-	}
-	return ""
-}
-
+// runOverlayView is the only run surface left: confirming a target closes
+// the palette immediately, so nothing renders while make runs.
 // runOverlayView renders the fuzzy palette: prompt at top, list of
 // matches below with the cursor row highlighted. Limited to a sane
 // height so very large Makefiles don't push the modal past the
@@ -1952,45 +1971,6 @@ func (m *Model) runOverlayView() string {
 			modalKey.Render("↩")+modalDim.Render(" run  ")+
 			modalKey.Render("esc")+modalDim.Render(" cancel"))
 	return modalStyle.Render(strings.Join(lines, "\n"))
-}
-
-// runRunningView renders the floating "running" box. While visible all
-// keys are suppressed except `q` (cancel) and ctrl+c (quit TUI).
-func (m *Model) runRunningView() string {
-	frame := spinFrames[m.spinFrame%len(spinFrames)]
-	body := strings.Join([]string{
-		modalTitle.Render(frame + " Running: " + m.run.running),
-		"",
-		modalDim.Render("output streaming to the hamr tab"),
-		"",
-		modalKey.Render("q") + modalDim.Render(" cancel"),
-	}, "\n")
-	return modalStyle.Render(body)
-}
-
-// runFinishedView renders the post-run box, distinguishing success and
-// failure visually so a 0 vs non-zero exit is unmistakable.
-func (m *Model) runFinishedView() string {
-	var title, status string
-	switch {
-	case m.run.failed && m.run.failedMsg != "":
-		title = "Failed: " + m.run.running
-		status = modalDanger.Render(m.run.failedMsg)
-	case m.run.failed:
-		title = "Failed: " + m.run.running
-		status = modalDanger.Render(fmt.Sprintf("exit %d", m.run.exitCode))
-	default:
-		title = "Done: " + m.run.running
-		status = modalTitle.Render("✓")
-	}
-	body := strings.Join([]string{
-		modalTitle.Render(title),
-		"",
-		status,
-		"",
-		modalDim.Render("any key to dismiss"),
-	}, "\n")
-	return modalStyle.Render(body)
 }
 
 // overlay places the modal in the centre of the base view by replacing

@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/FyrmForge/hamr/internal/devserver"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -48,5 +50,241 @@ func TestModel_HelpModal_FitsAvailableHeight(t *testing.T) {
 		if avail := m.availableModalHeight(); got > avail {
 			t.Fatalf("height=%d: help modal renders %d rows, exceeds available %d (bottom border cropped)", h, got, avail)
 		}
+	}
+}
+
+// TestModel_SystemStatus covers the status-bar ticker. The whole point of the
+// indicator is that it reflects what the dev server is doing regardless of who
+// triggered it, so each state is driven through the same broker events the
+// runtime forwards.
+func TestModel_SystemStatus(t *testing.T) {
+	ev := func(m *Model, t string, data string) {
+		m.applyBrokerEvent(devserver.SSEEvent{Type: t, Data: data})
+	}
+
+	t.Run("idle", func(t *testing.T) {
+		m := NewModel(NewHotkeySource())
+		if got := m.systemStatus(); !strings.Contains(got, "OK") {
+			t.Fatalf("idle status = %q, want OK", got)
+		}
+	})
+
+	t.Run("building", func(t *testing.T) {
+		m := NewModel(NewHotkeySource())
+		ev(m, devserver.EvBuilding, "site")
+		if got := m.systemStatus(); !strings.Contains(got, "building site") {
+			t.Fatalf("status = %q, want building site", got)
+		}
+		ev(m, devserver.EvBuildOK, "site")
+		if got := m.systemStatus(); !strings.Contains(got, "OK") {
+			t.Fatalf("status after build_ok = %q, want OK", got)
+		}
+	})
+
+	t.Run("compose start", func(t *testing.T) {
+		// Pulling images is the slowest part of a cold start and used to show
+		// nothing at all.
+		m := NewModel(NewHotkeySource())
+		ev(m, devserver.EvComposeUp, "postgres")
+		if got := m.systemStatus(); !strings.Contains(got, "starting postgres") {
+			t.Fatalf("status = %q, want starting postgres", got)
+		}
+		ev(m, devserver.EvComposeOK, "postgres")
+		if got := m.systemStatus(); !strings.Contains(got, "OK") {
+			t.Fatalf("status after compose_ok = %q, want OK", got)
+		}
+	})
+
+	t.Run("build error clears only the rule that failed", func(t *testing.T) {
+		// The payload is JSON; clearing every entry on it would blank the
+		// sibling build that is still perfectly fine.
+		m := NewModel(NewHotkeySource())
+		ev(m, devserver.EvBuilding, "site")
+		ev(m, devserver.EvBuilding, "css")
+		ev(m, devserver.EvBuildError, `{"rule":"css","output":"boom"}`)
+		if got := m.active; !reflect.DeepEqual(got, []string{"building site"}) {
+			t.Fatalf("active = %v, want only building site", got)
+		}
+	})
+
+	t.Run("concurrent work all shows", func(t *testing.T) {
+		// Another target finishing must not blank the indicator for the one
+		// still running, and everything in flight shares the ticker.
+		m := NewModel(NewHotkeySource())
+		ev(m, devserver.EvMakeStart, "slow")
+		ev(m, devserver.EvMakeDone, "other 0")
+		ev(m, devserver.EvBuilding, "site")
+		got := m.systemStatus()
+		if !strings.Contains(got, "make slow") || !strings.Contains(got, "building site") {
+			t.Fatalf("status = %q, want both items", got)
+		}
+	})
+
+	t.Run("duplicate start is not listed twice", func(t *testing.T) {
+		m := NewModel(NewHotkeySource())
+		ev(m, devserver.EvBuilding, "site")
+		ev(m, devserver.EvBuilding, "site")
+		if len(m.active) != 1 {
+			t.Fatalf("active = %v, want one entry", m.active)
+		}
+	})
+
+	t.Run("restarting outranks everything", func(t *testing.T) {
+		m := NewModel(NewHotkeySource())
+		ev(m, devserver.EvBuilding, "site")
+		ev(m, devserver.EvRestarting, "")
+		got := m.systemStatus()
+		if !strings.Contains(got, "restarting") || strings.Contains(got, "building") {
+			t.Fatalf("status = %q, want restarting alone", got)
+		}
+		// The next run coming up clears it, and the work that died with the
+		// old run goes with it.
+		m.Update(actionsReadyMsg{})
+		if got := m.systemStatus(); !strings.Contains(got, "OK") {
+			t.Fatalf("status after actions ready = %q, want OK", got)
+		}
+	})
+
+	t.Run("errors share the ticker with live work", func(t *testing.T) {
+		// A stuck error used to outrank everything, so a rebuild triggered to
+		// fix it was invisible for as long as it ran.
+		m := NewModel(NewHotkeySource())
+		m.errors = []string{"site"}
+		if got := m.systemStatus(); !strings.Contains(got, "ERR: site") {
+			t.Fatalf("status = %q, want ERR: site", got)
+		}
+		ev(m, devserver.EvMakeStart, "css")
+		got := m.systemStatus()
+		if !strings.Contains(got, "ERR: site") || !strings.Contains(got, "make css") {
+			t.Fatalf("status = %q, want the error and the running make", got)
+		}
+	})
+}
+
+// TestMarquee covers the ticker window: content that fits never moves, content
+// that overflows scrolls one cell per step and wraps around without a seam.
+func TestMarquee(t *testing.T) {
+	t.Run("fits, so it does not scroll", func(t *testing.T) {
+		for _, off := range []int{0, 1, 7} {
+			if got := marquee([]string{"abc"}, 10, off); got != "abc" {
+				t.Fatalf("offset %d = %q, want abc unmoved", off, got)
+			}
+		}
+	})
+
+	t.Run("overflow scrolls one cell per step", func(t *testing.T) {
+		items := []string{"aaaa", "bbbb"}
+		first := marquee(items, 6, 0)
+		if first != "aaaa  " {
+			t.Fatalf("offset 0 = %q", first)
+		}
+		if got := marquee(items, 6, 1); got != "aaa  •" {
+			t.Fatalf("offset 1 = %q, want a one-cell shift", got)
+		}
+	})
+
+	t.Run("wraps around to the start", func(t *testing.T) {
+		items := []string{"aaaa", "bbbb"}
+		// strip is items + one trailing separator; a full lap returns to the
+		// original window, so the loop has no visible seam.
+		strip := len([]rune(strings.Join(items, tickerSep) + tickerSep))
+		if got, want := marquee(items, 6, strip), marquee(items, 6, 0); got != want {
+			t.Fatalf("after a full lap = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("empty and zero width are safe", func(t *testing.T) {
+		if got := marquee(nil, 10, 0); got != "" {
+			t.Fatalf("empty items = %q", got)
+		}
+		if got := marquee([]string{"a"}, 0, 0); got != "" {
+			t.Fatalf("zero width = %q", got)
+		}
+	})
+}
+
+// TestStatusBar_FitsNarrowTerminal guards the bar against the ticker: the
+// status slot is the one variable-width piece in the left cluster, and it now
+// has a real appetite. Overflowing it would push the version tag off-screen or
+// wrap the bar onto a second line.
+func TestStatusBar_FitsNarrowTerminal(t *testing.T) {
+	for _, width := range []int{40, 60, 100} {
+		m := NewModel(NewHotkeySource())
+		m.width = width
+		m.proxyURL = "http://localhost:8080"
+		for _, rule := range []string{"site", "css", "templ", "sqlc"} {
+			m.applyBrokerEvent(devserver.SSEEvent{Type: devserver.EvBuilding, Data: rule})
+		}
+		if got := lipgloss.Width(m.statusBar()); got != width {
+			t.Fatalf("width %d: status bar rendered %d cells", width, got)
+		}
+	}
+}
+
+// TestSpinTick_RunsOnlyWhileBusy guards the tick chain: it starts when the
+// status bar enters a busy state, keeps rescheduling while it stays busy, and
+// stops dead once idle — a leaked chain would repaint the bar forever.
+func TestSpinTick_RunsOnlyWhileBusy(t *testing.T) {
+	m := &Model{}
+
+	// Idle: a broker event that leaves nothing in flight starts no chain.
+	_, cmd := m.Update(brokerEventMsg{evt: devserver.SSEEvent{Type: devserver.EvBuildOK, Data: "site"}})
+	if cmd != nil || m.spinning {
+		t.Fatal("chain started while idle")
+	}
+
+	_, cmd = m.Update(brokerEventMsg{evt: devserver.SSEEvent{Type: devserver.EvBuilding, Data: "site"}})
+	if cmd == nil || !m.spinning {
+		t.Fatal("chain did not start when the build began")
+	}
+
+	// A second busy event must not start a competing chain.
+	_, cmd = m.Update(brokerEventMsg{evt: devserver.SSEEvent{Type: devserver.EvMakeStart, Data: "db-refresh"}})
+	if cmd != nil {
+		t.Fatal("second busy event started a duplicate chain")
+	}
+
+	_, cmd = m.Update(spinTickMsg{})
+	if cmd == nil {
+		t.Fatal("chain should reschedule while busy")
+	}
+	if m.spinFrame != 1 {
+		t.Fatalf("spinFrame=%d want 1", m.spinFrame)
+	}
+	if got := m.systemStatus(); !strings.Contains(got, spinFrames[1]+" building site") {
+		t.Fatalf("status = %q, want the current spinner frame", got)
+	}
+
+	// Everything finishes: the next tick ends the chain.
+	m.Update(brokerEventMsg{evt: devserver.SSEEvent{Type: devserver.EvMakeDone, Data: "db-refresh 0"}})
+	m.Update(brokerEventMsg{evt: devserver.SSEEvent{Type: devserver.EvBuildOK, Data: "site"}})
+	_, cmd = m.Update(spinTickMsg{})
+	if cmd != nil || m.spinning {
+		t.Fatal("chain should stop once idle")
+	}
+	if m.spinFrame != 1 {
+		t.Fatalf("spinFrame=%d want 1 (no advance after idle)", m.spinFrame)
+	}
+}
+
+// A restart clears the busy list without a tick passing through, so the
+// spinning flag has to be cleared with it. Latching it true would leave
+// spinIfBusy refusing to start a chain for the rest of the session — no
+// spinner and no scrolling, forever.
+func TestActionsReady_ReleasesSpinnerChain(t *testing.T) {
+	m := NewModel(NewHotkeySource())
+	m.Update(brokerEventMsg{evt: devserver.SSEEvent{Type: devserver.EvBuilding, Data: "site"}})
+	if !m.spinning {
+		t.Fatal("chain should be running during the build")
+	}
+
+	m.Update(actionsReadyMsg{})
+	if m.spinning {
+		t.Fatal("spinning latched true after the run was replaced")
+	}
+
+	_, cmd := m.Update(brokerEventMsg{evt: devserver.SSEEvent{Type: devserver.EvBuilding, Data: "site"}})
+	if cmd == nil {
+		t.Fatal("chain must restart for the new run's first build")
 	}
 }

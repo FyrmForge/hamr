@@ -319,3 +319,69 @@ func TestHandleHotkey_RestartRespectsCooldown(t *testing.T) {
 	assert.False(t, r.handleHotkey(HotkeyRestart, actions, func() {}))
 	assert.Equal(t, 1, fired)
 }
+
+// The initial build used to broadcast nothing: EvBuilding/EvBuildOK were only
+// wired into the file-change path, so `hamr dev` spent its slowest stretch —
+// cold start — reporting an idle status bar. The actions hook fires before the
+// build loop, which is what makes subscribing in time possible at all.
+func TestRunner_InitialBuild_BroadcastsBuildEvents(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	cfg := &Config{Dev: DevConfig{
+		Daemons: []Daemon{{Name: "idle", Cmd: "sleep 60"}},
+		Watch:   []WatchRule{{Name: "site", Watch: StringOrSlice{"**/*.go"}, Cmd: "true"}},
+	}}
+
+	var mu sync.Mutex
+	var seen []SSEEvent
+	done := make(chan struct{})
+	var once sync.Once
+
+	dir := t.TempDir()
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	t.Cleanup(cancel)
+
+	r := NewRunner(cfg,
+		WithLogger(discardLogger()),
+		WithNoProxy(true),
+		WithActionsHook(func(a *DevActions) {
+			events, unsub := a.Broker().Subscribe()
+			t.Cleanup(unsub)
+			go func() {
+				for evt := range events {
+					mu.Lock()
+					seen = append(seen, evt)
+					mu.Unlock()
+					if evt.Type == EvBuildOK {
+						once.Do(func() { close(done) })
+					}
+				}
+			}()
+		}),
+	)
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- r.Run(ctx) }()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("initial build never broadcast build_ok")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	var sawBuilding bool
+	for _, evt := range seen {
+		if evt.Type == EvBuilding && evt.Data == "site" {
+			sawBuilding = true
+		}
+	}
+	assert.True(t, sawBuilding, "initial build must broadcast building for the rule, got %+v", seen)
+}

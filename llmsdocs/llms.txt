@@ -65,10 +65,13 @@
   quit, `m` opens a fuzzy palette over the
   project-root `./Makefile` targets (declaration order; type to filter,
   `↑/↓` navigate, `↩` runs, `Esc` cancels; hidden when no Makefile is
-  present). Output streams to the hamr tab line-prefixed
-  `[make:<target>]`; while running only `q` (cancel — kills the `make` process group) and
-  Ctrl+C (quit) work; on exit a Done/Failed summary stays until any key
-  dismisses it. `Tab`/`Shift+Tab` to cycle
+  present). The target runs through the dev server, so its output
+  reaches every consumer at once: the hamr tab line-prefixed
+  `[make:<target>]`, the browser log overlay, and MCP `logs.read` with
+  rule `make:<target>`. The palette closes as soon as you pick a target —
+  the run is reported by the status bar (a spinner plus `make <target>`) and its
+  output in the hamr tab, and the TUI stays usable throughout; the final
+  `[make:<target>] exited <n>` line is the result. `Tab`/`Shift+Tab` to cycle
   between the hamr log tab and one tab per `[[dev.docker_compose]]`
   entry (each fed by `docker compose logs -f`), `/` for case-insensitive
   per-tab live (incremental) substring search with `n`/`N` next/prev,
@@ -88,7 +91,17 @@
   `[hamr:tui] clipboard: ...` lines on the hamr tab. `q`/Ctrl+C quit
   even when the dev server is parked on a config parse error. `M` toggles
   the MCP gateway (see **hamr mcp**); the status bar shows `MCP on/<n>` or
-  `MCP off`.
+  `MCP off`. The status bar also carries a system indicator fed by the dev
+  server's event bus, so it shows work triggered from anywhere (file save,
+  hotkey, browser panel, MCP agent). It is a stock-ticker marquee: every
+  item in flight — `building <rule>` (initial build included),
+  `starting <name>` for a compose entry, `make <target>` — scrolls
+  right-to-left joined by ` • `, each with a braille spinner frame.
+  Content that fits does not scroll. `restarting` shows alone;
+  `ERR: <rules>` joins as a final item and reddens the strip; `● OK`
+  when idle.
+  All dev-server state reaches consumers as broker events and all consumer
+  actions go through `DevActions` — see `docs/adr/004-dev-event-bus.md`.
 - **hamr mcp**: MCP (Model Context Protocol) bridge that lets an AI agent
   (Claude Code, Codex, opencode) drive a running `hamr dev`. Two hops:
   agent ⟷ `hamr mcp` over stdio, then `hamr mcp` ⟷ `hamr dev` over localhost

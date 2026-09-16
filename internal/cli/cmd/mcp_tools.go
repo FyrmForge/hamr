@@ -74,7 +74,7 @@ var bridgeTools = []bridgeTool{
 	},
 	{
 		name:        "make.run",
-		description: "Run a Makefile target. Waits briefly for completion: returns status=done with exitCode+output for fast targets, or status=running for slow ones — then poll logs.read (rule make:<target>) for the completion marker.",
+		description: "Run a Makefile target. Waits briefly for completion: returns status=done with exitCode+output for fast targets, or status=running for slow ones — then poll logs.read (rule make:<target>) for the completion marker '[make:<target>] exited <n>'. Covers runs started from the dev TUI too — every make goes through the dev server.",
 		inputSchema: `{"type":"object","properties":{"target":{"type":"string"}},"required":["target"]}`,
 	},
 	{

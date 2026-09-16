@@ -70,8 +70,6 @@ var (
 			Foreground(colorAccent).
 			Bold(true)
 
-	modalDanger = lipgloss.NewStyle().Foreground(colorErr).Bold(true)
-
 	// Modal-internal counterparts to statusDim/statusKey. They drop the
 	// status-bar background so dim hints inside modals don't render as a
 	// dark block against the modal's transparent body.

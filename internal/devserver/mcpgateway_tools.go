@@ -145,34 +145,22 @@ func (g *mcpGateway) makeRun(body []byte) (any, error) {
 	if !g.cfg.Dev.MCP.MakeTargetAllowed(a.Target) {
 		return nil, fmt.Errorf("make target %q not allowed by [dev.mcp] make_targets", a.Target)
 	}
-	rule := &WatchRule{Name: "make:" + a.Target, Cmd: "make " + shellQuote(a.Target)}
-
-	type result struct {
-		output string
-		err    error
-	}
-	done := make(chan result, 1)
-	go func() {
-		// Tied to the dev server's context (not Background) so a slow target is
-		// killed on shutdown instead of orphaned. The goroutine still outlives
-		// this request — the agent polls logs.read for the completion marker.
-		out, err := g.actions.pm.RunCommand(g.ctx, rule)
-		// Completion marker so the agent can detect done + exit code via
-		// logs.read after a "check back later".
-		g.logBuf.Append(LogLine{Rule: rule.Name, Text: fmt.Sprintf("[%s] exited %d", rule.Name, exitCodeOf(err))})
-		done <- result{out, err}
-	}()
+	// Runs through DevActions so the output lands in the shared log buffer and
+	// on the event bus — same path the TUI's `m` hotkey takes. The run outlives
+	// this request when it's slow; the agent polls logs.read for the completion
+	// marker. Deliberately not cancelled on timeout.
+	done, _ := g.actions.RunMake(a.Target)
 
 	timer := time.NewTimer(g.cfg.Dev.MCP.ResolvedMakeWait())
 	defer timer.Stop()
 	select {
 	case r := <-done:
-		code := exitCodeOf(r.err)
-		return makeRunResult{Status: "done", ExitCode: &code, Output: tailString(r.output, 4000)}, nil
+		code := r.ExitCode
+		return makeRunResult{Status: "done", ExitCode: &code, Output: r.Output}, nil
 	case <-timer.C:
 		return makeRunResult{
 			Status:  "running",
-			Message: fmt.Sprintf("still running — poll logs.read for rule %q", rule.Name),
+			Message: fmt.Sprintf("still running — poll logs.read for rule %q", "make:"+a.Target),
 		}, nil
 	}
 }

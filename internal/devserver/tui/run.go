@@ -8,37 +8,33 @@ import (
 type runStage int
 
 const (
-	runClosed   runStage = iota // modal not visible
-	runOverlay                  // fuzzy palette open; awaiting selection
-	runRunning                  // target executing; floating box shows it
-	runFinished                 // target done; box stays until any key
+	runClosed  runStage = iota // modal not visible
+	runOverlay                 // fuzzy palette open; awaiting selection
 )
 
 // runState is the pure state machine for the make-target runner. No I/O —
 // keys and a target list go in, transitions and a "trigger" decision come
-// out. Spawning the actual `make <target>` lives in the bubbletea model.
+// out. Dispatching the actual `make <target>` lives in the bubbletea model.
+//
+// The palette closes the moment a target is confirmed: the run itself is
+// reported by the status bar (a spinner plus `make <target>`, driven by the
+// dev server's event bus) and its output streams into the hamr tab, so there
+// is nothing left for a modal to show and no reason to lock the TUI while it
+// runs.
 type runState struct {
 	stage   runStage
 	targets []string // full list in Makefile order
 	query   string
 	cursor  int // index into filtered() results
-
-	// running/finished context.
-	running   string // target name currently executing or just finished
-	exitCode  int
-	failed    bool
-	failedMsg string // populated when start failed before exec (e.g. cmd not found)
 }
 
 // runDecision encodes the outcome of feeding a key into the modal.
 type runDecision struct {
 	// trigger is set when the user has confirmed a target and the model
-	// should now dispatch `make <target>` in a goroutine.
+	// should now dispatch `make <target>`.
 	trigger    bool
 	triggerTgt string
-	// cancel is set when the running target should be SIGINT'd.
-	cancel bool
-	// closed is set when the modal should disappear (esc, any-key dismiss).
+	// closed is set when the modal should disappear (esc).
 	closed bool
 }
 
@@ -56,46 +52,14 @@ func (r *runState) openOverlay(targets []string) {
 	r.stage = runOverlay
 }
 
-// active reports whether any modal surface is currently visible.
-func (r *runState) active() bool { return r.stage != runClosed }
-
-// overlayActive reports whether the fuzzy palette is open.
-func (r *runState) overlayActive() bool { return r.stage == runOverlay }
-
-// runningActive reports whether the "running" box is visible (running or
-// finished states both render the box).
-func (r *runState) runningActive() bool {
-	return r.stage == runRunning || r.stage == runFinished
-}
-
-// markRunning transitions the state machine to runRunning for the named
-// target. Caller is responsible for actually launching the process.
-func (r *runState) markRunning(target string) {
-	r.stage = runRunning
-	r.running = target
-	r.exitCode = 0
-	r.failed = false
-	r.failedMsg = ""
-}
-
-// markFinished transitions to runFinished with the given exit info. The
-// "running" box stays on screen until the user dismisses with any key.
-func (r *runState) markFinished(exitCode int, failed bool, msg string) {
-	r.stage = runFinished
-	r.exitCode = exitCode
-	r.failed = failed
-	r.failedMsg = msg
-}
+// active reports whether the palette is currently visible.
+func (r *runState) active() bool { return r.stage == runOverlay }
 
 // close resets the state machine to runClosed, clearing transient state.
 func (r *runState) close() {
 	r.stage = runClosed
 	r.query = ""
 	r.cursor = 0
-	r.running = ""
-	r.exitCode = 0
-	r.failed = false
-	r.failedMsg = ""
 }
 
 // handleOverlayKey advances the palette in response to a key. Printable
@@ -118,7 +82,8 @@ func (r *runState) handleOverlayKey(key string, printable rune) runDecision {
 			return runDecision{}
 		}
 		target := filtered[r.cursor]
-		return runDecision{trigger: true, triggerTgt: target}
+		r.close()
+		return runDecision{trigger: true, triggerTgt: target, closed: true}
 	case "up":
 		if r.cursor > 0 {
 			r.cursor--
@@ -143,29 +108,6 @@ func (r *runState) handleOverlayKey(key string, printable rune) runDecision {
 		r.cursor = 0
 	}
 	return runDecision{}
-}
-
-// handleRunningKey is called while a target is executing. Only `q`
-// cancels; everything else is swallowed so the user can't accidentally
-// quit the TUI mid-run.
-func (r *runState) handleRunningKey(key string) runDecision {
-	if r.stage != runRunning {
-		return runDecision{}
-	}
-	if key == "q" {
-		return runDecision{cancel: true}
-	}
-	return runDecision{}
-}
-
-// handleFinishedKey is called while the post-run box is shown. Any key
-// dismisses it.
-func (r *runState) handleFinishedKey(_ string) runDecision {
-	if r.stage != runFinished {
-		return runDecision{}
-	}
-	r.close()
-	return runDecision{closed: true}
 }
 
 // filtered returns the targets matching the current query, ranked by

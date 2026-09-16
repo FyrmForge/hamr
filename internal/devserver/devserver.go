@@ -346,7 +346,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	defer func() {
 		r.logger.Info("shutting down")
 		if !restarting {
-			broker.Broadcast(SSEEvent{Type: "shutdown"})
+			broker.Broadcast(SSEEvent{Type: EvShutdown})
 		}
 		pm.ClearCallbacks()
 		cancel()
@@ -383,7 +383,7 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	actions := &DevActions{
 		ctx: runCtx, cfg: r.cfg, pm: pm, broker: broker,
-		errorState: errorState, graph: graph, logger: r.logger,
+		errorState: errorState, graph: graph, logger: r.logger, logBuf: logBuf,
 		requestRestart: func() {
 			select {
 			case restartCh <- struct{}{}:
@@ -667,6 +667,11 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 		dc := &r.cfg.Dev.DockerCompose[i]
 		r.logger.Info("ensuring docker compose", "name", dc.Name, "file", dc.File)
+		// Pulling images and waiting on healthchecks is the slowest part of a
+		// cold start; without this the TUI status bar sits on "OK" for a
+		// minute while nothing appears to happen. Every exit path below has
+		// to clear it or the indicator spins forever.
+		broker.Broadcast(SSEEvent{Type: EvComposeUp, Data: dc.Name})
 		output, shifts, err := r.ensureDockerCompose(runCtx, dc)
 		for _, s := range shifts {
 			composeShifts = append(composeShifts, s)
@@ -679,6 +684,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		} else {
 			errorState.Clear(dc.Name)
 		}
+		broker.Broadcast(SSEEvent{Type: EvComposeOK, Data: dc.Name})
 		// Spawn the per-entry `compose logs -f` follower after the up
 		// has been issued. The follower self-restarts on early exit
 		// (typically because dockerWipe ran `down -v`) until runCtx
@@ -753,6 +759,11 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 
 		if rule.Cmd != "" {
+			// Same pair the watch path broadcasts in handleEvent — the
+			// initial build is just as slow and just as worth showing.
+			// Broadcast after the depFailed skip above so a rule that never
+			// runs never opens an entry the indicator can't close.
+			broker.Broadcast(SSEEvent{Type: EvBuilding, Data: name})
 			if output, err := pm.RunCommand(runCtx, rule); err != nil {
 				r.logger.Error("initial build failed", "rule", name, "err", err)
 				errorState.Set(name, output)
@@ -761,6 +772,7 @@ func (r *Runner) Run(ctx context.Context) error {
 				graph.MarkDone(name)
 				continue
 			}
+			broker.Broadcast(SSEEvent{Type: EvBuildOK, Data: name})
 		}
 		if rule.Run != "" {
 			if err := pm.StartProcess(runCtx, rule); err != nil {
@@ -796,9 +808,11 @@ func (r *Runner) Run(ctx context.Context) error {
 				return nil
 			case <-configReloadCh:
 				restarting = true
+				broker.Broadcast(SSEEvent{Type: EvRestarting})
 				return ErrConfigReload
 			case <-restartCh:
 				restarting = true
+				broker.Broadcast(SSEEvent{Type: EvRestarting})
 				return ErrRestart
 			case action := <-hotkeys.Actions():
 				if r.handleHotkey(action, actions, cancel) {
@@ -932,9 +946,11 @@ func (r *Runner) Run(ctx context.Context) error {
 		case <-configReloadCh:
 			r.logger.Info("config changed, reloading")
 			restarting = true
+			broker.Broadcast(SSEEvent{Type: EvRestarting})
 			return ErrConfigReload
 		case <-restartCh:
 			restarting = true
+			broker.Broadcast(SSEEvent{Type: EvRestarting})
 			return ErrRestart
 		case action := <-hotkeys.Actions():
 			if r.handleHotkey(action, actions, cancel) {
@@ -1029,7 +1045,7 @@ func (r *Runner) handleEvent(ctx context.Context, evt FileEvent, graph *Graph, p
 	r.logger.Info("change detected", "rule", rule.Name, "path", evt.Path)
 
 	// Notify the browser that a build is starting.
-	broker.Broadcast(SSEEvent{Type: "building", Data: rule.Name})
+	broker.Broadcast(SSEEvent{Type: EvBuilding, Data: rule.Name})
 
 	// Mark this rule as running so dependees block.
 	graph.MarkRunning(rule.Name)
@@ -1050,7 +1066,7 @@ func (r *Runner) handleEvent(ctx context.Context, evt FileEvent, graph *Graph, p
 			return
 		}
 		errorState.Clear(rule.Name)
-		broker.Broadcast(SSEEvent{Type: "build_ok", Data: rule.Name})
+		broker.Broadcast(SSEEvent{Type: EvBuildOK, Data: rule.Name})
 	}
 
 	// Restart the long-running process.
@@ -1071,7 +1087,7 @@ func (r *Runner) handleEvent(ctx context.Context, evt FileEvent, graph *Graph, p
 	// Broadcast reload event.
 	if rule.Reload != "" && rule.Reload != ReloadNone {
 		broker.Broadcast(SSEEvent{
-			Type: "reload",
+			Type: EvReload,
 			Data: string(rule.Reload),
 		})
 	}
@@ -1155,7 +1171,7 @@ func buildErrorEvent(rule, output string) SSEEvent {
 		Rule   string `json:"rule"`
 		Output string `json:"output"`
 	}{Rule: rule, Output: output})
-	return SSEEvent{Type: "build_error", Data: string(payload)}
+	return SSEEvent{Type: EvBuildError, Data: string(payload)}
 }
 
 func (r *Runner) findRule(name string) *WatchRule {

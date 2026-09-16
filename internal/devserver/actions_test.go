@@ -6,6 +6,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -243,5 +246,137 @@ func TestActions_DarkFilterToggle(t *testing.T) {
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 		assert.Equal(t, want, body["on"])
 		assert.Equal(t, want, actions.broker.darkFilter.Load())
+	}
+}
+
+// makeActions builds a DevActions wired for RunMake (pm + broker + log buffer)
+// in a temp dir holding the given Makefile body.
+func makeActions(t *testing.T, makefile string) (*DevActions, *LogBuffer) {
+	t.Helper()
+	if _, err := exec.LookPath("make"); err != nil {
+		t.Skip("make not installed")
+	}
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Makefile"), []byte(makefile), 0o644))
+	t.Chdir(dir)
+
+	logBuf := NewLogBuffer(100)
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
+	pm := NewProcessManager(slog.Default())
+	pm.SetLogOutput(logBuf, broker)
+	return &DevActions{
+		ctx: context.Background(), cfg: &Config{}, pm: pm, broker: broker,
+		errorState: NewErrorState(), logger: slog.Default(), logBuf: logBuf,
+	}, logBuf
+}
+
+// TestActions_RunMake verifies the whole point of routing make through
+// DevActions: output reaches the shared LogBuffer (so MCP logs.read sees it no
+// matter who launched the run) and the bus carries start + done events.
+func TestActions_RunMake(t *testing.T) {
+	actions, logBuf := makeActions(t, "hello:\n\t@echo greetings\n")
+	events, cancelSub := actions.Broker().Subscribe()
+	defer cancelSub()
+
+	done, _ := actions.RunMake("hello")
+
+	select {
+	case r := <-done:
+		assert.NoError(t, r.Err)
+		assert.Equal(t, 0, r.ExitCode)
+		assert.Contains(t, r.Output, "greetings")
+	case <-time.After(20 * time.Second):
+		t.Fatal("make never finished")
+	}
+
+	var texts []string
+	for _, l := range logBuf.Lines() {
+		assert.Equal(t, "make:hello", l.Rule)
+		texts = append(texts, l.Text)
+	}
+	joined := strings.Join(texts, "\n")
+	assert.Contains(t, joined, "greetings", "output must reach the shared log buffer, not just the caller")
+	assert.Contains(t, joined, "[make:hello] exited 0", "completion marker lets an agent poll logs.read for the exit code")
+
+	// Start is broadcast synchronously, done after the process exits, so both
+	// are queued by now.
+	var types []string
+	for len(events) > 0 {
+		types = append(types, (<-events).Type)
+	}
+	assert.Contains(t, types, EvMakeStart)
+	assert.Contains(t, types, EvMakeDone)
+}
+
+// TestActions_RunMake_NonZeroExit checks a failing target reports its code
+// rather than surfacing as a start failure.
+func TestActions_RunMake_NonZeroExit(t *testing.T) {
+	actions, logBuf := makeActions(t, "boom:\n\t@exit 3\n")
+	// make reports its own failure code (2), not the recipe's.
+
+	done, _ := actions.RunMake("boom")
+	select {
+	case r := <-done:
+		assert.Error(t, r.Err)
+		assert.Equal(t, 2, r.ExitCode)
+	case <-time.After(20 * time.Second):
+		t.Fatal("make never finished")
+	}
+	assert.Contains(t, lastLogText(logBuf), "[make:boom] exited 2")
+}
+
+// TestActions_RunMake_CancelKillsChildTree runs a target whose recipe
+// backgrounds a grandchild holding the output pipe open. Cancelling must take
+// the whole process group down — killing make alone leaves the sleep running
+// and the wait blocks on the pipe forever.
+func TestActions_RunMake_CancelKillsChildTree(t *testing.T) {
+	actions, _ := makeActions(t, "slow:\n\tsleep 60 & sleep 60\n")
+
+	done, cancel := actions.RunMake("slow")
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("RunMake did not return after cancel — child tree survived")
+	}
+}
+
+func lastLogText(buf *LogBuffer) string {
+	lines := buf.Lines()
+	if len(lines) == 0 {
+		return ""
+	}
+	return lines[len(lines)-1].Text
+}
+
+// TestActions_RunMake_VisibleToLogsRead closes the loop on the bug this whole
+// path exists to fix: a make run started outside MCP (the TUI's `m` hotkey
+// calls RunMake exactly like this) must be readable through the gateway's
+// logs.read filter, by both the exact rule and the "make" prefix.
+func TestActions_RunMake_VisibleToLogsRead(t *testing.T) {
+	actions, logBuf := makeActions(t, "hello:\n\t@echo greetings\n")
+
+	done, _ := actions.RunMake("hello")
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("make never finished")
+	}
+
+	g := &mcpGateway{logBuf: logBuf}
+	for _, rule := range []string{"make:hello", "make"} {
+		got, err := g.logsRead([]byte(`{"rule":"` + rule + `"}`))
+		require.NoError(t, err)
+		entries, ok := got.([]logEntry)
+		require.True(t, ok)
+
+		var text string
+		for _, e := range entries {
+			text += e.Text + "\n"
+		}
+		assert.Contains(t, text, "greetings", "logs.read rule=%q must return the run's output", rule)
+		assert.Contains(t, text, "exited 0", "logs.read rule=%q must return the completion marker", rule)
 	}
 }

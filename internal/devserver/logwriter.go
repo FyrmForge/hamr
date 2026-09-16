@@ -56,5 +56,5 @@ func (lw *logWriter) Flush() {
 
 func outputEvent(rule, text, color string) SSEEvent {
 	payload, _ := json.Marshal(LogLine{Rule: rule, Text: text, Color: color})
-	return SSEEvent{Type: "output", Data: string(payload)}
+	return SSEEvent{Type: EvOutput, Data: string(payload)}
 }

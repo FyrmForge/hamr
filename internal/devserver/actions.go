@@ -26,6 +26,10 @@ type DevActions struct {
 	errorState *ErrorState
 	graph      *Graph
 	logger     *slog.Logger
+	// logBuf is the shared ring every consumer reads (MCP logs.read, the
+	// browser log overlay). RunMake appends its completion marker here. Nil
+	// outside a live Run() (e.g. in unit tests) — guard before use.
+	logBuf *LogBuffer
 	// requestRun enqueues a rule onto the dev server's single scheduler
 	// goroutine. Manual runs (POST /run, hotkey rebuild) must go through here so
 	// they are serialized with file-watch builds and respect dependency order —
@@ -128,7 +132,7 @@ func (a *DevActions) handleDark(w http.ResponseWriter, r *http.Request) {
 	}
 	on := !a.broker.darkFilter.Load()
 	a.broker.darkFilter.Store(on)
-	a.broker.Broadcast(SSEEvent{Type: "dark_filter", Data: onOff(on)})
+	a.broker.Broadcast(SSEEvent{Type: EvDarkFilter, Data: onOff(on)})
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, `{"ok":true,"on":%t}`, on) //nolint:errcheck
 }
@@ -136,6 +140,58 @@ func (a *DevActions) handleDark(w http.ResponseWriter, r *http.Request) {
 // ErrorState returns the underlying error state so non-HTTP consumers (the
 // TUI runtime) can subscribe to error changes.
 func (a *DevActions) ErrorState() *ErrorState { return a.errorState }
+
+// Broker returns the dev server's event bus so in-process consumers (the TUI
+// runtime) can Subscribe to the same stream the browser gets.
+func (a *DevActions) Broker() *SSEBroker { return a.broker }
+
+// MakeResult is the outcome of a RunMake call.
+type MakeResult struct {
+	ExitCode int
+	Output   string // tail of combined stdout/stderr
+	Err      error
+}
+
+// makeOutputCap bounds the output tail RunMake hands back. Matches what the
+// MCP make.run tool has always returned.
+const makeOutputCap = 4000
+
+// RunMake runs `make <target>` through the ProcessManager, so its output
+// reaches every consumer at once — the TUI viewport, the browser log overlay,
+// the shared LogBuffer behind MCP logs.read — tagged "make:<target>". Callers
+// must not spawn make themselves: output from a locally-spawned process is
+// visible only to whoever spawned it.
+//
+// Broadcasts EvMakeStart immediately and EvMakeDone with the exit code when the
+// process exits, and appends a "[make:<target>] exited <n>" marker to the log
+// buffer so an agent polling logs.read can tell a finished run from a hung one.
+//
+// Returns straight away: read done for the result (it receives exactly once,
+// then closes), or call cancel to SIGKILL the process group. Cancel is safe
+// after the run has already finished.
+//
+// ponytail: concurrent runs of the same or different targets are allowed —
+// they already were, since MCP and the TUI could overlap. Serialise here if
+// two makes stepping on each other ever proves to be a real problem.
+func (a *DevActions) RunMake(target string) (<-chan MakeResult, func()) {
+	ctx, cancel := context.WithCancel(a.ctx)
+	done := make(chan MakeResult, 1)
+	rule := &WatchRule{Name: "make:" + target, Cmd: "make " + shellQuote(target)}
+
+	a.broker.Broadcast(SSEEvent{Type: EvMakeStart, Data: target})
+	go func() {
+		defer cancel() // release the ctx even when the caller never cancels
+		out, err := a.pm.RunCommand(ctx, rule)
+		code := exitCodeOf(err)
+		if a.logBuf != nil {
+			a.logBuf.Append(LogLine{Rule: rule.Name, Text: fmt.Sprintf("[%s] exited %d", rule.Name, code)})
+		}
+		a.broker.Broadcast(SSEEvent{Type: EvMakeDone, Data: fmt.Sprintf("%s %d", target, code)})
+		done <- MakeResult{ExitCode: code, Output: tailString(out, makeOutputCap), Err: err}
+		close(done)
+	}()
+	return done, cancel
+}
 
 // DockerComposes returns the configured docker compose entries the runner
 // is managing.

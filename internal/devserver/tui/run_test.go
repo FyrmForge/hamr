@@ -16,7 +16,7 @@ func TestRunState_OpenOverlayEmptyClosesImmediately(t *testing.T) {
 func TestRunState_OpenOverlayPopulates(t *testing.T) {
 	r := &runState{}
 	r.openOverlay([]string{"build", "test", "vet"})
-	if !r.overlayActive() {
+	if !r.active() {
 		t.Fatal("expected overlay active")
 	}
 	if r.cursor != 0 {
@@ -113,76 +113,20 @@ func TestRunState_EscClosesOverlay(t *testing.T) {
 	}
 }
 
-func TestRunState_RunningQCancels(t *testing.T) {
+// TestRunState_EnterClosesOverlay guards the whole point of the palette:
+// confirming a target dismisses it immediately instead of locking the TUI
+// behind a "running" box — the status bar and the hamr tab report the run.
+func TestRunState_EnterClosesOverlay(t *testing.T) {
 	r := &runState{}
-	r.markRunning("build")
-	if !r.runningActive() {
-		t.Fatal("expected runningActive")
+	r.openOverlay([]string{"build", "test"})
+	d := r.handleOverlayKey("enter", 0)
+	if !d.trigger || !d.closed {
+		t.Fatalf("decision=%+v want trigger+closed", d)
 	}
-	d := r.handleRunningKey("q")
-	if !d.cancel {
-		t.Fatalf("expected cancel decision; got %+v", d)
+	if r.active() {
+		t.Fatal("palette still visible after confirming a target")
 	}
-}
-
-func TestRunState_RunningOtherKeysIgnored(t *testing.T) {
-	r := &runState{}
-	r.markRunning("build")
-	for _, k := range []string{"r", "m", "enter", "esc", "ctrl+c", "tab", "?"} {
-		d := r.handleRunningKey(k)
-		if d.cancel || d.closed || d.trigger {
-			t.Fatalf("key %q produced non-empty decision %+v", k, d)
-		}
-		if r.stage != runRunning {
-			t.Fatalf("key %q changed stage", k)
-		}
-	}
-}
-
-func TestRunState_FinishedAnyKeyDismisses(t *testing.T) {
-	r := &runState{}
-	r.markRunning("build")
-	r.markFinished(0, false, "")
-	d := r.handleFinishedKey("x")
-	if !d.closed || r.active() {
-		t.Fatalf("expected closed; decision=%+v stage=%v", d, r.stage)
-	}
-}
-
-func TestRunState_FinishedFailedRetainsExitInfo(t *testing.T) {
-	r := &runState{}
-	r.markRunning("build")
-	r.markFinished(2, true, "")
-	if !r.failed || r.exitCode != 2 {
-		t.Fatalf("failed=%v exit=%d", r.failed, r.exitCode)
-	}
-	if r.running != "build" {
-		t.Fatalf("running=%q want 'build'", r.running)
-	}
-}
-
-// TestSpinTick_AdvancesWhileRunningAndStops checks the spinner chain is
-// self-limiting: it advances a frame and reschedules while the target is
-// running, and returns no follow-up command once the run is over — a
-// leaked chain would repaint forever after the box is gone.
-func TestSpinTick_AdvancesWhileRunningAndStops(t *testing.T) {
-	m := &Model{}
-	m.run.markRunning("build")
-
-	_, cmd := m.Update(spinTickMsg{})
-	if m.spinFrame != 1 {
-		t.Fatalf("spinFrame=%d want 1", m.spinFrame)
-	}
-	if cmd == nil {
-		t.Fatal("expected the tick chain to reschedule while running")
-	}
-
-	m.run.markFinished(0, false, "")
-	_, cmd = m.Update(spinTickMsg{})
-	if cmd != nil {
-		t.Fatal("tick chain should stop once the run is finished")
-	}
-	if m.spinFrame != 1 {
-		t.Fatalf("spinFrame=%d want 1 (no advance after finish)", m.spinFrame)
+	if r.query != "" || r.cursor != 0 {
+		t.Fatalf("transient state not cleared: query=%q cursor=%d", r.query, r.cursor)
 	}
 }

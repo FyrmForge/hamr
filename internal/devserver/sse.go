@@ -14,6 +14,28 @@ type SSEEvent struct {
 	Data string // event data
 }
 
+// Event types broadcast on the broker. The broker is the dev server's one
+// event bus: every consumer (browser dev panel, TUI, MCP) subscribes to it
+// rather than being wired its own callback. See docs/adr/004-dev-event-bus.md.
+//
+// Always broadcast with one of these constants — a free string here is a typo
+// no compiler catches, and the mismatch only shows up as a consumer that
+// silently never updates.
+const (
+	EvBuilding   = "building"    // Data: rule name
+	EvBuildOK    = "build_ok"    // Data: rule name
+	EvBuildError = "build_error" // Data: JSON {rule, output}
+	EvOutput     = "output"      // Data: JSON {rule, text, color}
+	EvReload     = "reload"      // Data: reload mode
+	EvShutdown   = "shutdown"    // Data: ""
+	EvDarkFilter = "dark_filter" // Data: "on" / "off"
+	EvRestarting = "restarting"  // Data: ""
+	EvMakeStart  = "make_start"  // Data: target
+	EvMakeDone   = "make_done"   // Data: "<target> <exit code>"
+	EvComposeUp  = "compose_up"  // Data: compose entry name
+	EvComposeOK  = "compose_ok"  // Data: compose entry name
+)
+
 // sseRule is a watch rule serialized for the config SSE event.
 type sseRule struct {
 	Name    string   `json:"name"`
@@ -133,18 +155,8 @@ func (b *SSEBroker) Handler() http.HandlerFunc {
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 
-		id := b.nextID.Add(1)
-		ch := make(chan SSEEvent, 16)
-
-		b.mu.Lock()
-		b.clients[id] = ch
-		b.mu.Unlock()
-
-		defer func() {
-			b.mu.Lock()
-			delete(b.clients, id)
-			b.mu.Unlock()
-		}()
+		ch, unsubscribe := b.Subscribe()
+		defer unsubscribe()
 
 		// Send initial connected event, followed by config.
 		_, _ = fmt.Fprintf(w, "event: connected\ndata: ok\n\n")
@@ -178,6 +190,36 @@ func onOff(v bool) string {
 		return "on"
 	}
 	return "off"
+}
+
+// Subscribe registers a consumer and returns its event channel plus a cancel
+// func that removes and closes it. The channel is buffered (16) and events are
+// dropped for a slow consumer, exactly as for HTTP clients — a stalled TUI must
+// not wedge a build.
+//
+// In-process consumers (the TUI runtime) use this directly; Handler uses it for
+// each browser connection. Cancel is idempotent and must be called, or the
+// consumer's slot leaks for the life of the broker.
+//
+// Closing under the write lock is safe: Broadcast sends while holding the read
+// lock, so no send can be in flight when the close happens.
+func (b *SSEBroker) Subscribe() (<-chan SSEEvent, func()) {
+	id := b.nextID.Add(1)
+	ch := make(chan SSEEvent, 16)
+
+	b.mu.Lock()
+	b.clients[id] = ch
+	b.mu.Unlock()
+
+	var once sync.Once
+	return ch, func() {
+		once.Do(func() {
+			b.mu.Lock()
+			delete(b.clients, id)
+			close(ch)
+			b.mu.Unlock()
+		})
+	}
 }
 
 // Broadcast sends an event to all connected clients. Non-blocking: if a

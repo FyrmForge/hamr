@@ -251,6 +251,12 @@ return immediately; `docker.restart`/`wipe` and `rule.run` dispatch async (poll
 `docker.status` / `logs.read`); `make.run` waits up to `make_wait` then returns
 "still running" for slow targets.
 
+`logs.read` with `rule: "make:<target>"` covers every run of that target,
+including ones the developer started from the TUI's `m` hotkey — make always
+goes through the dev server. A finished run ends with a
+`[make:<target>] exited <n>` line, which is how an agent tells "still working"
+from "done, exit 2" after a `make.run` returned "still running".
+
 `dev.restart` replies before it restarts anything, because it tears down the very
 proxy the call arrived on — the handler writes and flushes `{"ok":true}`, then
 fires the restart. So the reply always lands, but it reports only that the
@@ -403,6 +409,36 @@ The 🔨 emoji reflects overall state:
 | Yellow | Dev build (`DEV`), version mismatch (`VER`), or update available (`UPD`) |
 | Red | Active build errors (`ERR rule1, rule2`) |
 
+### System indicator
+
+One slot in the status bar says what the dev server is doing right now. It is
+fed by the dev server's event stream, so it reflects work triggered from
+anywhere — a file save, a hotkey, the browser dev panel, or an MCP agent:
+
+| Indicator | Meaning |
+|-----------|---------|
+| `● OK` | Idle, nothing failing |
+| `⠙ building <rule>` | A watch rule is rebuilding — the initial build on startup counts |
+| `⠙ starting <name>` | A `[[dev.docker_compose]]` entry is coming up (pull, `up -d`, healthchecks) |
+| `⠙ make <target>` | A Makefile target is running (`m` hotkey or `make.run`) |
+| `⠙ restarting` | Restart or config reload in flight, new run not up yet |
+| `ERR: <rules>` | One or more rules are failing |
+
+Everything in flight shares the slot as a **stock-ticker marquee**: items are
+joined with `•` and scroll right-to-left through a window about a third of the
+terminal's width, wrapping around. A single item that fits doesn't scroll — it
+just spins in place. Each item carries its own spinner frame.
+
+`⠙ restarting` is the one exception and shows alone: the server is unwinding,
+so nothing else it was doing is still meaningful.
+
+`ERR: <rules>` joins the ticker as a final item rather than outranking it, and
+turns the whole strip red. That way a rebuild triggered to fix a failing rule
+is visible while it runs, instead of being hidden behind the error it is
+fixing. Styling is per frame, not per item — slicing ANSI mid-escape as the
+window moves is not worth the trouble, and red is the honest colour when
+something is broken.
+
 - **`DEV`** — running a local dev build (not a released binary)
 - **`VER cli=X.Y.Z project=A.B.C`** — CLI major.minor differs from the project's `[hamr].version`
 - **`UPD latest=X.Y.Z`** — a newer hamr release is available on GitHub (checked once per session)
@@ -415,7 +451,7 @@ The 🔨 emoji reflects overall state:
 | `R` | Restart the dev server | Full startup lifecycle re-runs in place: config re-read, docker compose brought up, ports re-resolved, `.env` re-injected, builds and daemons restarted, watcher rebuilt. The TUI and its log buffers survive. Use it when startup-only state went stale — a port now clashing, an edited `.env`, a container that came up wrong. Ignored while the server is still starting up, with a "still starting up" warning in the log (`q` still quits), and refused for the first 5 seconds after it becomes ready — so a double-press costs one restart, not two. Also works while parked on a `hamr.toml` parse error, where it retries immediately — the config can be valid and startup still have failed on a clashing port or a bad `.env`, neither of which touches `hamr.toml`. |
 | `o` | Open the proxy URL in the default browser | Requires `[proxy]` configured |
 | `c` | Clear the active tab's log buffer | |
-| `m` | Run a Makefile target | Opens a fuzzy palette listing every target in `./Makefile` (declaration order). Type to filter, `↑/↓` to move, `↩` to run, `Esc` to cancel. Hidden when no `Makefile` exists. Output streams to the hamr tab prefixed `[make:<target>]`. While running, only `q` (cancel — kills the `make` process group) and `Ctrl+C` (quit TUI) work. On exit a Done/Failed summary stays until any key dismisses it. |
+| `m` | Run a Makefile target | Opens a fuzzy palette listing every target in `./Makefile` (declaration order). Type to filter, `↑/↓` to move, `↩` to run, `Esc` to cancel. Hidden when no `Makefile` exists. The target runs through the dev server, not the TUI, so its output reaches every consumer at once: the hamr tab prefixed `[make:<target>]`, the browser log overlay, and `logs.read` with `rule: "make:<target>"` for an agent. Picking a target closes the palette immediately — the TUI is never locked while a target runs. The status bar shows a spinner and `make <target>` for the duration and the `[make:<target>] exited <n>` line is the result. |
 | `M` | Toggle the MCP gateway | Runtime kill-switch for `[dev.mcp]` — flips the gateway on/off for the session without rewriting `hamr.toml`. The status bar shows `MCP on/<n>` (exposed tool count) or `MCP off`. Shown only when a proxy is running. |
 | `Tab` / `Shift+Tab` | Cycle log tabs (hamr → docker stacks → mcp) | One tab per `[[dev.docker_compose]]` entry, fed by `docker compose logs -f --tail=50`; plus a dedicated **mcp** tab (last) when `[dev.mcp]` is configured, showing one line per agent request. |
 | `/` | Search the active tab (case-insensitive substring) | Live: highlights and `[k/n]` counter update as you type. `↩` locks in, `Esc` cancels; per-tab persistent. |
@@ -724,3 +760,24 @@ Adoption applies to both `keep_running = true` and `keep_running = false` entrie
 the flag governs shutdown, adoption governs startup. A service that's missing,
 exited, `starting`, or `unhealthy` triggers the apply path for that entry: walk
 the missing services (peers stay put), then `compose up -d` to bring them in.
+
+## Adding state or actions to the dev server
+
+The dev server has three consumers — the browser dev panel, the TUI, and MCP
+agents — and one rule that keeps them from drifting apart
+(`docs/adr/004-dev-event-bus.md`):
+
+- **State goes out on the broker.** Anything that changes inside the dev server
+  is broadcast as a typed event (`EvBuilding`, `EvMakeStart`, … in
+  `internal/devserver/sse.go`). Consumers subscribe: the browser over HTTP, the
+  TUI in-process via `SSEBroker.Subscribe()`. Adding state means adding an event
+  constant and handling it where it matters — not adding another runner hook.
+- **Actions come in through `DevActions`.** `RebuildAll`, `RestartServer`,
+  `RunMake`, the docker operations. No consumer spawns a process itself: output
+  from a locally-spawned process is visible only to whoever spawned it, which is
+  exactly how TUI-launched make runs used to go missing from `logs.read`.
+
+Access control belongs at the edge. `[dev.mcp] make_targets` is checked in the
+`make.run` tool handler, not inside `RunMake`, because it governs what agents may
+run — pushing it down would silently restrict the developer's own `m` hotkey to
+the agent whitelist.

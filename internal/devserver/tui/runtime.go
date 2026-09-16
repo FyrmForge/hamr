@@ -18,6 +18,10 @@ type Runtime struct {
 	sink        *Sink
 	hotkeys     *HotkeySource
 	dockerSinks map[string]*Sink
+	// unsubscribe drops the previous run's broker subscription. onActions
+	// fires once per Run(), so a restart would otherwise leak the old
+	// forwarding goroutine and its broker slot on every R press.
+	unsubscribe func()
 }
 
 // NewRuntime builds the TUI runtime. Call Wire on a Runner before its Run
@@ -31,12 +35,11 @@ type Runtime struct {
 func NewRuntime() *Runtime {
 	hotkeys := NewHotkeySource()
 	model := NewModel(hotkeys)
+	// `make <target>` output reaches this sink the same way every rule's
+	// output does — through the dev server's ProcessManager, which the
+	// runner points at the sink via WithProcessOutput. The TUI never spawns
+	// make itself; see docs/adr/004-dev-event-bus.md.
 	sink := NewSink()
-	// The run-overlay's `make <target>` output flows through the same
-	// hamr Sink as the runner's slog handler, so a single tab carries
-	// every line tagged for the user (slog lines from hamr itself,
-	// `[make:<target>]`-prefixed lines from on-demand make runs).
-	model.SetMakeOutput(sink)
 
 	prog := tea.NewProgram(
 		model,
@@ -95,9 +98,32 @@ func (r *Runtime) RegisterDockerStacks(names []string) map[string]io.Writer {
 	return out
 }
 
-// onActions runs on the runner goroutine; it subscribes to error-state
-// changes so the status bar updates without polling.
+// onActions runs on the runner goroutine once per Run(). It subscribes the
+// model to the dev server's event bus — the same stream the browser dev panel
+// reads — and hands it the RunMake entry point so the `m` hotkey dispatches
+// through the dev server instead of spawning its own make.
+//
+// Error state stays on its own callback: it is a snapshot the model replaces
+// wholesale, not an event. Migrating it (and the proxy/MCP hooks) onto the bus
+// is a follow-up.
 func (r *Runtime) onActions(a *devserver.DevActions) {
+	// A restart builds a fresh DevActions with a fresh broker; drop the old
+	// subscription before taking the new one.
+	if r.unsubscribe != nil {
+		r.unsubscribe()
+	}
+	events, cancel := a.Broker().Subscribe()
+	r.unsubscribe = cancel
+	go func() {
+		// Ends when cancel closes the channel, i.e. on the next restart or
+		// when the runtime shuts down.
+		for evt := range events {
+			r.program.Send(brokerEventMsg{evt: evt})
+		}
+	}()
+
+	r.program.Send(actionsReadyMsg{runMake: a.RunMake})
+
 	es := a.ErrorState()
 	push := func() {
 		r.program.Send(errorChangedMsg{rules: es.RuleNames()})
