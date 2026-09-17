@@ -60,7 +60,7 @@ func TestMCPEnabledTools(t *testing.T) {
 		{
 			name:   "stripe write exposes list + lifecycle",
 			access: map[string]string{"stripe": "write"},
-			want:   []string{"stripe.list", "stripe.complete", "stripe.expire", "stripe.refund"},
+			want:   []string{"stripe.list", "stripe.complete", "stripe.expire", "stripe.refund", "stripe.mode"},
 		},
 		{
 			name:   "deny level exposes nothing",

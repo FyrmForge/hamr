@@ -1,11 +1,9 @@
 package cmd
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/FyrmForge/hamr/internal/devserver"
 	"github.com/FyrmForge/hamr/pkg/storage"
@@ -103,7 +101,7 @@ func init() {
 // values without the user having to wrap in `eval $(hamr env --export)`),
 // otherwise the fallback default.
 //
-// `.env` is read in a scoped, on-demand way (see readDotenvKey) — the CLI
+// `.env` is read in a scoped, on-demand way (see devserver.ReadDotenvKey) — the CLI
 // never mutates its own process env. Earlier versions called `os.Setenv`
 // for every `.env` key at startup, which leaked into spawned children's
 // envs and made `.env` edits silently invisible to live-reloaded site
@@ -116,7 +114,7 @@ func flagOrEnv(cmd *cobra.Command, flag, envKey, def string) string {
 	if v := os.Getenv(envKey); v != "" {
 		return v
 	}
-	if v, ok := readDotenvKey(".env", envKey); ok && v != "" {
+	if v, ok := devserver.ReadDotenvKey(".env", envKey); ok && v != "" {
 		return rewriteWithWalks(v)
 	}
 	return def
@@ -132,43 +130,4 @@ func flagOrEnv(cmd *cobra.Command, flag, envKey, def string) string {
 // devserver.RewriteValueForWalks.
 func rewriteWithWalks(value string) string {
 	return devserver.RewriteValueForWalks(".", value)
-}
-
-// readDotenvKey parses a .env file looking for a single key. Returns the
-// trimmed value and ok=true on hit, ok=false on miss or unreadable file.
-// Does NOT call os.Setenv — call sites are scoped to where the value is
-// needed. Strips matching surrounding single or double quotes; lines
-// starting with '#' are comments; malformed lines are skipped.
-func readDotenvKey(path, key string) (string, bool) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", false
-	}
-	defer f.Close() //nolint:errcheck
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || line[0] == '#' {
-			continue
-		}
-		k, v, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		// Accept the `export KEY=value` form that godotenv (used by scaffolded
-		// apps) understands, so `hamr sync` doesn't miss credentials the app
-		// loads fine.
-		k = strings.TrimSpace(k)
-		k = strings.TrimSpace(strings.TrimPrefix(k, "export "))
-		if k != key {
-			continue
-		}
-		v = strings.TrimSpace(v)
-		if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') && v[len(v)-1] == v[0] {
-			v = v[1 : len(v)-1]
-		}
-		return v, true
-	}
-	return "", false
 }

@@ -57,7 +57,7 @@ type stripePaymentIntent struct {
 
 // registerPaymentIntentRoutes mounts PI endpoints. Called from
 // RegisterAPIRoutes — kept private so callers go through one entry point.
-func (m *StripeMock) registerPaymentIntentRoutes(mux *http.ServeMux) {
+func (m *StripeMock) registerPaymentIntentRoutes(mux stripeRouter) {
 	mux.HandleFunc("/v1/payment_intents", m.handlePaymentIntents)
 	mux.HandleFunc("/v1/payment_intents/", m.handlePaymentIntentByID)
 }
@@ -134,7 +134,7 @@ func (m *StripeMock) createPaymentIntent(w http.ResponseWriter, r *http.Request)
 	// is an instant 400.
 	if pi.TransferDataDestination != "" {
 		m.mu.RLock()
-		_, exists := m.accounts[pi.TransferDataDestination]
+		exists := m.accountExists(pi.TransferDataDestination)
 		m.mu.RUnlock()
 		if !exists {
 			writeStripeError(w, http.StatusBadRequest, "invalid_request_error",
@@ -294,8 +294,8 @@ func (m *StripeMock) capturePaymentIntent(w http.ResponseWriter, r *http.Request
 	pi.AmountReceived = captureAmount
 
 	fires := []webhookFire{
-		{"payment_intent.succeeded", m.serializePaymentIntent(pi, ch)},
-		{"charge.succeeded", m.serializeCharge(ch)},
+		{eventType: "payment_intent.succeeded", object: m.serializePaymentIntent(pi, ch)},
+		{eventType: "charge.succeeded", object: m.serializeCharge(ch)},
 	}
 	// Destination-charge cascade: transfer the captured amount (minus the
 	// application fee) to the connected account, unless transfer_data.amount
@@ -319,7 +319,7 @@ func (m *StripeMock) capturePaymentIntent(w http.ResponseWriter, r *http.Request
 		m.transfers[tr.ID] = tr
 		pi.TransferID = tr.ID
 		ch.TransferID = tr.ID
-		fires = append(fires, webhookFire{"transfer.created", m.serializeTransfer(tr)})
+		fires = append(fires, webhookFire{eventType: "transfer.created", object: m.serializeTransfer(tr)})
 	}
 
 	piCopy := clonePaymentIntent(pi)

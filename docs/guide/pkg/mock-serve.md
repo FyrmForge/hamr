@@ -39,6 +39,7 @@ services:
       HAMR_MOCK_UI_PORT: "4501"
       HAMR_STRIPE_BASE_URL: "http://localhost:4501"
       HAMR_STRIPE_WEBHOOK_URL: "http://app:8080/api/webhooks/stripe"
+      HAMR_STRIPE_THIN_WEBHOOK_URL: "http://app:8080/api/webhooks/stripe/v2"
       HAMR_STRIPE_WEBHOOK_SECRET: "whsec_dev_abc123"
     ports:
       - "4500:4500"

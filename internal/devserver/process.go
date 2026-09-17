@@ -218,31 +218,41 @@ func (pm *ProcessManager) RunCommand(ctx context.Context, rule *WatchRule) (stri
 		displayName = rule.Name + ":build"
 	}
 
-	stdoutDest, stderrDest := pm.prefixDests()
-	psw := newPrefixWriter(stdoutDest, displayName, color)
-	pse := newPrefixWriter(stderrDest, displayName, color)
-	var lw *logWriter
-	if pm.logBuf != nil {
-		lw = newLogWriter(displayName, color, pm.logBuf, pm.logBroker)
-		cmd.Stdout = io.MultiWriter(psw, capture, lw)
-		cmd.Stderr = io.MultiWriter(pse, capture, lw)
-	} else {
-		cmd.Stdout = io.MultiWriter(psw, capture)
-		cmd.Stderr = io.MultiWriter(pse, capture)
-	}
+	var flush func()
+	cmd.Stdout, cmd.Stderr, flush = pm.outputWriters(displayName, color, capture)
 
 	runErr := cmd.Run()
 	// Flush any newline-less trailing output (e.g. a crash message) before
 	// returning, so the last line of a failing command isn't dropped.
-	psw.Flush()
-	pse.Flush()
-	if lw != nil {
-		lw.Flush()
-	}
+	flush()
 	if runErr != nil {
 		return capture.String(), fmt.Errorf("rule %q cmd failed: %w", rule.Name, runErr)
 	}
 	return capture.String(), nil
+}
+
+// outputWriters builds a child process's stdout and stderr: the name-prefixed
+// terminal output, the shared log buffer when there is one, and extra (tee'd
+// to both). flush emits any trailing newline-less line; call it after Wait.
+func (pm *ProcessManager) outputWriters(name, color string, extra ...io.Writer) (stdout, stderr io.Writer, flush func()) {
+	stdoutDest, stderrDest := pm.prefixDests()
+	psw := newPrefixWriter(stdoutDest, name, color)
+	pse := newPrefixWriter(stderrDest, name, color)
+	outs := append([]io.Writer{psw}, extra...)
+	errs := append([]io.Writer{pse}, extra...)
+	var lw *logWriter
+	if pm.logBuf != nil {
+		lw = newLogWriter(name, color, pm.logBuf, pm.logBroker)
+		outs, errs = append(outs, lw), append(errs, lw)
+	}
+	flush = func() {
+		psw.Flush()
+		pse.Flush()
+		if lw != nil {
+			lw.Flush()
+		}
+	}
+	return io.MultiWriter(outs...), io.MultiWriter(errs...), flush
 }
 
 // StartProcess starts a long-running process, killing any previous instance.
@@ -274,18 +284,8 @@ func (pm *ProcessManager) StartProcess(ctx context.Context, rule *WatchRule) err
 		displayName = rule.Name + ":run"
 	}
 
-	stdoutDest, stderrDest := pm.prefixDests()
-	psw := newPrefixWriter(stdoutDest, displayName, color)
-	pse := newPrefixWriter(stderrDest, displayName, color)
-	var lw *logWriter
-	if pm.logBuf != nil {
-		lw = newLogWriter(displayName, color, pm.logBuf, pm.logBroker)
-		cmd.Stdout = io.MultiWriter(psw, capture, lw)
-		cmd.Stderr = io.MultiWriter(pse, capture, lw)
-	} else {
-		cmd.Stdout = io.MultiWriter(psw, capture)
-		cmd.Stderr = io.MultiWriter(pse, capture)
-	}
+	var flush func()
+	cmd.Stdout, cmd.Stderr, flush = pm.outputWriters(displayName, color, capture)
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("rule %q start failed: %w", rule.Name, err)
@@ -303,11 +303,7 @@ func (pm *ProcessManager) StartProcess(ctx context.Context, rule *WatchRule) err
 	go func() {
 		err := cmd.Wait()
 		// Flush trailing newline-less output (e.g. a panic line) before exit.
-		psw.Flush()
-		pse.Flush()
-		if lw != nil {
-			lw.Flush()
-		}
+		flush()
 		close(mp.done)
 		pm.mu.Lock()
 		tracked := pm.procs[ruleName] == mp

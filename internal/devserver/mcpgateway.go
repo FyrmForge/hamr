@@ -78,6 +78,7 @@ type mcpGateway struct {
 	mailMock    *MailMock
 	smsMock     *SMSMock
 	stripeMock  *StripeMock
+	stripe      *stripeSwitch // nil when [dev.stripe] is off
 	errorState  *ErrorState
 	consoleSink *ConsoleSink // structured browser-console buffer, for console.read
 	requestLog  *RequestLog  // proxy request ring buffer, for http.read
@@ -100,6 +101,7 @@ type mcpGatewayDeps struct {
 	mailMock    *MailMock
 	smsMock     *SMSMock
 	stripeMock  *StripeMock
+	stripe      *stripeSwitch
 	errorState  *ErrorState
 	auditPath   string
 	logSink     func(string)
@@ -136,6 +138,7 @@ func newMCPGateway(d mcpGatewayDeps) (*mcpGateway, error) {
 		mailMock:    d.mailMock,
 		smsMock:     d.smsMock,
 		stripeMock:  d.stripeMock,
+		stripe:      d.stripe,
 		errorState:  d.errorState,
 		consoleSink: d.consoleSink,
 		requestLog:  d.requestLog,
@@ -389,6 +392,11 @@ func decodeArgs(body []byte, v any) error {
 }
 
 func (g *mcpGateway) dispatch(tool string, body []byte) (any, error) {
+	// The mock tools would act on mock state the app no longer talks to, and
+	// their webhooks would fail the app's signature check.
+	if strings.HasPrefix(tool, "stripe.") && tool != "stripe.mode" && g.stripeMock != nil && g.stripeMock.listening.Load() {
+		return nil, errStripeListening
+	}
 	switch tool {
 	case "dev.info":
 		return g.devInfo(), nil
@@ -452,6 +460,8 @@ func (g *mcpGateway) dispatch(tool string, body []byte) (any, error) {
 		return g.stripeExpire(body)
 	case "stripe.refund":
 		return g.stripeRefund(body)
+	case "stripe.mode":
+		return g.stripeMode(body)
 	default:
 		return nil, fmt.Errorf("unknown tool %q", tool)
 	}

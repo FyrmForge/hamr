@@ -40,7 +40,7 @@ type stripeAccountLink struct {
 // registerAccountRoutes mounts the Account + AccountLink endpoints.
 // Called from RegisterAPIRoutes — kept private so callers go through the
 // single entry point.
-func (m *StripeMock) registerAccountRoutes(mux *http.ServeMux) {
+func (m *StripeMock) registerAccountRoutes(mux stripeRouter) {
 	mux.HandleFunc("/v1/accounts", m.handleAccounts)
 	mux.HandleFunc("/v1/accounts/", m.handleAccountByID)
 	mux.HandleFunc("/v1/account_links", m.handleAccountLinks)

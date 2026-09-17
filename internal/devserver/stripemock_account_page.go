@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -38,7 +39,12 @@ func (m *StripeMock) handleOnboardingPage(w http.ResponseWriter, r *http.Request
 	if ok {
 		acct = cloneAccount(acct)
 	}
+	v2 := cloneV2Account(m.v2Accounts[id])
 	m.mu.RUnlock()
+	if v2 != nil {
+		m.handleV2OnboardingPage(w, v2)
+		return
+	}
 	if !ok {
 		http.Error(w, "account not found", http.StatusNotFound)
 		return
@@ -71,6 +77,14 @@ func (m *StripeMock) handleAccountComplete(w http.ResponseWriter, r *http.Reques
 	id := strings.TrimSpace(r.FormValue("account"))
 	if id == "" {
 		http.Error(w, "missing account form field", http.StatusBadRequest)
+		return
+	}
+
+	m.mu.RLock()
+	_, isV2 := m.v2Accounts[id]
+	m.mu.RUnlock()
+	if isV2 {
+		m.handleV2AccountComplete(w, r, id)
 		return
 	}
 
@@ -115,6 +129,34 @@ code{background:#0a2540;padding:2px 6px;border-radius:4px;font-size:12px}</style
 <p class="sub">A signed <code>account.updated</code> webhook has been sent to your app.</p>
 <p class="sub">You can close this tab.</p>
 </div></body></html>`, id)
+}
+
+// handleV2AccountComplete finishes v2 onboarding and, like Stripe's hosted
+// flow, sends the user to the account link's return_url.
+func (m *StripeMock) handleV2AccountComplete(w http.ResponseWriter, r *http.Request, id string) {
+	returnURL, err := m.completeV2Onboarding(id)
+	if err != nil {
+		writeStripeOpError(w, err)
+		return
+	}
+	if u, perr := url.Parse(returnURL); perr == nil && (u.Scheme == "http" || u.Scheme == "https") {
+		http.Redirect(w, r, returnURL, http.StatusSeeOther)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
+<html><head><title>hamr — Onboarding Complete</title>
+<style>body{background:#0a2540;color:#fff;font-family:-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
+.card{background:#1a3a5c;border-radius:12px;padding:36px;max-width:480px;text-align:center}
+h1{margin:0 0 12px}.sub{color:#a3c4e0;font-size:14px;margin:0 0 18px}
+code{background:#0a2540;padding:2px 6px;border-radius:4px;font-size:12px}</style>
+</head><body><div class="card">
+<h1>✓ Onboarding complete</h1>
+<p class="sub">Account <code>%s</code> has every requested capability active.</p>
+<p class="sub">Signed thin events have been sent to your app's v2 webhook.</p>
+<p class="sub">You can close this tab.</p>
+</div></body></html>`, template.HTMLEscapeString(id))
 }
 
 var stripeOnboardingTmpl = template.Must(template.New("stripe-onboarding").Parse(`<!DOCTYPE html>

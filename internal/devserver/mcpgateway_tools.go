@@ -63,7 +63,7 @@ func (g *mcpGateway) devInfo() devInfoResult {
 		Errors:      errlist,
 		Mail:        mail,
 		SMS:         smsInfo,
-		Stripe:      devInfoStripe{Enabled: g.cfg.Dev.Stripe.Enabled},
+		Stripe:      devInfoStripe{Mode: g.stripeModeName()},
 		Gateway: devInfoGateway{
 			Enabled: g.IsEnabled(),
 			Access:  g.cfg.Dev.MCP.Access,
@@ -328,6 +328,32 @@ func joinAddrs(addrs []mailAddress) string {
 }
 
 // --- stripe ---
+
+// stripeModeName is the running Stripe mode: "off", "mock" or "listen".
+func (g *mcpGateway) stripeModeName() string {
+	if g.stripe == nil {
+		return StripeModeOff
+	}
+	if mode := g.stripe.Mode(); mode != "" {
+		return mode
+	}
+	return g.cfg.Dev.Stripe.ResolvedMode() // still booting
+}
+
+func (g *mcpGateway) stripeMode(body []byte) (any, error) {
+	if g.stripe == nil {
+		return nil, fmt.Errorf("stripe is off ([dev.stripe] mode)")
+	}
+	var a stripeModeArgs
+	if err := decodeArgs(body, &a); err != nil {
+		return nil, err
+	}
+	mode, err := g.stripe.Set(a.Mode)
+	if err != nil {
+		return nil, fmt.Errorf("%w (running: %s)", err, mode)
+	}
+	return stripeModeResult{Mode: mode}, nil
+}
 
 func (g *mcpGateway) stripeList() (any, error) {
 	if g.stripeMock == nil {

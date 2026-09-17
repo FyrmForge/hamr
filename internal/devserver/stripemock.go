@@ -19,9 +19,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -31,10 +34,15 @@ import (
 // multi-event case rather than a single POST.
 const webhookDeliveryTimeout = 30 * time.Second
 
-// webhookFire is one event to deliver in an async fanout.
+// webhookFire is one event to deliver in an async fanout. account is set for
+// events that happen on a connected account (the envelope's top-level
+// "account"); thinRelatedID marks a v2 thin event about that object, which
+// carries no data.object.
 type webhookFire struct {
-	eventType string
-	object    map[string]any
+	eventType     string
+	object        map[string]any
+	account       string
+	thinRelatedID string
 }
 
 // fireEventsAsync delivers events out-of-band with a bounded timeout, logging
@@ -47,7 +55,7 @@ func (m *StripeMock) fireEventsAsync(fires []webhookFire, logKV ...any) {
 		ctx, cancel := context.WithTimeout(context.Background(), webhookDeliveryTimeout)
 		defer cancel()
 		for _, f := range fires {
-			if err := m.FireEvent(ctx, f.eventType, f.object); err != nil {
+			if err := m.fireEvent(ctx, f); err != nil {
 				kv := append([]any{"event_type", f.eventType, "err", err}, logKV...)
 				m.logger.Warn("webhook delivery failed", kv...)
 			}
@@ -57,13 +65,13 @@ func (m *StripeMock) fireEventsAsync(fires []webhookFire, logKV ...any) {
 
 // fireEventAsync is the single-event convenience form of fireEventsAsync.
 func (m *StripeMock) fireEventAsync(eventType string, object map[string]any, logKV ...any) {
-	m.fireEventsAsync([]webhookFire{{eventType, object}}, logKV...)
+	m.fireEventsAsync([]webhookFire{{eventType: eventType, object: object}}, logKV...)
 }
 
 // stripeAPIVersion is the Stripe API version this mock emits responses for.
-// MUST match stripe-go/v82's stripe.APIVersion constant. CI test enforces
+// MUST match stripe-go/v86's stripe.APIVersion constant. CI test enforces
 // the link so a stripe-go bump cannot land without bumping this string.
-const stripeAPIVersion = "2025-08-27.basil"
+const stripeAPIVersion = "2026-08-26.dahlia"
 
 // StripeMock is a dev-only in-memory Stripe backend. Routes implement enough
 // of /v1/* for stripe-go to round-trip CheckoutSession create/retrieve.
@@ -73,16 +81,27 @@ type StripeMock struct {
 	persistPath string      // empty = in-memory only
 	persistErr  func(error) // callback for persist errors; nil = silent
 
-	mu             sync.RWMutex
-	sessions       map[string]*stripeSession
-	accounts       map[string]*stripeAccount
-	paymentIntents map[string]*stripePaymentIntent
-	charges        map[string]*stripeCharge
-	transfers      map[string]*stripeTransfer
-	refunds        map[string]*stripeRefund
-	payouts        map[string]*stripePayout
-	webhookEP      WebhookEndpoint // destination + secret for outbound signed events; zero value disables firing
-	whClient       *http.Client    // lazy-initialized in webhookHTTP()
+	mu              sync.RWMutex
+	sessions        map[string]*stripeSession
+	accounts        map[string]*stripeAccount
+	paymentIntents  map[string]*stripePaymentIntent
+	charges         map[string]*stripeCharge
+	transfers       map[string]*stripeTransfer
+	refunds         map[string]*stripeRefund
+	payouts         map[string]*stripePayout
+	v2Accounts      map[string]*stripeV2Account
+	balanceSettings map[string]*stripeBalanceSettings // keyed by account id ("" = platform)
+	disputes        map[string]*stripeDispute
+	events          []*stripeEvent // newest last, capped at stripeEventLimit
+	idem            map[string]*idemEntry
+	idemMu          sync.Mutex
+	webhookEP       WebhookEndpoint // destination + secret for outbound signed events; zero value disables firing
+	whClient        *http.Client    // lazy-initialized in webhookHTTP()
+
+	// listening is true while [dev.stripe] runs in listen mode: the app holds
+	// the `stripe listen` secret, so mock webhooks would fail its signature
+	// check. Delivery and the MCP stripe.* tools refuse instead.
+	listening atomic.Bool
 }
 
 // StripeMockOptions configures a StripeMock at construction.
@@ -120,36 +139,45 @@ func NewStripeMock(opts StripeMockOptions) *StripeMock {
 	}
 	logger = logger.With("component", "stripe")
 	m := &StripeMock{
-		baseURL:        strings.TrimRight(opts.BaseURL, "/"),
-		logger:         logger,
-		persistPath:    opts.PersistPath,
-		persistErr:     opts.OnPersistError,
-		sessions:       map[string]*stripeSession{},
-		accounts:       map[string]*stripeAccount{},
-		paymentIntents: map[string]*stripePaymentIntent{},
-		charges:        map[string]*stripeCharge{},
-		transfers:      map[string]*stripeTransfer{},
-		refunds:        map[string]*stripeRefund{},
-		payouts:        map[string]*stripePayout{},
+		baseURL:         strings.TrimRight(opts.BaseURL, "/"),
+		logger:          logger,
+		persistPath:     opts.PersistPath,
+		persistErr:      opts.OnPersistError,
+		sessions:        map[string]*stripeSession{},
+		accounts:        map[string]*stripeAccount{},
+		paymentIntents:  map[string]*stripePaymentIntent{},
+		charges:         map[string]*stripeCharge{},
+		transfers:       map[string]*stripeTransfer{},
+		refunds:         map[string]*stripeRefund{},
+		payouts:         map[string]*stripePayout{},
+		v2Accounts:      map[string]*stripeV2Account{},
+		balanceSettings: map[string]*stripeBalanceSettings{},
+		disputes:        map[string]*stripeDispute{},
+		idem:            map[string]*idemEntry{},
 	}
 	m.loadFromDisk()
 	return m
 }
 
 // RegisterAPIRoutes mounts the Stripe API endpoints on mux. The mux MUST be
-// served at the root of its listener (e.g. on a dedicated stripe-only port)
-// because stripe-go validates that req.URL.Path starts with /v1 and rejects
-// anything served under a sub-path.
+// served at the root of its listener because stripe-go validates that
+// req.URL.Path starts with /v1 or /v2 and rejects anything under a sub-path.
+// Every route replays repeated Idempotency-Key POSTs (see idempotent).
 //
-//	POST /v1/checkout/sessions       — create session
-//	GET  /v1/checkout/sessions/{id}  — retrieve session
+//	POST /v1/checkout/sessions              — create session
+//	GET  /v1/checkout/sessions/{id}         — retrieve session
+//	POST /v1/checkout/sessions/{id}/expire  — expire an open session
 func (m *StripeMock) RegisterAPIRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/v1/checkout/sessions", m.handleCheckoutSessions)
-	mux.HandleFunc("/v1/checkout/sessions/", m.handleCheckoutSessionByID)
-	m.registerAccountRoutes(mux)
-	m.registerPaymentIntentRoutes(mux)
-	m.registerRefundRoutes(mux)
-	m.registerPayoutRoutes(mux)
+	r := idempotentRouter{mux: mux, mock: m}
+	r.HandleFunc("/v1/checkout/sessions", m.handleCheckoutSessions)
+	r.HandleFunc("/v1/checkout/sessions/", m.handleCheckoutSessionByID)
+	m.registerAccountRoutes(r)
+	m.registerV2AccountRoutes(r)
+	m.registerPaymentIntentRoutes(r)
+	m.registerRefundRoutes(r)
+	m.registerPayoutRoutes(r)
+	m.registerTransferRoutes(r)
+	m.registerBalanceRoutes(r)
 }
 
 // stripeSession is the in-memory representation. Mirrors the subset of
@@ -167,8 +195,12 @@ type stripeSession struct {
 	SuccessURL      string            `json:"success_url"`
 	CancelURL       string            `json:"cancel_url"`
 	Metadata        map[string]string `json:"metadata,omitempty"`
-	Status          string            `json:"status"`         // "open" | "complete" | "expired"
-	PaymentStatus   string            `json:"payment_status"` // "paid" | "unpaid" | "no_payment_required"
+	// PaymentIntentMetadata is payment_intent_data.metadata: what Stripe copies
+	// onto the payment intent and its charge. Nil = fall back to Metadata.
+	PaymentIntentMetadata map[string]string `json:"payment_intent_metadata,omitempty"`
+	CustomerEmail         string            `json:"customer_email,omitempty"`
+	Status                string            `json:"status"`         // "open" | "complete" | "expired"
+	PaymentStatus         string            `json:"payment_status"` // "paid" | "unpaid" | "no_payment_required"
 }
 
 type stripeLineItem struct {
@@ -189,14 +221,19 @@ func (m *StripeMock) handleCheckoutSessions(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-// handleCheckoutSessionByID handles GET /v1/checkout/sessions/{id}.
+// handleCheckoutSessionByID handles GET /v1/checkout/sessions/{id} and
+// POST /v1/checkout/sessions/{id}/expire.
 func (m *StripeMock) handleCheckoutSessionByID(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.URL.Path, "/v1/checkout/sessions/")
-	if id == "" || strings.Contains(id, "/") {
+	id, action, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/v1/checkout/sessions/"), "/")
+	if id == "" {
 		writeStripeError(w, http.StatusNotFound, "invalid_request_error", "session id required")
 		return
 	}
-	if r.Method != http.MethodGet {
+	if action == "expire" && r.Method == http.MethodPost {
+		m.expireCheckoutSessionAPI(w, id)
+		return
+	}
+	if action != "" || r.Method != http.MethodGet {
 		writeStripeError(w, http.StatusMethodNotAllowed, "invalid_request_error", "method not allowed")
 		return
 	}
@@ -212,6 +249,26 @@ func (m *StripeMock) handleCheckoutSessionByID(w http.ResponseWriter, r *http.Re
 			fmt.Sprintf("No such checkout.session: '%s'", id))
 		return
 	}
+	writeStripeJSON(w, http.StatusOK, m.serializeSession(sess))
+}
+
+// expireCheckoutSessionAPI serves the SDK's Expire call. Real Stripe answers
+// 400 for a session that is not open, not 409 like the dashboard button.
+func (m *StripeMock) expireCheckoutSessionAPI(w http.ResponseWriter, id string) {
+	if err := m.expireSession(id); err != nil {
+		var oe *stripeOpError
+		if errors.As(err, &oe) && oe.status == http.StatusNotFound {
+			writeStripeError(w, http.StatusNotFound, "invalid_request_error",
+				fmt.Sprintf("No such checkout.session: '%s'", id))
+			return
+		}
+		writeStripeError(w, http.StatusBadRequest, "invalid_request_error",
+			`Only Checkout Sessions with a status in ["open"] can be expired.`)
+		return
+	}
+	m.mu.RLock()
+	sess := cloneSession(m.sessions[id])
+	m.mu.RUnlock()
 	writeStripeJSON(w, http.StatusOK, m.serializeSession(sess))
 }
 
@@ -248,10 +305,14 @@ func (m *StripeMock) createCheckoutSession(w http.ResponseWriter, r *http.Reques
 // loudly on the most common mistakes (missing line items, mixed currencies).
 func buildSessionFromParams(p map[string]any) (*stripeSession, error) {
 	s := &stripeSession{
-		Mode:       getString(p, "mode"),
-		SuccessURL: getString(p, "success_url"),
-		CancelURL:  getString(p, "cancel_url"),
-		Metadata:   stringMap(p, "metadata"),
+		Mode:          getString(p, "mode"),
+		SuccessURL:    getString(p, "success_url"),
+		CancelURL:     getString(p, "cancel_url"),
+		Metadata:      stringMap(p, "metadata"),
+		CustomerEmail: getString(p, "customer_email"),
+	}
+	if pid, ok := p["payment_intent_data"].(map[string]any); ok {
+		s.PaymentIntentMetadata = stringMap(pid, "metadata")
 	}
 	if s.Mode == "" {
 		s.Mode = "payment"
@@ -331,6 +392,7 @@ func (m *StripeMock) serializeSession(s *stripeSession) map[string]any {
 		"payment_intent":  s.PaymentIntentID,
 		"success_url":     s.SuccessURL,
 		"cancel_url":      s.CancelURL,
+		"customer_email":  nullableString(s.CustomerEmail),
 		"status":          s.Status,
 		"payment_status":  s.PaymentStatus,
 		"url":             m.baseURL + "/__hamr/stripe/checkout?session=" + s.ID,
@@ -413,12 +475,59 @@ func writeStripeJSON(w http.ResponseWriter, code int, body any) {
 // surfaces a typed *stripe.Error to callers instead of a generic decode
 // failure.
 func writeStripeError(w http.ResponseWriter, code int, errType, msg string) {
-	writeStripeJSON(w, code, map[string]any{
-		"error": map[string]any{
-			"type":    errType,
-			"message": msg,
-		},
+	writeStripeErrorCode(w, code, errType, "", msg)
+}
+
+// writeStripeErrorCode is writeStripeError with Stripe's machine-readable
+// error code (e.g. "charge_already_refunded"), which apps branch on.
+func writeStripeErrorCode(w http.ResponseWriter, status int, errType, code, msg string) {
+	e := map[string]any{"type": errType, "message": msg}
+	if code != "" {
+		e["code"] = code
+	}
+	writeStripeJSON(w, status, map[string]any{"error": e})
+}
+
+// accountExists reports whether id is a v1 or v2 connected account. Caller
+// holds m.mu.
+func (m *StripeMock) accountExists(id string) bool {
+	_, v1 := m.accounts[id]
+	_, v2 := m.v2Accounts[id]
+	return v1 || v2
+}
+
+// sortNewestFirst orders items by creation time, newest first, breaking ties
+// on id so pages are stable when several objects share a second.
+func sortNewestFirst[T any](items []T, key func(T) (time.Time, string)) {
+	sort.Slice(items, func(i, j int) bool {
+		ti, idi := key(items[i])
+		tj, idj := key(items[j])
+		if !ti.Equal(tj) {
+			return ti.After(tj)
+		}
+		return idi > idj
 	})
+}
+
+// pageAfter applies Stripe's v1 list paging (limit, starting_after) to a
+// sorted slice. limit defaults to 10 and caps at 100, like Stripe.
+func pageAfter[T any](items []T, q url.Values, id func(T) string) ([]T, bool) {
+	if after := q.Get("starting_after"); after != "" {
+		for i, it := range items {
+			if id(it) == after {
+				items = items[i+1:]
+				break
+			}
+		}
+	}
+	limit := 10
+	if n, err := strconv.Atoi(q.Get("limit")); err == nil && n > 0 && n <= 100 {
+		limit = n
+	}
+	if len(items) > limit {
+		return items[:limit], true
+	}
+	return items, false
 }
 
 func randomHex(n int) string {

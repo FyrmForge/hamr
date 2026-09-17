@@ -11,9 +11,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	stripe "github.com/stripe/stripe-go/v82"
-	"github.com/stripe/stripe-go/v82/account"
-	"github.com/stripe/stripe-go/v82/payout"
+	stripe "github.com/stripe/stripe-go/v86"
+	"github.com/stripe/stripe-go/v86/account"
+	"github.com/stripe/stripe-go/v86/payout"
 )
 
 // TestStripeMock_CreatePayout_RoundTrip verifies the create happy path:

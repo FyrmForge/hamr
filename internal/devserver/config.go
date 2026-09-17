@@ -1,7 +1,6 @@
 package devserver
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -159,25 +158,61 @@ func (c SMSConfig) ResolvedPersistPath() string {
 	return ".hamr/sms/inbox.jsonl"
 }
 
-// StripeConfig holds the [dev.stripe] table for the local Stripe mock. When
-// Enabled is true, hamr dev mounts a Stripe-compatible HTTP backend on the
-// proxy mux at /v1/* so real stripe-go clients can talk to it via
-// stripe.SetBackend(...) pointing at the proxy URL. Requires [proxy] to be
-// configured (the API and dev UI both live on the proxy mux).
+// StripeConfig holds the [dev.stripe] table. Mode picks how hamr dev handles
+// Stripe; the S hotkey flips mock ⇄ listen at runtime.
 //
+//   - "off" (default): nothing mounted, nothing injected.
+//   - "mock": hamr mounts a Stripe-compatible HTTP backend on the proxy mux
+//     (/v1/*, /v2/*) that real stripe-go clients reach via
+//     stripe.SetBackend(...) pointed at HAMR_STRIPE_MOCK_URL, and fires signed
+//     webhooks at the URLs below with WebhookSecret, exactly as Stripe would.
+//   - "listen": hamr runs `stripe listen` against a real sandbox (key from
+//     STRIPE_KEY in .env), forwarding to the same URLs, and injects the
+//     secret it prints. The app calls api.stripe.com.
+//
+// Both modes need [proxy]: the mock surfaces stay mounted in listen mode.
 // The mock is dev-only: no production safeguards. Apps gate by leaving
 // STRIPE_MOCK unset in production so stripe-go reaches api.stripe.com.
-//
-// Webhook delivery: when an outcome is recorded (paid/failed/cancelled), the
-// mock fires a real signed webhook to WebhookURL with WebhookSecret, exactly
-// as Stripe would. The app's existing webhook handler (using stripe-go's
-// webhook.ConstructEvent) verifies and processes it unchanged.
 type StripeConfig struct {
-	Enabled       bool   `toml:"enabled"`
-	WebhookURL    string `toml:"webhook_url"`    // required when Enabled
-	WebhookSecret string `toml:"webhook_secret"` // required when Enabled
-	Persist       *bool  `toml:"persist"`        // default true
-	PersistPath   string `toml:"persist_path"`   // default ".hamr/stripe/state.json"
+	Mode                  string   `toml:"mode"`                     // "off" | "mock" | "listen"; default "off"
+	WebhookURL            string   `toml:"webhook_url"`              // required unless off
+	ThinWebhookURL        string   `toml:"thin_webhook_url"`         // optional; empty = thin events are not delivered
+	ConnectWebhookURL     string   `toml:"connect_webhook_url"`      // optional; connected-account events. Empty = WebhookURL
+	ThinConnectWebhookURL string   `toml:"thin_connect_webhook_url"` // optional; connected-account thin events. Empty = ThinWebhookURL
+	ThinEvents            []string `toml:"thin_events"`              // thin events `stripe listen` forwards; default ResolvedThinEvents
+	WebhookSecret         string   `toml:"webhook_secret"`           // mock mode signing secret; required unless off
+	Persist               *bool    `toml:"persist"`                  // mock only; default true
+	PersistPath           string   `toml:"persist_path"`             // mock only; default ".hamr/stripe/state.json"
+}
+
+const (
+	StripeModeOff    = "off"
+	StripeModeMock   = "mock"
+	StripeModeListen = "listen"
+)
+
+// ResolvedMode returns Mode with the default applied.
+func (c StripeConfig) ResolvedMode() string {
+	if c.Mode == "" {
+		return StripeModeOff
+	}
+	return c.Mode
+}
+
+// Active reports whether [dev.stripe] is on in either mode.
+func (c StripeConfig) Active() bool { return c.ResolvedMode() != StripeModeOff }
+
+// ResolvedThinEvents returns ThinEvents with the default applied: the Accounts
+// v2 events the scaffold's thin handler reacts to. `stripe listen` has no
+// default for --thin-events, so an unset list would forward none.
+func (c StripeConfig) ResolvedThinEvents() []string {
+	if c.ThinEvents == nil {
+		return []string{
+			"v2.core.account[requirements].updated",
+			"v2.core.account[configuration.recipient].capability_status_updated",
+		}
+	}
+	return c.ThinEvents
 }
 
 // PersistEnabled returns whether persistence is on. Defaults to true when
@@ -371,6 +406,12 @@ func loadConfig(path string, withPrefs bool) (*Config, error) {
 		}
 	}
 
+	// `enabled` was replaced by `mode`. The field is gone, so the decoder would
+	// silently ignore it and turn Stripe off — fail loudly instead.
+	if meta.IsDefined("dev", "stripe", "enabled") || prefsMeta.IsDefined("dev", "stripe", "enabled") {
+		return nil, fmt.Errorf("validate config: dev.stripe.enabled was replaced by mode: use mode = \"mock\" (or \"off\")")
+	}
+
 	cfg.ProxyConfigured = proxyConfigured(meta) || proxyConfigured(prefsMeta)
 	if err := applyProxyAliases(&cfg, path); err != nil {
 		return nil, fmt.Errorf("validate config: %w", err)
@@ -532,7 +573,7 @@ func resolveProxyAddrEnvRef(configPath, key string) (string, error) {
 		return normalizeProxyAddrEnvValue(v)
 	}
 	dotenvPath := filepath.Join(filepath.Dir(configPath), ".env")
-	if v, ok := readDotenvKey(dotenvPath, key); ok && v != "" {
+	if v, ok := ReadDotenvKey(dotenvPath, key); ok && v != "" {
 		return normalizeProxyAddrEnvValue(v)
 	}
 	return "", fmt.Errorf("not found in shell env or %s", dotenvPath)
@@ -555,35 +596,6 @@ func normalizeProxyAddrEnvValue(v string) (string, error) {
 		return ":" + v, nil
 	}
 	return v, nil
-}
-
-func readDotenvKey(path, key string) (string, bool) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", false
-	}
-	defer f.Close() //nolint:errcheck
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || line[0] == '#' {
-			continue
-		}
-		k, v, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		if strings.TrimSpace(k) != key {
-			continue
-		}
-		v = strings.TrimSpace(v)
-		if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') && v[len(v)-1] == v[0] {
-			v = v[1 : len(v)-1]
-		}
-		return v, true
-	}
-	return "", false
 }
 
 func applyDefaults(cfg *Config) {
@@ -711,14 +723,20 @@ func validate(cfg *Config) error {
 		}
 	}
 
-	// Validate Stripe mock. Required fields fire only when enabled — leaving
-	// the block out (or enabled=false) is the no-op path.
-	if cfg.Dev.Stripe.Enabled {
+	// Validate Stripe. Required fields fire only when on — leaving the block
+	// out (or mode = "off") is the no-op path. The secret is required in listen
+	// mode too: a listener that fails to start falls back to the mock.
+	switch cfg.Dev.Stripe.ResolvedMode() {
+	case StripeModeOff, StripeModeMock, StripeModeListen:
+	default:
+		return fmt.Errorf("dev.stripe.mode %q: must be %q, %q or %q", cfg.Dev.Stripe.Mode, StripeModeOff, StripeModeMock, StripeModeListen)
+	}
+	if cfg.Dev.Stripe.Active() {
 		if cfg.Dev.Stripe.WebhookURL == "" {
-			return fmt.Errorf("dev.stripe.webhook_url is required when dev.stripe.enabled = true (point at your app's stripe webhook handler, e.g. \"http://localhost:8080/api/webhooks/stripe\")")
+			return fmt.Errorf("dev.stripe.webhook_url is required when dev.stripe.mode is on (point at your app's stripe webhook handler, e.g. \"http://localhost:8080/api/webhooks/stripe\")")
 		}
 		if cfg.Dev.Stripe.WebhookSecret == "" {
-			return fmt.Errorf("dev.stripe.webhook_secret is required when dev.stripe.enabled = true (must match your app's STRIPE_WEBHOOK_SECRET)")
+			return fmt.Errorf("dev.stripe.webhook_secret is required when dev.stripe.mode is on (the mock signs webhooks with it; listen mode falls back to the mock)")
 		}
 	}
 
@@ -727,7 +745,7 @@ func validate(cfg *Config) error {
 	// proxy section is still required (the mock UIs live on the proxy
 	// mux), but ":0" / random-bind is now allowed — the runner derives
 	// the URL after the listener has bound rather than at config-load.
-	if cfg.Dev.Email.Enabled || cfg.Dev.SMS.Enabled || cfg.Dev.Stripe.Enabled {
+	if cfg.Dev.Email.Enabled || cfg.Dev.SMS.Enabled || cfg.Dev.Stripe.Active() {
 		if !cfg.ProxyConfigured {
 			return fmt.Errorf("[proxy] is required when [dev.email], [dev.sms], or [dev.stripe] is enabled: the mocks live on the proxy mux and their client-reachable URL is derived from the bound proxy port")
 		}

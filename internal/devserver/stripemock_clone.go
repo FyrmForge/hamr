@@ -19,6 +19,7 @@ func cloneSession(s *stripeSession) *stripeSession {
 	}
 	c := *s
 	c.Metadata = cloneStringMap(s.Metadata)
+	c.PaymentIntentMetadata = cloneStringMap(s.PaymentIntentMetadata)
 	if s.LineItems != nil {
 		c.LineItems = append([]stripeLineItem(nil), s.LineItems...)
 	}
@@ -71,4 +72,20 @@ func cloneCharge(c *stripeCharge) *stripeCharge {
 	cc := *c
 	cc.Metadata = cloneStringMap(c.Metadata)
 	return &cc
+}
+
+func cloneTransfer(t *stripeTransfer) *stripeTransfer {
+	if t == nil {
+		return nil
+	}
+	c := *t
+	c.Metadata = cloneStringMap(t.Metadata)
+	if t.Reversals != nil {
+		c.Reversals = make([]stripeTransferReversal, len(t.Reversals))
+		for i, rv := range t.Reversals {
+			rv.Metadata = cloneStringMap(rv.Metadata)
+			c.Reversals[i] = rv
+		}
+	}
+	return &c
 }

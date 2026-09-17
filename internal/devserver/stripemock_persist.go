@@ -17,13 +17,16 @@ import (
 // structs is forward-compatible. Removing or renaming a field requires a
 // migration — easier to just `rm .hamr/stripe/state.json` in dev.
 type stripeStateFile struct {
-	Sessions       map[string]*stripeSession       `json:"sessions"`
-	Accounts       map[string]*stripeAccount       `json:"accounts"`
-	PaymentIntents map[string]*stripePaymentIntent `json:"payment_intents"`
-	Charges        map[string]*stripeCharge        `json:"charges"`
-	Transfers      map[string]*stripeTransfer      `json:"transfers"`
-	Refunds        map[string]*stripeRefund        `json:"refunds"`
-	Payouts        map[string]*stripePayout        `json:"payouts"`
+	Sessions        map[string]*stripeSession         `json:"sessions"`
+	Accounts        map[string]*stripeAccount         `json:"accounts"`
+	PaymentIntents  map[string]*stripePaymentIntent   `json:"payment_intents"`
+	Charges         map[string]*stripeCharge          `json:"charges"`
+	Transfers       map[string]*stripeTransfer        `json:"transfers"`
+	Refunds         map[string]*stripeRefund          `json:"refunds"`
+	Payouts         map[string]*stripePayout          `json:"payouts"`
+	V2Accounts      map[string]*stripeV2Account       `json:"v2_accounts"`
+	BalanceSettings map[string]*stripeBalanceSettings `json:"balance_settings"`
+	Disputes        map[string]*stripeDispute         `json:"disputes"`
 }
 
 // persist serializes the entire in-memory state and atomically writes it
@@ -38,13 +41,16 @@ func (m *StripeMock) persist() {
 		return
 	}
 	state := stripeStateFile{
-		Sessions:       m.sessions,
-		Accounts:       m.accounts,
-		PaymentIntents: m.paymentIntents,
-		Charges:        m.charges,
-		Transfers:      m.transfers,
-		Refunds:        m.refunds,
-		Payouts:        m.payouts,
+		Sessions:        m.sessions,
+		Accounts:        m.accounts,
+		PaymentIntents:  m.paymentIntents,
+		Charges:         m.charges,
+		Transfers:       m.transfers,
+		Refunds:         m.refunds,
+		Payouts:         m.payouts,
+		V2Accounts:      m.v2Accounts,
+		BalanceSettings: m.balanceSettings,
+		Disputes:        m.disputes,
 	}
 	if err := writeStripeState(m.persistPath, state); err != nil {
 		m.reportPersistErr(err)
@@ -110,6 +116,16 @@ func (m *StripeMock) loadFromDisk() {
 	if state.Payouts != nil {
 		m.payouts = state.Payouts
 	}
+	if state.V2Accounts != nil {
+		m.v2Accounts = state.V2Accounts
+	}
+	if state.BalanceSettings != nil {
+		m.balanceSettings = state.BalanceSettings
+	}
+	if state.Disputes != nil {
+		m.disputes = state.Disputes
+	}
+
 }
 
 // writeStripeState atomically writes the state to path via tmp + rename.

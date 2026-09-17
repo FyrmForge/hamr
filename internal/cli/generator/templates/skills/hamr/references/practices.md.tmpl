@@ -299,7 +299,9 @@ version of this list into `AGENTS.md` and `CLAUDE.md`.
 - `mail.list`, `mail.get` (+ `mail.clear`, `mail.ingest`) — read the dev inbox
   instead of asking what an email said.
 - `stripe.list` (+ `stripe.complete`, `stripe.expire`, `stripe.refund`) — read
-  and drive the Stripe mock instead of guessing at payment state.
+  and drive the Stripe mock instead of guessing at payment state. `stripe.mode`
+  switches between the mock and `stripe listen`; the others error in listen
+  mode (`dev.info` shows which is running).
 - `dev.info` — running rules, ports (including walked ones), versions.
 - `dev.restart` (at `dev = "write"`) — re-runs the dev server's whole startup
   lifecycle in place: docker compose, port resolution, `.env` injection, builds,

@@ -37,7 +37,7 @@ func init() {
 // .env wouldn't reach live-reloaded site binaries because their
 // godotenv/autoload skipped already-set vars). The one CLI command that
 // needs .env values (`hamr sync` for S3 creds) reads them in a scoped
-// way via flagOrEnv → readDotenvKey.
+// way via flagOrEnv → devserver.ReadDotenvKey.
 func Execute() error {
 	return rootCmd.Execute()
 }

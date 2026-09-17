@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"slices"
 	"strings"
 	"time"
@@ -96,7 +97,8 @@ func spinTick() tea.Cmd {
 // report is a failure that never produced an exit code — the
 // `[make:<target>] exited <n>` log line covers every other outcome.
 type runFinishedMsg struct {
-	msg string // non-empty when the run failed without an exit status
+	target string
+	msg    string // non-empty when the run failed without an exit status
 }
 
 // versionStatusMsg updates the persistent version indicator on the
@@ -219,6 +221,9 @@ type Model struct {
 	// tunnelURL is the public tunnel URL while it's on ("" when off), set off
 	// the tunnel_up / tunnel_down events. It replaces proxyURL in the bar.
 	tunnelURL string
+	// stripeMode is "mock" / "listen" / "switching" off the stripe_mode event;
+	// "" when [dev.stripe] is off. Drives the S hint and the status bar.
+	stripeMode string
 }
 
 // mcpStatusMsg updates the MCP gateway indicator in the status bar.
@@ -360,6 +365,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case runFinishedMsg:
+		// EvMakeDone rides the SSE bus, which drops events when a chatty
+		// target floods it; this message arrives once per run regardless.
+		m.deactivate("make " + msg.target)
 		if msg.msg != "" {
 			return m, func() tea.Msg { return LogLineMsg(msg.msg) }
 		}
@@ -558,6 +566,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Toggle the public tunnel ([dev.tunnel]). The runner pushes the URL
 		// (or "" when off) back via tunnel_up / tunnel_down on the event bus.
 		m.hotkeys.Send(devserver.HotkeyTunnelToggle)
+		return m, nil
+	case "S":
+		// Flip [dev.stripe] mock ⇄ listen. The runner reports progress and
+		// the result back via stripe_mode on the event bus.
+		m.hotkeys.Send(devserver.HotkeyStripeMode)
 		return m, nil
 	case "?":
 		m.help.toggle()
@@ -1341,6 +1354,7 @@ func (m *Model) applyBrokerEvent(evt devserver.SSEEvent) {
 	case devserver.EvRestarting:
 		m.restarting = true
 		m.clearTunnel() // the restarted server comes up with the tunnel off
+		m.stripeMode = "" // the restarted server reports its mode again
 	case devserver.EvTunnelStart:
 		m.activate("tunnel " + evt.Data)
 	case devserver.EvTunnelUp:
@@ -1348,13 +1362,16 @@ func (m *Model) applyBrokerEvent(evt devserver.SSEEvent) {
 		m.tunnelURL = evt.Data
 	case devserver.EvTunnelDown:
 		m.clearTunnel()
+	case devserver.EvStripeMode:
+		m.stripeMode = evt.Data
 	case devserver.EvMakeStart:
 		m.activate("make " + evt.Data)
 	case devserver.EvMakeDone:
 		// Data is "<target> <exit code>". Concurrent runs are allowed, so
 		// only the target that actually finished leaves the list.
-		if target, _, ok := strings.Cut(evt.Data, " "); ok {
-			m.deactivate("make " + target)
+		// Split on the last space: the exit code never has one, a target might.
+		if i := strings.LastIndex(evt.Data, " "); i >= 0 {
+			m.deactivate("make " + evt.Data[:i])
 		}
 	}
 }
@@ -1394,7 +1411,7 @@ func (m *Model) dispatchRun(target string) tea.Cmd {
 	if m.runMake == nil {
 		// Runner not up yet (or a test that doesn't exercise the run path).
 		return func() tea.Msg {
-			return runFinishedMsg{msg: "[make:" + target + "] dev server not ready"}
+			return runFinishedMsg{target: target, msg: "[make:" + target + "] dev server not ready"}
 		}
 	}
 
@@ -1404,12 +1421,13 @@ func (m *Model) dispatchRun(target string) tea.Cmd {
 	done, _ := m.runMake(target)
 	return func() tea.Msg {
 		r := <-done
-		if r.Err != nil && r.ExitCode == 0 {
+		var exitErr *exec.ExitError
+		if r.Err != nil && !errors.As(r.Err, &exitErr) {
 			// Failed without an exit status (make missing, spawn error) —
 			// no `exited <n>` line will appear, so say why here.
-			return runFinishedMsg{msg: "[make:" + target + "] " + r.Err.Error()}
+			return runFinishedMsg{target: target, msg: "[make:" + target + "] " + r.Err.Error()}
 		}
-		return runFinishedMsg{}
+		return runFinishedMsg{target: target}
 	}
 }
 
@@ -1853,6 +1871,13 @@ func (m *Model) statusBar() string {
 	if m.mcpKnown {
 		parts = append(parts, barPad(2), statusLabel.Render("•"), barPad(2), m.mcpIndicator())
 	}
+	if m.stripeMode != "" {
+		mode := m.stripeMode
+		if mode == "switching" {
+			mode = "switching…"
+		}
+		parts = append(parts, barPad(2), statusLabel.Render("•"), barPad(2), statusDim.Render("stripe: "+mode))
+	}
 	left := strings.Join(parts, "")
 
 	right, rightW := m.versionTag()
@@ -1904,6 +1929,9 @@ func (m *Model) hintBar() string {
 	}
 	if m.proxyURL != "" {
 		left = append(left, statusKey.Render("T")+statusDim.Render(" tunnel"))
+	}
+	if m.stripeMode != "" {
+		left = append(left, statusKey.Render("S")+statusDim.Render(" stripe"))
 	}
 	if m.tabCount() > 1 {
 		left = append(left, statusKey.Render("Tab")+statusDim.Render(" tabs"))

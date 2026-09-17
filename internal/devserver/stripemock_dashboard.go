@@ -2,9 +2,13 @@ package devserver
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"html/template"
+	"maps"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -13,8 +17,8 @@ import (
 // registerDashboardRoutes mounts the dashboard + per-resource action
 // endpoints. Called from RegisterUIRoutes.
 //
-//	GET  /__hamr/stripe                       — index (5 tables)
-//	POST /__hamr/stripe/resend                — re-fire natural events for ?resource=&id=
+//	GET  /__hamr/stripe                       — index: every resource table + controls
+//	POST /__hamr/stripe/resend                — re-fire natural events for ?resource=&id=, or a logged event by ?event=
 //	POST /__hamr/stripe/refund                — issue refund on a PI from the dashboard
 //	POST /__hamr/stripe/expire                — mark an open session expired
 func (m *StripeMock) registerDashboardRoutes(mux *http.ServeMux) {
@@ -45,11 +49,24 @@ func (m *StripeMock) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	m.mu.RLock()
 	data := dashboardData{
-		Sessions: snapshotSessions(m.sessions),
-		Accounts: snapshotAccounts(m.accounts),
-		PIs:      snapshotPaymentIntents(m.paymentIntents),
-		Refunds:  snapshotRefunds(m.refunds),
-		Payouts:  snapshotPayouts(m.payouts),
+		Sessions:    snapshotSessions(m.sessions),
+		Accounts:    snapshotAccounts(m.accounts),
+		PIs:         snapshotPaymentIntents(m.paymentIntents),
+		Refunds:     snapshotRefunds(m.refunds),
+		Payouts:     snapshotPayouts(m.payouts),
+		V2Accounts:  m.snapshotV2AccountRows(),
+		Disputes:    snapshotDisputes(m.disputes),
+		Events:      snapshotEvents(m.events),
+		DisputedPIs: map[string]bool{},
+		Balances:    map[string]string{},
+	}
+	for _, pi := range data.PIs {
+		if ch, ok := m.charges[pi.LatestChargeID]; ok && (ch.DisputeID != "" || ch.Refunded) {
+			data.DisputedPIs[pi.ID] = true // nothing left to dispute either way
+		}
+	}
+	for _, a := range data.Accounts {
+		data.Balances[a.ID] = formatBalances(m.connectedBalance(a.ID))
 	}
 	m.mu.RUnlock()
 
@@ -72,6 +89,21 @@ func (m *StripeMock) handleResend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if evID := strings.TrimSpace(r.FormValue("event")); evID != "" {
+		ctx, cancel := context.WithTimeout(r.Context(), webhookDeliveryTimeout)
+		defer cancel()
+		// Delivery failures are recorded on the event row; only a missing
+		// event is an error here.
+		if err := m.resendEvent(ctx, evID); err != nil {
+			var oe *stripeOpError
+			if errors.As(err, &oe) {
+				writeStripeOpError(w, err)
+				return
+			}
+		}
+		http.Redirect(w, r, "/__hamr/stripe#events", http.StatusSeeOther)
+		return
+	}
 	resource := r.FormValue("resource")
 	id := strings.TrimSpace(r.FormValue("id"))
 	if id == "" || resource == "" {
@@ -92,7 +124,7 @@ func (m *StripeMock) handleResend(w http.ResponseWriter, r *http.Request) {
 		}
 		evt := sessionResendEvent(sess)
 		if evt != "" {
-			fires = append(fires, webhookFire{evt, m.serializeSession(sess)})
+			fires = append(fires, webhookFire{eventType: evt, object: m.serializeSession(sess)})
 		}
 	case "account":
 		acct, ok := m.accounts[id]
@@ -104,7 +136,7 @@ func (m *StripeMock) handleResend(w http.ResponseWriter, r *http.Request) {
 		// reached the post-onboarding state. Otherwise no-op (button
 		// shouldn't be rendered at all in that case).
 		if acct.DetailsSubmitted {
-			fires = append(fires, webhookFire{"account.updated", m.serializeAccount(acct)})
+			fires = append(fires, webhookFire{eventType: "account.updated", object: m.serializeAccount(acct)})
 		}
 	case "payment_intent":
 		pi, ok := m.paymentIntents[id]
@@ -117,13 +149,13 @@ func (m *StripeMock) handleResend(w http.ResponseWriter, r *http.Request) {
 			// Under RLock: passing the live charge pointer is safe because
 			// serialize only reads it (nil when there is no charge).
 			ch := m.charges[pi.LatestChargeID]
-			fires = append(fires, webhookFire{"payment_intent.succeeded", m.serializePaymentIntent(pi, ch)})
+			fires = append(fires, webhookFire{eventType: "payment_intent.succeeded", object: m.serializePaymentIntent(pi, ch)})
 			if ch != nil {
-				fires = append(fires, webhookFire{"charge.succeeded", m.serializeCharge(ch)})
+				fires = append(fires, webhookFire{eventType: "charge.succeeded", object: m.serializeCharge(ch)})
 			}
 			if pi.TransferID != "" {
 				if tr, ok := m.transfers[pi.TransferID]; ok {
-					fires = append(fires, webhookFire{"transfer.created", m.serializeTransfer(tr)})
+					fires = append(fires, webhookFire{eventType: "transfer.created", object: m.serializeTransfer(tr)})
 				}
 			}
 		case "requires_payment_method":
@@ -132,7 +164,7 @@ func (m *StripeMock) handleResend(w http.ResponseWriter, r *http.Request) {
 			// latter has a payment_failed event worth resending; a never-attempted
 			// PI leaves fires empty → "nothing to resend".
 			if pi.Failed {
-				fires = append(fires, webhookFire{"payment_intent.payment_failed", m.serializePaymentIntent(pi, nil)})
+				fires = append(fires, webhookFire{eventType: "payment_intent.payment_failed", object: m.serializePaymentIntent(pi, nil)})
 			}
 		}
 	case "refund":
@@ -144,7 +176,7 @@ func (m *StripeMock) handleResend(w http.ResponseWriter, r *http.Request) {
 		// Refund event payload is the post-refund Charge, not the Refund
 		// object — matches what real Stripe sends on charge.refunded.
 		if ch, ok := m.charges[rf.ChargeID]; ok {
-			fires = append(fires, webhookFire{"charge.refunded", m.serializeCharge(ch)})
+			fires = append(fires, webhookFire{eventType: "charge.refunded", object: m.serializeCharge(ch)})
 		}
 	case "payout":
 		po, ok := m.payouts[id]
@@ -154,9 +186,9 @@ func (m *StripeMock) handleResend(w http.ResponseWriter, r *http.Request) {
 		}
 		switch po.Status {
 		case "paid":
-			fires = append(fires, webhookFire{"payout.paid", m.serializePayout(po)})
+			fires = append(fires, webhookFire{eventType: "payout.paid", object: m.serializePayout(po), account: po.AccountID})
 		case "failed":
-			fires = append(fires, webhookFire{"payout.failed", m.serializePayout(po)})
+			fires = append(fires, webhookFire{eventType: "payout.failed", object: m.serializePayout(po), account: po.AccountID})
 		}
 	default:
 		m.mu.RUnlock()
@@ -324,13 +356,85 @@ func snapshotPayouts(m map[string]*stripePayout) []*stripePayout {
 	return out
 }
 
+func snapshotDisputes(m map[string]*stripeDispute) []*stripeDispute {
+	out := make([]*stripeDispute, 0, len(m))
+	for _, v := range m {
+		c := *v
+		out = append(out, &c)
+	}
+	sortNewestFirst(out, func(d *stripeDispute) (time.Time, string) { return d.Created, d.ID })
+	if len(out) > dashboardLimit {
+		out = out[:dashboardLimit]
+	}
+	return out
+}
+
+// snapshotEvents returns the newest events first, capped.
+func snapshotEvents(events []*stripeEvent) []*stripeEvent {
+	out := make([]*stripeEvent, 0, min(len(events), dashboardLimit))
+	for i := len(events) - 1; i >= 0 && len(out) < dashboardLimit; i-- {
+		c := *events[i]
+		out = append(out, &c)
+	}
+	return out
+}
+
+// v2AccountRow is one Accounts v2 row on the control page.
+type v2AccountRow struct {
+	Account   *stripeV2Account
+	Transfers string // recipient stripe_transfers status, "" when not requested
+	Balance   string
+	Onboarded bool
+}
+
+// snapshotV2AccountRows builds the Accounts v2 rows. Caller holds m.mu.
+func (m *StripeMock) snapshotV2AccountRows() []v2AccountRow {
+	accts := make([]*stripeV2Account, 0, len(m.v2Accounts))
+	for _, a := range m.v2Accounts {
+		accts = append(accts, a)
+	}
+	sortNewestFirst(accts, func(a *stripeV2Account) (time.Time, string) { return a.Created, a.ID })
+	if len(accts) > dashboardLimit {
+		accts = accts[:dashboardLimit]
+	}
+	rows := make([]v2AccountRow, len(accts))
+	for i, a := range accts {
+		rows[i] = v2AccountRow{
+			Account:   cloneV2Account(a),
+			Transfers: a.Capabilities[capRecipientTransfers],
+			Balance:   formatBalances(m.connectedBalance(a.ID)),
+			Onboarded: a.onboarded(),
+		}
+	}
+	return rows
+}
+
+// formatBalances renders a per-currency balance map, e.g. "£12.00, $3.00".
+func formatBalances(b map[string]int64) string {
+	var parts []string
+	for _, cur := range slices.Sorted(maps.Keys(b)) {
+		if b[cur] != 0 {
+			parts = append(parts, formatStripeAmount(b[cur], cur))
+		}
+	}
+	if len(parts) == 0 {
+		return "—"
+	}
+	return strings.Join(parts, ", ")
+}
+
 // dashboardData is the template input.
 type dashboardData struct {
-	Sessions []*stripeSession
-	Accounts []*stripeAccount
-	PIs      []*stripePaymentIntent
-	Refunds  []*stripeRefund
-	Payouts  []*stripePayout
+	Sessions    []*stripeSession
+	Accounts    []*stripeAccount
+	V2Accounts  []v2AccountRow
+	PIs         []*stripePaymentIntent
+	Refunds     []*stripeRefund
+	Payouts     []*stripePayout
+	Disputes    []*stripeDispute
+	Events      []*stripeEvent
+	DisputedPIs map[string]bool   // PI id → no Dispute button: already disputed or fully refunded
+	Balances    map[string]string // v1 account id → formatted balance
 }
 
 // dashboardFuncs exposes formatting helpers to the template.
@@ -384,9 +488,9 @@ th,td{padding:9px 14px;text-align:left;border-bottom:1px solid #2e3642;vertical-
 th{color:#64748b;font-weight:600;text-transform:uppercase;font-size:10px;letter-spacing:0.05em;background:#0d1117}
 tr:last-child td{border-bottom:none}
 .status-tag{display:inline-block;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:700;text-transform:uppercase}
-.status-paid,.status-succeeded,.status-complete{background:#14532d;color:#86efac}
-.status-failed,.status-canceled{background:#481414;color:#fca5a5}
-.status-pending,.status-requires_payment_method,.status-requires_confirmation,.status-requires_action,.status-requires_capture{background:#422006;color:#fbbf24}
+.status-paid,.status-succeeded,.status-complete,.status-active,.status-won{background:#14532d;color:#86efac}
+.status-failed,.status-canceled,.status-lost,.status-restricted{background:#481414;color:#fca5a5}
+.status-needs_response,.status-pending,.status-requires_payment_method,.status-requires_confirmation,.status-requires_action,.status-requires_capture{background:#422006;color:#fbbf24}
 .status-expired,.status-unpaid{background:#3f1d52;color:#c4b5fd}
 .status-open{background:#1e3a5f;color:#93c5fd}
 .flag-on{color:#86efac;font-weight:600}
@@ -404,7 +508,7 @@ button.action.primary{background:#635bff;color:#fff;border-color:#635bff}
 <body>
 <div class="wrap">
 <h1>Stripe Mock <span class="badge">Dev Dashboard</span></h1>
-<p class="sub">Snapshot of every resource the local Stripe mock has captured. State is persisted to <code>.hamr/stripe/state.json</code> by default — survives <code>hamr dev</code> restart.</p>
+<p class="sub">Snapshot of every resource the local Stripe mock has captured, with controls to drive it. State is persisted to <code>.hamr/stripe/state.json</code> by default — survives <code>hamr dev</code> restart. Read-only views laid out like Stripe's: <a href="/__hamr/stripe/dashboard">platform dashboard</a>, and an Express view per connected account.</p>
 
 <section>
 <h2>Checkout Sessions <span class="count">{{len .Sessions}}</span></h2>
@@ -433,10 +537,10 @@ button.action.primary{background:#635bff;color:#fff;border-color:#635bff}
 </section>
 
 <section>
-<h2>Connect Accounts <span class="count">{{len .Accounts}}</span></h2>
+<h2>Connect Accounts (v1) <span class="count">{{len .Accounts}}</span></h2>
 {{if .Accounts -}}
 <table>
-<thead><tr><th>ID</th><th>Type</th><th>Country</th><th>Charges</th><th>Payouts</th><th>Actions</th></tr></thead>
+<thead><tr><th>ID</th><th>Type</th><th>Country</th><th>Charges</th><th>Payouts</th><th>Balance</th><th>Actions</th></tr></thead>
 <tbody>
 {{range .Accounts}}
 <tr>
@@ -445,7 +549,12 @@ button.action.primary{background:#635bff;color:#fff;border-color:#635bff}
 <td>{{.Country}}</td>
 <td>{{if .ChargesEnabled}}<span class="flag-on">yes</span>{{else}}<span class="flag-off">no</span>{{end}}</td>
 <td>{{if .PayoutsEnabled}}<span class="flag-on">yes</span>{{else}}<span class="flag-off">no</span>{{end}}</td>
+<td>{{index $.Balances .ID}}</td>
 <td class="actions-cell">
+{{if ne (index $.Balances .ID) "—"}}
+<form class="row-form" method="POST" action="/__hamr/stripe/payout/account"><input type="hidden" name="account" value="{{.ID}}"><button class="action">Pay out balance</button></form>
+{{end}}
+<a class="action" href="/__hamr/stripe/express/{{.ID}}">Express view</a>
 {{if not .DetailsSubmitted}}
 <a class="action" href="/__hamr/stripe/onboarding?account={{.ID}}">Onboard</a>
 {{end}}
@@ -458,6 +567,33 @@ button.action.primary{background:#635bff;color:#fff;border-color:#635bff}
 </tbody>
 </table>
 {{- else}}<div class="empty">No connected accounts captured yet.</div>{{end}}
+</section>
+
+<section>
+<h2>Connect Accounts (v2) <span class="count">{{len .V2Accounts}}</span></h2>
+{{if .V2Accounts -}}
+<table>
+<thead><tr><th>ID</th><th>Email</th><th>Configurations</th><th>Transfers</th><th>Balance</th><th>Actions</th></tr></thead>
+<tbody>
+{{range .V2Accounts}}
+<tr>
+<td><code>{{shortID .Account.ID}}</code></td>
+<td>{{.Account.ContactEmail}}</td>
+<td>{{range $i, $c := .Account.Configurations}}{{if $i}}, {{end}}{{$c}}{{end}}</td>
+<td>{{if .Transfers}}<span class="status-tag status-{{.Transfers}}">{{.Transfers}}</span>{{else}}—{{end}}</td>
+<td>{{.Balance}}</td>
+<td class="actions-cell">
+<a class="action" href="/__hamr/stripe/express/{{.Account.ID}}">Express view</a>
+{{if not .Onboarded}}<a class="action" href="/__hamr/stripe/onboarding?account={{.Account.ID}}">Onboard</a>{{end}}
+{{if ne .Balance "—"}}
+<form class="row-form" method="POST" action="/__hamr/stripe/payout/account"><input type="hidden" name="account" value="{{.Account.ID}}"><button class="action">Pay out balance</button></form>
+{{end}}
+</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{- else}}<div class="empty">No Accounts v2 captured yet.</div>{{end}}
 </section>
 
 <section>
@@ -483,6 +619,9 @@ button.action.primary{background:#635bff;color:#fff;border-color:#635bff}
 {{if .TransferDataDestination}}<label style="font-size:10px;color:#a3c4e0"><input type="checkbox" name="reverse_transfer" value="true" checked>reverse</label>{{end}}
 <button class="action danger">Refund</button>
 </form>
+{{if not (index $.DisputedPIs .ID)}}
+<form class="row-form" method="POST" action="/__hamr/stripe/dispute"><input type="hidden" name="payment_intent" value="{{.ID}}"><button class="action danger">Dispute</button></form>
+{{end}}
 {{end}}
 {{if piResendable .}}
 <form class="row-form" method="POST" action="/__hamr/stripe/resend"><input type="hidden" name="resource" value="payment_intent"><input type="hidden" name="id" value="{{.ID}}"><button class="action">Resend</button></form>
@@ -542,6 +681,54 @@ button.action.primary{background:#635bff;color:#fff;border-color:#635bff}
 </tbody>
 </table>
 {{- else}}<div class="empty">No payouts captured yet.</div>{{end}}
+</section>
+
+<section>
+<h2>Disputes <span class="count">{{len .Disputes}}</span></h2>
+{{if .Disputes -}}
+<table>
+<thead><tr><th>ID</th><th>Charge</th><th>Amount</th><th>Status</th><th>Actions</th></tr></thead>
+<tbody>
+{{range .Disputes}}
+<tr>
+<td><code>{{shortID .ID}}</code></td>
+<td><code>{{shortID .ChargeID}}</code></td>
+<td>{{amount .Amount .Currency}}</td>
+<td><span class="status-tag status-{{.Status}}">{{.Status}}</span></td>
+<td class="actions-cell">
+{{if eq .Status "needs_response"}}
+<form class="row-form" method="POST" action="/__hamr/stripe/dispute/close"><input type="hidden" name="dispute" value="{{.ID}}"><input type="hidden" name="outcome" value="won"><button class="action">Close: won</button></form>
+<form class="row-form" method="POST" action="/__hamr/stripe/dispute/close"><input type="hidden" name="dispute" value="{{.ID}}"><input type="hidden" name="outcome" value="lost"><button class="action danger">Close: lost</button></form>
+{{end}}
+</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{- else}}<div class="empty">No disputes. Open one from a succeeded PaymentIntent.</div>{{end}}
+</section>
+
+<section id="events">
+<h2>Events <span class="count">{{len .Events}} (newest first, kept in memory)</span></h2>
+{{if .Events -}}
+<table>
+<thead><tr><th>ID</th><th>Type</th><th>Object</th><th>Account</th><th>Delivery</th><th>Actions</th></tr></thead>
+<tbody>
+{{range .Events}}
+<tr>
+<td><code>{{shortID .ID}}</code></td>
+<td>{{.Type}}{{if .Thin}} <span class="tag">thin</span>{{end}}</td>
+<td>{{if .ObjectID}}<code>{{shortID .ObjectID}}</code>{{end}}</td>
+<td>{{if .Account}}<code>{{shortID .Account}}</code>{{else}}—{{end}}</td>
+<td>{{if .Delivered}}<span class="flag-on">delivered</span>{{else if .LastError}}<span class="flag-off" title="{{.LastError}}">failed</span>{{else}}<span title="no webhook URL configured for this event kind">not sent</span>{{end}}{{if gt .Attempts 1}} ×{{.Attempts}}{{end}}</td>
+<td class="actions-cell">
+<form class="row-form" method="POST" action="/__hamr/stripe/resend"><input type="hidden" name="event" value="{{.ID}}"><button class="action">Resend</button></form>
+</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{- else}}<div class="empty">No events emitted yet.</div>{{end}}
 </section>
 
 </div>

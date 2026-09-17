@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	stripe "github.com/stripe/stripe-go/v82"
+	stripe "github.com/stripe/stripe-go/v86"
 )
 
 // TestStripeMock_Dashboard_RendersAllResources is the smoke test: seed
@@ -112,7 +112,7 @@ func TestStripeMock_Dashboard_Resend_RefundFiresChargeRefunded(t *testing.T) {
 	resp.Body.Close()                //nolint:errcheck
 	app.WaitFor(t, 2, 2*time.Second) // pi.succeeded + charge.succeeded
 
-	rf, _, _, err := mock.applyRefund(refundInput{piID: piID, amount: 500})
+	rf, _, _, _, err := mock.applyRefund(refundInput{piID: piID, amount: 500})
 	require.NoError(t, err)
 
 	// Resend it via dashboard.

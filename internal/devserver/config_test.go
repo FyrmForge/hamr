@@ -819,7 +819,8 @@ cmd = "echo"
 `)
 	cfg, err := LoadConfig(path)
 	require.NoError(t, err)
-	assert.False(t, cfg.Dev.Stripe.Enabled)
+	assert.False(t, cfg.Dev.Stripe.Active())
+	assert.Equal(t, StripeModeOff, cfg.Dev.Stripe.ResolvedMode())
 }
 
 func TestLoadConfig_StripeEnabled(t *testing.T) {
@@ -829,7 +830,7 @@ listen = ":3000"
 target = ":8080"
 
 [dev.stripe]
-enabled = true
+mode = "mock"
 webhook_url = "http://localhost:8080/api/webhooks/stripe"
 webhook_secret = "whsec_dev_local"
 
@@ -840,7 +841,8 @@ cmd = "echo"
 `)
 	cfg, err := LoadConfig(path)
 	require.NoError(t, err)
-	assert.True(t, cfg.Dev.Stripe.Enabled)
+	assert.Equal(t, StripeModeMock, cfg.Dev.Stripe.ResolvedMode())
+	assert.Len(t, cfg.Dev.Stripe.ResolvedThinEvents(), 2)
 	assert.Equal(t, "http://localhost:8080/api/webhooks/stripe", cfg.Dev.Stripe.WebhookURL)
 	assert.Equal(t, "whsec_dev_local", cfg.Dev.Stripe.WebhookSecret)
 }
@@ -852,10 +854,10 @@ func TestLoadConfig_StripeValidation(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name: "enabled without webhook_url",
+			name: "mock without webhook_url",
 			toml: `
 [dev.stripe]
-enabled = true
+mode = "mock"
 webhook_secret = "whsec_x"
 
 [[dev.watch]]
@@ -866,10 +868,10 @@ cmd = "echo"
 			wantErr: "dev.stripe.webhook_url is required",
 		},
 		{
-			name: "enabled without webhook_secret",
+			name: "listen without webhook_secret",
 			toml: `
 [dev.stripe]
-enabled = true
+mode = "listen"
 webhook_url = "http://localhost:8080/wh"
 
 [[dev.watch]]
@@ -878,6 +880,34 @@ watch = "*.go"
 cmd = "echo"
 `,
 			wantErr: "dev.stripe.webhook_secret is required",
+		},
+		{
+			name: "unknown mode",
+			toml: `
+[dev.stripe]
+mode = "on"
+
+[[dev.watch]]
+name = "go"
+watch = "*.go"
+cmd = "echo"
+`,
+			wantErr: `dev.stripe.mode "on"`,
+		},
+		{
+			name: "enabled was replaced by mode",
+			toml: `
+[dev.stripe]
+enabled = true
+webhook_url = "http://localhost:8080/wh"
+webhook_secret = "whsec_x"
+
+[[dev.watch]]
+name = "go"
+watch = "*.go"
+cmd = "echo"
+`,
+			wantErr: `dev.stripe.enabled was replaced by mode: use mode = "mock" (or "off")`,
 		},
 	}
 	for _, tt := range tests {
@@ -922,7 +952,7 @@ listen = ":0"
 target = ":8080"
 
 [dev.stripe]
-enabled = true
+mode = "mock"
 webhook_url = "http://localhost:8080/wh"
 webhook_secret = "whsec_x"
 

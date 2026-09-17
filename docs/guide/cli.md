@@ -105,7 +105,9 @@ By default, `hamr dev` also mirrors its recent log stream to `.hamr/dev_logs.txt
 
 The TUI shows an MCP indicator when `[dev.mcp]` is configured; press `M` to toggle the gateway on/off for the session (a runtime kill-switch that doesn't rewrite `hamr.toml`).
 
-Press `T` to open a public tunnel to the dev proxy (`cloudflared` by default, or `ngrok` / a custom command). hamr sets `BASE_URL` to the public URL and restarts your app; routes that run commands or read/write logs are blocked through the tunnel, and process output is kept out of live reload and error pages. See [`[dev.tunnel]`](hamr-toml.md).
+Press `T` to open a public tunnel to the dev proxy (`cloudflared` by default, or `ngrok` / a custom command). hamr sets `BASE_URL` to the public URL and restarts your app; every hamr route except live reload and the mail/SMS/Stripe mocks is blocked through the tunnel, and process output is kept out of live reload and error pages. See [`[dev.tunnel]`](hamr-toml.md).
+
+Press `S` to flip Stripe between hamr's mock and `stripe listen` against your sandbox. hamr runs the Stripe CLI with `STRIPE_KEY` from `.env`, injects the signing secret it prints, and restarts your app. See [`[dev.stripe]`](hamr-toml.md).
 
 ---
 
@@ -137,6 +139,7 @@ Both listeners bind all interfaces by default (`HAMR_MOCK_BIND` empty), which is
 | `HAMR_SMS_PERSIST_PATH` | JSONL path; empty → in-memory only | empty |
 | `HAMR_STRIPE_BASE_URL` | browser-reachable origin of the mock UI (required for stripe) | — |
 | `HAMR_STRIPE_WEBHOOK_URL` | app's webhook handler (required for stripe) | — |
+| `HAMR_STRIPE_THIN_WEBHOOK_URL` | app's v2 thin-event handler; empty → thin events are not sent | empty |
 | `HAMR_STRIPE_WEBHOOK_SECRET` | matches the app's `STRIPE_WEBHOOK_SECRET` (required for stripe) | — |
 | `HAMR_STRIPE_PERSIST_PATH` | state JSON path; empty → in-memory only | empty |
 

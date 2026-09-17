@@ -137,4 +137,9 @@ var bridgeTools = []bridgeTool{
 		description: "Refund a payment intent in the Stripe mock (fires charge.refunded). amount is in the smallest currency unit.",
 		inputSchema: `{"type":"object","properties":{"payment_intent":{"type":"string"},"amount":{"type":"integer"},"reverse_transfer":{"type":"boolean"},"refund_application_fee":{"type":"boolean"}},"required":["payment_intent"]}`,
 	},
+	{
+		name:        "stripe.mode",
+		description: "Switch [dev.stripe] between the mock and `stripe listen` against a real sandbox (key from STRIPE_KEY in .env). Omit mode to flip. Injects the matching STRIPE_* env and restarts the apps; blocks until done (up to ~30s while the listener connects). A failed switch errors and names the mode still running. While in listen mode the other stripe.* tools error.",
+		inputSchema: `{"type":"object","properties":{"mode":{"type":"string","enum":["mock","listen"]}}}`,
+	},
 }

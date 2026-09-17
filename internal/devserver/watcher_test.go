@@ -192,6 +192,51 @@ func TestWatcher_Integration(t *testing.T) {
 	w.Stop()
 }
 
+func TestWatcher_TouchTriggersRule(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, ".env")
+	require.NoError(t, os.WriteFile(envPath, []byte("PORT=8080\n"), 0o644))
+
+	rules := []WatchRule{{Name: "site", Watch: StringOrSlice{".env"}, Debounce: Duration{50 * time.Millisecond}}}
+	w, err := NewWatcher(dir, rules, watcherLogger())
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	require.NoError(t, w.Start(ctx))
+	time.Sleep(100 * time.Millisecond) // let watcher settle
+
+	// `touch`: timestamp only, content unchanged.
+	now := time.Now().Add(time.Second)
+	require.NoError(t, os.Chtimes(envPath, now, now))
+
+	select {
+	case evt := <-w.Events():
+		assert.Equal(t, "site", evt.Rule.Name)
+	case <-time.After(3 * time.Second):
+		t.Fatal("touching a watched file did not trigger its rule")
+	}
+
+	// chmod on a file nobody touched lately is not a change: a rule that
+	// chmods its own watch set must not retrigger itself.
+	old := time.Now().Add(-time.Minute)
+	require.NoError(t, os.Chtimes(envPath, old, old))
+	time.Sleep(200 * time.Millisecond) // that Chmod is stale-mtime too; let it settle
+	require.NoError(t, os.Chmod(envPath, 0o600))
+	select {
+	case evt := <-w.Events():
+		t.Fatalf("chmod triggered rule %s", evt.Rule.Name)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	cancel()
+	w.Stop()
+}
+
 func TestWatcher_NewDirectory(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")

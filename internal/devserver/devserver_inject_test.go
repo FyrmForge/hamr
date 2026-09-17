@@ -23,7 +23,7 @@ func TestBuildHamrInjectedEnv(t *testing.T) {
 
 	t.Run("proxy not configured returns nil (mocks can't run without proxy)", func(t *testing.T) {
 		cfg := &Config{ProxyConfigured: false}
-		cfg.Dev.Stripe.Enabled = true
+		cfg.Dev.Stripe.Mode = StripeModeMock
 		cfg.Dev.Email.Enabled = true
 		assert.Nil(t, buildHamrInjectedEnv(cfg, "http://localhost:3000", 8080))
 	})
@@ -46,7 +46,7 @@ func TestBuildHamrInjectedEnv(t *testing.T) {
 
 	t.Run("stripe mock only", func(t *testing.T) {
 		cfg := &Config{ProxyConfigured: true}
-		cfg.Dev.Stripe.Enabled = true
+		cfg.Dev.Stripe.Mode = StripeModeMock
 		got := buildHamrInjectedEnv(cfg, "http://localhost:3000", 8080)
 		assert.Equal(t, []string{
 			"PORT=8080",
@@ -58,7 +58,7 @@ func TestBuildHamrInjectedEnv(t *testing.T) {
 	t.Run("both mocks enabled, walked ports", func(t *testing.T) {
 		cfg := &Config{ProxyConfigured: true}
 		cfg.Dev.Email.Enabled = true
-		cfg.Dev.Stripe.Enabled = true
+		cfg.Dev.Stripe.Mode = StripeModeMock
 		got := buildHamrInjectedEnv(cfg, "http://localhost:3458", 9091)
 		assert.Equal(t, []string{
 			"PORT=9091",

@@ -37,7 +37,7 @@ type stripePayout struct {
 
 // registerPayoutRoutes mounts /v1/payouts endpoints. Called from
 // RegisterAPIRoutes — kept private so callers go through one entry point.
-func (m *StripeMock) registerPayoutRoutes(mux *http.ServeMux) {
+func (m *StripeMock) registerPayoutRoutes(mux stripeRouter) {
 	mux.HandleFunc("/v1/payouts", m.handlePayouts)
 	mux.HandleFunc("/v1/payouts/", m.handlePayoutByID)
 }
@@ -113,7 +113,7 @@ func (m *StripeMock) createPayout(w http.ResponseWriter, r *http.Request) {
 	// exist, mirror Stripe's 404 — protects against typos in dev.
 	if po.AccountID != "" {
 		m.mu.RLock()
-		_, exists := m.accounts[po.AccountID]
+		exists := m.accountExists(po.AccountID)
 		m.mu.RUnlock()
 		if !exists {
 			writeStripeError(w, http.StatusNotFound, "invalid_request_error",

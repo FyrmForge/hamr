@@ -117,10 +117,13 @@ func (m *StripeMock) handlePayoutComplete(w http.ResponseWriter, r *http.Request
 	po.FailureCode = rule.failureCode
 	po.FailureMessage = rule.failureMessage
 	dataObject := m.serializePayout(po)
+	account := po.AccountID
 	m.persist()
 	m.mu.Unlock()
 
-	m.fireEventAsync(rule.eventType, dataObject, "payout", id)
+	// A connected account's payout event names the account at the top level
+	// (event.account), which is the only link back to the seller.
+	m.fireEventsAsync([]webhookFire{{eventType: rule.eventType, object: dataObject, account: account}}, "payout", id)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")

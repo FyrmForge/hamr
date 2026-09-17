@@ -65,6 +65,9 @@ type Runner struct {
 	// tunnel is set by Run() when the proxy is up; the T hotkey toggles it.
 	tunnel *tunnel
 
+	// stripe is set by Run() when [dev.stripe] is on; the S hotkey flips it.
+	stripe *stripeSwitch
+
 	// proxyURL is set by Run() after the proxy listener has bound to its
 	// (possibly walked) port. Read by the o-open hotkey so it always points
 	// at the actual listening URL, not the value originally written in
@@ -241,7 +244,8 @@ func (r *Runner) baseLogWriter() io.Writer {
 //     [dev.stripe] is enabled (the email/SMS mocks use it as their ingest
 //     target; the scaffold's emailmock.New(envHamrDevURL) reads it, as does
 //     smsmock.New).
-//   - HAMR_STRIPE_MOCK_URL: proxy origin, set only when [dev.stripe].enabled.
+//   - HAMR_STRIPE_MOCK_URL: proxy origin, set when [dev.stripe] is on (either
+//     mode; the Stripe vars that change per mode live in the stripe env layer).
 //     Scaffolded main.go points stripe-go at this URL when STRIPE_MOCK=true.
 //
 // godotenv.Load() in the spawned site honors pre-set env vars (doesn't
@@ -257,10 +261,10 @@ func buildHamrInjectedEnv(cfg *Config, proxyOrigin string, appPort int) []string
 		injected = append(injected, fmt.Sprintf("PORT=%d", appPort))
 	}
 	if proxyOrigin != "" {
-		if cfg.Dev.Email.Enabled || cfg.Dev.SMS.Enabled || cfg.Dev.Stripe.Enabled {
+		if cfg.Dev.Email.Enabled || cfg.Dev.SMS.Enabled || cfg.Dev.Stripe.Active() {
 			injected = append(injected, "HAMR_DEV_URL="+proxyOrigin)
 		}
-		if cfg.Dev.Stripe.Enabled {
+		if cfg.Dev.Stripe.Active() {
 			injected = append(injected, "HAMR_STRIPE_MOCK_URL="+proxyOrigin)
 		}
 	}
@@ -305,11 +309,12 @@ func (r *Runner) Run(ctx context.Context) error {
 	if r.procStdout != nil || r.procStderr != nil {
 		pm.SetOutputSinks(r.procStdout, r.procStderr)
 	}
-	broker := NewSSEBroker(r.cfg.Dev.Watch, r.cfg.Dev.Daemons, r.cfg.Dev.DockerCompose, r.cfg.Dev.Email.Enabled, r.cfg.Dev.SMS.Enabled, r.cfg.Dev.Stripe.Enabled, consoleCapture, r.cfg.Dev.DarkFilter)
+	broker := NewSSEBroker(r.cfg.Dev.Watch, r.cfg.Dev.Daemons, r.cfg.Dev.DockerCompose, r.cfg.Dev.Email.Enabled, r.cfg.Dev.SMS.Enabled, r.cfg.Dev.Stripe.Active(), consoleCapture, r.cfg.Dev.DarkFilter)
 	errorState := NewErrorState()
 	logBuf := NewLogBuffer(1000)
 	requestLog := NewRequestLog(1000)
 	pm.SetLogOutput(logBuf, broker)
+	envLayers := &envLayers{ctx: runCtx, cfg: r.cfg, pm: pm, logger: r.logger}
 	// Injected env (PORT, HAMR_DEV_URL, HAMR_STRIPE_MOCK_URL) is set further
 	// down once the proxy listener has bound and we know the actual ports —
 	// hamr's port_walk may have shifted them above the configured defaults.
@@ -372,6 +377,9 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 		if r.tunnel != nil {
 			r.tunnel.Close()
+		}
+		if r.stripe != nil {
+			r.stripe.Close()
 		}
 		// Close the MCP audit log only after the proxy has stopped serving, so a
 		// late in-flight tool call can't write to an already-closed audit file.
@@ -489,15 +497,15 @@ func (r *Runner) Run(ctx context.Context) error {
 		)
 	}
 
-	// Stripe mock validation. The mock is constructed below — once we know
+	// Stripe validation. The mock is constructed below — once we know
 	// the actual proxy port — so its BaseURL reflects any +1-on-busy walk
 	// rather than the originally-configured listen value.
-	if r.cfg.Dev.Stripe.Enabled {
+	if r.cfg.Dev.Stripe.Active() {
 		if !r.cfg.ProxyConfigured {
-			return fmt.Errorf("dev.stripe.enabled = true requires a [proxy] section in hamr.toml (the Stripe API + UI live on the proxy mux)")
+			return fmt.Errorf("dev.stripe.mode = %q requires a [proxy] section in hamr.toml (the Stripe API + UI live on the proxy mux)", r.cfg.Dev.Stripe.ResolvedMode())
 		}
 		if r.noProxy {
-			return fmt.Errorf("dev.stripe.enabled = true cannot be used with --no-proxy (the Stripe API + UI live on the proxy mux)")
+			return fmt.Errorf("dev.stripe.mode = %q cannot be used with --no-proxy (the Stripe API + UI live on the proxy mux)", r.cfg.Dev.Stripe.ResolvedMode())
 		}
 	}
 
@@ -561,9 +569,11 @@ func (r *Runner) Run(ctx context.Context) error {
 		proxyOrigin = proxyClientBaseURLFromPort(proxyPort)
 		r.proxyURL = proxyOrigin
 
-		// Stripe mock construction is gated on Enabled — when disabled the
-		// pointer stays nil and NewProxyHandler skips its routes.
-		if r.cfg.Dev.Stripe.Enabled {
+		// The mock is constructed in both modes — its surfaces stay mounted in
+		// listen mode — so when off the pointer stays nil and NewProxyHandler
+		// skips its routes. The switch picks the mode at boot, further down.
+		if r.cfg.Dev.Stripe.Active() {
+			sc := r.cfg.Dev.Stripe
 			stripeLogger := r.logger.With("component", "stripe")
 			opts := StripeMockOptions{
 				BaseURL: proxyOrigin,
@@ -572,24 +582,30 @@ func (r *Runner) Run(ctx context.Context) error {
 					stripeLogger.Warn("persistence error", "err", err)
 				},
 			}
-			if r.cfg.Dev.Stripe.PersistEnabled() {
-				opts.PersistPath = r.cfg.Dev.Stripe.ResolvedPersistPath()
+			if sc.PersistEnabled() {
+				opts.PersistPath = sc.ResolvedPersistPath()
 			}
 			stripeMock = NewStripeMock(opts)
-			webhookURL := rewriteWebhookURLForAppPort(r.cfg.Dev.Stripe.WebhookURL, originalAppPort, actualAppPort)
-			stripeMock.SetWebhookEndpoint(WebhookEndpoint{
-				URL:    webhookURL,
-				Secret: r.cfg.Dev.Stripe.WebhookSecret,
-			})
-			persistPath := ""
-			if r.cfg.Dev.Stripe.PersistEnabled() {
-				persistPath = r.cfg.Dev.Stripe.ResolvedPersistPath()
+			walk := func(u string) string { return rewriteWebhookURLForAppPort(u, originalAppPort, actualAppPort) }
+			ep := WebhookEndpoint{
+				URL:            walk(sc.WebhookURL),
+				ThinURL:        walk(sc.ThinWebhookURL),
+				ConnectURL:     walk(sc.ConnectWebhookURL),
+				ThinConnectURL: walk(sc.ThinConnectWebhookURL),
+				Secret:         sc.WebhookSecret,
 			}
-			stripeLogger.Info("mock enabled",
+			stripeMock.SetWebhookEndpoint(ep)
+			r.stripe = &stripeSwitch{
+				ctx: runCtx, cfg: r.cfg, ep: ep, mock: stripeMock, pm: pm,
+				env: envLayers, logger: stripeLogger, broker: broker, dotenv: ".env",
+			}
+			stripeLogger.Info("stripe enabled",
+				"mode", sc.ResolvedMode(),
 				"api", r.cfg.Proxy.Listen+"/v1/*",
 				"ui", r.cfg.Proxy.Listen+"/__hamr/stripe/*",
-				"webhook_url", webhookURL,
-				"persist", persistPath,
+				"webhook_url", ep.URL,
+				"thin_webhook_url", ep.ThinURL,
+				"persist", opts.PersistPath,
 			)
 		}
 
@@ -616,6 +632,7 @@ func (r *Runner) Run(ctx context.Context) error {
 			mailMock:    mailMock,
 			smsMock:     smsMock,
 			stripeMock:  stripeMock,
+			stripe:      r.stripe,
 			errorState:  errorState,
 			auditPath:   r.cfg.Dev.MCP.ResolvedLogFile(),
 			logSink:     r.mcpLogHook,
@@ -658,6 +675,7 @@ func (r *Runner) Run(ctx context.Context) error {
 			cfg:     r.cfg,
 			handler: blockDevCommands(handler),
 			pm:      pm,
+			env:     envLayers,
 			logger:  r.logger.With("component", "tunnel"),
 			broker:  broker,
 		}
@@ -730,7 +748,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	for _, rewrite := range envRewrites {
 		r.logger.Info("walked .env value", "rewrite", rewrite)
 	}
-	// SetInjectedEnv must precede the first StartProcess — initial-build
+	// The base env layer must be set before the first StartProcess — initial-build
 	// is below so this placement is safe. Compose ensure above doesn't
 	// consume pm.injectedEnv (it builds its own env from dc.Env), so
 	// moving the call from the old pre-loop position to here doesn't
@@ -744,9 +762,11 @@ func (r *Runner) Run(ctx context.Context) error {
 	// PORT=:8081, breaking int-parsing in the scaffolded main.go.
 	merged := append([]string(nil), envRewrites...)
 	merged = append(merged, buildHamrInjectedEnv(r.cfg, proxyOrigin, actualAppPort)...)
-	pm.SetInjectedEnv(merged)
-	if r.tunnel != nil {
-		r.tunnel.baseEnv = merged
+	envLayers.setBase(merged)
+	// Before the first build so apps start on the right Stripe env. Blocks
+	// while a configured listener connects to Stripe.
+	if r.stripe != nil {
+		r.stripe.boot()
 	}
 
 	// Initial build: run all rules in topological order.
@@ -1063,6 +1083,12 @@ func (r *Runner) handleHotkey(action HotkeyAction, actions *DevActions, cancel c
 			return false
 		}
 		go r.tunnel.Toggle()
+	case HotkeyStripeMode:
+		if r.stripe == nil {
+			r.logger.Warn("stripe is off ([dev.stripe] mode)")
+			return false
+		}
+		go func() { _, _ = r.stripe.Set("") }()
 	case HotkeyQuit:
 		r.logger.Info("quit requested")
 		cancel()

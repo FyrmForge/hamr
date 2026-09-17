@@ -51,10 +51,14 @@ func (m *StripeMock) completeCheckout(id, outcome string) (redirect string, leav
 
 	sess.Status = rule.status
 	sess.PaymentStatus = rule.paymentStatus
-	fires := []webhookFire{{rule.eventType, m.serializeSession(sess)}}
+	fires := []webhookFire{{eventType: rule.eventType, object: m.serializeSession(sess)}}
 
 	if rule.createPayment {
 		now := time.Now()
+		piMeta := sess.PaymentIntentMetadata
+		if piMeta == nil {
+			piMeta = sess.Metadata
+		}
 		ch := &stripeCharge{
 			ID:              "ch_test_" + randomHex(24),
 			Amount:          sess.AmountTotal,
@@ -65,8 +69,9 @@ func (m *StripeMock) completeCheckout(id, outcome string) (redirect string, leav
 			Captured:        true,
 			PaymentIntentID: sess.PaymentIntentID,
 			PaymentMethod:   "pm_card_visa",
+			ReceiptEmail:    sess.CustomerEmail,
 			Created:         now,
-			Metadata:        sess.Metadata,
+			Metadata:        cloneStringMap(piMeta),
 		}
 		pi := &stripePaymentIntent{
 			ID:                 sess.PaymentIntentID,
@@ -78,14 +83,15 @@ func (m *StripeMock) completeCheckout(id, outcome string) (redirect string, leav
 			LatestChargeID:     ch.ID,
 			PaymentMethod:      "pm_card_visa",
 			ClientSecret:       sess.PaymentIntentID + "_secret_" + randomHex(12),
+			ReceiptEmail:       sess.CustomerEmail,
 			Created:            now,
-			Metadata:           sess.Metadata,
+			Metadata:           cloneStringMap(piMeta),
 		}
 		m.paymentIntents[pi.ID] = pi
 		m.charges[ch.ID] = ch
 		fires = append(fires,
-			webhookFire{"payment_intent.succeeded", m.serializePaymentIntent(pi, ch)},
-			webhookFire{"charge.succeeded", m.serializeCharge(ch)},
+			webhookFire{eventType: "payment_intent.succeeded", object: m.serializePaymentIntent(pi, ch)},
+			webhookFire{eventType: "charge.succeeded", object: m.serializeCharge(ch)},
 		)
 	}
 
@@ -131,7 +137,7 @@ func (m *StripeMock) expireSession(id string) error {
 // refundPayment refunds a payment intent and fires charge.refunded, mirroring
 // the dashboard refund button. amount is in the smallest currency unit.
 func (m *StripeMock) refundPayment(piID string, amount int64, reverseTransfer, refundAppFee bool) (*stripeRefund, error) {
-	rf, _, eventObject, err := m.applyRefund(refundInput{
+	rf, _, eventObject, reversed, err := m.applyRefund(refundInput{
 		piID:            piID,
 		amount:          amount,
 		reverseTransfer: reverseTransfer,
@@ -140,7 +146,7 @@ func (m *StripeMock) refundPayment(piID string, amount int64, reverseTransfer, r
 	if err != nil {
 		return nil, err
 	}
-	m.fireEventAsync("charge.refunded", eventObject, "refund", rf.ID)
+	m.fireEventsAsync(refundFires(eventObject, reversed), "refund", rf.ID)
 	return rf, nil
 }
 
@@ -184,6 +190,9 @@ func (m *StripeMock) stateSummary() StripeStateSummary {
 	}
 	for _, a := range m.accounts {
 		out.Accounts = append(out.Accounts, StripeAccountSummary{ID: a.ID, Email: a.Email, ChargesEnabled: a.ChargesEnabled})
+	}
+	for _, a := range m.v2Accounts {
+		out.Accounts = append(out.Accounts, StripeAccountSummary{ID: a.ID, Email: a.ContactEmail, V2: true, Onboarded: a.onboarded()})
 	}
 	return out
 }

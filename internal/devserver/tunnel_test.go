@@ -79,10 +79,17 @@ func TestBlockDevCommands(t *testing.T) {
 		"/__hamr/mcp/make.run":       http.StatusForbidden,
 		"/__hamr/logs":               http.StatusForbidden,
 		"/x/../__hamr/rule/site/run": http.StatusForbidden,
+		"/__hamr/dark":               http.StatusForbidden,
+		"/__hamr/some-future-route":  http.StatusForbidden,
+		"/__hamr":                    http.StatusForbidden,
+		"/__hamr/mailx":              http.StatusForbidden,
 		"/__hamr/mail":               http.StatusOK,
+		"/__hamr/sms/clear":          http.StatusOK,
 		"/__hamr/stripe/checkout":    http.StatusOK,
 		"/__hamr/reload":             http.StatusOK,
-		"/__hamr/rules-page":         http.StatusOK,
+		"/__hamr/logo.png":           http.StatusOK,
+		"/v1/payment_intents":        http.StatusOK,
+		"/__hamrx":                   http.StatusOK,
 		"/":                          http.StatusOK,
 	} {
 		rec := httptest.NewRecorder()

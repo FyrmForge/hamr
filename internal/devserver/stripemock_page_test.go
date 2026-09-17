@@ -15,9 +15,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	stripe "github.com/stripe/stripe-go/v82"
-	checkoutsession "github.com/stripe/stripe-go/v82/checkout/session"
-	"github.com/stripe/stripe-go/v82/webhook"
+	stripe "github.com/stripe/stripe-go/v86"
+	checkoutsession "github.com/stripe/stripe-go/v86/checkout/session"
+	"github.com/stripe/stripe-go/v86/webhook"
 )
 
 // TestStripeMock_CheckoutPage_RendersOpenSession is a sanity check on the

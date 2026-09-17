@@ -286,7 +286,7 @@ loopback listener that serves the same proxy handler:
 
 ```
 internet  ⟶  cloudflared / ngrok  ⟶  127.0.0.1:<tunnel port>  ⟶  proxy handler  ⟶  app
-                                     (403 on /__hamr/rule, docker, mcp, logs, console)
+                                     (403 on /__hamr/* except reload, logo.png, mail, sms, stripe)
 ```
 
 Once the tunnel prints its URL (15s timeout; its output shows as `[tunnel]` in
@@ -299,9 +299,27 @@ the public URL replaces the localhost URL in the status bar and `o` opens it.
 
 Live reload, error pages, and the mail/SMS/Stripe mocks work through the
 tunnel, minus process output (no log lines in the reload stream, no build
-output on error pages); command-running and log routes don't. The tunnel is off at every start
+output on error pages); every other `/__hamr/*` route returns 403. The tunnel is off at every start
 (including after `R` or a config reload). Config and the security notes are in
 [`[dev.tunnel]`](../hamr-toml.md).
+
+## Stripe Listen Mode
+
+With `[dev.stripe]` on, press `S` to swap hamr's Stripe mock for
+`stripe listen` against your real sandbox, and back:
+
+```
+Stripe sandbox  ⟶  stripe listen (key: STRIPE_KEY from .env)  ⟶  webhook_url / thin_webhook_url  ⟶  app
+```
+
+hamr starts the Stripe CLI (30s to print its `whsec_` secret; output shows as
+`[stripe]`), injects `STRIPE_MOCK=false` and that secret as every
+`STRIPE_WEBHOOK_SECRET*` var, and restarts every running `run` rule and daemon.
+`S` again goes back to the mock. The status bar shows `stripe: mock`,
+`stripe: listen` or `stripe: switching…`. A failed switch keeps the current
+mode; a listener that exits on its own drops back to the mock; changing
+`STRIPE_KEY` in `.env` restarts the listener. Start in listen mode with
+`mode = "listen"`. Details in [`[dev.stripe]`](../hamr-toml.md).
 
 ## File Logging
 
@@ -480,9 +498,9 @@ something is broken.
 | `R` | Restart the dev server | Full startup lifecycle re-runs in place: config re-read, docker compose brought up, ports re-resolved, `.env` re-injected, builds and daemons restarted, watcher rebuilt. The TUI and its log buffers survive. Use it when startup-only state went stale — a port now clashing, an edited `.env`, a container that came up wrong. Ignored while the server is still starting up, with a "still starting up" warning in the log (`q` still quits), and refused for the first 5 seconds after it becomes ready — so a double-press costs one restart, not two. Also works while parked on a `hamr.toml` parse error, where it retries immediately — the config can be valid and startup still have failed on a clashing port or a bad `.env`, neither of which touches `hamr.toml`. |
 | `o` | Open the proxy URL in the default browser | Requires `[proxy]` configured. Opens the public tunnel URL instead while `T` is on. |
 | `c` | Clear the active tab's log buffer | |
-| `m` | Run a Makefile target | Opens a fuzzy palette listing every target in `./Makefile` (declaration order). Type to filter, `↑/↓` to move, `↩` to run, `Esc` to cancel. Hidden when no `Makefile` exists. The target runs through the dev server, not the TUI, so its output reaches every consumer at once: the hamr tab prefixed `[make:<target>]`, the browser log overlay, and `logs.read` with `rule: "make:<target>"` for an agent. Picking a target closes the palette immediately — the TUI is never locked while a target runs. The status indicator shows a spinner and `make <target>` for the duration and the `[make:<target>] exited <n>` line is the result. |
+| `m` | Run a Makefile target | Opens a fuzzy palette listing every target in `./Makefile` (declaration order). Type to filter, `↑/↓` to move, `↩` to run, `Esc` to cancel. Hidden when no `Makefile` exists. The target runs through the dev server, not the TUI, so its output reaches every consumer at once: the hamr tab prefixed `[make:<target>]`, the browser log overlay, and `logs.read` with `rule: "make:<target>"` for an agent. Picking a target closes the palette immediately — the TUI is never locked while a target runs. The status indicator shows a spinner and `make <target>` for the duration (cleared by the run result itself, so a flood of output cannot leave it stuck) and the `[make:<target>] exited <n>` line is the result. |
 | `M` | Toggle the MCP gateway | Runtime kill-switch for `[dev.mcp]` — flips the gateway on/off for the session without rewriting `hamr.toml`. The status bar shows `MCP on/<n>` (exposed tool count) or `MCP off`. Shown only when a proxy is running. |
-| `T` | Toggle the public tunnel | Starts/stops `cloudflared`, `ngrok`, or a custom command per [`[dev.tunnel]`](../hamr-toml.md) against a dedicated proxy listener that blocks `/__hamr/{rule,docker,mcp,logs,console}` and withholds process output from live reload and error pages. On: sets `BASE_URL` (or `env`) to the public URL and restarts running `run` rules and daemons (no rebuild). The status ticker shows `tunnel starting` / `tunnel stopping` while it works; once up, the public URL replaces the localhost URL in the status bar (and `o` opens it). Off at every start; shown only when a proxy is running. |
+| `T` | Toggle the public tunnel | Starts/stops `cloudflared`, `ngrok`, or a custom command per [`[dev.tunnel]`](../hamr-toml.md) against a dedicated proxy listener that blocks every `/__hamr/*` route except live reload, the logo and the mail/SMS/Stripe mocks, and withholds process output from live reload and error pages. On: sets `BASE_URL` (or `env`) to the public URL and restarts running `run` rules and daemons (no rebuild). The status ticker shows `tunnel starting` / `tunnel stopping` while it works; once up, the public URL replaces the localhost URL in the status bar (and `o` opens it). Off at every start; shown only when a proxy is running. |
 | `Tab` / `Shift+Tab` | Cycle log tabs (hamr → docker stacks → mcp) | One tab per `[[dev.docker_compose]]` entry, fed by `docker compose logs -f --tail=50`; plus a dedicated **mcp** tab (last) when `[dev.mcp]` is configured, showing one line per agent request. |
 | `/` | Search the active tab (case-insensitive substring) | Live: highlights and `[k/n]` counter update as you type. `↩` locks in, `Esc` cancels; per-tab persistent. |
 | `n` / `N` | Jump to next / previous search match | Wraps at ends. |

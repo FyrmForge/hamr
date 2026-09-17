@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -98,10 +97,23 @@ func (c TunnelConfig) command(port int) ([]string, *regexp.Regexp) {
 	return append([]string{"cloudflared", "tunnel", "--no-autoupdate", "--url", "http://" + addr}, c.Args...), cloudflaredURLRE
 }
 
-// tunnelBlockedPrefixes are the proxy routes that run commands, leak the raw
-// dev log, or let a visitor write into it (browser console ingest).
-// Unreachable through the tunnel; the mocks stay reachable.
-var tunnelBlockedPrefixes = []string{"/__hamr/rule", "/__hamr/docker", "/__hamr/mcp", "/__hamr/logs", "/__hamr/console"}
+// tunnelAllowedPrefixes are the only /__hamr routes reachable through the
+// tunnel: live reload, the logo, and the mail/SMS/Stripe mocks. Every other
+// /__hamr route (commands, logs, MCP, console ingest, the dark filter, and any
+// route added later) is refused, so a new dev-only route is private by default.
+var tunnelAllowedPrefixes = []string{"/__hamr/reload", "/__hamr/logo.png", "/__hamr/mail", "/__hamr/sms", "/__hamr/stripe"}
+
+func tunnelAllowed(p string) bool {
+	if p != "/__hamr" && !strings.HasPrefix(p, "/__hamr/") {
+		return true // the app, and the Stripe mock API at /v1 and /v2
+	}
+	for _, prefix := range tunnelAllowedPrefixes {
+		if p == prefix || strings.HasPrefix(p, prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
 
 type tunnelCtxKey struct{}
 
@@ -113,17 +125,15 @@ func isTunnelRequest(r *http.Request) bool {
 }
 
 // blockDevCommands wraps the proxy handler for the tunnel listener, refusing
-// the routes in tunnelBlockedPrefixes and marking the rest as tunnel requests.
+// /__hamr routes outside tunnelAllowedPrefixes and marking the rest as tunnel
+// requests.
 // The tunnel gets its own listener so every request on it is tunnel traffic
 // by construction — no Host sniffing.
 func blockDevCommands(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p := path.Clean(r.URL.Path)
-		for _, prefix := range tunnelBlockedPrefixes {
-			if p == prefix || strings.HasPrefix(p, prefix+"/") {
-				http.Error(w, "not available through the hamr dev tunnel", http.StatusForbidden)
-				return
-			}
+		if !tunnelAllowed(path.Clean(r.URL.Path)) {
+			http.Error(w, "not available through the hamr dev tunnel", http.StatusForbidden)
+			return
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), tunnelCtxKey{}, true)))
 	})
@@ -154,9 +164,14 @@ const tunnelURLTimeout = 15 * time.Second
 
 // tunnelProc is one running tunnel: its listener, server and child process.
 type tunnelProc struct {
-	srv  *http.Server
-	cmd  *exec.Cmd
-	done chan struct{} // closed when cmd.Wait returns
+	*childProc
+	srv *http.Server
+}
+
+// stop stops the child and closes the listener.
+func (p *tunnelProc) stop() {
+	p.childProc.stop()
+	_ = p.srv.Close()
 }
 
 // tunnel owns the runtime on/off state behind the T hotkey.
@@ -165,10 +180,8 @@ type tunnel struct {
 	cfg     *Config
 	handler http.Handler // proxy handler already wrapped by blockDevCommands
 	pm      *ProcessManager
+	env     *envLayers // owns the tunnel env layer and the app restarts
 	logger  *slog.Logger
-	// baseEnv is the injected env without tunnel vars. Written by Run before
-	// ready and only read after (handleHotkey gates on ready), same as proxyURL.
-	baseEnv []string
 	broker  *SSEBroker // tunnel_start / tunnel_up / tunnel_down go out here
 
 	mu   sync.Mutex
@@ -287,57 +300,67 @@ func (t *tunnel) start() (*tunnelProc, string, error) {
 		_ = ln.Close()
 		return nil, "", fmt.Errorf("%s not found on PATH (install it, or set [dev.tunnel] cmd)", argv[0])
 	}
+	srv := serveProxy(ln, t.handler)
+	c, url, err := startChild(t.ctx, t.pm, "tunnel", argv, nil, urlRE, "a public URL", tunnelURLTimeout)
+	if err != nil {
+		_ = srv.Close()
+		return nil, "", err
+	}
+	return &tunnelProc{childProc: c, srv: srv}, url, nil
+}
 
-	cmd := exec.CommandContext(t.ctx, argv[0], argv[1:]...)
+// childProc is a long-running helper process a runtime feature owns (the
+// tunnel binary, `stripe listen`), outside the ProcessManager's rule table.
+type childProc struct {
+	cmd  *exec.Cmd
+	done chan struct{} // closed when cmd.Wait returns
+}
+
+// startChild runs argv in its own process group with its output prefixed as
+// name in the dev log, and waits up to timeout for a line matching re. It
+// returns the first submatch (what: named in errors). env nil inherits
+// hamr's environment.
+func startChild(ctx context.Context, pm *ProcessManager, name string, argv, env []string, re *regexp.Regexp, what string, timeout time.Duration) (*childProc, string, error) {
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Env = env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return killGroup(cmd, syscall.SIGKILL) }
 	cmd.WaitDelay = 2 * time.Second
 
 	tail := newTailBuffer()
 	found := make(chan string, 1)
-	scan := &urlScanner{re: urlRE, found: found}
-	stdoutDest, stderrDest := t.pm.prefixDests()
-	color := nextColor()
-	outs := []io.Writer{newPrefixWriter(stdoutDest, "tunnel", color), tail, scan}
-	errs := []io.Writer{newPrefixWriter(stderrDest, "tunnel", color), tail, scan}
-	if t.pm.logBuf != nil {
-		lw := newLogWriter("tunnel", color, t.pm.logBuf, t.pm.logBroker)
-		outs, errs = append(outs, lw), append(errs, lw)
-	}
-	cmd.Stdout = io.MultiWriter(outs...)
-	cmd.Stderr = io.MultiWriter(errs...)
+	scan := &urlScanner{re: re, found: found}
+	var flush func()
+	cmd.Stdout, cmd.Stderr, flush = pm.outputWriters(name, nextColor(), tail, scan)
 
-	srv := serveProxy(ln, t.handler)
 	if err := cmd.Start(); err != nil {
-		_ = srv.Close()
 		return nil, "", fmt.Errorf("start %s: %w", argv[0], err)
 	}
-	p := &tunnelProc{srv: srv, cmd: cmd, done: make(chan struct{})}
+	p := &childProc{cmd: cmd, done: make(chan struct{})}
 	go func() {
 		_ = cmd.Wait()
+		flush()
 		close(p.done)
 	}()
 
-	timer := time.NewTimer(tunnelURLTimeout)
+	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
-	case url := <-found:
-		return p, url, nil
+	case v := <-found:
+		return p, v, nil
 	case <-p.done:
-		_ = srv.Close()
-		return nil, "", fmt.Errorf("%s exited before printing a URL; output:\n%s", argv[0], tail.String())
+		return nil, "", fmt.Errorf("%s exited before printing %s; output:\n%s", argv[0], what, tail.String())
 	case <-timer.C:
 		p.stop()
-		return nil, "", fmt.Errorf("no public URL from %s within %s; output:\n%s", argv[0], tunnelURLTimeout, tail.String())
-	case <-t.ctx.Done():
+		return nil, "", fmt.Errorf("no %s from %s within %s; output:\n%s", strings.TrimPrefix(what, "a "), argv[0], timeout, tail.String())
+	case <-ctx.Done():
 		p.stop()
-		return nil, "", t.ctx.Err()
+		return nil, "", ctx.Err()
 	}
 }
 
-// stop signals the tunnel's process group, escalates to SIGKILL if it hangs,
-// and closes the listener.
-func (p *tunnelProc) stop() {
+// stop signals the process group and escalates to SIGKILL if it hangs.
+func (p *childProc) stop() {
 	_ = killGroup(p.cmd, syscall.SIGTERM)
 	select {
 	case <-p.done:
@@ -345,7 +368,6 @@ func (p *tunnelProc) stop() {
 		_ = killGroup(p.cmd, syscall.SIGKILL)
 		<-p.done
 	}
-	_ = p.srv.Close()
 }
 
 func killGroup(cmd *exec.Cmd, sig syscall.Signal) error {
@@ -355,42 +377,22 @@ func killGroup(cmd *exec.Cmd, sig syscall.Signal) error {
 	return cmd.Process.Signal(sig)
 }
 
-// apply points the injected env at url ("" removes the tunnel vars),
-// restarts the running run-rules and daemons so they pick it up, and
-// broadcasts tunnel_up / tunnel_down once they're back. Builds are not re-run.
+// apply points the tunnel env layer at url ("" removes the tunnel vars),
+// which restarts the running run-rules and daemons so they pick it up, and
+// broadcasts tunnel_up / tunnel_down once they're back.
 func (t *tunnel) apply(url string) {
 	t.mu.Lock()
 	t.url = url
 	t.mu.Unlock()
 
-	env := append([]string(nil), t.baseEnv...)
+	var env []string
 	if url != "" {
-		// Last so they win buildEnv's last-wins over a .env rewrite of the same key.
 		for _, k := range t.cfg.Dev.Tunnel.ResolvedEnv() {
 			env = append(env, k+"="+url)
 		}
 	}
-	t.pm.SetInjectedEnv(env)
+	t.env.setTunnel(env)
 
-	// Only restart what is running: a rule whose build failed stays down.
-	// StartProcess is serialized, so a scheduler rebuild of the same rule
-	// racing this just restarts it twice.
-	for i := range t.cfg.Dev.Watch {
-		rule := &t.cfg.Dev.Watch[i]
-		if rule.Run != "" && t.pm.isRunning(rule.Name) {
-			if err := t.pm.StartProcess(t.ctx, rule); err != nil {
-				t.logger.Error("restart failed", "rule", rule.Name, "err", err)
-			}
-		}
-	}
-	for i := range t.cfg.Dev.Daemons {
-		d := &t.cfg.Dev.Daemons[i]
-		if t.pm.isRunning(d.Name) {
-			if err := t.pm.StartProcess(t.ctx, &WatchRule{Name: d.Name, Run: d.Cmd, Dir: d.Dir, Env: d.Env}); err != nil {
-				t.logger.Error("restart failed", "daemon", d.Name, "err", err)
-			}
-		}
-	}
 	if url != "" {
 		t.broker.Broadcast(SSEEvent{Type: EvTunnelUp, Data: url})
 	} else {

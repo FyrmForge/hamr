@@ -34,6 +34,7 @@ type stripeCharge struct {
 	Customer             string            `json:"customer,omitempty"`
 	Created              time.Time         `json:"created"`
 	Metadata             map[string]string `json:"metadata,omitempty"`
+	DisputeID            string            `json:"dispute_id,omitempty"` // set once a dispute is opened from the dashboard
 }
 
 // stripeTransfer is the in-memory representation of a Stripe Transfer —
@@ -42,14 +43,27 @@ type stripeCharge struct {
 // transfer_data.destination succeeds; the destination receives
 // (Amount - ApplicationFeeAmount) by default.
 type stripeTransfer struct {
-	ID                  string            `json:"id"`
-	Amount              int64             `json:"amount"`
-	AmountReversed      int64             `json:"amount_reversed,omitempty"` // accumulated reversals from refunds with reverse_transfer=true
-	Currency            string            `json:"currency"`
-	Destination         string            `json:"destination"`           // connected account ID (acct_xxx)
-	SourceTransactionID string            `json:"source_transaction_id"` // the Charge ID that triggered this transfer
-	Created             time.Time         `json:"created"`
-	Metadata            map[string]string `json:"metadata,omitempty"`
+	ID                  string                   `json:"id"`
+	Amount              int64                    `json:"amount"`
+	AmountReversed      int64                    `json:"amount_reversed,omitempty"` // accumulated reversals from refunds with reverse_transfer=true
+	Currency            string                   `json:"currency"`
+	Destination         string                   `json:"destination"`           // connected account ID (acct_xxx)
+	SourceTransactionID string                   `json:"source_transaction_id"` // the Charge ID that funds this transfer (optional for API-created transfers)
+	TransferGroup       string                   `json:"transfer_group,omitempty"`
+	Description         string                   `json:"description,omitempty"`
+	Created             time.Time                `json:"created"`
+	Metadata            map[string]string        `json:"metadata,omitempty"`
+	Reversals           []stripeTransferReversal `json:"reversals,omitempty"`
+}
+
+// stripeTransferReversal is one amount pulled back off a transfer, either via
+// POST /v1/transfers/{id}/reversals or a refund with reverse_transfer=true.
+type stripeTransferReversal struct {
+	ID       string            `json:"id"`
+	Amount   int64             `json:"amount"`
+	RefundID string            `json:"refund_id,omitempty"`
+	Created  time.Time         `json:"created"`
+	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
 // serializeCharge renders the JSON wire shape stripe-go expects for a
@@ -75,6 +89,12 @@ func (m *StripeMock) serializeCharge(c *stripeCharge) map[string]any {
 		"receipt_email":          nullableString(c.ReceiptEmail),
 		"refunded":               c.Refunded,
 		"status":                 c.Status,
+		"balance_transaction":    chargeBalanceTxnID(c.ID),
+		"disputed":               c.DisputeID != "",
+		"payment_method_details": map[string]any{
+			"type": "card",
+			"card": map[string]any{"brand": "visa", "last4": "4242", "funding": "credit", "country": "US"},
+		},
 	}
 	if c.Metadata != nil {
 		out["metadata"] = c.Metadata
@@ -102,8 +122,21 @@ func (m *StripeMock) serializeTransfer(t *stripeTransfer) map[string]any {
 		"currency":           t.Currency,
 		"destination":        t.Destination,
 		"livemode":           false,
-		"reversed":           t.AmountReversed >= t.Amount,
-		"source_transaction": t.SourceTransactionID,
+		"reversed":           t.Amount > 0 && t.AmountReversed >= t.Amount,
+		"source_transaction": nullableString(t.SourceTransactionID),
+		"transfer_group":     nullableString(t.TransferGroup),
+		"description":        nullableString(t.Description),
+	}
+	reversals := make([]map[string]any, len(t.Reversals))
+	for i := range t.Reversals {
+		reversals[i] = serializeTransferReversal(t, &t.Reversals[i])
+	}
+	out["reversals"] = map[string]any{
+		"object":      "list",
+		"url":         "/v1/transfers/" + t.ID + "/reversals",
+		"has_more":    false,
+		"total_count": len(reversals),
+		"data":        reversals,
 	}
 	if t.Metadata != nil {
 		out["metadata"] = t.Metadata

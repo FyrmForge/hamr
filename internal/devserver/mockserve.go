@@ -22,7 +22,7 @@ import (
 // there is no hamr.toml dependency.
 //
 // Two listeners:
-//   - the app-facing port (HAMR_MOCK_PORT): stripe /v1/* API + mail/sms ingest sinks
+//   - the app-facing port (HAMR_MOCK_PORT): stripe /v1/* + /v2/* API + mail/sms ingest sinks
 //   - the UI port (HAMR_MOCK_UI_PORT): the human dashboards. Optional — when
 //     unset the UI mounts on the app-facing port too (single listener).
 //
@@ -40,7 +40,7 @@ import (
 // MountedMock is what a provider returns: the route registrations for each
 // surface. Either may be nil if a mock has no routes on that surface.
 type MountedMock struct {
-	RegisterAPI func(*http.ServeMux) // app-facing (stripe /v1, mail/sms ingest)
+	RegisterAPI func(*http.ServeMux) // app-facing (stripe /v1 + /v2, mail/sms ingest)
 	RegisterUI  func(*http.ServeMux) // human-facing dashboards
 }
 
@@ -119,7 +119,11 @@ func buildStripeMock(logger *slog.Logger) (*MountedMock, error) {
 			logger.Warn("stripe mock persistence error", "err", err)
 		},
 	})
-	m.SetWebhookEndpoint(WebhookEndpoint{URL: webhookURL, Secret: webhookSecret})
+	m.SetWebhookEndpoint(WebhookEndpoint{
+		URL:     webhookURL,
+		ThinURL: os.Getenv("HAMR_STRIPE_THIN_WEBHOOK_URL"), // optional: v2 thin events
+		Secret:  webhookSecret,
+	})
 	return &MountedMock{
 		RegisterAPI: m.RegisterAPIRoutes,
 		RegisterUI:  m.RegisterUIRoutes,

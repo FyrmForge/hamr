@@ -109,7 +109,8 @@ Include which user/profile combinations were driven.
   `sms.list`/`sms.get`) → fired, renders, links land on the right page.
 - Payment surface: flows that charge — `stripe.list` to find sessions, drive
   outcomes with `stripe.complete` / `stripe.expire` / `stripe.refund`, verify
-  the app reacts to each.
+  the app reacts to each. These need the mock: if `dev.info` shows
+  `stripe.mode` = `listen`, switch with `stripe.mode {"mode":"mock"}` first.
 - Expired session mid-flow: log out elsewhere, then click an HTMX action —
   must navigate to login, not swap the login page into a fragment.
 - User-content injection: messages / display names with `<script>`, quotes,

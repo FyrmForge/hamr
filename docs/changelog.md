@@ -62,7 +62,59 @@ the TL;DR on top of it.
   `hamr rename-module`. Update any scripts, `hamr.toml` `cmd =` hooks, and
   Makefiles. Scaffolded projects' Makefiles already use the new names.
 
+- **Stripe mock moved to stripe-go v86 and API version `2026-08-26.dahlia`.**
+  It was on v82 and `2025-08-27.basil`. New projects import
+  `github.com/stripe/stripe-go/v86`. Existing projects with the mock enabled
+  must move too. stripe-go's `webhook.ConstructEvent` rejects events from a
+  different release train, so a v82 (`basil`) app rejects every mock event.
+  Migrate: swap `stripe-go/v82` for `stripe-go/v86` in imports, then
+  `go get github.com/stripe/stripe-go/v86@v86.4.2 && go mod tidy`. The
+  scaffold's calls compile unchanged. Apps on v85 (also `dahlia`) keep working.
+
+- **`[dev.stripe] enabled` is replaced by `mode`.** A config that still sets
+  `enabled` fails to load. Migrate: `enabled = true` → `mode = "mock"`;
+  `enabled = false` → remove it (or `mode = "off"`). `hamr dev` now also
+  injects `STRIPE_MOCK` and the `STRIPE_WEBHOOK_SECRET*` vars into your app,
+  overriding `.env`, so `webhook_secret` in `hamr.toml` is the source of truth
+  in mock mode.
+
 ### Fixes
+
+- **hamr reads common `.env` lines the way your app does.** `hamr dev` and
+  `hamr sync` had three separate `.env` parsers that disagreed with godotenv and
+  each other. A
+  trailing comment (`STRIPE_KEY=sk_test_abc # sandbox`) stayed in the value,
+  so `stripe listen` got a broken key. An `export DATABASE_URL=...` line kept
+  `export` in the key, so the port-walk rewrite went out under the wrong name.
+  One shared parser now strips `export`, surrounding quotes, and a ` #`
+  comment after an unquoted value. Escape sequences inside quotes are still
+  not unescaped, but an escaped quote no longer ends the value.
+
+- **The Stripe mock's money paths agree with each other.** Refunds are
+  capped at the captured amount, not the authorised one, so a partial capture
+  cannot be over-refunded. A disputed charge refuses refunds
+  (`charge_disputed`), a fully refunded charge refuses disputes, and a partial
+  refund shrinks the disputable amount. Transfers need funding: with
+  `source_transaction` the charge must have enough left after refunds and
+  earlier transfers from it, without one the platform balance must cover the
+  amount (`balance_insufficient` either way). Disputes on direct charges land
+  on the connected account's ledger instead of the platform's, and
+  `refund_application_fee` moves the pro-rata fee back to the connected
+  account.
+
+- **The `make <target>` spinner clears even when the event bus drops the done
+  event.** A chatty target could flood the per-subscriber channel, lose
+  `EvMakeDone`, and leave the status bar spinning until the next restart. The
+  TUI now also clears it when the run's own result arrives.
+
+- **`touch` on a watched file reruns its `[[dev.watch]]` rule.** `touch`
+  changes only the timestamp, which the watcher dropped as a non-modification
+  event, so `touch .env` never restarted the app even though `.env` sits in the
+  site rule's `watch`. A timestamp bump now counts; debounce still folds a
+  burst into one run. Tools that rewrite timestamps without editing (some
+  editors, `git checkout`) now also trigger a rebuild. A `chmod` or `chown`
+  that leaves the timestamp alone is still ignored, so a rule that
+  `chmod +x`es files in its own watch set does not loop.
 
 - **The scaffold integration tests pick free ports instead of hardcoded ones.**
   They shell `docker compose up` directly rather than going through `hamr dev`,
@@ -100,6 +152,37 @@ the TL;DR on top of it.
 
 ### Features
 
+- **Stripe listen mode for `hamr dev`.** Press `S` to swap the Stripe mock for
+  `stripe listen` against your real sandbox, and back. hamr runs the Stripe CLI
+  with `STRIPE_KEY` from `.env`, forwards to your webhook URLs (thin events and
+  connected-account events included), injects the signing secret it prints and
+  restarts your app — no more copying `whsec_` into `.env`. Start there with
+  `[dev.stripe] mode = "listen"`. Live keys are refused; a listener that fails
+  or exits falls back to the mock; editing `STRIPE_KEY` restarts it. New
+  `connect_webhook_url` / `thin_connect_webhook_url` (the mock uses them too)
+  and `thin_events` options, a `stripe.mode` MCP tool, and `dev.info` reports
+  the mode. See `[dev.stripe]` in the hamr.toml guide.
+
+- **Stripe mock covers Connect on Accounts v2.** Stripe no longer lets new
+  platforms create v1 Express accounts, so the mock now serves
+  `/v2/core/accounts` and `/v2/core/account_links`. Onboarding sets the
+  requested capabilities active and sends v2 thin events to the new optional
+  `[dev.stripe] thin_webhook_url`, signed with the same secret. It also adds
+  transfers and reversals, `GET /v1/refunds`, checkout session expire, balance
+  transactions with a fee on every charge, balance settings, disputes and
+  connected-account payouts driven from the dashboard, and replay of repeated
+  idempotency keys. The `/__hamr/stripe` page gains v2 accounts, disputes and an
+  event log where any event can be resent with the same id. Two read-only pages
+  show the records laid out like Stripe's dashboards: a platform dashboard at
+  `/__hamr/stripe/dashboard` (payments, balances, connected accounts,
+  transfers, payouts, disputes, events) and an Express view per connected
+  account at `/__hamr/stripe/express/<account>`. New projects
+  scaffold a second webhook route at `/api/webhooks/stripe/v2` with
+  `STRIPE_WEBHOOK_SECRET_V2`, and a `stripe.Client`. Existing apps see a few
+  extra fields and events: charges carry `balance_transaction`, refunds with
+  `reverse_transfer` also fire `transfer.reversed`, and connected-account
+  payout events set `account`. See [Stripe mock](guide/pkg/stripemock.md).
+
 - **Cloudflare as a trusted proxy.** `TRUSTED_PROXIES=cloudflare` (or
   `server.WithTrustedProxies("cloudflare")`) trusts Cloudflare's edge ranges so
   `RealIP()` returns the visitor, not a Cloudflare IP. The list ships pinned as
@@ -111,10 +194,10 @@ the TL;DR on top of it.
   internet through your locally installed `cloudflared` (default, no account)
   or `ngrok`, or any command via `[dev.tunnel] cmd`. hamr sets `BASE_URL` (or
   the vars in `env`) to the public URL and restarts your app; `T` again turns it
-  off. The tunnel gets its own proxy listener that blocks the routes which run
-  commands or read and write logs (`/__hamr/rule`, `docker`, `mcp`, `logs`,
-  `console`) and keeps process output out of live reload and error pages; the mocks
-  stay reachable. See `[dev.tunnel]` in the hamr.toml guide.
+  off. The tunnel gets its own proxy listener that allows only live reload, the
+  logo and the mail/SMS/Stripe mocks under `/__hamr/`; every other hamr route,
+  including any added later, returns 403. Process output stays out of live
+  reload and error pages. See `[dev.tunnel]` in the hamr.toml guide.
 
 - **One event bus for the dev server, and a system indicator in the TUI status
   bar.** The status bar now says what `hamr dev` is doing right now —

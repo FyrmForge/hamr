@@ -37,7 +37,7 @@ type portShifts map[int]int
 // loadDotenv reads path and returns parsed entries in declaration order.
 // Missing file is not an error — returns (nil, nil) so callers can treat
 // "no .env" as "no rewrites needed". Comment-only and malformed lines are
-// silently skipped, matching the scoped readDotenvKey already in use.
+// silently skipped.
 func loadDotenv(path string) ([]dotenvEntry, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -53,22 +53,69 @@ func parseDotenv(data []byte) []dotenvEntry {
 	var out []dotenvEntry
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || line[0] == '#' {
-			continue
+		if key, val, ok := parseDotenvLine(scanner.Text()); ok {
+			out = append(out, dotenvEntry{Key: key, Value: val})
 		}
-		k, v, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		key := strings.TrimSpace(k)
-		val := strings.TrimSpace(v)
-		if len(val) >= 2 && (val[0] == '"' || val[0] == '\'') && val[len(val)-1] == val[0] {
-			val = val[1 : len(val)-1]
-		}
-		out = append(out, dotenvEntry{Key: key, Value: val})
 	}
 	return out
+}
+
+// ReadDotenvKey returns the first value for key in the .env file at path.
+// ok is false on a miss or an unreadable file. It never touches the process
+// env, so callers read credentials only where they need them.
+func ReadDotenvKey(path, key string) (string, bool) {
+	entries, err := loadDotenv(path)
+	if err != nil {
+		return "", false
+	}
+	for _, e := range entries {
+		if e.Key == key {
+			return e.Value, true
+		}
+	}
+	return "", false
+}
+
+// parseDotenvLine is the one .env line parser hamr uses, so hamr reads the
+// same values the app does through godotenv: an optional `export ` prefix,
+// surrounding quotes stripped, and a ` #` comment dropped after an unquoted
+// value. Blank, comment and malformed lines return ok=false.
+// ponytail: no escape sequences or multi-line quoted values; add them if a
+// real .env needs them.
+func parseDotenvLine(line string) (key, val string, ok bool) {
+	line = strings.TrimSpace(line)
+	if line == "" || line[0] == '#' {
+		return "", "", false
+	}
+	k, v, found := strings.Cut(line, "=")
+	if !found {
+		return "", "", false
+	}
+	key = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(k), "export "))
+	if key == "" {
+		return "", "", false
+	}
+	v = strings.TrimSpace(v)
+	if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') {
+		// The first unescaped matching quote closes the value; the rest of the
+		// line (a comment) is dropped, like godotenv.
+		for i := 1; i < len(v); i++ {
+			if v[i] == '\\' {
+				i++
+				continue
+			}
+			if v[i] == v[0] {
+				return key, v[1:i], true
+			}
+		}
+	}
+	for i := 1; i < len(v); i++ {
+		if v[i] == '#' && (v[i-1] == ' ' || v[i-1] == '\t') {
+			v = strings.TrimSpace(v[:i])
+			break
+		}
+	}
+	return key, v, true
 }
 
 // rewriteForPortShifts walks entries, applying the agreed match rules for

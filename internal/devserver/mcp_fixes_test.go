@@ -18,7 +18,7 @@ func TestMutatingMCPToolDerivedFromAreas(t *testing.T) {
 	for _, read := range []string{"dev.info", "logs.read", "console.read", "http.read", "docker.logs", "docker.status", "mail.list", "mail.get", "stripe.list"} {
 		assert.False(t, mutatingMCPTool(read), "%s is a read", read)
 	}
-	for _, write := range []string{"docker.restart", "docker.wipe", "rule.run", "rebuild.all", "make.run", "mail.clear", "mail.ingest", "stripe.complete", "stripe.expire", "stripe.refund"} {
+	for _, write := range []string{"docker.restart", "docker.wipe", "rule.run", "rebuild.all", "make.run", "mail.clear", "mail.ingest", "stripe.complete", "stripe.expire", "stripe.refund", "stripe.mode"} {
 		assert.True(t, mutatingMCPTool(write), "%s is a write", write)
 	}
 }

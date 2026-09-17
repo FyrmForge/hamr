@@ -37,6 +37,7 @@ const (
 	EvTunnelStart = "tunnel_start" // Data: "starting" / "stopping"
 	EvTunnelUp    = "tunnel_up"    // Data: public URL
 	EvTunnelDown  = "tunnel_down"  // Data: "" (off, or a start that failed)
+	EvStripeMode  = "stripe_mode"  // Data: "mock" / "listen" / "switching"
 )
 
 // sseRule is a watch rule serialized for the config SSE event.

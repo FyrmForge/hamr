@@ -35,7 +35,7 @@ func TestStripeMock_Persist_RoundTrip(t *testing.T) {
 	resp := postPaymentIntentComplete(t, mock, piID, "succeed")
 	resp.Body.Close() //nolint:errcheck
 	// Issue a refund to populate the refunds map + mutate the charge.
-	_, _, _, err := mock.applyRefund(refundInput{
+	_, _, _, _, err := mock.applyRefund(refundInput{
 		piID:            piID,
 		amount:          1000,
 		reverseTransfer: true,

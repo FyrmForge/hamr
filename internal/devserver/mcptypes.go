@@ -48,7 +48,7 @@ type devInfoMail struct {
 }
 
 type devInfoStripe struct {
-	Enabled bool `json:"enabled"`
+	Mode string `json:"mode"` // "off" | "mock" | "listen"
 }
 
 type devInfoGateway struct {
@@ -207,6 +207,16 @@ type stripeRefundArgs struct {
 	RefundAppFee    bool   `json:"refund_application_fee"`
 }
 
+// stripeModeArgs is stripe.mode's input. Empty Mode flips mock ⇄ listen.
+type stripeModeArgs struct {
+	Mode string `json:"mode"`
+}
+
+// stripeModeResult is the mode running after stripe.mode.
+type stripeModeResult struct {
+	Mode string `json:"mode"`
+}
+
 // stripeRefundResult is the ack returned by stripe.refund.
 type stripeRefundResult struct {
 	ID     string `json:"id"`
@@ -250,5 +260,7 @@ type StripeLineItemSummary struct {
 type StripeAccountSummary struct {
 	ID             string `json:"id"`
 	Email          string `json:"email"`
-	ChargesEnabled bool   `json:"chargesEnabled"`
+	ChargesEnabled bool   `json:"chargesEnabled"`      // v1 accounts
+	V2             bool   `json:"v2,omitempty"`        // Accounts v2 (/v2/core/accounts)
+	Onboarded      bool   `json:"onboarded,omitempty"` // v2: every requested capability active
 }

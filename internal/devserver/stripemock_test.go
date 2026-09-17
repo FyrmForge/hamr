@@ -9,12 +9,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	stripe "github.com/stripe/stripe-go/v82"
-	checkoutsession "github.com/stripe/stripe-go/v82/checkout/session"
+	stripe "github.com/stripe/stripe-go/v86"
+	checkoutsession "github.com/stripe/stripe-go/v86/checkout/session"
 )
 
 // TestStripeAPIVersionMatchesSDK guards against drift: hamr's pinned API
-// version must equal whatever stripe-go/v82 ships with. If a stripe-go bump
+// version must equal whatever stripe-go/v86 ships with. If a stripe-go bump
 // changes APIVersion, this test fires immediately and forces a paired bump
 // of the constant in stripemock.go.
 func TestStripeAPIVersionMatchesSDK(t *testing.T) {

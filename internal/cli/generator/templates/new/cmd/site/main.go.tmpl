@@ -29,7 +29,7 @@ import (
 	"github.com/FyrmForge/hamr/pkg/storage"
 {{- end}}
 {{- if .IncludeStripe}}
-	stripe "github.com/stripe/stripe-go/v82"
+	stripe "github.com/stripe/stripe-go/v86"
 {{- end}}
 {{- if .IncludeEmailMock}}
 	"github.com/FyrmForge/hamr/pkg/email"
@@ -94,6 +94,10 @@ var (
 {{- if .IncludeStripe}}
 	envStripeKey           = config.GetEnvOrDefault("STRIPE_KEY", "")
 	envStripeWebhookSecret = config.GetEnvOrDefault("STRIPE_WEBHOOK_SECRET", "")
+	// STRIPE_WEBHOOK_SECRET_V2 signs v2 thin events. Under hamr dev and
+	// `stripe listen` it equals STRIPE_WEBHOOK_SECRET; a deployed Stripe
+	// event destination has its own.
+	envStripeWebhookSecretV2 = config.GetEnvOrDefault("STRIPE_WEBHOOK_SECRET_V2", "")
 	envStripeMock          = config.GetEnvOrDefaultBool("STRIPE_MOCK", false)
 	// HAMR_STRIPE_MOCK_URL is auto-injected by `hamr dev` (derived from
 	// hamr.toml [proxy].listen) so the mock URL tracks proxy port changes
@@ -308,6 +312,9 @@ func main() {
 		))
 		log.Info("stripe SDK pointed at hamr mock", "url", envHamrStripeMockURL)
 	}
+	// One client for everything, built after SetBackend so it inherits the
+	// mock backend. Use its namespaces (V1Transfers, V2CoreAccounts, ...).
+	stripeClient := stripe.NewClient(envStripeKey)
 {{- end}}
 {{- if .IncludeEmailMock}}
 
@@ -324,7 +331,9 @@ func main() {
 	api.RegisterRoutes(srv, &api.Deps{
 		Store: store,
 {{- if .IncludeStripe}}
-		WebhookSecret: envStripeWebhookSecret,
+		WebhookSecret:   envStripeWebhookSecret,
+		WebhookSecretV2: envStripeWebhookSecretV2,
+		StripeClient:    stripeClient,
 {{- end}}
 	})
 

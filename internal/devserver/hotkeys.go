@@ -21,6 +21,8 @@ const (
 	HotkeyRestart
 	// HotkeyTunnelToggle starts or stops the public tunnel ([dev.tunnel]).
 	HotkeyTunnelToggle
+	// HotkeyStripeMode flips [dev.stripe] between the mock and `stripe listen`.
+	HotkeyStripeMode
 )
 
 // HotkeySource emits hotkey actions for the dev runner to consume. The TUI

@@ -183,14 +183,14 @@ func (m *StripeMock) handlePaymentIntentComplete(w http.ResponseWriter, r *http.
 			ch.TransferID = tr.ID
 
 			fires = append(fires,
-				webhookFire{rule.primaryEvt, m.serializePaymentIntent(pi, ch)},
-				webhookFire{"charge.succeeded", m.serializeCharge(ch)},
-				webhookFire{"transfer.created", m.serializeTransfer(tr)},
+				webhookFire{eventType: rule.primaryEvt, object: m.serializePaymentIntent(pi, ch)},
+				webhookFire{eventType: "charge.succeeded", object: m.serializeCharge(ch)},
+				webhookFire{eventType: "transfer.created", object: m.serializeTransfer(tr)},
 			)
 		} else {
 			fires = append(fires,
-				webhookFire{rule.primaryEvt, m.serializePaymentIntent(pi, ch)},
-				webhookFire{"charge.succeeded", m.serializeCharge(ch)},
+				webhookFire{eventType: rule.primaryEvt, object: m.serializePaymentIntent(pi, ch)},
+				webhookFire{eventType: "charge.succeeded", object: m.serializeCharge(ch)},
 			)
 		}
 	} else {
@@ -199,7 +199,7 @@ func (m *StripeMock) handlePaymentIntentComplete(w http.ResponseWriter, r *http.
 		// Mark the PI failed so the dashboard can tell this declined PI apart
 		// from a never-attempted one (both sit at requires_payment_method).
 		pi.Failed = true
-		fires = append(fires, webhookFire{rule.primaryEvt, m.serializePaymentIntent(pi, nil)})
+		fires = append(fires, webhookFire{eventType: rule.primaryEvt, object: m.serializePaymentIntent(pi, nil)})
 	}
 	m.persist()
 	m.mu.Unlock()

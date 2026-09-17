@@ -288,8 +288,10 @@ func TestSpinTick_RunsOnlyWhileBusy(t *testing.T) {
 		t.Fatalf("status = %q, want the current spinner frame", got)
 	}
 
-	// Everything finishes: the next tick ends the chain.
-	m.Update(brokerEventMsg{evt: devserver.SSEEvent{Type: devserver.EvMakeDone, Data: "db-refresh 0"}})
+	// Everything finishes: the next tick ends the chain. The make entry
+	// clears off runFinishedMsg alone, since the bus may drop EvMakeDone
+	// under a flood of output.
+	m.Update(runFinishedMsg{target: "db-refresh"})
 	m.Update(brokerEventMsg{evt: devserver.SSEEvent{Type: devserver.EvBuildOK, Data: "site"}})
 	_, cmd = m.Update(spinTickMsg{})
 	if cmd != nil || m.spinning {

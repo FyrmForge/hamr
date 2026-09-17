@@ -369,7 +369,7 @@ var mcpHabits = []struct{ area, read, write string }{
 		write: "`sms.clear` empties it; `sms.ingest` injects a message."},
 	{area: "stripe",
 		read:  "Never guess at payment state — `stripe.list` reads the mock's objects.",
-		write: "`stripe.complete` / `stripe.expire` / `stripe.refund` drive a payment to an outcome."},
+		write: "`stripe.complete` / `stripe.expire` / `stripe.refund` drive a payment to an outcome. `stripe.mode` switches between the mock and `stripe listen` against a real sandbox; in listen mode the other stripe tools error."},
 	{area: "dev",
 		read:  "`dev.info` reports the running rules, ports (including walked ones), and versions — read it before assuming a port.",
 		write: "When startup-only state goes stale — a port now clashing, an edited `.env`, a container that came up wrong — call `dev.restart` (re-runs the whole startup lifecycle in place). Never start a second dev server. A restart within 5s of the last one is refused — that means it already happened, so read the logs instead of calling again."},

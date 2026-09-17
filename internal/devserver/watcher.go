@@ -151,10 +151,16 @@ func (w *Watcher) loop(ctx context.Context) {
 				}
 			}
 
-			// Skip non-modification events.
-			if !event.Has(fsnotify.Write) && !event.Has(fsnotify.Create) &&
-				!event.Has(fsnotify.Remove) && !event.Has(fsnotify.Rename) {
-				continue
+			// `touch` only updates the timestamp, which arrives as Chmod, and
+			// touching a watched file (e.g. .env) is a deliberate way to rerun
+			// its rule. But chmod/chown arrive as Chmod too without moving the
+			// mtime, and a rule that chmods its own watch set would loop
+			// forever, so a Chmod counts only when the file was just touched.
+			// ponytail: 2s mtime window; track per-file mtimes if it misfires.
+			if event.Op == fsnotify.Chmod {
+				if info, err := os.Stat(event.Name); err != nil || time.Since(info.ModTime()) > 2*time.Second {
+					continue
+				}
 			}
 
 			rel, err := filepath.Rel(w.root, event.Name)

@@ -44,8 +44,11 @@ enabled = true
 {{end -}}
 {{if .IncludeStripe}}
 [dev.stripe]
-enabled = true
+# "mock" runs hamr's Stripe mock; "listen" runs `stripe listen` against your
+# sandbox (STRIPE_KEY in .env). S in the TUI flips between them.
+mode = "mock"
 webhook_url = "http://localhost:8080/api/webhooks/stripe"
+thin_webhook_url = "http://localhost:8080/api/webhooks/stripe/v2"
 webhook_secret = "{{.StripeWebhookSecret}}"
 {{end -}}
 {{if or (ne .Database "sqlite") (eq .StorageBackend "s3")}}

@@ -53,7 +53,7 @@ var mcpAreas = map[string]mcpArea{
 	"mail":   {readTools: []string{"mail.list", "mail.get"}, writeTools: []string{"mail.clear", "mail.ingest"}},
 	"sms":    {readTools: []string{"sms.list", "sms.get"}, writeTools: []string{"sms.clear", "sms.ingest"}},
 	"build":  {writeTools: []string{"rule.run", "rebuild.all", "make.run"}},
-	"stripe": {readTools: []string{"stripe.list"}, writeTools: []string{"stripe.complete", "stripe.expire", "stripe.refund"}},
+	"stripe": {readTools: []string{"stripe.list"}, writeTools: []string{"stripe.complete", "stripe.expire", "stripe.refund", "stripe.mode"}},
 }
 
 // MCPAreaNames returns every configurable [dev.mcp.access] area in a stable

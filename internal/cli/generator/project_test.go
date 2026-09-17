@@ -930,14 +930,21 @@ func TestGenerateProject_stripe(t *testing.T) {
 		"checkout.session.completed",
 		"checkout.session.expired",
 		"checkout.session.async_payment_failed",
-		"account.updated",
 		"payment_intent.succeeded",
 		"payment_intent.payment_failed",
 		"charge.succeeded",
 		"charge.refunded",
 		"transfer.created",
+		"transfer.reversed",
 		"payout.paid",
 		"payout.failed",
+		"charge.dispute.created",
+		"charge.dispute.funds_withdrawn",
+		"charge.dispute.closed",
+		"charge.dispute.funds_reinstated",
+		// v2 thin events, fired when onboarding an Accounts v2 account.
+		"v2.core.account[requirements].updated",
+		"v2.core.account[configuration.recipient].capability_status_updated",
 	} {
 		assert.Contains(t, handlerGo, evt, "scaffolded webhook handler must stub %q (mock fires it)", evt)
 	}
@@ -947,6 +954,8 @@ func TestGenerateProject_stripe(t *testing.T) {
 	assert.Contains(t, serverGo, "stripehandler")
 	assert.Contains(t, serverGo, "WebhookSecret")
 	assert.Contains(t, serverGo, "/webhooks/stripe")
+	assert.Contains(t, serverGo, "/webhooks/stripe/v2", "thin events get their own route")
+	assert.Contains(t, handlerGo, "ParseEventNotification")
 
 	// main.go uses real stripe-go via SetBackend (no pkg/stripemock anymore).
 	mainGo := readFile(t, dir, "cmd/site/main.go")
@@ -955,6 +964,8 @@ func TestGenerateProject_stripe(t *testing.T) {
 	assert.Contains(t, mainGo, "envStripeKey")
 	assert.Contains(t, mainGo, "envHamrStripeMockURL", "main.go must read HAMR_STRIPE_MOCK_URL (hamr-injected, no hardcoded port)")
 	assert.Contains(t, mainGo, "STRIPE_WEBHOOK_SECRET")
+	assert.Contains(t, mainGo, "STRIPE_WEBHOOK_SECRET_V2")
+	assert.Contains(t, mainGo, "stripe.NewClient")
 	assert.Contains(t, mainGo, "STRIPE_MOCK")
 	assert.Contains(t, mainGo, "HAMR_STRIPE_MOCK_URL")
 	assert.Contains(t, mainGo, "stripe.SetBackend")
@@ -981,7 +992,7 @@ func TestGenerateProject_stripe(t *testing.T) {
 	// as .env (the scaffold writes one value to both).
 	hamrToml := readFile(t, dir, "hamr.toml")
 	assert.Contains(t, hamrToml, "[dev.stripe]")
-	assert.Contains(t, hamrToml, "enabled = true")
+	assert.Contains(t, hamrToml, `mode = "mock"`)
 	assert.Contains(t, hamrToml, "webhook_url = \"http://localhost:8080/api/webhooks/stripe\"")
 	// Extract the secret from .env and assert hamr.toml contains the same value.
 	const envPrefix = "STRIPE_WEBHOOK_SECRET="

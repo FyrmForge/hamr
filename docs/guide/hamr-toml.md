@@ -70,7 +70,7 @@ with different values and the config fails to load with
 | `[dev]`                 | `hamr dev`                    | Watch rules, daemons, mocks |
 | `[dev.email]`           | `hamr dev`                    | Mail mock at `/__hamr/mail` |
 | `[dev.sms]`             | `hamr dev`                    | SMS mock at `/__hamr/sms` |
-| `[dev.stripe]`          | `hamr dev`                    | Stripe mock at `/v1/*` + `/__hamr/stripe/*` |
+| `[dev.stripe]`          | `hamr dev`                    | Stripe mock at `/v1/*` + `/__hamr/stripe/*`, or `stripe listen` |
 | `[dev.mcp]`             | `hamr dev` / `hamr mcp`       | MCP gateway for AI agents at `/__hamr/mcp/*` |
 | `[dev.tunnel]`          | `hamr dev`                    | Public tunnel (cloudflared / ngrok) toggled with `T` |
 | `[[dev.docker_compose]]`| `hamr dev`                    | Compose deps lifecycle |
@@ -298,20 +298,60 @@ Pair with `pkg/smsmock` as your `sms.Sender` impl in dev. Requires
 | `persist`      | bool   | `true`                    | Mirror to JSONL file. `false` = in-memory only. |
 | `persist_path` | string | `.hamr/sms/inbox.jsonl`   | JSONL file path. |
 
-### `[dev.stripe]` — Stripe mock
+### `[dev.stripe]` — Stripe mock or `stripe listen`
 
-When `enabled = true`, a Stripe-compatible HTTP backend mounts at `/v1/*`
-and a dashboard at `/__hamr/stripe/*` on the proxy. Apps point real
-`stripe-go` at the proxy URL via `STRIPE_MOCK=true`. Requires `[proxy]`.
-See [`pkg/stripemock`](pkg/stripemock.md).
+`mode` picks how `hamr dev` handles Stripe. Both modes need `[proxy]`.
+
+- **`mock`**: a Stripe-compatible HTTP backend mounts at `/v1/*` and `/v2/*`,
+  and a dashboard at `/__hamr/stripe/*` on the proxy. Apps point real
+  `stripe-go` at the proxy URL via `STRIPE_MOCK=true`. See
+  [`pkg/stripemock`](pkg/stripemock.md).
+- **`listen`**: `hamr dev` runs `stripe listen` against your sandbox, using
+  `STRIPE_KEY` from `.env`, and forwards to the URLs below. The app talks to
+  api.stripe.com. Needs the [Stripe CLI](https://docs.stripe.com/stripe-cli)
+  on `PATH`. Live keys (`sk_live_`, `rk_live_`) are refused.
+
+Press `S` to flip between them at runtime. `dev.stripe.enabled` was replaced
+by `mode`; a config that still sets it fails to load.
 
 | Field            | Type   | Default                     | Notes |
 |------------------|--------|-----------------------------|-------|
-| `enabled`        | bool   | `false`                     | |
-| `webhook_url`    | string | (required when enabled)     | Where to POST signed events, e.g. `http://localhost:8080/api/webhooks/stripe`. |
-| `webhook_secret` | string | (required when enabled)     | Must equal the app's `STRIPE_WEBHOOK_SECRET`. |
-| `persist`        | bool   | `true`                      | Persist state across `hamr dev` restarts. |
-| `persist_path`   | string | `.hamr/stripe/state.json`   | State file path. |
+| `mode`           | string | `"off"`                     | `"off"`, `"mock"` or `"listen"`. |
+| `webhook_url`    | string | (required unless off)       | Where signed v1 snapshot events go, e.g. `http://localhost:8080/api/webhooks/stripe`. |
+| `thin_webhook_url` | string | empty                     | Where v2 thin events (Accounts v2 changes) go, e.g. `http://localhost:8080/api/webhooks/stripe/v2`. Empty = thin events are not delivered. |
+| `connect_webhook_url` | string | empty                  | Events on a connected account. Empty = `webhook_url`. |
+| `thin_connect_webhook_url` | string | empty             | Thin events on a connected account. Empty = `thin_webhook_url`. |
+| `thin_events`    | list   | the two `v2.core.account[...]` events | Thin events `stripe listen` forwards (it has no default). |
+| `webhook_secret` | string | (required unless off)       | The mock's signing secret. Also used in listen mode if the listener can't start and hamr falls back to the mock. |
+| `persist`        | bool   | `true`                      | Mock only. Persist state across `hamr dev` restarts. |
+| `persist_path`   | string | `.hamr/stripe/state.json`   | Mock only. State file path. |
+
+All four URLs follow the app's port when `hamr dev` walks to a free one.
+
+**Env injected into your app** (overrides `.env`, like the port-walk rewrites):
+
+| Var | mock | listen |
+|---|---|---|
+| `STRIPE_MOCK` | `true` | `false` |
+| `STRIPE_KEY` | not injected | from `.env` (what the listener uses) |
+| `STRIPE_WEBHOOK_SECRET`, `_V2`, `_CONNECT`, `_V2_CONNECT` | `webhook_secret` | the secret `stripe listen` prints |
+| `HAMR_STRIPE_MOCK_URL` | proxy URL | proxy URL |
+
+Locally one secret signs every kind of event, so all four secret vars hold the
+same value.
+
+**On `S` (or at boot with `mode = "listen"`):** hamr starts `stripe listen`
+with the key in its environment (not on the command line), waits up to 30s
+for the signing secret, injects the env and restarts your running apps. If it
+fails (no CLI, bad key, no secret), a flip leaves the current mode running and
+boot falls back to the mock; the log says why. If `stripe listen` exits on its
+own, hamr switches back to the mock. Changing `STRIPE_KEY` in `.env` while
+listening restarts the listener. Your app restarts on the `.env` edit with the
+new key straight away, then once more when the new listener's secret is in.
+
+In listen mode the mock's dashboards and state stay up, but it won't deliver
+webhooks (the app holds the listener's secret, so they'd fail verification)
+and the MCP `stripe.*` tools error — except `stripe.mode`.
 
 ### `[dev.mcp]` — MCP gateway for AI agents
 
@@ -339,7 +379,7 @@ See [`hamr mcp`](cli.md) and the security notes below.
 | `mail`   | `mail.list`, `mail.get`       | `mail.clear`, `mail.ingest`           |
 | `sms`    | `sms.list`, `sms.get`         | `sms.clear`, `sms.ingest`             |
 | `build`  | — (write-only)                | `rule.run`, `rebuild.all`, `make.run` |
-| `stripe` | `stripe.list`                 | `stripe.complete`, `stripe.expire`, `stripe.refund` |
+| `stripe` | `stripe.list`                 | `stripe.complete`, `stripe.expire`, `stripe.refund`, `stripe.mode` |
 
 ```toml
 [dev.mcp]
@@ -414,9 +454,10 @@ replaces the localhost URL in the status bar and `o` opens it.
 
 **Security.** The tunnel serves the same proxy — live reload, error pages, and
 the mail/SMS/Stripe mocks all work through it — on its own listener that
-refuses the routes which run commands, leak logs, or accept log lines:
-`/__hamr/rule/*`, `/__hamr/docker/*`, `/__hamr/mcp/*`, `/__hamr/logs`, and
-`/__hamr/console` (403). Process output is withheld too: the live-reload stream
+allows only `/__hamr/reload`, `/__hamr/logo.png`, `/__hamr/mail/*`,
+`/__hamr/sms/*` and `/__hamr/stripe/*`. Every other `/__hamr/*` route returns
+403: the ones that run commands, leak logs, accept log lines or flip the dark
+filter for every open browser, and any route added later. Process output is withheld too: the live-reload stream
 sends tunnel visitors no `output` lines, a config with rule/daemon/stack names
 only (no commands, globs or files), and build errors without their output; the
 build error page names the failing rule but hides its output. Everything else
@@ -424,7 +465,8 @@ is public to anyone holding the URL, with no password: your app, the mock
 inboxes, and the Stripe mock API at `/v1/*`. Turn it off when you're done.
 
 Anyone you share the URL with also gets the injected hamr dev overlay (so rule
-and compose-stack names are visible); its rebuild/docker buttons return 403.
+and compose-stack names are visible); its rebuild, docker and dark-filter buttons
+return 403.
 
 An ngrok fixed domain is per-developer: put `[dev.tunnel]` in
 `.pref.hamr.toml` rather than the committed `hamr.toml`.
@@ -460,6 +502,10 @@ Long-running processes started once at launch. No file watching, no restart.
 
 Each rule watches files, runs `cmd` on change, and optionally keeps `run`
 alive between builds. Rules can depend on each other to form a build graph.
+Any write, create, delete or rename counts as a change, and so does a
+timestamp-only one: `touch .env` reruns a rule that watches `.env`. A
+`chmod` or `chown` that leaves the timestamp alone does not, so a rule can
+`chmod +x` files in its own watch set without retriggering itself.
 
 | Field      | Type            | Default | Notes |
 |------------|-----------------|---------|-------|
