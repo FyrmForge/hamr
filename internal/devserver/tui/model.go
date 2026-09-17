@@ -1393,7 +1393,7 @@ func (m *Model) activate(label string) {
 }
 
 // deactivate removes a work label. Unknown labels are ignored — a finish
-// event whose start was dropped (the subscriber channel drops when full)
+// event whose start was dropped (a full subscriber channel can still evict)
 // must not corrupt the rest of the list.
 func (m *Model) deactivate(label string) {
 	if i := slices.Index(m.active, label); i >= 0 {

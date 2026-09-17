@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"sync"
 	"sync/atomic"
 )
@@ -85,9 +86,27 @@ type sseConfig struct {
 }
 
 // SSEBroker manages SSE client connections and broadcasts events.
+// sseClient is one subscriber: its buffered channel plus the event types it
+// does not want. Exclusions exist because the 16-slot buffer is shared by
+// rare lifecycle events (building, build_ok) and per-line process output; a
+// consumer that only renders lifecycle state would otherwise lose a build_ok
+// in an output burst and show that build as running forever.
+type sseClient struct {
+	ch      chan SSEEvent
+	exclude []string
+	// send serializes delivery to this client. Broadcast runs under a read
+	// lock, so several goroutines send concurrently — one logWriter per
+	// running process, plus builds, compose and make. Without this, the
+	// evict and the retry in Broadcast are two separate steps and another
+	// sender can take the freed slot in between, losing both the evicted
+	// event and the one that evicted it. Only non-blocking channel
+	// operations run under it.
+	send sync.Mutex
+}
+
 type SSEBroker struct {
 	mu         sync.RWMutex
-	clients    map[uint64]chan SSEEvent
+	clients    map[uint64]*sseClient
 	nextID     atomic.Uint64
 	configJSON string // pre-serialized config payload
 	// tunnelConfigJSON is configJSON for tunnel visitors: names and mock
@@ -160,7 +179,7 @@ func NewSSEBroker(rules []WatchRule, daemons []Daemon, dockerCompose []DockerCom
 	pubData, _ := json.Marshal(pub)
 
 	b := &SSEBroker{
-		clients:          make(map[uint64]chan SSEEvent),
+		clients:          make(map[uint64]*sseClient),
 		configJSON:       string(data),
 		tunnelConfigJSON: string(pubData),
 	}
@@ -231,9 +250,16 @@ func onOff(v bool) string {
 }
 
 // Subscribe registers a consumer and returns its event channel plus a cancel
-// func that removes and closes it. The channel is buffered (16) and events are
-// dropped for a slow consumer, exactly as for HTTP clients — a stalled TUI must
-// not wedge a build.
+// func that removes and closes it. The channel is buffered (16) and a full
+// buffer never blocks the sender, exactly as for HTTP clients — a stalled TUI
+// must not wedge a build. See Broadcast for what a full buffer costs.
+//
+// exclude names event types this consumer never wants, skipped before they can
+// take a buffer slot. Since the buffer is a shared budget between rare state
+// events and per-line EvOutput, a consumer that reads output elsewhere should
+// exclude EvOutput so its buffer holds only what it renders. Broadcast's
+// eviction already keeps state events from being lost, so this is a way to
+// stop carrying traffic the consumer discards, not a correctness requirement.
 //
 // In-process consumers (the TUI runtime) use this directly; Handler uses it for
 // each browser connection. Cancel is idempotent and must be called, or the
@@ -241,12 +267,12 @@ func onOff(v bool) string {
 //
 // Closing under the write lock is safe: Broadcast sends while holding the read
 // lock, so no send can be in flight when the close happens.
-func (b *SSEBroker) Subscribe() (<-chan SSEEvent, func()) {
+func (b *SSEBroker) Subscribe(exclude ...string) (<-chan SSEEvent, func()) {
 	id := b.nextID.Add(1)
 	ch := make(chan SSEEvent, 16)
 
 	b.mu.Lock()
-	b.clients[id] = ch
+	b.clients[id] = &sseClient{ch: ch, exclude: exclude}
 	b.mu.Unlock()
 
 	var once sync.Once
@@ -260,20 +286,69 @@ func (b *SSEBroker) Subscribe() (<-chan SSEEvent, func()) {
 	}
 }
 
-// Broadcast sends an event to all connected clients. Non-blocking: if a
-// client's buffer is full, the event is dropped for that client.
+// Broadcast sends an event to all connected clients. Non-blocking: a slow
+// consumer never wedges the caller, which is usually a build goroutine.
+//
+// On a full buffer the event is dropped, except for the state-change events
+// evictable reports: those evict the oldest queued event to make room. A
+// consumer that misses "output" loses one log line it can read from the log
+// buffer; one that misses "build_ok" shows that build as running until
+// something else resets it, so the two cannot share a drop policy.
 func (b *SSEBroker) Broadcast(evt SSEEvent) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
-	for _, ch := range b.clients {
-		select {
-		case ch <- evt:
-		default:
-			// Client buffer full, drop event.
+	for _, c := range b.clients {
+		if slices.Contains(c.exclude, evt.Type) {
+			continue
 		}
+		c.deliver(evt)
 	}
 }
+
+// deliver posts one event to a single client, applying the drop-vs-evict
+// policy. Held under the client's send mutex so no other sender can take a
+// slot this call frees; every operation inside is non-blocking, so a stalled
+// consumer still can't wedge the caller.
+func (c *sseClient) deliver(evt SSEEvent) {
+	c.send.Lock()
+	defer c.send.Unlock()
+
+	if trySend(c.ch, evt) {
+		return
+	}
+	if !evictable(evt.Type) {
+		return // droppable and the buffer is full: drop it.
+	}
+	// Make room. The consumer may also have drained since the send above, so
+	// this can take a slot that was already free.
+	//
+	// ponytail: evicts the oldest event, which is an older state event if the
+	// buffer holds nothing else — a consumer stalled for 16 straight state
+	// events loses the oldest. In practice output is what fills the buffer.
+	// A mutex-guarded ring buffer instead of a channel if that changes.
+	select {
+	case <-c.ch:
+	default:
+	}
+	trySend(c.ch, evt)
+}
+
+// trySend posts evt without blocking, reporting whether it fit.
+func trySend(ch chan SSEEvent, evt SSEEvent) bool {
+	select {
+	case ch <- evt:
+		return true
+	default:
+		return false
+	}
+}
+
+// evictable reports whether an event may push an older one out of a full
+// buffer. True for every event carrying state a consumer renders until told
+// otherwise; false for EvOutput, the only per-line, high-volume type, which
+// is what fills the buffer in the first place.
+func evictable(evtType string) bool { return evtType != EvOutput }
 
 // ClientCount returns the number of connected SSE clients.
 func (b *SSEBroker) ClientCount() int {

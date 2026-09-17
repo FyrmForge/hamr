@@ -1101,9 +1101,6 @@ func (r *Runner) handleEvent(ctx context.Context, evt FileEvent, graph *Graph, p
 	rule := evt.Rule
 	r.logger.Info("change detected", "rule", rule.Name, "path", evt.Path)
 
-	// Notify the browser that a build is starting.
-	broker.Broadcast(SSEEvent{Type: EvBuilding, Data: rule.Name})
-
 	// Mark this rule as running so dependees block.
 	graph.MarkRunning(rule.Name)
 	defer graph.MarkDone(rule.Name)
@@ -1116,6 +1113,11 @@ func (r *Runner) handleEvent(ctx context.Context, evt FileEvent, graph *Graph, p
 
 	// Run the build command.
 	if rule.Cmd != "" {
+		// Notify the browser and the TUI that a build is starting. Broadcast
+		// here, not on entry: a run-only rule has no build to finish, and a
+		// cancelled dep wait returns above, so either would open an entry
+		// nothing ever closes and leave it spinning.
+		broker.Broadcast(SSEEvent{Type: EvBuilding, Data: rule.Name})
 		if output, err := pm.RunCommand(ctx, rule); err != nil {
 			r.logger.Error("build failed", "rule", rule.Name, "err", err)
 			errorState.Set(rule.Name, output)

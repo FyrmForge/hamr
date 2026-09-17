@@ -44,6 +44,28 @@ Anything that changes inside the dev server is broadcast on `SSEBroker` as a
 typed event. Consumers subscribe: the browser over HTTP via `Handler()`, the
 TUI in-process via `Subscribe()`. Both get the same events from the same place.
 
+Each subscriber gets its own 16-slot buffer and a full buffer never blocks the
+caller, so a stalled consumer can never wedge a build. That makes the buffer a
+shared budget between rare state events and per-line `EvOutput`, and a rebuild
+emits output by the hundred, so the naive policy loses whichever event arrives
+into a full buffer — including the `build_ok` that clears a build from the
+status bar.
+
+Two rules resolve it. `Broadcast` drops `EvOutput` on a full buffer but lets
+every other event evict the oldest entry to make room. The asymmetry is about
+what a loss costs, not about what is recoverable: a dropped log line costs one
+line of scrollback, while a dropped `build_ok` leaves a build showing as
+running until something else resets that consumer. Eviction is per client and
+serialized by a mutex on the client — `Broadcast` runs under a read lock, so
+several goroutines send at once and an unguarded evict-then-retry lets another
+sender take the freed slot, losing both events.
+
+On top of that, `Subscribe()` takes event types to exclude, so a consumer
+reading output elsewhere need not carry it at all — the TUI passes `EvOutput`,
+since process lines reach its viewport through the `ProcessManager` sinks. The
+browser panel renders the log overlay and so keeps output; eviction is what
+protects it.
+
 New state means a new event constant in `sse.go` and a `case` in each consumer
 that cares. It does not mean a new `WithXHook` option.
 

@@ -383,3 +383,119 @@ func TestSSEBroker_SubscribeDropsWhenFull(t *testing.T) {
 		t.Fatal("Broadcast blocked on a full in-process subscriber")
 	}
 }
+
+// TestSSEBroker_SubscribeExcludeKeepsLifecycle reproduces the stuck status-bar
+// spinner: a restart floods the bus with process output, and on an unfiltered
+// subscription that burst overflows the 16-slot buffer and drops the build_ok
+// that clears "building site". Excluding output must keep the lifecycle event.
+func TestSSEBroker_SubscribeExcludeKeepsLifecycle(t *testing.T) {
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
+	events, cancel := broker.Subscribe(EvOutput)
+	defer cancel()
+
+	for range 100 { // buffer is 16
+		broker.Broadcast(outputEvent("site", "janitor: task completed", ""))
+	}
+	broker.Broadcast(SSEEvent{Type: EvBuildOK, Data: "site"})
+
+	select {
+	case evt := <-events:
+		assert.Equal(t, EvBuildOK, evt.Type, "output must not reach a subscriber that excluded it")
+		assert.Equal(t, "site", evt.Data)
+	default:
+		t.Fatal("build_ok dropped: the status bar would spin forever")
+	}
+}
+
+// TestSSEBroker_BroadcastEvictsForStateEvents covers the consumer that cannot
+// use the exclusion: the browser dev panel renders the log overlay, so it must
+// keep EvOutput and its buffer fills during a rebuild. A build_ok arriving then
+// has to evict rather than be dropped, or the panel's dot spins until something
+// else resets it — and a rule with reload "none" never sends that reset.
+func TestSSEBroker_BroadcastEvictsForStateEvents(t *testing.T) {
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
+	events, cancel := broker.Subscribe() // no exclusion, like the browser
+	defer cancel()
+
+	for range 100 { // buffer is 16
+		broker.Broadcast(outputEvent("site", "janitor: task completed", ""))
+	}
+	broker.Broadcast(SSEEvent{Type: EvBuildOK, Data: "site"})
+
+	var got []SSEEvent
+	for len(events) > 0 {
+		got = append(got, <-events)
+	}
+	require.NotEmpty(t, got)
+	last := got[len(got)-1]
+	assert.Equal(t, EvBuildOK, last.Type, "build_ok must survive a full buffer")
+	assert.Equal(t, "site", last.Data)
+	assert.Len(t, got, 16, "eviction must not grow the buffer")
+}
+
+// TestSSEBroker_BroadcastDropsOutputWhenFull is the other half of the policy:
+// output stays droppable, so a log burst cannot push state events out.
+func TestSSEBroker_BroadcastDropsOutputWhenFull(t *testing.T) {
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
+	events, cancel := broker.Subscribe()
+	defer cancel()
+
+	broker.Broadcast(SSEEvent{Type: EvBuilding, Data: "site"})
+	for range 100 {
+		broker.Broadcast(outputEvent("site", "line", ""))
+	}
+
+	first := <-events
+	assert.Equal(t, EvBuilding, first.Type, "output must not evict a queued state event")
+}
+
+// TestSSEBroker_BroadcastConcurrentEvictKeepsStateEvent covers the shape the
+// dev server actually runs: several logWriter goroutines flood the bus while
+// builds report results. Broadcast holds only a read lock, so the evict and
+// the retry in deliver must be serialized per client — otherwise a flooder
+// takes the slot an evict just freed, and the state event is lost after
+// destroying an older one, which is worse than dropping it outright.
+//
+// The buffer is prefilled with output and never drained, and far fewer state
+// events are sent than the buffer holds. Channels are FIFO, so every eviction
+// takes an output line and no state event can displace another: with delivery
+// serialized, all of them must be present at the end.
+func TestSSEBroker_BroadcastConcurrentEvictKeepsStateEvent(t *testing.T) {
+	const (
+		states  = 8
+		writers = 4
+		lines   = 2000 // per writer, to keep hitting the full buffer
+	)
+
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
+	events, cancel := broker.Subscribe()
+	defer cancel()
+
+	for range 16 { // fill the buffer, so every send below finds it full
+		broker.Broadcast(outputEvent("site", "prefill", ""))
+	}
+
+	var wg sync.WaitGroup
+	for range writers {
+		wg.Go(func() {
+			for range lines {
+				broker.Broadcast(outputEvent("site", "line", ""))
+			}
+		})
+	}
+	for range states {
+		wg.Go(func() {
+			broker.Broadcast(SSEEvent{Type: EvBuildOK, Data: "site"})
+		})
+	}
+	wg.Wait()
+
+	var seen int
+	for len(events) > 0 {
+		if (<-events).Type == EvBuildOK {
+			seen++
+		}
+	}
+	assert.Equal(t, states, seen,
+		"state events lost to a concurrent output burst: evict and retry must be atomic per client")
+}

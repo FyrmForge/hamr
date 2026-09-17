@@ -112,7 +112,12 @@ func (r *Runtime) onActions(a *devserver.DevActions) {
 	if r.unsubscribe != nil {
 		r.unsubscribe()
 	}
-	events, cancel := a.Broker().Subscribe()
+	// Output is excluded: process log lines reach the viewport through the
+	// process manager's sinks (WithLogWriter / SetOutputSinks), not the bus.
+	// Leaving them on this subscription let a restart's log burst overflow the
+	// 16-slot buffer and drop the build_ok that clears the status bar, so a
+	// finished build sat there spinning.
+	events, cancel := a.Broker().Subscribe(devserver.EvOutput)
 	r.unsubscribe = cancel
 	go func() {
 		// Ends when cancel closes the channel, i.e. on the next restart or

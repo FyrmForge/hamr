@@ -3328,6 +3328,19 @@ The dev server has exactly one event stream — `SSEBroker` in
 `internal/devserver/sse.go` — and every consumer subscribes to it: the
 browser dev panel over HTTP (`Handler()`), the TUI in-process
 (`Subscribe()`, which returns a buffered channel and a cancel func).
+Each subscriber's buffer holds 16 events and never blocks the sender, so
+a rebuild's output burst would otherwise discard the state events a
+status bar needs and strand a finished build as still running. Two rules
+prevent that. `Broadcast` drops `EvOutput` on a full buffer but lets any
+other event evict the oldest entry to make room — a lost log line costs
+one line of scrollback, a lost `build_ok` leaves a build showing as
+running. Eviction is serialized per client by a mutex, since `Broadcast`
+runs under a read lock and an unguarded evict-then-retry lets a
+concurrent sender take the freed slot. And
+`Subscribe(exclude ...string)` takes event types to leave out: the TUI
+passes `EvOutput`, since process output reaches its viewport through the
+`ProcessManager` sinks, not the bus. The browser panel renders the log
+overlay, so it keeps output and relies on eviction.
 Events are typed constants (`EvBuilding`, `EvBuildOK`, `EvBuildError`,
 `EvOutput`, `EvReload`, `EvShutdown`, `EvDarkFilter`, `EvRestarting`,
 `EvMakeStart`, `EvMakeDone`, `EvComposeUp`, `EvComposeOK`,

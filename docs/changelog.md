@@ -80,6 +80,14 @@ the TL;DR on top of it.
 
 ### Fixes
 
+- **Builds no longer show as running after they finish.** A rebuild that
+  produced a burst of log lines could discard the event that clears the build,
+  leaving the `hamr dev` status bar and the browser panel's dot spinning on
+  work that had already finished. The browser case persisted until the next
+  page reload, so a rule with `reload = "none"` stayed stuck for the session.
+  Rules that only run a process, and builds cancelled while waiting on a
+  dependency, could leave the same stuck entry.
+
 - **hamr reads common `.env` lines the way your app does.** `hamr dev` and
   `hamr sync` had three separate `.env` parsers that disagreed with godotenv and
   each other. A
