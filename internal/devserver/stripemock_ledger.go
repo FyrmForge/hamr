@@ -154,7 +154,7 @@ func (m *StripeMock) disputeEntries(acct string) []ledgerEntry {
 			Source: dp.ID, Currency: dp.Currency, Amount: -dp.Amount, Fee: disputeFee})
 		if dp.Status == "won" {
 			out = append(out, ledgerEntry{Created: dp.ClosedAt, Type: "adjustment", Description: "Chargeback reversal for " + dp.ChargeID,
-				Source: dp.ID, Currency: dp.Currency, Amount: dp.Amount, Fee: -disputeFee})
+				Source: dp.ID, Currency: dp.Currency, Amount: dp.Amount})
 		}
 	}
 	return out

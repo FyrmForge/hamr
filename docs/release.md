@@ -28,6 +28,7 @@ Prefixes that **do not** trigger a release:
 3. It analyzes commit messages since the last tag to determine the bump
 4. If a bump is needed, it creates a git tag and GitHub release
 5. Cross-platform binaries are built with the version baked in via ldflags
+6. A multi-arch image (linux/amd64 + arm64) is pushed to `ghcr.io/fyrmforge/hamr` as `v<version>` and `latest`; it runs `hamr mock-serve` by default. The GHCR package was created private on its first push and must be made public once in the package settings.
 
 ## Dev Builds
 

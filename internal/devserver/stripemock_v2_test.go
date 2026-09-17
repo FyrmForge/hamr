@@ -540,7 +540,7 @@ func TestStripeMock_Dispute_OpenAndCloseWon(t *testing.T) {
 	assert.Equal(t, int64(disputeFee), created.BalanceTransactions[0].Fee)
 	assert.Equal(t, stripe.DisputeStatusWon, closed.Status)
 	require.Len(t, closed.BalanceTransactions, 2)
-	assert.Equal(t, int64(0), closed.BalanceTransactions[0].Fee+closed.BalanceTransactions[1].Fee, "a won dispute returns the fee")
+	assert.Equal(t, int64(disputeFee), closed.BalanceTransactions[0].Fee+closed.BalanceTransactions[1].Fee, "a won dispute keeps the fee")
 }
 
 func TestStripeMock_EventLog_ResendReplaysSameEventID(t *testing.T) {

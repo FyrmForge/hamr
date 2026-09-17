@@ -9,30 +9,18 @@ want the mocks on a long-lived service that other containers talk to directly.
 
 ## Quick Start
 
-**1. Build an image with `hamr` on PATH.**
+**1. Pick the image.**
 
-A minimal Dockerfile:
-
-```dockerfile
-FROM golang:1.24-alpine AS build
-WORKDIR /src
-COPY . .
-RUN go build -o /usr/local/bin/hamr ./cmd/hamr
-
-FROM alpine:3.21
-COPY --from=build /usr/local/bin/hamr /usr/local/bin/hamr
-ENTRYPOINT ["hamr"]
-```
+Each hamr release publishes `ghcr.io/fyrmforge/hamr:<version>` (and `:latest`)
+for linux/amd64 and linux/arm64. Its default command is `hamr mock-serve`.
+Pin the exact version so the mocks only change when you bump it.
 
 **2. Add a `mocks` service to `docker-compose.yml`.**
 
 ```yaml
 services:
   mocks:
-    build:
-      context: .
-      dockerfile: Dockerfile.hamr
-    command: ["mock", "serve"]
+    image: ghcr.io/fyrmforge/hamr:v0.38.0
     environment:
       HAMR_MOCKS: "mail,sms,stripe"
       HAMR_MOCK_PORT: "4500"

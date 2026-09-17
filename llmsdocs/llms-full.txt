@@ -131,6 +131,9 @@
   and `[proxy]` configured (the gateway lives on the proxy mux).
 - **hamr mock-serve**: Runs the dev mocks (mail, sms, stripe) standalone — no proxy,
   TUI, build, or watch — built for a dedicated container in a dev environment.
+  Each release publishes the image `ghcr.io/fyrmforge/hamr:v<version>` (+ `:latest`,
+  linux/amd64 + arm64) with `mock-serve` as its default command — use `image:` in compose
+  rather than building hamr from source.
   Unlike the mocks embedded in `hamr dev` (which mount on the proxy mux and read
   `[dev.email]`/`[dev.sms]`/`[dev.stripe]` from hamr.toml), this command depends on no config
   file: selection and all tuning come from env vars. `HAMR_MOCKS` (csv, required,
@@ -2483,9 +2486,10 @@ ApplicationFeeRefund as a distinct resource.
 - `GET /v1/balance_transactions/{id}` — ids are derived, not stored:
   `txn_<charge id>` → type `charge`, fee `stripeFee(amount_captured)`
   (1.5% + 20 for gbp/eur, 2.9% + 30 otherwise); `txn_<dispute id>_withdrawal`
-  → `adjustment`/`dispute`, amount −disputed, fee 1500;
+  → `adjustment`/`dispute`, amount −disputed, fee 2000;
   `txn_<dispute id>_reinstatement` (won disputes only) → amount +disputed,
-  fee −1500. `net = amount − fee`, `fee_details[0].type = stripe_fee`.
+  fee 0 (the dispute fee is never returned). `net = amount − fee`,
+  `fee_details[0].type = stripe_fee` (empty when fee is 0).
 - `GET`/`POST /v1/balance_settings` — scoped by `Stripe-Account` ("" =
   platform; unknown account → 404). Stores `payments.debit_negative_balances`,
   `payments.settlement_timing.delay_days`, and
@@ -2755,8 +2759,8 @@ POST → 405). The control page links to them.
   and outstanding requirements. Unknown account → 404.
 - Ledgers (`stripemock_ledger.go`) are derived from stored objects on every
   read. Platform: charges (+captured, fee `stripeFee`), refunds, transfers
-  (−), reversals (+), dispute withdrawal (−amount, fee 1500) and reversal
-  when won, platform payouts; direct charges (PI with `Stripe-Account`)
+  (−), reversals (+), dispute withdrawal (−amount, fee 2000) and reversal
+  when won (+amount, fee 0), platform payouts; direct charges (PI with `Stripe-Account`)
   count on the connected account, with only the application fee on the
   platform. Connected: transfers in (payment), reversals (payment_refund),
   direct charges (fee = Stripe fee + application fee), their refunds,

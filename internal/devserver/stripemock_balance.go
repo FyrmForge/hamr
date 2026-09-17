@@ -33,9 +33,12 @@ func stripeFee(amount int64, currency string) int64 {
 	}
 }
 
-// disputeFee is what Stripe charges for handling a chargeback. ponytail: one
-// flat amount in the currency's minor unit; Stripe's varies by country.
-const disputeFee = 1500
+// disputeFee is what Stripe charges for receiving a chargeback. It is never
+// returned, even when the dispute is won. ponytail: one flat amount in the
+// currency's minor unit; Stripe's varies by country, and the separate
+// "countered" fee (charged on submitting evidence, returned on a win) is not
+// modelled because the mock has no evidence step.
+const disputeFee = 2000
 
 // Balance transaction ids are derived from the object that moved the money,
 // so they need no storage of their own and exist for charges persisted
@@ -72,12 +75,16 @@ func (m *StripeMock) balanceTransactionLocked(id string) map[string]any {
 		return serializeBalanceTxn(id, dp.ID, "adjustment", "dispute", -dp.Amount, disputeFee, dp.Currency, dp.Created, "Dispute fee")
 	}
 	if dp, ok := m.disputes[strings.TrimSuffix(rest, "_reinstatement")]; ok && strings.HasSuffix(rest, "_reinstatement") && dp.Status == "won" {
-		return serializeBalanceTxn(id, dp.ID, "adjustment", "dispute_reversal", dp.Amount, -disputeFee, dp.Currency, dp.ClosedAt, "Dispute fee refund")
+		return serializeBalanceTxn(id, dp.ID, "adjustment", "dispute_reversal", dp.Amount, 0, dp.Currency, dp.ClosedAt, "")
 	}
 	return nil
 }
 
 func serializeBalanceTxn(id, source, typ, category string, amount, fee int64, currency string, created time.Time, feeDesc string) map[string]any {
+	feeDetails := []map[string]any{}
+	if fee != 0 {
+		feeDetails = append(feeDetails, map[string]any{"amount": fee, "currency": currency, "type": "stripe_fee", "description": feeDesc})
+	}
 	return map[string]any{
 		"id":                 id,
 		"object":             "balance_transaction",
@@ -91,9 +98,7 @@ func serializeBalanceTxn(id, source, typ, category string, amount, fee int64, cu
 		"type":               typ,
 		"reporting_category": category,
 		"source":             source,
-		"fee_details": []map[string]any{{
-			"amount": fee, "currency": currency, "type": "stripe_fee", "description": feeDesc,
-		}},
+		"fee_details": feeDetails,
 	}
 }
 

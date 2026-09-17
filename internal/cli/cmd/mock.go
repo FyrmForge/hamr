@@ -31,6 +31,7 @@ configuration comes from environment variables:
 
   HAMR_STRIPE_BASE_URL         browser-reachable origin of the mock UI (required for stripe)
   HAMR_STRIPE_WEBHOOK_URL      app's webhook handler (required for stripe)
+  HAMR_STRIPE_THIN_WEBHOOK_URL app's v2 thin-event handler; empty → thin events are not sent
   HAMR_STRIPE_WEBHOOK_SECRET   matches the app's STRIPE_WEBHOOK_SECRET (required for stripe)
   HAMR_STRIPE_PERSIST_PATH     state JSON path; empty → in-memory only`,
 	Args: cobra.NoArgs,

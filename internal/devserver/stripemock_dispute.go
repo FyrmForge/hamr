@@ -109,7 +109,7 @@ func (m *StripeMock) openDispute(piID string) (*stripeDispute, error) {
 	return dp, nil
 }
 
-// closeDispute settles an open dispute. Won returns the money and the fee
+// closeDispute settles an open dispute. Won returns the money but not the fee
 // (charge.dispute.funds_reinstated); lost keeps both withdrawn.
 func (m *StripeMock) closeDispute(id, outcome string) error {
 	if outcome != "won" && outcome != "lost" {

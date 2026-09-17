@@ -119,6 +119,8 @@ hamr mock-serve
 
 Runs the dev mocks (mail, sms, stripe) standalone — no proxy, TUI, build, or watch — for running in a dedicated container in a dev environment. Unlike the mocks embedded in `hamr dev` (which live on the proxy mux and read `hamr.toml`), this command is configured entirely through environment variables and depends on no config file.
 
+Each release publishes it as an image, `ghcr.io/fyrmforge/hamr:<version>` (and `:latest`, linux/amd64 + arm64), whose default command is `hamr mock-serve`. See [Deploying Mocks](pkg/mock-serve.md).
+
 Two listeners:
 
 - **app-facing** (`HAMR_MOCK_PORT`): the surface your app talks to — stripe `/v1/*` API and the mail/SMS ingest sinks.

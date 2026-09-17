@@ -80,8 +80,8 @@ func TestStripeMock_Ledger_Balances(t *testing.T) {
 	defer mock.mu.RUnlock()
 	fee := stripeFee(10000, "gbp")
 	// Platform: charge 10000 - fee, transfer -8000, reversal +1000, dispute
-	// withdrawn and returned (won) nets to zero.
-	assert.Equal(t, map[string]int64{"gbp": 10000 - fee - 8000 + 1000}, balanceOf(mock.platformLedger()))
+	// withdrawn and returned (won) costs only the dispute fee.
+	assert.Equal(t, map[string]int64{"gbp": 10000 - fee - 8000 + 1000 - disputeFee}, balanceOf(mock.platformLedger()))
 	// Seller: 8000 in, 1000 reversed, 7000 paid out.
 	assert.Equal(t, map[string]int64{"gbp": 0}, mock.connectedBalance(acctID))
 }

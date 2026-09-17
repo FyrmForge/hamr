@@ -152,6 +152,14 @@ the TL;DR on top of it.
 
 ### Features
 
+- **hamr mock image.** Each release now publishes
+  `ghcr.io/fyrmforge/hamr:<version>` and `:latest` for linux/amd64 and arm64.
+  It runs `hamr mock-serve` by default, so a compose stack can use
+  `image: ghcr.io/fyrmforge/hamr:v0.38.0` instead of building hamr from source.
+  The Stripe mock's dispute fee is now 2000 (was 1500) and, as in real
+  Stripe, a won dispute no longer returns it. The mock-serve guide
+  used a `mock serve` command that doesn't exist; it now shows the image.
+
 - **Stripe listen mode for `hamr dev`.** Press `S` to swap the Stripe mock for
   `stripe listen` against your real sandbox, and back. hamr runs the Stripe CLI
   with `STRIPE_KEY` from `.env`, forwards to your webhook URLs (thin events and

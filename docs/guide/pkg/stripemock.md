@@ -260,8 +260,9 @@ still recorded in the event log, but not sent.
 - **Close: won** fires `charge.dispute.closed` +
   `charge.dispute.funds_reinstated`; **Close: lost** fires
   `charge.dispute.closed`.
-- `balance_transactions` on the dispute carry the fee: 1500 withdrawn, and
-  a second entry returning it when won.
+- `balance_transactions` on the dispute carry the fee: 2000 withdrawn. A won
+  dispute adds a second entry returning the money with fee 0 — the dispute
+  fee is never returned, as in real Stripe.
 
 **Payouts (Connect-aware)**
 - `POST /v1/payouts` — create a manually-triggered payout in `pending`
