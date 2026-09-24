@@ -47,6 +47,7 @@ func init() {
 	addServiceCmd.Flags().Bool("auth", false, "wire session auth middleware (api/html; requires --db and a project with auth)")
 	addServiceCmd.Flags().Bool("locale", false, "wire the locale bundle (html; requires a project with locale)")
 	addServiceCmd.Flags().Int("port", 0, "listen port for api/html services (default 8081)")
+	addServiceCmd.Flags().Bool("skip-version-check", false, "skip the \"CLI newer than scaffold\" guard for --auth services")
 	addCmd.AddCommand(addServiceCmd)
 }
 
@@ -98,6 +99,16 @@ func runAddService(cmd *cobra.Command, args []string) error {
 	authAvailable := meta.Options.Auth == "session"
 	localeAvailable := meta.Options.Locale
 
+	// Resolved up front so an explicit --auth fails before the wizard prompts;
+	// an interactive "yes" is caught after it.
+	var versionErr error
+	if skip, _ := cmd.Flags().GetBool("skip-version-check"); !skip && releaseBuild {
+		versionErr = ensureScaffoldNotBehindCLI(meta, version)
+	}
+	if wantAuth, _ := cmd.Flags().GetBool("auth"); wantAuth && versionErr != nil {
+		return versionErr
+	}
+
 	if err := runServiceWizard(cmd, cwd, cfg, devCfg, authAvailable, localeAvailable); err != nil {
 		return err
 	}
@@ -107,6 +118,9 @@ func runAddService(cmd *cobra.Command, args []string) error {
 	}
 	if cfg.WithAuth && !authAvailable {
 		return fmt.Errorf("--auth requires a project scaffolded with session auth")
+	}
+	if cfg.WithAuth && versionErr != nil {
+		return versionErr
 	}
 	if cfg.WithLocale && !localeAvailable {
 		return fmt.Errorf("--locale requires a project scaffolded with locale support")
@@ -131,6 +145,34 @@ func runAddService(cmd *cobra.Command, args []string) error {
 	_, _ = fmt.Fprintln(out, "  hamr dev")
 	if cfg.HTTP() {
 		_, _ = fmt.Fprintf(out, "  http://localhost:%d\n", cfg.Port)
+	}
+	return nil
+}
+
+// ensureScaffoldNotBehindCLI blocks `add service --auth` when the project was
+// scaffolded by an older hamr than the CLI generating into it.
+//
+// The auth service templates call into internal/repo, and that source lives in
+// the project — it does not upgrade with the CLI binary. A v0.2 CLI emitting
+// deps.Store.Users().GetByID against a v0.1 scaffold's flat repo.Store produces
+// code that does not compile.
+//
+// Projects with no [hamr] section (scaffolded before metadata tracking) and
+// unparseable versions on either side fall through: there is nothing to compare.
+func ensureScaffoldNotBehindCLI(meta scaffold.Metadata, cliVersion string) error {
+	if !meta.HasHamrSection() {
+		return nil
+	}
+	cliVer, err := scaffold.ParseVersion(cliVersion)
+	if err != nil {
+		return nil
+	}
+	projVer, err := scaffold.ParseVersion(meta.Hamr.Version)
+	if err != nil {
+		return nil
+	}
+	if projVer.Less(cliVer) {
+		return fmt.Errorf("project was scaffolded with hamr v%s but this CLI is v%s — `add service --auth` generates code against internal/repo, which your project owns and which does not upgrade with the CLI; migrate it by hand (`hamr ai upgrade` shows the diff), record that with `hamr ai upgrade --applied`, or pass --skip-version-check if you already have", projVer, cliVer)
 	}
 	return nil
 }

@@ -57,7 +57,7 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 
 	authmw := hamrmw.NewBrowserAuth(deps.SessionManager,
 		hamrmw.WithSubjectLoader(func(reqCtx context.Context, id string) (any, error) {
-			return deps.Store.GetUserByID(reqCtx, id)
+			return deps.Store.Users().GetByID(reqCtx, id)
 		}),
 		hamrmw.WithLoginRedirect("/login"),
 		hamrmw.WithHomeRedirect("/"),

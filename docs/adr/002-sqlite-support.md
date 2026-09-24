@@ -86,6 +86,12 @@ For the repo layer, separate template directories (`internal/repo/postgres/` vs
 paths differ in placeholder syntax (`$1` vs `?`); the GORM paths are nearly identical since
 GORM abstracts the dialect.
 
+> **Superseded in part (2026-09):** the repo layer no longer interleaves both connectors in
+> one file. `{{if eq .DBConnector "sqlx"}}` was replaced by a separate template per connector
+> (`store.go.tmpl` vs `gorm/store.go.tmpl`, and so on), selected in `buildProjectFileList`.
+> The per-database directory split stands for sqlx; the GORM templates live once in
+> `internal/repo/gorm/` and render into either package, since GORM abstracts the dialect.
+
 ### SQLite pragmas: WAL + foreign keys + busy timeout
 
 Default pragmas set on every connection:

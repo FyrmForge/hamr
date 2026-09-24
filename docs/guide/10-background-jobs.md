@@ -127,12 +127,12 @@ var orders []Order
 err := async.All(ctx,
     func(ctx context.Context) error {
         var err error
-        user, err = repo.GetUser(ctx, id)
+        user, err = store.Users().GetByID(ctx, id)
         return err
     },
     func(ctx context.Context) error {
         var err error
-        orders, err = repo.GetOrders(ctx, id)
+        orders, err = store.Orders().ListByUser(ctx, id)
         return err
     },
 )
@@ -144,8 +144,8 @@ Run N functions concurrently and collect all errors:
 
 ```go
 errs := async.Settle(ctx,
-    func(ctx context.Context) error { profile, err = repo.GetProfile(ctx, id); return err },
-    func(ctx context.Context) error { prefs, err = repo.GetPreferences(ctx, id); return err },
+    func(ctx context.Context) error { profile, err = store.Profiles().GetByUserID(ctx, id); return err },
+    func(ctx context.Context) error { prefs, err = store.Preferences().GetByUserID(ctx, id); return err },
 )
 // errs[i] is nil for successful slots
 ```
@@ -156,7 +156,7 @@ Apply a function to every item in a slice:
 
 ```go
 users, err := async.Map(ctx, userIDs, func(ctx context.Context, id int64) (User, error) {
-    return repo.GetUser(ctx, id)
+    return store.Users().GetByID(ctx, id)
 })
 ```
 

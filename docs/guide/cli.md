@@ -251,6 +251,7 @@ Service types:
 | `--auth` | prompted | Wire session auth middleware against the shared store (`api`/`html`; requires `--db` and a project scaffolded with session auth). The site keeps owning login — the service only validates sessions. |
 | `--locale` | prompted | Load the project's locale bundle + middleware (`html`; requires a project scaffolded with locale) |
 | `--port` | `8081` | Listen port for `api`/`html` services, exposed as `<NAME>_PORT` |
+| `--skip-version-check` | `false` | Bypass the `--auth` guard that refuses when the CLI is newer than the project's `[hamr] version` |
 
 ```bash
 hamr add service                                   # fully interactive
@@ -264,6 +265,7 @@ Notes:
 - HTTP services run on their own port and are **not** behind the `hamr dev` proxy at `:3000` — hit them directly (`http://localhost:<port>`). Live-reload injection and the browser console capture apply to the proxied site only; the appended watch rule still rebuilds and restarts the service on change.
 - The service name becomes the binary (`bin/<name>`), the watch-rule name, and the env prefix (`billing-svc` → `BILLING_SVC_PORT`). Names already used by a directory or watch rule are rejected.
 - Migrations stay owned by the site / `cmd/migrate`; services connect to the schema as-is.
+- `--auth` (released builds only) refuses when the CLI is newer than the project's `[hamr] version`: the generated `SubjectLoader` calls `deps.Store.Users().GetByID`, and `internal/repo` is project-owned code that does not upgrade with the CLI. Migrate it by hand (`hamr ai upgrade` shows the diff), then `hamr ai upgrade --applied`, or pass `--skip-version-check`.
 
 ---
 

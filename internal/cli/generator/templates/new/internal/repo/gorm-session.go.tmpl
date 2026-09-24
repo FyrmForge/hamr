@@ -1,0 +1,52 @@
+package repo
+
+import (
+	"time"
+
+	"github.com/FyrmForge/hamr/pkg/auth"
+)
+
+// Session is the sessions table. The gorm tags are the schema: internal/db
+// registers this struct for auto-migration.
+//
+// To store extra metadata, add your own columns here and populate them in
+// Store.Create, or store a JSON blob if you prefer.
+type Session struct {
+	ID        string    `gorm:"primaryKey"`
+	SubjectID *string   `gorm:"index"`
+	Token     string    `gorm:"uniqueIndex;not null"`
+	ExpiresAt time.Time `gorm:"not null"`
+	CreatedAt time.Time `gorm:"not null;autoCreateTime"`
+}
+
+// TableName pins the table name so it does not track struct renames.
+func (Session) TableName() string { return "sessions" }
+
+// SessionFromAuth converts a framework session into a table row.
+func SessionFromAuth(session *auth.Session) *Session {
+	row := &Session{
+		ID:        session.ID,
+		Token:     session.Token,
+		ExpiresAt: session.ExpiresAt,
+		CreatedAt: session.CreatedAt,
+	}
+	if session.SubjectID != "" {
+		row.SubjectID = &session.SubjectID
+	}
+	return row
+}
+
+// ToAuth converts a table row into a framework session.
+func (s *Session) ToAuth() *auth.Session {
+	subjectID := ""
+	if s.SubjectID != nil {
+		subjectID = *s.SubjectID
+	}
+	return &auth.Session{
+		ID:        s.ID,
+		SubjectID: subjectID,
+		Token:     s.Token,
+		ExpiresAt: s.ExpiresAt,
+		CreatedAt: s.CreatedAt,
+	}
+}

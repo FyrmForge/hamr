@@ -185,6 +185,46 @@ func TestBuildProjectFileList_auth(t *testing.T) {
 	assert.True(t, dests["internal/web/handler/auth/register/register.templ"])
 }
 
+func TestBuildProjectFileList_connectorTemplates(t *testing.T) {
+	// The gorm and sqlx repo layers are separate templates writing to the same
+	// destinations, so the connector must pick the source, not a conditional
+	// inside the file.
+	srcFor := func(connector, database string) map[string]string {
+		cfg := &ProjectConfig{
+			Name:            "proj",
+			Module:          "github.com/test/proj",
+			CSS:             "plain",
+			Database:        database,
+			DBConnector:     connector,
+			IncludeAuth:     true,
+			IncludeSessions: true,
+		}
+		byDest := make(map[string]string)
+		for _, f := range buildProjectFileList(cfg) {
+			byDest[f.dest] = f.tmpl
+		}
+		return byDest
+	}
+
+	gorm := srcFor("gorm", "postgres")
+	assert.Equal(t, "templates/new/internal/repo/gorm-user.go.tmpl", gorm["internal/repo/user.go"])
+	assert.Equal(t, "templates/new/internal/repo/gorm-session.go.tmpl", gorm["internal/repo/session.go"])
+	assert.Equal(t, "templates/new/internal/repo/gorm/store.go.tmpl", gorm["internal/repo/postgres/store.go"])
+	assert.Equal(t, "templates/new/internal/repo/gorm/users.go.tmpl", gorm["internal/repo/postgres/users.go"])
+
+	// GORM abstracts the dialect: sqlite renders the same template into its own package.
+	gormSQLite := srcFor("gorm", "sqlite")
+	assert.Equal(t, "templates/new/internal/repo/gorm/store.go.tmpl", gormSQLite["internal/repo/sqlite/store.go"])
+	assert.Equal(t, "templates/new/internal/repo/gorm/users.go.tmpl", gormSQLite["internal/repo/sqlite/users.go"])
+
+	sqlx := srcFor("sqlx", "postgres")
+	assert.Equal(t, "templates/new/internal/repo/user.go.tmpl", sqlx["internal/repo/user.go"])
+	assert.Equal(t, "templates/new/internal/repo/postgres/store.go.tmpl", sqlx["internal/repo/postgres/store.go"])
+	assert.Equal(t, "templates/new/internal/repo/postgres/users.go.tmpl", sqlx["internal/repo/postgres/users.go"])
+	// sqlx gets the sessions schema from the SQL migrations, not a struct.
+	assert.NotContains(t, sqlx, "internal/repo/session.go")
+}
+
 func TestBuildProjectFileList_noAuth(t *testing.T) {
 	cfg := &ProjectConfig{Name: "proj", Module: "github.com/test/proj", CSS: "plain"}
 	files := buildProjectFileList(cfg)
@@ -1264,12 +1304,28 @@ func TestGenerateProject_gorm(t *testing.T) {
 
 	require.NoError(t, GenerateProject(dir, cfg))
 
-	// GORM model file exists.
+	// GORM auto-migration registers the repo structs; it does not redeclare them.
 	assertFileExists(t, dir, "internal/db/models.go")
 	models := readFile(t, dir, "internal/db/models.go")
-	assert.Contains(t, models, "Session")
-	assert.Contains(t, models, "User")
 	assert.Contains(t, models, "models()")
+	assert.Contains(t, models, "&repo.Session{}")
+	assert.Contains(t, models, "&repo.User{}")
+	assert.NotContains(t, models, "type User struct")
+	assert.NotContains(t, models, "type Session struct")
+
+	// The gorm tags are the schema, and they live on the repo structs.
+	userGo := readFile(t, dir, "internal/repo/user.go")
+	assert.Contains(t, userGo, `gorm:"primaryKey"`)
+	assert.NotContains(t, userGo, `db:"id"`)
+	// No default on Active: GORM would omit the zero value and make false unreachable.
+	assert.NotContains(t, userGo, "default:true")
+
+	sessionGo := readFile(t, dir, "internal/repo/session.go")
+	assert.Contains(t, sessionGo, `gorm:"uniqueIndex;not null"`)
+	assert.Contains(t, sessionGo, `func (Session) TableName() string { return "sessions" }`)
+
+	// The one session model is shared: the store does not declare its own.
+	assert.NotContains(t, readFile(t, dir, "internal/repo/postgres/store.go"), "type sessionRow struct")
 
 	// db.go uses GORM.
 	dbGo := readFile(t, dir, "internal/db/db.go")
@@ -1311,13 +1367,37 @@ func TestGenerateProject_gorm(t *testing.T) {
 	assert.Contains(t, readme, "GORM")
 
 	agents := readFile(t, dir, "AGENTS.md")
-	assert.Contains(t, agents, "internal/db/            Database connection + GORM models")
+	assert.Contains(t, agents, "internal/db/            Database connection + GORM auto-migration")
 	assert.Contains(t, agents, "cmd/migrate/            Standalone migration runner")
-	assert.Contains(t, agents, "Models live in `internal/db/models.go`")
+	assert.Contains(t, agents, "Models live in `internal/repo/` next to their stores")
 	assert.Contains(t, agents, "Repo implementations use `gorm.DB`")
 	assert.Contains(t, agents, "Use `cmd/migrate` / `make migrate` to run `appdb.AutoMigrate(...)`")
 	assert.NotContains(t, agents, "Migrations in `internal/db/migrations/`")
 	assert.NotContains(t, agents, "Use `sqlx` for queries in repo implementations")
+}
+
+func TestGenerateProject_gormSQLite(t *testing.T) {
+	// One gorm store template serves both databases; the package clause and
+	// doc comments must follow the database it renders into.
+	dir := filepath.Join(t.TempDir(), "gormlite")
+	cfg := &ProjectConfig{
+		Name:            "gormlite",
+		Module:          "github.com/test/gormlite",
+		CSS:             "plain",
+		Database:        "sqlite",
+		DBConnector:     "gorm",
+		GoVersion:       "1.25.0",
+		IncludeSessions: true,
+		IncludeAuth:     true,
+		AuthWithTables:  true,
+	}
+	require.NoError(t, GenerateProject(dir, cfg))
+
+	store := readFile(t, dir, "internal/repo/sqlite/store.go")
+	assert.Contains(t, store, "package sqlite\n")
+	assert.Contains(t, store, "using SQLite via GORM")
+	assert.NotContains(t, store, "PostgreSQL")
+	assert.Contains(t, readFile(t, dir, "internal/repo/sqlite/users.go"), "package sqlite\n")
 }
 
 func TestGenerateProject_sqlxMigrateCommandUsesSQLXDB(t *testing.T) {

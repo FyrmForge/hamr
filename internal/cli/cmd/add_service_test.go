@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/FyrmForge/hamr/internal/cli/generator"
+	"github.com/FyrmForge/hamr/internal/scaffold"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -158,4 +159,36 @@ func TestAddService_DuplicateWatchRuleName(t *testing.T) {
 	err := cmd2.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "already exists")
+}
+
+func TestEnsureScaffoldNotBehindCLI(t *testing.T) {
+	meta := func(v string) scaffold.Metadata {
+		return scaffold.Metadata{Hamr: scaffold.HamrSection{Version: v}}
+	}
+
+	tests := []struct {
+		name    string
+		meta    scaffold.Metadata
+		cli     string
+		wantErr bool
+	}{
+		{"cli ahead of scaffold", meta("0.1.0"), "0.2.0", true},
+		{"same version", meta("0.2.0"), "0.2.0", false},
+		{"cli behind scaffold", meta("0.3.0"), "0.2.0", false},
+		{"no hamr section", scaffold.Metadata{}, "0.2.0", false},
+		{"unparseable project version", meta("not-a-version"), "0.2.0", false},
+		{"unparseable cli version", meta("0.1.0"), "dev", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ensureScaffoldNotBehindCLI(tt.meta, tt.cli)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "--skip-version-check")
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
 }

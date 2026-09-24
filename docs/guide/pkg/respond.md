@@ -33,7 +33,7 @@ a committed `200` with a truncated body.
 
 ```go
 func (h *Handler) GetUser(c echo.Context) error {
-    user, err := h.repo.GetUser(ctx, id)
+    user, err := h.users.Get(ctx, id)
     if err != nil {
         return echo.NewHTTPError(http.StatusNotFound, "User not found")
     }

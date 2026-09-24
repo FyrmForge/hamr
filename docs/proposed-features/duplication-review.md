@@ -129,6 +129,10 @@ Most of the SQLX branch differs only by placeholder style:
 
 Most of the GORM branch is effectively identical.
 
+> **Partly addressed (2026-09):** the sqlx/gorm interleaving is gone — each connector now has
+> its own template, picked by the generator. The GORM branch is now one shared template in
+> `internal/repo/gorm/`. The postgres/sqlite duplication of the sqlx branch remains.
+
 Risk:
 
 - every repo/auth behavior change has to be ported through four template variants

@@ -125,35 +125,92 @@ err := db.MigrateDown(database, db.MigrateConfig{
 
 ## Repository Pattern
 
-Now that you have a database connection and migrations in place, you need a way to query data. HAMR projects organize data access using repositories — one per domain entity. Repositories accept `*sqlx.DB` and expose typed methods:
+Now that you have a database connection and migrations in place, you need a way to query data. HAMR projects expose data access through a single `repo.Store` interface, split into one sub-store per domain entity and reached through an accessor:
 
 ```go
-type UserRepo struct {
-    db *sqlx.DB
+store.Users().GetByID(ctx, id)
+```
+
+The interfaces live in `internal/repo/`, beside their models:
+
+```go
+// internal/repo/repo.go
+type Store interface {
+    Health(ctx context.Context) error
+    Users() UserStore
 }
 
-func NewUserRepo(db *sqlx.DB) *UserRepo {
-    return &UserRepo{db: db}
-}
-
-func (r *UserRepo) GetByID(ctx context.Context, id int64) (*User, error) {
-    var user User
-    err := r.db.GetContext(ctx, &user, "SELECT * FROM users WHERE id = $1", id)
-    if err != nil {
-        return nil, err
-    }
-    return &user, nil
-}
-
-func (r *UserRepo) Create(ctx context.Context, u *User) error {
-    _, err := r.db.NamedExecContext(ctx,
-        `INSERT INTO users (name, email, password_hash)
-         VALUES (:name, :email, :password_hash)`, u)
-    return err
+// internal/repo/user.go
+type UserStore interface {
+    GetByID(ctx context.Context, id string) (*User, error)
+    GetByEmail(ctx context.Context, email string) (*User, error)
+    Create(ctx context.Context, user *User) error
 }
 ```
 
-Repositories are passed into handlers via the `Deps` struct in `internal/web/server.go`.
+The implementation lives in the database package (`internal/repo/postgres/` or `internal/repo/sqlite/`) — an accessor returning an unexported sub-store that holds the connection:
+
+```go
+// internal/repo/postgres/users.go
+func (s *Store) Users() repo.UserStore { return &userStore{db: s.db} }
+
+type userStore struct {
+    db *sqlx.DB
+}
+
+func (s *userStore) GetByID(ctx context.Context, id string) (*repo.User, error) {
+    var u repo.User
+    err := s.db.GetContext(ctx, &u,
+        `SELECT id, email, password_hash, name, role, active, created_at, updated_at
+         FROM users WHERE id = $1`, id)
+    if err != nil {
+        if errors.Is(err, sql.ErrNoRows) {
+            return nil, nil
+        }
+        return nil, err
+    }
+    return &u, nil
+}
+```
+
+Method names drop the entity prefix — `Users().GetByID`, not `GetUserByID`. Adding an entity means three things: a `FooStore` interface beside its model, a `Foo()` accessor on `Store`, and a `fooStore` implementation in each database package.
+
+### Models & Struct Tags
+
+Models live in `internal/repo/`, beside the interfaces that return them. Their struct tags depend on the connector you scaffolded with.
+
+**sqlx** — `db:` tags map columns onto fields for `GetContext`/`SelectContext`. The schema itself is the SQL in `internal/db/migrations/`:
+
+```go
+// internal/repo/user.go
+type User struct {
+    ID    string `db:"id"`
+    Email string `db:"email"`
+    // ...
+}
+```
+
+**GORM** — `gorm:` tags *are* the schema. `internal/db/models.go` registers the structs for auto-migration and declares nothing itself:
+
+```go
+// internal/repo/user.go
+type User struct {
+    ID    string `gorm:"primaryKey"`
+    Email string `gorm:"uniqueIndex;not null"`
+    // ...
+}
+
+// internal/db/models.go
+func models() []any {
+    return []any{&repo.Session{}, &repo.User{}}
+}
+```
+
+One struct per table, used for both migration and queries — there is no separate model layer to keep in sync.
+
+> **Don't put a `default:` tag on a field whose zero value is meaningful.** GORM omits a field from the INSERT when its value is the Go zero value *and* it carries a `default:` tag, so the database default fires instead. On a `bool`, that makes `false` unreachable: `Create(&repo.User{Active: false})` would store `true`. This is why the scaffolded `User.Active` has `not null` but no default, and why `internal/service/auth.go` sets `Active: true` explicitly. A `default:` on `Role` is fine — an empty role is never a value you'd want stored.
+
+The `Store` goes into `internal/service/`, **not** into handlers. Handlers get services via the `Deps` struct in `internal/web/server.go` and never hold a `repo.Store` themselves — see [Handlers & Routing](04-handlers-routing.md).
 
 ---
 
@@ -227,5 +284,5 @@ When writing migrations or repo queries for SQLite-flavoured projects:
 
 ## Next Steps
 
-- [Handlers & Routing](04-handlers-routing.md) — Wire your repos into handlers
+- [Handlers & Routing](04-handlers-routing.md) — Wire your services into handlers
 - [Authentication](07-authentication.md) — Session storage and auth middleware

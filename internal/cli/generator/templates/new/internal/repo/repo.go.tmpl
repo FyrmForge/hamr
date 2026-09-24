@@ -9,6 +9,15 @@ import (
 )
 
 // Store defines the data access interface for the application.
+//
+// Data access is grouped into one sub-store per entity, reached through an
+// accessor: Store.Users().GetByID(ctx, id). Add a new entity by defining its
+// interface next to its model (see UserStore in user.go), adding an accessor
+// here, and implementing it in the database packages.
+//
+// Only internal/service should hold a Store. Handlers call services — except
+// health probes and the route wiring in server.go, which reach it directly.
+// See "Layers" in AGENTS.md.
 type Store interface {
 	// Health checks the database connection.
 	Health(ctx context.Context) error
@@ -19,13 +28,7 @@ type Store interface {
 {{- end}}
 {{- if .IncludeAuth}}
 
-	// GetUserByID returns a user by ID, or nil if not found.
-	GetUserByID(ctx context.Context, id string) (*User, error)
-
-	// GetUserByEmail returns a user by email, or nil if not found.
-	GetUserByEmail(ctx context.Context, email string) (*User, error)
-
-	// CreateUser inserts a new user.
-	CreateUser(ctx context.Context, user *User) error
+	// Users returns the user sub-store.
+	Users() UserStore
 {{- end}}
 }

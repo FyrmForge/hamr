@@ -24,6 +24,16 @@
 - **Store interface**: Repository pattern used in scaffolded projects.
   Generated projects define a Store interface in their internal/repo/repo.go;
   it is not part of the hamr framework itself.
+  Grouped one sub-store per entity behind an accessor:
+  `store.Users().GetByID(ctx, id)` (not `store.GetUserByID`). A new entity is a
+  `FooStore` interface beside its model, a `Foo()` accessor on `Store`, and a
+  `fooStore` in each database package. Only `internal/service/` holds a Store —
+  handlers call services (exceptions: health probes and the auth
+  `SubjectLoader` in server.go route wiring). With `--db-connector gorm` the
+  models live in `internal/repo/` and their `gorm` tags are the schema;
+  `internal/db/models.go` only registers them for auto-migration. Never put a
+  `default:` tag on a field whose zero value matters (a `bool`, a counter):
+  GORM omits zero values from the INSERT when a default is declared.
 - **hamr dev**: Dev server with file watching, auto-rebuild, and live reload. Any file event on a watched path reruns its `[[dev.watch]]` rule, including timestamp-only ones (`touch .env` restarts the app) but not a bare `chmod`/`chown`.
   `--headless` (automatic when stdout is not a terminal) skips the TUI and
   streams every line — hamr, rules, daemons, docker logs — to stdout, for
@@ -213,7 +223,7 @@
   with the manifest baked in at compile time. Config in [static] section of
   hamr.toml. `--clean` removes the dist dir and resets the manifest.
 - **hamr completion install**: Installs shell completion scripts for bash, zsh, or fish. Auto-detects shell from $SHELL. Supports --system for system-wide install (requires root) and --shell to override detection.
-- **hamr add service [name]**: Adds a new Go binary to an existing project. Types: `worker` (background loop with graceful shutdown), `api` (JSON server on its own `<NAME>_PORT`), `html` (templ server reusing the project layout), `empty` (bare `Run()` stub). Creates `cmd/<name>/` + `internal/<name>/`, appends a `[[dev.watch]]` rule to hamr.toml, and appends `<NAME>_PORT` to `.env` for HTTP types. Optional `--db`/`--auth`/`--locale` wire the project's store, session middleware, and locale bundle. Interactive wizard for anything not flagged. HTTP services are not behind the dev proxy — hit their port directly.
+- **hamr add service [name]**: Adds a new Go binary to an existing project. Types: `worker` (background loop with graceful shutdown), `api` (JSON server on its own `<NAME>_PORT`), `html` (templ server reusing the project layout), `empty` (bare `Run()` stub). Creates `cmd/<name>/` + `internal/<name>/`, appends a `[[dev.watch]]` rule to hamr.toml, and appends `<NAME>_PORT` to `.env` for HTTP types. Optional `--db`/`--auth`/`--locale` wire the project's store, session middleware, and locale bundle. Interactive wizard for anything not flagged. HTTP services are not behind the dev proxy — hit their port directly. `--auth` refuses (released builds) when the CLI is newer than the project's `[hamr] version`, since the generated code calls the project-owned `repo.Store`; bypass with `--skip-version-check`.
 - **hamr add skill [target]**: Installs AI agent skills: `hamr` (framework reference), `qa-loop` (Playwright + hamr MCP test-and-fix loop), `pr-publish` (structured PR with gist screenshots). No args → interactive picker (agents, then skills). Targets: `claude` → `./.claude/skills/{hamr,hamr-qa-loop,hamr-pr-publish}/`; `codex`/`opencode` → shared `./.agents/skills/…` (written once when both picked); `--global` writes under `~/.claude/skills/` / `~/.agents/skills/`. `--skills` selects a subset (default all). Requires `hamr.toml` in CWD for project installs. `--force` overwrites.
 - **respond.Redirect**: HTMX-aware redirect that sets HX-Redirect for HTMX
   requests and falls back to HTTP 303.

@@ -150,13 +150,16 @@ Handlers are methods on a struct that holds dependencies:
 
 ```go
 type handler struct {
-    repo *UserRepo
+    users *service.UserService
 }
 
-func NewHandler(repo *UserRepo) *handler {
-    return &handler{repo: repo}
+func NewHandler(users *service.UserService) *handler {
+    return &handler{users: users}
 }
 ```
+
+A handler holds services, never a `repo.Store`. Data access and the logic around
+it live in `internal/service/` — see [Database](03-database.md#repository-pattern).
 
 Use `logging.FromContext(c.Request().Context())` for request-scoped logging instead of storing a logger on the struct.
 
@@ -175,7 +178,7 @@ func (h *Handler) Home(c echo.Context) error {
 ```go
 func (h *Handler) GetUser(c echo.Context) error {
     id := c.Param("id")
-    user, err := h.repo.GetByID(c.Request().Context(), id)
+    user, err := h.users.Get(c.Request().Context(), id)
     if err != nil {
         return echo.NewHTTPError(http.StatusNotFound, "User not found")
     }
@@ -226,7 +229,7 @@ ctx.Set(c, TenantKey, tenantID)
 func (h *Handler) ListUsers(c echo.Context) error {
     page, size := respond.ParsePagination(c, 20)
 
-    users, total, err := h.repo.List(c.Request().Context(), page, size)
+    users, total, err := h.users.List(c.Request().Context(), page, size)
     if err != nil {
         return echo.NewHTTPError(http.StatusInternalServerError, "Failed to list users")
     }

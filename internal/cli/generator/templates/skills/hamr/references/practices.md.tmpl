@@ -60,6 +60,7 @@ Hamr packages use functional options consistently (`server.New`, `db.Connect`, `
 - Query via `sqlx` (or `gorm` if scaffolded with `--db-connector gorm`). Always pass the request context to the DB driver.
 - Migrations live in `internal/db/migrations/` as numbered `*.sql` files. `hamr dev` runs them on start (when `--migrate-startup` was used at scaffold time) or you run `make migrate` manually.
 - The scaffolded `internal/db/db.go` embeds `migrations/*.sql` — when adding a migration, just add the `.sql` file; the embed picks it up at build.
+- With `gorm`, models live in `internal/repo/` beside their stores and their `gorm` tags are the schema; `internal/db/models.go` only registers them for auto-migration. Never add a `default:` tag to a field whose zero value is meaningful — GORM drops zero-value fields from the INSERT when a default is declared, making that value unreachable.
 
 ### Logging
 

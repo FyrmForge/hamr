@@ -85,13 +85,17 @@ Create a `BrowserAuth` instance with your session manager and options:
 
 ```go
 auth := middleware.NewBrowserAuth(sm,
-    middleware.WithSubjectLoader(func(ctx context.Context, id string) (any, error) {
-        return repo.GetUser(ctx, id)
+    middleware.WithSubjectLoader(func(reqCtx context.Context, id string) (any, error) {
+        return deps.Store.Users().GetByID(reqCtx, id)
     }),
     middleware.WithLoginRedirect("/login"),
     middleware.WithHomeRedirect("/dashboard"),
 )
 ```
+
+The subject loader is route wiring, not a handler, so it reaches the store
+directly — this is the one place in `server.go` that does. Handlers themselves
+call services.
 
 ### Load + Policy
 
@@ -126,13 +130,8 @@ func (h *Handler) Login(c echo.Context) error {
     email := c.FormValue("email")
     password := c.FormValue("password")
 
-    user, err := h.repo.GetByEmail(c.Request().Context(), email)
+    user, err := h.authService.Authenticate(c.Request().Context(), email, password)
     if err != nil {
-        return echo.NewHTTPError(http.StatusUnauthorized, "Invalid credentials")
-    }
-
-    match, err := auth.CheckPassword(password, user.PasswordHash)
-    if err != nil || !match {
         return echo.NewHTTPError(http.StatusUnauthorized, "Invalid credentials")
     }
 
@@ -178,13 +177,11 @@ func (h *Handler) Register(c echo.Context) error {
         return respond.HTML(c, http.StatusUnprocessableEntity, registerForm(c, f, errors))
     }
 
-    // Hash password
-    hash, err := auth.HashPassword(password)
-    if err != nil {
+    // Hashing and persistence belong to the service, not the handler.
+    if _, err := h.authService.Register(c.Request().Context(), email, password, name); err != nil {
         return echo.NewHTTPError(http.StatusInternalServerError, "Registration failed")
     }
 
-    // Create user...
     middleware.SetFlash(c, "Account created! Please log in.", middleware.FlashSuccess)
     return c.Redirect(http.StatusSeeOther, "/login")
 }

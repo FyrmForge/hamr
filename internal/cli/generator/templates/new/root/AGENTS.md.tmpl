@@ -33,7 +33,7 @@ make e2e-local      # Run E2E tests locally
 ```
 cmd/site/              Application entry point (env config loaded here)
 {{- if eq .DBConnector "gorm"}}
-internal/db/            Database connection + GORM models
+internal/db/            Database connection + GORM auto-migration
 {{- else}}
 internal/db/            Database connection + embedded migrations
 {{- end}}
@@ -41,6 +41,12 @@ internal/db/            Database connection + embedded migrations
 cmd/migrate/            Standalone migration runner
 {{- end}}
 internal/repo/           Data access layer (Store interface + {{if eq .Database "sqlite"}}SQLite{{else}}PostgreSQL{{end}} impl)
+{{- if .IncludeAuth}}
+internal/service/        Business logic layer (the only caller of internal/repo)
+{{- else}}
+internal/service/        Business logic layer — not generated yet; create it
+                         with your first service (the only caller of internal/repo)
+{{- end}}
 internal/web/            HTTP layer
 internal/web/server.go   Route registration + middleware groups
 internal/web/handler/    One package per page, mirroring URL path
@@ -77,6 +83,89 @@ This project uses the HAMR framework (`github.com/FyrmForge/hamr`). Key packages
 
 See `docs/llms.txt` for a compact API reference and `docs/llms-full.txt` for
 complete package documentation.
+
+## Layers
+
+```
+internal/web/handler/  →  internal/service/  →  internal/repo/
+```
+
+**A handler translates HTTP and renders. Everything in between is the
+service.** Handlers parse the request (`c.Bind`, `c.QueryParam`, path params),
+call one service method, and render the result. `internal/service/` is the
+only package that talks to `internal/repo/` — and when this project has no
+service package yet, business logic still goes there rather than into a
+handler.
+
+A handler must not hold a `repo.Store` — if it has no store field, it cannot
+make a repo call, and the compiler enforces the rule for free.
+
+This applies to reads, not just writes. A page loader that fetches from two
+repos, joins them, sorts, and derives a flag is business logic wearing a
+read's clothes. Rules that live there — who can see what, when something
+counts as ready — silently drift from the other pages that need the same
+rule.
+
+### Violation
+
+```go
+// handler/thing/handler.go
+func (h *handler) Page(c echo.Context) error {
+    status := c.QueryParam("status")
+
+    list, err := h.store.Things().ListByOwner(ctx, ownerID, status)  // repo call
+    if err != nil {
+        return err
+    }
+    thumbs, err := h.store.Media().ThumbsFor(ctx, list)              // second repo
+    if err != nil {
+        return err
+    }
+    rows := join(list, thumbs)                                       // shaping
+    sortRows(rows, c.QueryParam("sort"))                             // shaping
+    ready := owner.StripeStatus == StripeDone                        // business rule
+
+    return respond.HTML(c, http.StatusOK, ThingsPage(c, rows, ready))
+}
+```
+
+### Fix
+
+```go
+// service/things.go — the logic, testable without an HTTP request
+func (s *ThingService) ListForOwner(ctx context.Context, ownerID string, f ThingFilter) (*ThingList, error)
+
+// handler/thing/handler.go — parse, call, render
+func (h *handler) Page(c echo.Context) error {
+    f := ThingFilter{Status: c.QueryParam("status"), Sort: c.QueryParam("sort")}
+
+    list, err := h.things.ListForOwner(c.Request().Context(), ownerID, f)
+    if err != nil {
+        return err
+    }
+    return respond.HTML(c, http.StatusOK, ThingsPage(c, list))
+}
+```
+
+Importing a repo package for a **type** (`things.Thing` in a view model) is
+fine. Holding a repo **handle** is not.
+
+Two things that are not services: a package with one method per repo method
+and no logic of its own is a passthrough — call the service directly and
+delete it. A new layer with no callers is worse than the problem it was
+meant to fix.
+
+Two exceptions, both outside handler bodies:
+
+Infrastructure probes. `internal/api/handler/health` holds a `repo.Store` to
+call `store.Health(ctx)`. That's a connection ping, not domain logic, and a
+service around it would be pure passthrough.
+
+Route wiring. `internal/web/server.go` and `internal/api/server.go` take a
+`repo.Store` on `Deps` and the auth `SubjectLoader` closure calls
+`deps.Store.Users().GetByID(reqCtx, id)` directly. That closure is
+middleware plumbing, not a handler — wrapping it in a service produces
+exactly the passthrough layer described above. Leave it alone.
 
 ## Handler Pattern
 
@@ -124,20 +213,25 @@ import (
     "github.com/FyrmForge/hamr/pkg/respond"
     "github.com/labstack/echo/v4"
 
-    "{{.Module}}/internal/repo"
+    "{{.Module}}/internal/service"
 )
 
+// A handler holds services, never a repo.Store. See "Layers" above.
 type handler struct {
-    store repo.Store
+    things *service.ThingService
 }
 
-func NewHandler(store repo.Store) *handler {
-    return &handler{store: store}
+func NewHandler(things *service.ThingService) *handler {
+    return &handler{things: things}
 }
 
 // GET /things
 func (h *handler) Page(c echo.Context) error {
-    return respond.HTML(c, http.StatusOK, ThingsPage(c))
+    things, err := h.things.List(c.Request().Context())
+    if err != nil {
+        return err
+    }
+    return respond.HTML(c, http.StatusOK, ThingsPage(c, things))
 }
 
 // POST /things
@@ -149,7 +243,9 @@ func (h *handler) Submit(c echo.Context) error {
         return respond.HTML(c, http.StatusUnprocessableEntity, createForm(c, f, errs))
     }
 
-    // Save to database...
+    if err := h.things.Create(c.Request().Context(), f.Name, f.Email); err != nil {
+        return err
+    }
 
     middleware.SetFlash(c, "Created successfully!", middleware.FlashSuccess)
     return respond.Redirect(c, "/things")
@@ -229,13 +325,13 @@ type CreateForm struct {
 }
 
 type Handler struct {
-    store          repo.Store
+    things          *service.ThingService
     CreateFormRules validate.Form
 }
 
-func NewHandler(store repo.Store) *Handler {
+func NewHandler(things *service.ThingService) *Handler {
     return &Handler{
-        store: store,
+        things: things,
         CreateFormRules: validate.NewForm(
             validate.WithOOBRenderer(form.OOBValidator),
             validate.WithGeneralError("Please fix the errors below."),
@@ -255,7 +351,10 @@ func (h *Handler) Create(c echo.Context) error {
         return respond.HTML(c, http.StatusUnprocessableEntity, createForm(c, f, errs))
     }
 
-    // Save to database...
+    if err := h.things.Create(c.Request().Context(), f.Name, f.Email); err != nil {
+        return err
+    }
+
     middleware.SetFlash(c, "Created successfully!", middleware.FlashSuccess)
     return respond.Redirect(c, "/things")
 }
@@ -493,8 +592,12 @@ Custom components via `@apply` in `frontend/css/input.css`:
 - Use `cmd/migrate` / `make migrate` to apply pending migrations
 {{- end}}
 {{- else}}
-- Models live in `internal/db/models.go`
+- Models live in `internal/repo/` next to their stores — their `gorm` tags are the schema
+- `internal/db/models.go` only registers those structs for auto-migration
 - Repo implementations use `gorm.DB`
+- Never put a `default:` tag on a field whose zero value is meaningful (a `bool`, a
+  counter): GORM omits zero-value fields from the INSERT when a default is declared,
+  so the zero value becomes unreachable
 {{- if .MigrateAtStartup}}
 - Schema changes run during server startup via `appdb.AutoMigrate(...)`
 {{- else}}
@@ -502,6 +605,10 @@ Custom components via `@apply` in `frontend/css/input.css`:
 {{- end}}
 {{- end}}
 - Store interface in `internal/repo/repo.go`
+- One sub-store per entity, reached through an accessor — `store.Users().GetByID(ctx, id)`,
+  not `store.GetUserByID(ctx, id)`. Method names drop the entity prefix, so a
+  new entity is a `FooStore` interface beside its model, a `Foo()` accessor on
+  `Store`, and a `fooStore` implementation in the database package.
 {{- if ne .Database "sqlite"}}
 - `DATABASE_URL` in `.env` is the source of truth; the running app reads it via `config.GetEnvOrPanic("DATABASE_URL")`. When `hamr dev` walks the Postgres host port (because `5432` is busy on this machine), the value is auto-rewritten in spawned children's env and persisted to `.hamr/walks.json` so out-of-process tooling can pick it up via `hamr env`. **Don't hardcode ports** in code that reads from `.env`; trust the rewrite.
 {{- end}}
@@ -717,4 +824,4 @@ hub.SendToRoom("chat:123", msg)
 - Use `hamr/pkg` helpers instead of reimplementing
 - Prefer `respond.HTML`/`respond.JSON` over raw `c.HTML()`
 - Add `// GET /path` comments above handler methods
-- Keep handlers thin — business logic in service layer
+- Keep handlers thin — business logic in `internal/service/` (see "Layers")

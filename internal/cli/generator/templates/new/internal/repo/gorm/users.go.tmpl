@@ -1,0 +1,44 @@
+package {{if eq .Database "sqlite"}}sqlite{{else}}postgres{{end}}
+
+import (
+	"context"
+	"errors"
+
+	"{{.Module}}/internal/repo"
+	"gorm.io/gorm"
+)
+
+// Users returns the user sub-store.
+func (s *Store) Users() repo.UserStore { return &userStore{db: s.db} }
+
+type userStore struct {
+	db *gorm.DB
+}
+
+func (s *userStore) GetByID(ctx context.Context, id string) (*repo.User, error) {
+	var u repo.User
+	err := s.db.WithContext(ctx).Where("id = ?", id).First(&u).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &u, nil
+}
+
+func (s *userStore) GetByEmail(ctx context.Context, email string) (*repo.User, error) {
+	var u repo.User
+	err := s.db.WithContext(ctx).Where("email = ?", email).First(&u).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &u, nil
+}
+
+func (s *userStore) Create(ctx context.Context, user *repo.User) error {
+	return s.db.WithContext(ctx).Create(user).Error
+}

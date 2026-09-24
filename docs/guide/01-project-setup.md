@@ -47,6 +47,8 @@ myapp/
 │   └── site/
 │       └── main.go           # Application entrypoint
 ├── internal/
+│   ├── repo/                 # Data access (Store interface + DB impl)
+│   ├── service/              # Business logic — the only caller of repo/
 │   └── web/
 │       ├── server.go         # Route registration, deps, and static pages
 │       └── handler/          # Route handlers by domain
@@ -75,6 +77,8 @@ myapp/
 - **`cmd/site/main.go`** — Bootstraps config, database, server, and starts listening. All setup in one file.
 - **`internal/web/server.go`** — Registers routes and middleware on the server. Receives a `Deps` struct with shared dependencies (DB, logger, storage, etc.). See [Handlers & Routing](04-handlers-routing.md) for details.
 - **`internal/web/handler/`** — One subfolder per domain (home, auth, dashboard). Each has a `handler.go` with an `Handler` struct and a `templates/` folder with templ components.
+- **`internal/service/`** — Business logic. Handlers parse the request, call a service, and render; the service owns everything in between. This is the only package that calls `internal/repo/` — a handler holding a `repo.Store` is the layering bug to avoid. See [Handlers & Routing](04-handlers-routing.md).
+- **`internal/repo/`** — Data access. The `Store` interface plus its database implementation.
 - **`migrations/`** — Numbered SQL files (`001_create_users.up.sql`, `001_create_users.down.sql`).
 
 ---

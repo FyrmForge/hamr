@@ -268,12 +268,24 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 		{"templates/new/root/hamr.toml.tmpl", "hamr.toml"},
 	}
 
-	// Database-specific repo store.
-	switch cfg.Database {
-	case "sqlite":
-		files = append(files, templateFile{"templates/new/internal/repo/sqlite/store.go.tmpl", "internal/repo/sqlite/store.go"})
-	default:
-		files = append(files, templateFile{"templates/new/internal/repo/postgres/store.go.tmpl", "internal/repo/postgres/store.go"})
+	// Database-specific repo store. The gorm and sqlx variants are separate
+	// templates rather than one file full of connector conditionals. sqlx
+	// differs per database (placeholder syntax), so it has a template per
+	// directory; GORM abstracts the dialect, so one template serves both.
+	dbDir := "postgres"
+	if cfg.Database == "sqlite" {
+		dbDir = "sqlite"
+	}
+	repoTmplDir := "templates/new/internal/repo/" + dbDir
+	if cfg.DBConnector == "gorm" {
+		repoTmplDir = "templates/new/internal/repo/gorm"
+	}
+	files = append(files, templateFile{repoTmplDir + "/store.go.tmpl", "internal/repo/" + dbDir + "/store.go"})
+
+	// Session model — gorm scaffolds carry the sessions schema as a struct;
+	// sqlx scaffolds get it from the SQL migrations instead.
+	if cfg.DBConnector == "gorm" && cfg.IncludeSessions {
+		files = append(files, templateFile{"templates/new/internal/repo/gorm-session.go.tmpl", "internal/repo/session.go"})
 	}
 
 	// Docker Compose — only when there's a service to run.
@@ -308,8 +320,12 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 
 	// Auth files.
 	if cfg.IncludeAuth {
+		userTmpl := "templates/new/internal/repo/user.go.tmpl"
+		if cfg.DBConnector == "gorm" {
+			userTmpl = "templates/new/internal/repo/gorm-user.go.tmpl"
+		}
 		files = append(files,
-			templateFile{"templates/new/internal/repo/user.go.tmpl", "internal/repo/user.go"},
+			templateFile{userTmpl, "internal/repo/user.go"},
 			templateFile{"templates/new/internal/service/auth.go.tmpl", "internal/service/auth.go"},
 			templateFile{"templates/new/internal/auth/cookies.go.tmpl", "internal/auth/cookies.go"},
 			templateFile{"templates/new/internal/web/handler/auth/login/handler.go.tmpl", "internal/web/handler/auth/login/handler.go"},
@@ -317,12 +333,7 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 			templateFile{"templates/new/internal/web/handler/auth/register/handler.go.tmpl", "internal/web/handler/auth/register/handler.go"},
 			templateFile{"templates/new/internal/web/handler/auth/register/register.templ.tmpl", "internal/web/handler/auth/register/register.templ"},
 		)
-		switch cfg.Database {
-		case "sqlite":
-			files = append(files, templateFile{"templates/new/internal/repo/sqlite/users.go.tmpl", "internal/repo/sqlite/users.go"})
-		default:
-			files = append(files, templateFile{"templates/new/internal/repo/postgres/users.go.tmpl", "internal/repo/postgres/users.go"})
-		}
+		files = append(files, templateFile{repoTmplDir + "/users.go.tmpl", "internal/repo/" + dbDir + "/users.go"})
 	}
 
 	// WebSocket files.

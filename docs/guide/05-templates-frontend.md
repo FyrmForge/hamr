@@ -68,7 +68,7 @@ HAMR is HTMX-first — you get SPA-like interactivity without writing client-sid
 
 ```go
 func (h *Handler) UserList(c echo.Context) error {
-    users, _ := h.repo.List(c.Request().Context())
+    users, _ := h.users.List(c.Request().Context())
 
     if htmx.IsHTMX(c.Request()) {
         // HTMX request — render just the partial

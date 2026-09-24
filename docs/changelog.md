@@ -8,7 +8,84 @@ the TL;DR on top of it.
 
 ## [Unreleased]
 
+### Documentation
+
+- **`AGENTS.md` now states the layering rule.** The scaffold's generated code
+  always routed handlers through `internal/service/`, but `AGENTS.md` showed
+  handler examples holding a `repo.Store` and left `internal/service/` out of
+  the project structure — so agents copied the wrong pattern. New projects get
+  a `## Layers` section with the rule (a handler translates HTTP and renders;
+  everything in between is the service), a violation/fix pair, and the
+  health-probe and route-wiring exceptions. The guide pages that still showed
+  the old `UserRepo`/`h.repo.X` handler shape (handlers, templates, auth,
+  background jobs, testing) were brought in line. No generated code changed.
+
 ### Breaking changes
+
+- **GORM scaffolds now carry their schema on the repo structs.** Picking
+  `--db-connector gorm` used to generate three structs for two tables: a
+  `gorm`-tagged `db.User` and `db.Session` used only for auto-migration, a
+  `db:`-tagged `repo.User` (sqlx-shaped, and what every query actually read and
+  wrote), and a third `sessionRow` inside the store. GORM ignores `db:` tags, so
+  the query struct worked only by matching GORM's snake_case naming by accident,
+  and the two session copies had already drifted — one declared
+  `autoCreateTime`, the other didn't.
+
+  Now there is one struct per table. `repo.User` and `repo.Session` carry the
+  `gorm` tags and are the schema; `internal/db/models.go` only registers them:
+
+  ```go
+  func models() []any {
+      return []any{&repo.Session{}, &repo.User{}}
+  }
+  ```
+
+  `User.Active` deliberately has `not null` but **no** `default:true`. GORM omits
+  a field from the INSERT when its value is the Go zero value and it declares a
+  default, so with the tag in place `Create(&repo.User{Active: false})` would
+  store `true` — `false` unreachable, no error. The scaffolded register service
+  sets `Active: true` explicitly instead. The same trap applies to any `bool` or
+  counter you add; `default:'user'` on `Role` is safe because an empty role is
+  never wanted.
+
+  Existing gorm projects: delete the `User`/`Session` structs from
+  `internal/db/models.go` and the `sessionRow` from your store, move the `gorm`
+  tags onto `internal/repo/user.go` and a new `internal/repo/session.go`, and
+  point `models()` at them. Check every `default:` tag you moved onto a struct
+  that inserts. sqlx scaffolds are unaffected — they keep `db:` tags and their
+  SQL migrations.
+
+  Internally the repo layer is now one template per connector
+  (`gorm-user.go.tmpl`, `gorm/store.go.tmpl`, ...) selected by the
+  generator, rather than one file interleaving both with
+  `{{if eq .DBConnector}}`. GORM abstracts the dialect, so one
+  `gorm/` template renders into both `postgres/` and `sqlite/`.
+
+- **`repo.Store` is now a sub-store tree.** Data access is grouped one
+  sub-store per entity, reached through an accessor:
+
+  ```go
+  store.Users().GetByID(ctx, id)     // was store.GetUserByID(ctx, id)
+  store.Users().GetByEmail(ctx, e)   // was store.GetUserByEmail(ctx, e)
+  store.Users().Create(ctx, u)       // was store.CreateUser(ctx, u)
+  ```
+
+  The flat interface stopped scaling around twenty methods, and every
+  real project had already hand-rolled its own sub-stores. Method names
+  drop the entity prefix. A new entity is a `FooStore` interface beside
+  its model, a `Foo()` accessor on `Store`, and a `fooStore` in each
+  database package.
+
+  Existing projects: `hamr new` output changes, but so does `hamr add
+  service --auth` — it generates a `SubjectLoader` calling
+  `deps.Store.Users().GetByID(...)` into a project whose `internal/repo` you
+  own and which does not upgrade with the CLI binary. Against an older
+  scaffold that code will not compile, so `add service --auth` now refuses
+  when the CLI is newer than the project's `[hamr] version` (an explicit
+  `--auth` fails before the wizard prompts). Migrate `repo.Store` by hand —
+  `hamr ai upgrade` shows the diff — then record it with `hamr ai upgrade
+  --applied`, or pass `--skip-version-check` if you already have. Pin your
+  hamr version if you are not ready to follow the same shape.
 
 - **Frontend files consolidated under `frontend/`.** New projects put every
   frontend artifact in one directory instead of scattering four of them across

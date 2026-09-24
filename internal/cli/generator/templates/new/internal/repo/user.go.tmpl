@@ -1,6 +1,21 @@
 package repo
 
-import "time"
+import (
+	"context"
+	"time"
+)
+
+// UserStore is the user sub-store, reached via Store.Users().
+type UserStore interface {
+	// GetByID returns a user by ID, or nil if not found.
+	GetByID(ctx context.Context, id string) (*User, error)
+
+	// GetByEmail returns a user by email, or nil if not found.
+	GetByEmail(ctx context.Context, email string) (*User, error)
+
+	// Create inserts a new user.
+	Create(ctx context.Context, user *User) error
+}
 
 // User represents a user account.
 type User struct {

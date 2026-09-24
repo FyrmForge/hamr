@@ -41,14 +41,14 @@ func TestHomeHandler(t *testing.T) {
 Test against a local Postgres instance (started by Docker Compose) or use testcontainers for isolated database tests:
 
 ```go
-func TestUserRepo_Create(t *testing.T) {
+func TestUserStore_Create(t *testing.T) {
     // Connect to a test database (e.g., from DATABASE_URL env var or testcontainers)
     database, err := db.Connect(os.Getenv("TEST_DATABASE_URL"))
     require.NoError(t, err)
     t.Cleanup(func() { database.Close() })
 
-    repo := NewUserRepo(database)
-    err = repo.Create(context.Background(), &User{
+    store := postgres.NewStore(database)
+    err = store.Users().Create(context.Background(), &repo.User{
         Name:  "Alice",
         Email: "alice@example.com",
     })
@@ -62,7 +62,7 @@ For SQLite projects, use a `:memory:` database for fast, isolated per-test setup
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
-func TestUserRepo_Create(t *testing.T) {
+func TestUserStore_Create(t *testing.T) {
     database, err := sqlite.ConnectContext(context.Background(), ":memory:")
     require.NoError(t, err)
     t.Cleanup(func() { database.Close() })
@@ -72,8 +72,9 @@ func TestUserRepo_Create(t *testing.T) {
         Directory: "migrations",
     }))
 
-    repo := NewUserRepo(database)
-    // ...
+    // internal/repo/sqlite, aliased — hamr's pkg/db/sqlite owns the bare name here.
+    store := sqliterepo.NewStore(database)
+    // store.Users().Create(...)
 }
 ```
 

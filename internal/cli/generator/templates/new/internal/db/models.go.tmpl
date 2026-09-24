@@ -1,48 +1,26 @@
 package db
 
-import (
-	"time"
-)
+{{- $hasModels := or .IncludeSessions (and .IncludeAuth .AuthWithTables)}}
+{{- if $hasModels}}
+
+import "{{.Module}}/internal/repo"
+{{- end}}
 
 // models returns all GORM model structs for auto-migration.
+//
+// The structs themselves live in internal/repo next to their stores — their
+// gorm tags are the schema.
 func models() []any {
 	return []any{
 {{- if .IncludeSessions}}
-		&Session{},
+		&repo.Session{},
 {{- end}}
 {{- if and .IncludeAuth .AuthWithTables}}
-		&User{},
+		&repo.User{},
 {{- end}}
-{{- if not (or .IncludeSessions (and .IncludeAuth .AuthWithTables))}}
+{{- if not $hasModels}}
 		// Add your model structs here, e.g.:
-		// &Example{},
+		// &repo.Example{},
 {{- end}}
 	}
 }
-{{- if .IncludeSessions}}
-
-// Session represents a user session.
-type Session struct {
-	ID        string    `gorm:"primaryKey"`
-	SubjectID *string   `gorm:"index"`
-	Token     string    `gorm:"uniqueIndex;not null"`
-	ExpiresAt time.Time `gorm:"not null"`
-	CreatedAt time.Time `gorm:"not null;autoCreateTime"`
-	// Add your own metadata columns here, e.g.:
-	// IP        string `gorm:"not null;default:''"`
-}
-{{- end}}
-{{- if and .IncludeAuth .AuthWithTables}}
-
-// User represents an application user.
-type User struct {
-	ID           string    `gorm:"primaryKey"`
-	Email        string    `gorm:"uniqueIndex;not null"`
-	PasswordHash string    `gorm:"not null"`
-	Name         string    `gorm:"not null;default:''"`
-	Role         string    `gorm:"not null;default:'user'"`
-	Active       bool      `gorm:"not null;default:true"`
-	CreatedAt    time.Time `gorm:"not null;autoCreateTime"`
-	UpdatedAt    time.Time `gorm:"not null;autoUpdateTime"`
-}
-{{- end}}

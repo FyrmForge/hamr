@@ -97,6 +97,18 @@ func presets() []preset {
 			},
 		},
 		{
+			name: "sqlite",
+			cfg: &generator.ProjectConfig{
+				Name:        "sqlitetest",
+				Module:      "github.com/test/sqlitetest",
+				CSS:         "plain",
+				Database:    "sqlite",
+				DBConnector: "sqlx",
+				GoVersion:   goVer,
+				IncludeAuth: true,
+			},
+		},
+		{
 			name: "gorm",
 			cfg: &generator.ProjectConfig{
 				Name:             "gormtest",
@@ -106,6 +118,7 @@ func presets() []preset {
 				MigrateAtStartup: true,
 				GoVersion:        goVer,
 				IncludeAuth:      true,
+				AuthWithTables:   true,
 				StorageBackend:   "local",
 			},
 		},
@@ -259,6 +272,12 @@ func (h *harness) npmInstall() {
 
 func (h *harness) composeUp() {
 	h.t.Helper()
+	// Not every scaffold ships a compose file (sqlite + local storage has no
+	// services to start). Ask the filesystem rather than re-deriving the
+	// template's condition here, which would silently drift from it.
+	if _, err := os.Stat(filepath.Join(h.dir, "docker", "docker-compose.yaml")); errors.Is(err, os.ErrNotExist) {
+		return
+	}
 	project := "inttest-" + h.cfg.Name
 	h.runInProject("docker", "compose",
 		"-f", "docker/docker-compose.yaml",
@@ -352,6 +371,83 @@ func (h *harness) runMakeTest() {
 	h.runInProject("make", "test")
 }
 
+// gormActiveTest is dropped into gorm scaffolds to pin the default-tag trap
+// against a real database: with `default:true` on User.Active, GORM omits the
+// zero value from the INSERT and Create(&User{Active: false}) stores true.
+const gormActiveTest = `package %[2]s_test
+
+import (
+	"context"
+	"os"
+	"strconv"
+	"testing"
+	"time"
+
+	appdb "%[1]s/internal/db"
+	"%[1]s/internal/repo"
+	"%[1]s/internal/repo/%[2]s"
+)
+
+func TestUserActiveFalseRoundTrips(t *testing.T) {
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		t.Skip("DATABASE_URL not set")
+	}
+	gdb, err := appdb.Connect(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := appdb.AutoMigrate(gdb); err != nil {
+		t.Fatal(err)
+	}
+	users := %[2]s.NewStore(gdb).Users()
+	ctx := context.Background()
+
+	id := "inactive-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	if err := users.Create(ctx, &repo.User{ID: id, Email: id + "@example.com", PasswordHash: "x", Active: false}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := users.GetByID(ctx, id)
+	if err != nil || got == nil {
+		t.Fatalf("get user: %%v, %%v", got, err)
+	}
+	if got.Active {
+		t.Fatal("Active:false stored as true — a default: tag on User.Active makes GORM drop the zero value")
+	}
+}
+`
+
+// runGormActiveRoundTrip writes gormActiveTest into a gorm scaffold and runs it
+// against the compose database. make test does not load .env, so DATABASE_URL
+// is read here and passed explicitly.
+func (h *harness) runGormActiveRoundTrip() {
+	h.t.Helper()
+	if h.cfg.DBConnector != "gorm" || !h.cfg.IncludeAuth {
+		return
+	}
+	pkg := h.cfg.Database
+	src := fmt.Sprintf(gormActiveTest, h.cfg.Module, pkg)
+	testFile := filepath.Join(h.dir, "internal", "repo", pkg, "active_roundtrip_test.go")
+	require.NoError(h.t, os.WriteFile(testFile, []byte(src), 0o644))
+
+	env, err := os.ReadFile(filepath.Join(h.dir, ".env"))
+	require.NoError(h.t, err)
+	var dsn string
+	for _, line := range strings.Split(string(env), "\n") {
+		if v, ok := strings.CutPrefix(line, "DATABASE_URL="); ok {
+			dsn = strings.TrimSpace(v)
+		}
+	}
+	require.NotEmpty(h.t, dsn, "DATABASE_URL missing from .env")
+
+	cmd := exec.Command("go", "test", "-v", "-count=1", "-run", "TestUserActiveFalseRoundTrips", "./internal/repo/"+pkg+"/")
+	cmd.Dir = h.dir
+	cmd.Env = append(os.Environ(), "DATABASE_URL="+dsn)
+	cmd.Stdout = &testWriter{h.t}
+	cmd.Stderr = &testWriter{h.t}
+	require.NoError(h.t, cmd.Run(), "gorm Active:false round-trip failed")
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -432,6 +528,7 @@ func TestScaffold_GeneratedTests(t *testing.T) {
 			h.npmInstall()
 			h.composeUp()
 			h.runMakeTest()
+			h.runGormActiveRoundTrip()
 		})
 	}
 }

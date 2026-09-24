@@ -1,0 +1,34 @@
+package repo
+
+import (
+	"context"
+	"time"
+)
+
+// UserStore is the user sub-store, reached via Store.Users().
+type UserStore interface {
+	// GetByID returns a user by ID, or nil if not found.
+	GetByID(ctx context.Context, id string) (*User, error)
+
+	// GetByEmail returns a user by email, or nil if not found.
+	GetByEmail(ctx context.Context, email string) (*User, error)
+
+	// Create inserts a new user.
+	Create(ctx context.Context, user *User) error
+}
+
+// User represents a user account. The gorm tags are the schema: internal/db
+// registers this struct for auto-migration.
+type User struct {
+	ID           string `gorm:"primaryKey"`
+	Email        string `gorm:"uniqueIndex;not null"`
+	PasswordHash string `gorm:"not null"`
+	Name         string `gorm:"not null;default:''"`
+	Role         string `gorm:"not null;default:'user'"`
+	// No default on Active: GORM omits zero-value fields from an INSERT when
+	// the field carries a default tag, which would make Active:false
+	// unreachable and silently create an active user. Set it explicitly.
+	Active    bool      `gorm:"not null"`
+	CreatedAt time.Time `gorm:"not null;autoCreateTime"`
+	UpdatedAt time.Time `gorm:"not null;autoUpdateTime"`
+}

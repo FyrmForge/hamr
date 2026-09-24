@@ -29,7 +29,7 @@ func NewAuthService(store repo.Store) *AuthService {
 
 // Register creates a new user with a hashed password.
 func (s *AuthService) Register(ctx context.Context, email, password, name string) (*repo.User, error) {
-	existing, err := s.store.GetUserByEmail(ctx, email)
+	existing, err := s.store.Users().GetByEmail(ctx, email)
 	if err != nil {
 		return nil, fmt.Errorf("check existing user: %w", err)
 	}
@@ -54,7 +54,7 @@ func (s *AuthService) Register(ctx context.Context, email, password, name string
 		UpdatedAt:    now,
 	}
 
-	if err := s.store.CreateUser(ctx, user); err != nil {
+	if err := s.store.Users().Create(ctx, user); err != nil {
 		return nil, fmt.Errorf("create user: %w", err)
 	}
 
@@ -63,7 +63,7 @@ func (s *AuthService) Register(ctx context.Context, email, password, name string
 
 // Authenticate verifies credentials and returns the user.
 func (s *AuthService) Authenticate(ctx context.Context, email, password string) (*repo.User, error) {
-	user, err := s.store.GetUserByEmail(ctx, email)
+	user, err := s.store.Users().GetByEmail(ctx, email)
 	if err != nil {
 		return nil, fmt.Errorf("find user: %w", err)
 	}

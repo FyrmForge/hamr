@@ -21,6 +21,16 @@
 - **Store interface**: Repository pattern used in scaffolded projects.
   Generated projects define a Store interface in their internal/repo/repo.go;
   it is not part of the hamr framework itself.
+  Grouped one sub-store per entity behind an accessor:
+  `store.Users().GetByID(ctx, id)` (not `store.GetUserByID`). A new entity is a
+  `FooStore` interface beside its model, a `Foo()` accessor on `Store`, and a
+  `fooStore` in each database package. Only `internal/service/` holds a Store —
+  handlers call services (exceptions: health probes and the auth
+  `SubjectLoader` in server.go route wiring). With `--db-connector gorm` the
+  models live in `internal/repo/` and their `gorm` tags are the schema;
+  `internal/db/models.go` only registers them for auto-migration. Never put a
+  `default:` tag on a field whose zero value matters (a `bool`, a counter):
+  GORM omits zero values from the INSERT when a default is declared.
 - **hamr dev**: Dev server with file watching, auto-rebuild, and live reload. Any file event on a watched path reruns its `[[dev.watch]]` rule, including timestamp-only ones (`touch .env` restarts the app) but not a bare `chmod`/`chown`.
   `--headless` (automatic when stdout is not a terminal) skips the TUI and
   streams every line — hamr, rules, daemons, docker logs — to stdout, for
@@ -3452,6 +3462,7 @@ Flags:
 - `--auth` — wire session auth middleware against the shared store (`api`/`html` only; requires `--db` and a project scaffolded with session auth). The site keeps owning login; the service only validates sessions.
 - `--locale` — load the project's locale bundle + middleware (`html` only; requires a project scaffolded with locale)
 - `--port` — listen port for `api`/`html` (default `8081`), read from `<NAME>_PORT` (name upper-snake-cased: `billing-svc` → `BILLING_SVC_PORT`)
+- `--skip-version-check` — bypass the `--auth` guard below
 
 Examples:
 ```bash
@@ -3465,6 +3476,7 @@ Behavior notes:
 - HTTP services are **not** behind the `hamr dev` proxy (`:3000` targets the site only) — hit them directly at `http://localhost:<port>`. Live-reload injection and browser console capture apply to the proxied site; the appended watch rule still rebuilds and restarts the service on file changes.
 - The service name becomes the binary (`bin/<name>`), the watch-rule name, and the env prefix. Names colliding with an existing `cmd/`/`internal/` directory or a `[[dev.watch]]`/`[[dev.daemon]]` name are rejected.
 - Migrations stay owned by the site / `cmd/migrate`; services connect to the schema as-is.
+- `--auth` (released builds only) refuses when the CLI is newer than the project's `[hamr] version`: the generated `SubjectLoader` calls `deps.Store.Users().GetByID`, and `internal/repo` is project-owned code that does not upgrade with the CLI. Migrate it by hand (`hamr ai upgrade` shows the diff), then `hamr ai upgrade --applied`, or pass `--skip-version-check`. An explicit `--auth` fails before the wizard prompts.
 - The `html` type's home page renders through the project's shared `components.Layout`, so it picks up the project CSS and static asset pipeline.
 
 ### hamr add skill
