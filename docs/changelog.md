@@ -157,6 +157,13 @@ the TL;DR on top of it.
 
 ### Fixes
 
+- **SQLite projects that migrate at startup now pass CI.** A project scaffolded
+  with `--database sqlite --migrate-startup` has no `make migrate`
+  target, but its `.github/workflows/ci.yml` still ran `make migrate` and failed
+  at the "Run migrations" step. New scaffolds skip that step, because the server
+  migrates itself. For an existing project, delete the "Run migrations" step
+  from `.github/workflows/ci.yml`.
+
 - **Builds no longer show as running after they finish.** A rebuild that
   produced a burst of log lines could discard the event that clears the build,
   leaving the `hamr dev` status bar and the browser panel's dot spinning on

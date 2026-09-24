@@ -1,8 +1,10 @@
 package generator
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -809,6 +811,91 @@ func TestGenerateProject_ciWorkflowTailwind(t *testing.T) {
 	assert.Contains(t, ci, "make build")
 	assert.Contains(t, ci, "make test")
 	assert.Contains(t, ci, "make templint")
+}
+
+func TestGenerateProject_ciWorkflowSQLiteMigrateAtStartup(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "ciproj-sqlite")
+
+	cfg := &ProjectConfig{
+		Name:             "ciproj-sqlite",
+		Module:           "github.com/test/ciproj-sqlite",
+		CSS:              "plain",
+		Database:         "sqlite",
+		GoVersion:        "1.25.0",
+		MigrateAtStartup: true,
+	}
+
+	require.NoError(t, GenerateProject(dir, cfg))
+
+	// The Makefile has no migrate target, so CI must not call it.
+	ci := readFile(t, dir, ".github/workflows/ci.yml")
+	assert.NotContains(t, ci, "make migrate")
+	assert.NotContains(t, ci, "Run migrations")
+
+	makefile := readFile(t, dir, "Makefile")
+	assert.NotContains(t, makefile, "migrate:\n\t$(ENV_LOAD) go run ./cmd/migrate up")
+}
+
+func TestGenerateProject_ciWorkflowSQLite(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "ciproj-sqlite")
+
+	cfg := &ProjectConfig{
+		Name:      "ciproj-sqlite",
+		Module:    "github.com/test/ciproj-sqlite",
+		CSS:       "plain",
+		Database:  "sqlite",
+		GoVersion: "1.25.0",
+	}
+
+	require.NoError(t, GenerateProject(dir, cfg))
+
+	ci := readFile(t, dir, ".github/workflows/ci.yml")
+	assert.Contains(t, ci, "      - name: Run migrations")
+	assert.Contains(t, ci, "run: make migrate")
+	assert.Contains(t, ci, "DATABASE_PATH: ./data/ciproj-sqlite.db")
+
+	makefile := readFile(t, dir, "Makefile")
+	assert.Contains(t, makefile, "migrate:\n\t$(ENV_LOAD) go run ./cmd/migrate up")
+}
+
+// Every `make <target>` the generated CI runs must exist in the generated
+// Makefile, across every option ci.yml.tmpl or the Makefile branches on.
+func TestGenerateProject_ciMakeTargetsExist(t *testing.T) {
+	ciMake := regexp.MustCompile(`(?m)^\s*run: make ([\w-]+)`)
+	makeTarget := regexp.MustCompile(`(?m)^([\w-]+):([^=]|$)`)
+
+	for _, db := range []string{"postgres", "sqlite"} {
+		for _, conn := range []string{"sqlx", "gorm"} {
+			for _, css := range []string{"plain", "tailwind"} {
+				for _, startup := range []bool{false, true} {
+					name := fmt.Sprintf("%s-%s-%s-startup=%t", db, conn, css, startup)
+					t.Run(name, func(t *testing.T) {
+						dir := filepath.Join(t.TempDir(), "cimatrix")
+						require.NoError(t, GenerateProject(dir, &ProjectConfig{
+							Name:             "cimatrix",
+							Module:           "github.com/test/cimatrix",
+							CSS:              css,
+							Database:         db,
+							DBConnector:      conn,
+							MigrateAtStartup: startup,
+							GoVersion:        "1.25.0",
+						}))
+
+						targets := map[string]bool{}
+						for _, m := range makeTarget.FindAllStringSubmatch(readFile(t, dir, "Makefile"), -1) {
+							targets[m[1]] = true
+						}
+
+						calls := ciMake.FindAllStringSubmatch(readFile(t, dir, ".github/workflows/ci.yml"), -1)
+						require.NotEmpty(t, calls, "ci.yml runs no make targets; regex out of date?")
+						for _, m := range calls {
+							assert.True(t, targets[m[1]], "ci.yml runs `make %s` but the Makefile has no such target", m[1])
+						}
+					})
+				}
+			}
+		}
+	}
 }
 
 func TestGenerateProject_staticS3(t *testing.T) {

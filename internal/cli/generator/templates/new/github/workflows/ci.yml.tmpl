@@ -87,12 +87,12 @@ jobs:
             exit 1
           fi
 
-{{- if eq .Database "sqlite"}}
+{{- if and (eq .Database "sqlite") (not .MigrateAtStartup)}}
       - name: Run migrations
         env:
           DATABASE_PATH: ./data/{{.Name | slug}}.db
         run: make migrate
-{{- else}}
+{{- else if ne .Database "sqlite"}}
       # - name: Run migrations
       #   env:
       #     DATABASE_URL: postgres://postgres:postgres@localhost:5432/{{.Name | slug}}?sslmode=disable
