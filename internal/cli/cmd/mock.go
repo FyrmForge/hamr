@@ -21,6 +21,8 @@ configuration comes from environment variables:
   HAMR_MOCK_PORT               app-facing port: stripe /v1/* + mail/sms ingest (default 4500)
   HAMR_MOCK_UI_PORT            dashboards port; unset → UI on HAMR_MOCK_PORT
   HAMR_MOCK_BIND               bind host; empty → all interfaces (set 127.0.0.1 on a shared host)
+  HAMR_MOCK_UI_PASSWORD        basic-auth password for the /__hamr/* dashboards (any username); empty → open
+  HAMR_MOCK_API_ALLOW          comma-separated IPs/CIDRs allowed on the app-facing port (peer address only); empty → open
 
   HAMR_MAIL_MAX_MESSAGES       inbox cap (default 500)
   HAMR_MAIL_MAX_MESSAGE_BYTES  per-message byte cap (default 10MiB)

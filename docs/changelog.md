@@ -244,6 +244,16 @@ the TL;DR on top of it.
 
 ### Features
 
+- **`hamr mock-serve` can gate its two surfaces.** `HAMR_MOCK_UI_PASSWORD`
+  puts HTTP basic auth (any username, that password) on every `/__hamr/*`
+  dashboard route — mail and SMS inboxes, the Stripe dashboard and the
+  checkout/onboarding pages — while the mail/SMS ingest sinks stay open so the
+  app keeps working on a shared port. `HAMR_MOCK_API_ALLOW` restricts the
+  app-facing listener to a comma-separated list of IPs/CIDRs, checked against
+  the TCP peer only (forwarded headers are ignored), and logs each rejected
+  peer's address. Both are off when unset, so existing deployments are
+  unchanged.
+
 - **Stripe mock: subscriptions, coupons and a test clock.** A checkout
   session in `mode=subscription` (line items with `price_data.recurring`)
   now creates a Subscription and its first paid Invoice when paid, with

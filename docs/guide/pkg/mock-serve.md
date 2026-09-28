@@ -92,12 +92,55 @@ container-internal address.
 
 ## Security
 
-The mock surfaces are unauthenticated. The UI serves every captured email
+The mock surfaces are open by default. The UI serves every captured email
 (which may contain password-reset tokens and magic-login links) over plain
 GET, and the Stripe surface fires correctly-signed webhooks at your app on
 request. Inside a container network this is fine — control exposure via which
 ports you publish. On a shared host, set `HAMR_MOCK_BIND=127.0.0.1` to
 bind both listeners to loopback only.
+
+When a port has to be reachable from outside the compose network, gate it.
+Allow the app's exact address, not a whole private range:
+
+```yaml
+services:
+  mocks:
+    environment:
+      HAMR_MOCK_UI_PASSWORD: "pick-something-long" # dashboards ask for basic auth (any username)
+      HAMR_MOCK_API_ALLOW: "172.30.0.10"            # only the app reaches the app-facing port
+  app:
+    networks:
+      default:
+        ipv4_address: 172.30.0.10
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+```
+
+Do not allow the whole subnet, or a broad range like `172.16.0.0/12`. It
+contains the Docker bridge gateway (`172.30.0.1` here), and with Docker
+Desktop, rootless Docker or the userland proxy, traffic arriving on a
+published port reaches the container from that gateway address. Allowing it
+admits everyone.
+
+On other platforms, find the app's address from the mock's log. Every
+rejected request logs a warning with its `remote` address.
+
+`HAMR_MOCK_UI_PASSWORD` covers every `/__hamr/*` dashboard route, including
+the Stripe checkout and onboarding pages your browser is sent to. The mail and
+SMS ingest sinks stay open even on a shared port, so the app keeps working.
+Basic auth sends the password in cleartext over plain HTTP, so put the UI
+port behind TLS (your platform's HTTPS proxy) when it crosses a network you
+don't trust.
+
+`HAMR_MOCK_API_ALLOW` checks the TCP peer address only. Forwarded headers are
+client-set and ignored, so behind a public proxy (where every peer is the
+proxy) keep the app-facing port unpublished and reach it over private
+networking instead. On a shared port the allowlist applies to the dashboards
+too.
 
 ## Environment Variables
 

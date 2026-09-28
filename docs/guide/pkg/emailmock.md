@@ -160,7 +160,9 @@ Content-Type: application/json
   doesn't match the request host. Requests without an `Origin` header (curl,
   tests, non-browser clients) pass through.
 - **Not authenticated.** The inbox is unauthenticated by design. Do not bind
-  `hamr dev`'s proxy to a public interface.
+  `hamr dev`'s proxy to a public interface. A deployed `hamr mock-serve` can
+  password-protect it with `HAMR_MOCK_UI_PASSWORD`; see
+  [Deploying Mocks](mock-serve.md#security).
 
 ## Limitations
 

@@ -2,10 +2,12 @@ package devserver
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -32,10 +34,17 @@ import (
 //
 // Both listeners bind all interfaces by default (correct for a container,
 // where sibling containers reach it by service name). Set HAMR_MOCK_BIND to
-// restrict the bind host (e.g. 127.0.0.1) when running on a shared host —
-// the mock UIs are unauthenticated and expose captured emails (reset tokens,
-// magic links) and a signed-webhook trigger, so don't expose them on a
-// reachable interface in a shared environment.
+// restrict the bind host (e.g. 127.0.0.1) when running on a shared host.
+//
+// Two optional gates for when the ports must be reachable beyond the compose
+// network:
+//   - HAMR_MOCK_UI_PASSWORD: HTTP basic auth on every /__hamr/* dashboard
+//     route (any username, this password). The dashboards expose captured
+//     emails (reset tokens, magic links) and a signed-webhook trigger.
+//   - HAMR_MOCK_API_ALLOW: comma-separated IPs/CIDRs allowed to reach the
+//     app-facing listener. Checked against the TCP peer only — forwarded
+//     headers are spoofable and ignored — so behind a proxy keep the port
+//     unpublished and reach it over the private network instead.
 
 // MountedMock is what a provider returns: the route registrations for each
 // surface. Either may be nil if a mock has no routes on that surface.
@@ -157,30 +166,15 @@ func RunMockServe(ctx context.Context, logger *slog.Logger) error {
 		return fmt.Errorf("HAMR_MOCK_UI_PORT (%d) must differ from HAMR_MOCK_PORT; leave it unset to serve the UI on the app-facing port", port)
 	}
 
-	apiMux := http.NewServeMux()
-	uiMux := apiMux // same mux when ports are shared
-	if uiPort != 0 {
-		uiMux = http.NewServeMux()
+	apiHandler, uiHandler, err := buildMockHandlers(logger, selected, uiPort != 0)
+	if err != nil {
+		return err
 	}
 
-	for _, p := range selected {
-		mounted, berr := p.Build(logger)
-		if berr != nil {
-			return fmt.Errorf("%s mock: %w", p.Name, berr)
-		}
-		if mounted.RegisterAPI != nil {
-			mounted.RegisterAPI(apiMux)
-		}
-		if mounted.RegisterUI != nil {
-			mounted.RegisterUI(uiMux)
-		}
-		logger.Info("mock enabled", "name", p.Name)
-	}
-
-	servers := []*http.Server{newMockServer(bind, port, apiMux)}
+	servers := []*http.Server{newMockServer(bind, port, apiHandler)}
 	logger.Info("mock server listening", "addr", servers[0].Addr, "surface", "api+ingest")
 	if uiPort != 0 {
-		ui := newMockServer(bind, uiPort, uiMux)
+		ui := newMockServer(bind, uiPort, uiHandler)
 		servers = append(servers, ui)
 		logger.Info("mock server listening", "addr", ui.Addr, "surface", "ui")
 	} else {
@@ -203,6 +197,113 @@ func RunMockServe(ctx context.Context, logger *slog.Logger) error {
 	case err := <-errCh:
 		return err
 	}
+}
+
+// buildMockHandlers builds the selected mocks and returns the handler for each
+// listener, with the env-configured gates applied. split=false means one
+// shared listener: ui is nil and everything is served by api.
+//
+// UI routes go on their own mux mounted under /__hamr/ so one handler can
+// gate them all. On a shared port the ingest sinks (/__hamr/mail/ingest,
+// /__hamr/sms/ingest) are exact patterns on the API mux and win over the
+// prefix, so they stay open to the app.
+func buildMockHandlers(logger *slog.Logger, selected []MockProvider, split bool) (api, ui http.Handler, err error) {
+	apiMux := http.NewServeMux()
+	uiMux := apiMux
+	if split {
+		uiMux = http.NewServeMux()
+	}
+	uiRoutes := http.NewServeMux()
+
+	for _, p := range selected {
+		mounted, berr := p.Build(logger)
+		if berr != nil {
+			return nil, nil, fmt.Errorf("%s mock: %w", p.Name, berr)
+		}
+		if mounted.RegisterAPI != nil {
+			mounted.RegisterAPI(apiMux)
+		}
+		if mounted.RegisterUI != nil {
+			mounted.RegisterUI(uiRoutes)
+		}
+		logger.Info("mock enabled", "name", p.Name)
+	}
+
+	var uiGated http.Handler = uiRoutes
+	if pw := os.Getenv("HAMR_MOCK_UI_PASSWORD"); pw != "" {
+		uiGated = requirePassword(pw, uiRoutes)
+		logger.Info("mock UI password protected")
+	}
+	uiMux.Handle("/__hamr/", uiGated)
+
+	api = apiMux
+	if allow := config.GetEnvCSV("HAMR_MOCK_API_ALLOW"); len(allow) > 0 {
+		prefixes, perr := parsePrefixes(allow)
+		if perr != nil {
+			return nil, nil, fmt.Errorf("HAMR_MOCK_API_ALLOW: %w", perr)
+		}
+		api = allowPeers(logger, prefixes, apiMux)
+		logger.Info("mock API restricted to peers", "allow", allow)
+	}
+	if split {
+		ui = uiMux
+	}
+	return api, ui, nil
+}
+
+// requirePassword gates next behind HTTP basic auth. The username is ignored;
+// only the password is compared (constant-time).
+func requirePassword(password string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, got, ok := r.BasicAuth()
+		if !ok || subtle.ConstantTimeCompare([]byte(got), []byte(password)) != 1 {
+			w.Header().Set("WWW-Authenticate", `Basic realm="hamr mocks", charset="UTF-8"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// allowPeers rejects requests whose TCP peer is outside the given prefixes.
+// It deliberately ignores X-Forwarded-For and friends: they are client-set.
+// Rejections are logged with the peer address so a deploy whose app shows up
+// from an unexpected range (e.g. an IPv6 private network) is debuggable.
+func allowPeers(logger *slog.Logger, prefixes []netip.Prefix, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ap, err := netip.ParseAddrPort(r.RemoteAddr); err == nil {
+			// Unmap: ::ffff:10.0.0.5 → 10.0.0.5 so v4 CIDRs match on a dual-stack
+			// listener. Drop the zone: Prefix.Contains is always false for a
+			// zoned (link-local) address.
+			addr := ap.Addr().Unmap().WithZone("")
+			for _, p := range prefixes {
+				if p.Contains(addr) {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+		}
+		logger.Warn("mock API request rejected: peer not in HAMR_MOCK_API_ALLOW", "remote", r.RemoteAddr, "path", r.URL.Path)
+		http.Error(w, "forbidden", http.StatusForbidden)
+	})
+}
+
+// parsePrefixes accepts CIDRs ("10.0.0.0/8") and bare addresses ("10.0.0.5",
+// treated as a single-host prefix).
+func parsePrefixes(items []string) ([]netip.Prefix, error) {
+	out := make([]netip.Prefix, 0, len(items))
+	for _, item := range items {
+		if p, err := netip.ParsePrefix(item); err == nil {
+			out = append(out, p.Masked())
+			continue
+		}
+		a, err := netip.ParseAddr(item)
+		if err != nil {
+			return nil, fmt.Errorf("%q is not an IP or CIDR", item)
+		}
+		out = append(out, netip.PrefixFrom(a, a.BitLen()))
+	}
+	return out, nil
 }
 
 // mockReadHeaderTimeout and mockIdleTimeout match the values in serveProxy —

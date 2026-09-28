@@ -126,7 +126,7 @@ Two listeners:
 - **app-facing** (`HAMR_MOCK_PORT`): the surface your app talks to — stripe `/v1/*` API and the mail/SMS ingest sinks.
 - **UI** (`HAMR_MOCK_UI_PORT`): the human dashboards (captured email, fake payments). Optional — when unset the UI mounts on the app-facing port too. Splitting it onto its own port lets your deployment expose the two surfaces differently — e.g. publish the app-facing port to the app while keeping the dashboards on a port you only publish to `127.0.0.1`.
 
-Both listeners bind all interfaces by default (`HAMR_MOCK_BIND` empty), which is correct inside a container where sibling containers reach the mock by service name; isolate by controlling which ports you publish. **The mock surfaces are unauthenticated** — the UI serves every captured email (which can contain password-reset tokens and magic-login links) over plain GET, and the Stripe surface will fire a correctly-signed webhook at your app on request. Do not expose them on a reachable interface in a shared environment. When running outside a container on a shared host, set `HAMR_MOCK_BIND=127.0.0.1`.
+Both listeners bind all interfaces by default (`HAMR_MOCK_BIND` empty), which is correct inside a container where sibling containers reach the mock by service name; isolate by controlling which ports you publish. **The mock surfaces are open by default** — the UI serves every captured email (which can contain password-reset tokens and magic-login links) over plain GET, and the Stripe surface will fire a correctly-signed webhook at your app on request. When a port must be reachable beyond the compose network, gate it: `HAMR_MOCK_UI_PASSWORD` puts HTTP basic auth (any username, that password) on every `/__hamr/*` dashboard route, and `HAMR_MOCK_API_ALLOW` restricts the app-facing listener to the listed IPs/CIDRs. The allowlist checks the TCP peer only — `X-Forwarded-For` is client-set and ignored — so behind a public proxy keep the app-facing port unpublished and reach it over private networking. Allow the app's exact address, not a whole private range: a broad range contains the Docker bridge gateway, which is where published-port traffic comes from on some Docker setups. Rejected requests log their `remote` address. Basic auth is cleartext over plain HTTP; put the UI behind TLS when it crosses an untrusted network. When running outside a container on a shared host, set `HAMR_MOCK_BIND=127.0.0.1`.
 
 | Env | Purpose | Default |
 | --- | --- | --- |
@@ -134,6 +134,8 @@ Both listeners bind all interfaces by default (`HAMR_MOCK_BIND` empty), which is
 | `HAMR_MOCK_PORT` | app-facing port (stripe `/v1`, mail/sms ingest) | `4500` |
 | `HAMR_MOCK_UI_PORT` | dashboards port; unset → UI on `HAMR_MOCK_PORT` | unset |
 | `HAMR_MOCK_BIND` | bind host for both listeners; empty → all interfaces | empty |
+| `HAMR_MOCK_UI_PASSWORD` | basic-auth password for `/__hamr/*` dashboards (any username); empty → open | empty |
+| `HAMR_MOCK_API_ALLOW` | IPs/CIDRs allowed on the app-facing port, e.g. the app's address `172.30.0.10`; empty → open | empty |
 | `HAMR_MAIL_MAX_MESSAGES` | inbox cap | `500` |
 | `HAMR_MAIL_MAX_MESSAGE_BYTES` | per-message byte cap | `10MiB` |
 | `HAMR_MAIL_PERSIST_PATH` | mbox path; empty → in-memory only | empty |

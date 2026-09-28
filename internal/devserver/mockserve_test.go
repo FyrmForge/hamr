@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -112,4 +113,82 @@ func TestBuildStripeMockRequiresEnv(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, mounted.RegisterAPI)
 	assert.NotNil(t, mounted.RegisterUI)
+}
+
+func TestMockServeGates(t *testing.T) {
+	mail := []MockProvider{{Name: "mail", Build: buildMailMock}}
+	ingestBody := `{"From":{"Email":"app@example.com"},"To":[{"Email":"ada@example.com"}],"Subject":"hi","Text":"hi"}`
+
+	serve := func(h http.Handler, method, path, remote string, setup func(*http.Request)) int {
+		req := httptest.NewRequest(method, path, strings.NewReader(ingestBody))
+		req.Header.Set("Content-Type", "application/json")
+		if remote != "" {
+			req.RemoteAddr = remote
+		}
+		if setup != nil {
+			setup(req)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	t.Run("no env: both surfaces open", func(t *testing.T) {
+		api, ui, err := buildMockHandlers(slog.Default(), mail, true)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, serve(ui, http.MethodGet, "/__hamr/mail", "", nil))
+		assert.Equal(t, http.StatusOK, serve(api, http.MethodPost, "/__hamr/mail/ingest", "", nil))
+	})
+
+	t.Run("password: any user, right password passes", func(t *testing.T) {
+		t.Setenv("HAMR_MOCK_UI_PASSWORD", "s3cret")
+		_, ui, err := buildMockHandlers(slog.Default(), mail, true)
+		require.NoError(t, err)
+
+		assert.Equal(t, http.StatusUnauthorized, serve(ui, http.MethodGet, "/__hamr/mail", "", nil))
+		assert.Equal(t, http.StatusUnauthorized, serve(ui, http.MethodGet, "/__hamr/mail", "", func(r *http.Request) {
+			r.SetBasicAuth("whoever", "wrong")
+		}))
+		assert.Equal(t, http.StatusOK, serve(ui, http.MethodGet, "/__hamr/mail", "", func(r *http.Request) {
+			r.SetBasicAuth("whoever", "s3cret")
+		}))
+	})
+
+	t.Run("password on shared port: UI gated, ingest open", func(t *testing.T) {
+		t.Setenv("HAMR_MOCK_UI_PASSWORD", "s3cret")
+		api, ui, err := buildMockHandlers(slog.Default(), mail, false)
+		require.NoError(t, err)
+		assert.Nil(t, ui)
+		assert.Equal(t, http.StatusUnauthorized, serve(api, http.MethodGet, "/__hamr/mail", "", nil))
+		assert.Equal(t, http.StatusOK, serve(api, http.MethodPost, "/__hamr/mail/ingest", "", nil))
+	})
+
+	t.Run("allow: peer address only, forwarded headers ignored", func(t *testing.T) {
+		t.Setenv("HAMR_MOCK_API_ALLOW", "10.0.0.0/8, 192.168.1.7, fe80::/10")
+		api, ui, err := buildMockHandlers(slog.Default(), mail, true)
+		require.NoError(t, err)
+
+		ingest := func(remote string, setup func(*http.Request)) int {
+			return serve(api, http.MethodPost, "/__hamr/mail/ingest", remote, setup)
+		}
+		assert.Equal(t, http.StatusOK, ingest("10.4.5.6:1234", nil))
+		assert.Equal(t, http.StatusOK, ingest("[::ffff:10.4.5.6]:1234", nil), "v4-mapped peer matches v4 CIDR")
+		assert.Equal(t, http.StatusOK, ingest("[fe80::1%eth0]:1234", nil), "zoned link-local peer matches")
+		assert.Equal(t, http.StatusOK, ingest("192.168.1.7:1234", nil))
+		assert.Equal(t, http.StatusForbidden, ingest("192.168.1.8:1234", nil))
+		assert.Equal(t, http.StatusForbidden, ingest("203.0.113.9:1234", func(r *http.Request) {
+			r.Header.Set("X-Forwarded-For", "10.0.0.1")
+		}), "spoofed X-Forwarded-For does not help")
+
+		// Split port: the allowlist is app-facing only.
+		assert.Equal(t, http.StatusOK, serve(ui, http.MethodGet, "/__hamr/mail", "203.0.113.9:1234", nil))
+	})
+
+	t.Run("allow: bad entry fails startup", func(t *testing.T) {
+		t.Setenv("HAMR_MOCK_API_ALLOW", "10.0.0.0/8,app")
+		_, _, err := buildMockHandlers(slog.Default(), mail, true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "HAMR_MOCK_API_ALLOW")
+		assert.Contains(t, err.Error(), "app")
+	})
 }

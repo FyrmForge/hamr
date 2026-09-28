@@ -165,9 +165,15 @@
   separately-exposable listener (unset → UI on the
   app-facing port). Invalid/out-of-range ports error loudly (no silent
   default). Both listeners bind all interfaces; `HAMR_MOCK_BIND` restricts
-  the host (set `127.0.0.1` on a shared host — the mock surfaces are
-  unauthenticated: the UI serves captured emails, the Stripe surface fires
-  signed webhooks). Stripe requires `HAMR_STRIPE_BASE_URL` (browser-reachable
+  the host (set `127.0.0.1` on a shared host — the mock surfaces are open by
+  default: the UI serves captured emails, the Stripe surface fires signed
+  webhooks). Optional gates: `HAMR_MOCK_UI_PASSWORD` puts basic auth (any
+  username) on every `/__hamr/*` dashboard route, ingest sinks stay open;
+  `HAMR_MOCK_API_ALLOW` (csv IPs/CIDRs) restricts the app-facing listener by
+  TCP peer address, forwarded headers ignored; allow the app's exact IP, not a
+  broad range (it would contain the Docker bridge gateway that published-port
+  traffic can arrive from); rejections log the `remote` address. Basic auth is
+  cleartext without TLS. Stripe requires `HAMR_STRIPE_BASE_URL` (browser-reachable
   UI origin; no container-safe default), `HAMR_STRIPE_WEBHOOK_URL`,
   `HAMR_STRIPE_WEBHOOK_SECRET`; optional `HAMR_STRIPE_THIN_WEBHOOK_URL` for v2
   thin events. Mail tuning: `HAMR_MAIL_MAX_MESSAGES`,

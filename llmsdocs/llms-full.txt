@@ -157,9 +157,22 @@
   error loudly rather than silently falling back to a default. Both listeners bind all interfaces by
   default (correct in a container, where siblings reach it by service name); `HAMR_MOCK_BIND` restricts
   the bind host — set `127.0.0.1` when running outside a container on a shared host, because the mock
-  surfaces are unauthenticated (the UI serves every captured email, which may contain reset tokens /
+  surfaces are open by default (the UI serves every captured email, which may contain reset tokens /
   magic links, over plain GET, and the Stripe surface fires a correctly-signed webhook at the app on
-  request). Stripe needs
+  request). Two optional gates for ports that must be reachable beyond the compose network:
+  `HAMR_MOCK_UI_PASSWORD` puts HTTP basic auth (any username, that password, constant-time compare)
+  on every `/__hamr/*` dashboard route — the UI routes are mounted on their own mux under `/__hamr/`
+  so one handler covers them, and on a shared port the exact-pattern ingest sinks win over the prefix
+  and stay open to the app; `HAMR_MOCK_API_ALLOW` (csv of IPs and CIDRs, v4-mapped v6 peers unmapped
+  so v4 CIDRs match on a dual-stack listener) restricts the app-facing listener by TCP peer address,
+  ignoring `X-Forwarded-For` because it is client-set — behind a public proxy keep the port
+  unpublished and use private networking. Zoned (link-local) peers have the zone stripped before
+  matching. Allow the app's exact address (e.g. a compose `ipv4_address`), never a whole subnet or
+  `172.16.0.0/12`: those contain the Docker bridge gateway, and with Docker Desktop, rootless Docker
+  or the userland proxy, published-port traffic arrives from that gateway, so the list would admit
+  everyone. Each rejected request logs a warning with its `remote` address, which is how to find the
+  app's source address on other platforms (e.g. an IPv6 private network). Basic auth is cleartext
+  over plain HTTP; put the UI behind TLS across untrusted networks. Stripe needs
   `HAMR_STRIPE_BASE_URL` (browser-reachable origin of the mock UI — required
   because `localhost:<port>` has no container-safe default: not reachable via the
   host's published port or from sibling containers), plus `HAMR_STRIPE_WEBHOOK_URL`
