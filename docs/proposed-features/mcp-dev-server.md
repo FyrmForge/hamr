@@ -82,7 +82,7 @@ level exposes:
 | `mail`   | `mail.list`, `mail.get` | `mail.clear`, `mail.ingest` |
 | `sms`    | `sms.list`, `sms.get` | `sms.clear`, `sms.ingest` |
 | `build`  | — (write-only area)   | `rule.run`, `rebuild.all`, `make.run` |
-| `stripe` | `stripe.list`         | `stripe.complete`, `stripe.expire`, `stripe.refund` |
+| `stripe` | `stripe.list`         | `stripe.complete`, `stripe.expire`, `stripe.refund`, `stripe.advance`, `stripe.subscription` |
 
 Write-only areas (`build`) treat `read` as `deny` — there are no read-only
 tools to expose. With no `[dev.mcp.access]` table at all, zero tools are
@@ -105,8 +105,9 @@ Each allowed action becomes one MCP tool. Mapping to the existing surface:
 | `rebuild.all`  | `RebuildAll` (TUI-only today)              | none                        | **yes — add HTTP action** |
 | `make.run`     | `exec.Command("make", t)` in TUI model     | none                        | **yes — see below** |
 
-(`stripe.*` — `stripe.list` reads mock state; `stripe.complete`/`expire`/`refund`
-call `StripeMock` methods extracted from the dashboard handlers. See below.)
+(`stripe.*` — `stripe.list` reads mock state; `stripe.complete`/`expire`/`refund`/
+`advance`/`subscription` call `StripeMock` methods shared with the dashboard
+handlers. See below.)
 
 ### The two parity gaps
 
@@ -242,16 +243,26 @@ the access table above.
 
 The stripe lifecycle ops lived only inside HTML dashboard handlers. They were
 extracted into callable `StripeMock` methods (`completeCheckout`,
-`expireSession`, `refundPayment`, `stateSummary`) that the dashboard handlers
+`expireSession`, `refundPayment`, `stateSummary`, `advanceClock`,
+`subscriptionAction`) that the dashboard handlers
 now also call — single source of truth — and exposed as tools:
 
-- **`stripe.list`** _(read)_ — state snapshot: sessions, payment intents,
-  payouts, refunds, accounts (id/status/amount). → `StripeStateSummary`.
+- **`stripe.list`** _(read)_ — state snapshot: the mock clock, sessions,
+  subscriptions, payment intents, payouts, refunds, accounts, coupons with
+  their promotion codes. → `StripeStateSummary`.
 - **`stripe.complete`** _(write)_ — apply an outcome to a checkout session.
-  inputs: `session`, `outcome` (paid|failed|cancelled).
+  inputs: `session`, `outcome` (paid|failed|cancelled), `promotion_code?`
+  (what a buyer would type; paid only).
 - **`stripe.expire`** _(write)_ — expire an open session. inputs: `session`.
 - **`stripe.refund`** _(write)_ — refund a payment intent. inputs:
   `payment_intent`, `amount`, `reverse_transfer?`, `refund_application_fee?`.
+- **`stripe.advance`** _(write)_ — advance the mock clock and run every
+  subscription renewal that falls due. inputs: exactly one of `by`
+  (`1d|2w|1m|1y` or a Go duration) or `to` (RFC 3339 or unix). At most
+  five years per call. → `{now, cycled}` (every subscription the advance
+  acted on, renewed or ended).
+- **`stripe.subscription`** _(write)_ — drive one subscription. inputs:
+  `subscription`, `action` (next|retry|fail_next|cancel). → `{id, status}`.
 
 Niche Connect/onboarding ops (payout-complete, account-complete, PI-complete,
 resend) are not yet exposed — they can follow the same extraction pattern.

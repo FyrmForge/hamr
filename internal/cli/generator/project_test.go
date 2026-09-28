@@ -1069,6 +1069,13 @@ func TestGenerateProject_stripe(t *testing.T) {
 		"charge.dispute.funds_withdrawn",
 		"charge.dispute.closed",
 		"charge.dispute.funds_reinstated",
+		"customer.subscription.created",
+		"customer.subscription.updated",
+		"customer.subscription.deleted",
+		"invoice.paid",
+		"invoice.payment_succeeded",
+		"invoice.payment_failed",
+		"invoice.voided",
 		// v2 thin events, fired when onboarding an Accounts v2 account.
 		"v2.core.account[requirements].updated",
 		"v2.core.account[configuration.recipient].capability_status_updated",

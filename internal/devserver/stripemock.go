@@ -52,10 +52,13 @@ type webhookFire struct {
 // and warn-on-failure shape live in one place.
 func (m *StripeMock) fireEventsAsync(fires []webhookFire, logKV ...any) {
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), webhookDeliveryTimeout)
-		defer cancel()
 		for _, f := range fires {
-			if err := m.fireEvent(ctx, f); err != nil {
+			// Each delivery gets its own deadline: a clock advance can queue
+			// hundreds of events and they must not share one 30s budget.
+			ctx, cancel := context.WithTimeout(context.Background(), webhookDeliveryTimeout)
+			err := m.fireEvent(ctx, f)
+			cancel()
+			if err != nil {
 				kv := append([]any{"event_type", f.eventType, "err", err}, logKV...)
 				m.logger.Warn("webhook delivery failed", kv...)
 			}
@@ -92,6 +95,11 @@ type StripeMock struct {
 	v2Accounts      map[string]*stripeV2Account
 	balanceSettings map[string]*stripeBalanceSettings // keyed by account id ("" = platform)
 	disputes        map[string]*stripeDispute
+	coupons         map[string]*stripeCoupon
+	promotionCodes  map[string]*stripePromotionCode
+	subscriptions   map[string]*stripeSubscription
+	invoices        map[string]*stripeInvoice
+	clockOffset     atomic.Int64   // seconds the mock clock runs ahead of real time; see stripemock_clock.go
 	events          []*stripeEvent // newest last, capped at stripeEventLimit
 	idem            map[string]*idemEntry
 	idemMu          sync.Mutex
@@ -153,6 +161,10 @@ func NewStripeMock(opts StripeMockOptions) *StripeMock {
 		v2Accounts:      map[string]*stripeV2Account{},
 		balanceSettings: map[string]*stripeBalanceSettings{},
 		disputes:        map[string]*stripeDispute{},
+		coupons:         map[string]*stripeCoupon{},
+		promotionCodes:  map[string]*stripePromotionCode{},
+		subscriptions:   map[string]*stripeSubscription{},
+		invoices:        map[string]*stripeInvoice{},
 		idem:            map[string]*idemEntry{},
 	}
 	m.loadFromDisk()
@@ -178,6 +190,8 @@ func (m *StripeMock) RegisterAPIRoutes(mux *http.ServeMux) {
 	m.registerPayoutRoutes(r)
 	m.registerTransferRoutes(r)
 	m.registerBalanceRoutes(r)
+	m.registerCouponRoutes(r)
+	m.registerSubscriptionRoutes(r)
 }
 
 // stripeSession is the in-memory representation. Mirrors the subset of
@@ -185,22 +199,37 @@ func (m *StripeMock) RegisterAPIRoutes(mux *http.ServeMux) {
 // from responses (stripe-go ignores unknown JSON fields, missing fields
 // default to zero values).
 type stripeSession struct {
-	ID              string            `json:"id"`
-	PaymentIntentID string            `json:"payment_intent_id"`
-	Created         time.Time         `json:"created"`
-	Mode            string            `json:"mode"`
-	Currency        string            `json:"currency"`
-	AmountTotal     int64             `json:"amount_total"`
-	LineItems       []stripeLineItem  `json:"line_items"`
-	SuccessURL      string            `json:"success_url"`
-	CancelURL       string            `json:"cancel_url"`
-	Metadata        map[string]string `json:"metadata,omitempty"`
+	ID              string    `json:"id"`
+	PaymentIntentID string    `json:"payment_intent_id"`
+	Created         time.Time `json:"created"`
+	Mode            string    `json:"mode"`
+	Currency        string    `json:"currency"`
+	// AmountTotal is the gross line-item total (Stripe's amount_subtotal).
+	// The JSON name predates discounts and is kept so persisted state loads.
+	// Total() is what the buyer pays.
+	AmountTotal    int64            `json:"amount_total"`
+	AmountDiscount int64            `json:"amount_discount,omitempty"` // snapshotted when the discount is applied
+	Discounts      []stripeDiscount `json:"discounts,omitempty"`       // at most one, like Stripe
+	// AllowPromotionCodes shows a code input on the hosted page. Stripe
+	// forbids combining it with discounts[].
+	AllowPromotionCodes bool              `json:"allow_promotion_codes,omitempty"`
+	LineItems           []stripeLineItem  `json:"line_items"`
+	SuccessURL          string            `json:"success_url"`
+	CancelURL           string            `json:"cancel_url"`
+	Metadata            map[string]string `json:"metadata,omitempty"`
 	// PaymentIntentMetadata is payment_intent_data.metadata: what Stripe copies
 	// onto the payment intent and its charge. Nil = fall back to Metadata.
 	PaymentIntentMetadata map[string]string `json:"payment_intent_metadata,omitempty"`
-	CustomerEmail         string            `json:"customer_email,omitempty"`
-	Status                string            `json:"status"`         // "open" | "complete" | "expired"
-	PaymentStatus         string            `json:"payment_status"` // "paid" | "unpaid" | "no_payment_required"
+	// SubscriptionMetadata is subscription_data.metadata: copied onto the
+	// subscription a mode=subscription session creates.
+	SubscriptionMetadata map[string]string `json:"subscription_metadata,omitempty"`
+	CustomerEmail        string            `json:"customer_email,omitempty"`
+	// CustomerID and SubscriptionID are set when a mode=subscription session
+	// completes. The customer is an id only: the mock has no Customer resource.
+	CustomerID     string `json:"customer_id,omitempty"`
+	SubscriptionID string `json:"subscription_id,omitempty"`
+	Status         string `json:"status"`         // "open" | "complete" | "expired"
+	PaymentStatus  string `json:"payment_status"` // "paid" | "unpaid" | "no_payment_required"
 }
 
 type stripeLineItem struct {
@@ -208,6 +237,15 @@ type stripeLineItem struct {
 	UnitAmount int64  `json:"unit_amount"`
 	Quantity   int64  `json:"quantity"`
 	Currency   string `json:"currency"`
+	// Interval and IntervalCount come from price_data.recurring and are set
+	// only for subscription-mode line items.
+	Interval      string `json:"interval,omitempty"`
+	IntervalCount int64  `json:"interval_count,omitempty"`
+}
+
+// Total is the amount the buyer pays: the gross total minus any discount.
+func (s *stripeSession) Total() int64 {
+	return s.AmountTotal - s.AmountDiscount
 }
 
 // handleCheckoutSessions handles the collection endpoint. POST creates;
@@ -286,12 +324,23 @@ func (m *StripeMock) createCheckoutSession(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	sess.ID = "cs_test_" + randomHex(24)
-	sess.PaymentIntentID = "pi_test_" + randomHex(24)
-	sess.Created = time.Now()
+	// payment_intent stays null until the buyer pays, as Stripe has done
+	// since API 2022-08-01; a subscription's payment lives on its invoice.
+	sess.Created = m.now()
 	sess.Status = "open"
 	sess.PaymentStatus = "unpaid"
 
 	m.mu.Lock()
+	// discounts[] is resolved now so an unknown or exhausted coupon fails
+	// the create, as in Stripe; the redemption itself is counted on completion.
+	if len(sess.Discounts) > 0 {
+		d := sess.Discounts[0]
+		if err := m.applyDiscount(sess, d.CouponID, d.PromotionCodeID, ""); err != nil {
+			m.mu.Unlock()
+			writeStripeError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
+			return
+		}
+	}
 	m.sessions[sess.ID] = sess
 	sessCopy := cloneSession(sess)
 	m.persist()
@@ -314,8 +363,29 @@ func buildSessionFromParams(p map[string]any) (*stripeSession, error) {
 	if pid, ok := p["payment_intent_data"].(map[string]any); ok {
 		s.PaymentIntentMetadata = stringMap(pid, "metadata")
 	}
+	if sd, ok := p["subscription_data"].(map[string]any); ok {
+		s.SubscriptionMetadata = stringMap(sd, "metadata")
+	}
 	if s.Mode == "" {
 		s.Mode = "payment"
+	}
+	if s.Mode != "payment" && s.Mode != "subscription" {
+		return nil, fmt.Errorf("mode %q is not mocked (payment and subscription are)", s.Mode)
+	}
+	s.AllowPromotionCodes = getString(p, "allow_promotion_codes") == "true"
+	if raw, ok := p["discounts"].([]any); ok && len(raw) > 0 {
+		if len(raw) > 1 {
+			return nil, stripeText("You may only specify one discount on a Checkout Session")
+		}
+		if s.AllowPromotionCodes {
+			return nil, stripeText("You cannot use `allow_promotion_codes` together with `discounts`")
+		}
+		dm, _ := raw[0].(map[string]any)
+		d := stripeDiscount{CouponID: getString(dm, "coupon"), PromotionCodeID: getString(dm, "promotion_code")}
+		if (d.CouponID == "") == (d.PromotionCodeID == "") {
+			return nil, errors.New("discounts[0] must specify exactly one of coupon or promotion_code")
+		}
+		s.Discounts = []stripeDiscount{d}
 	}
 
 	rawItems, ok := p["line_items"].([]any)
@@ -330,6 +400,14 @@ func buildSessionFromParams(p map[string]any) (*stripeSession, error) {
 		li, err := buildLineItem(itemMap, i)
 		if err != nil {
 			return nil, err
+		}
+		switch {
+		case s.Mode == "subscription" && li.Interval == "":
+			return nil, fmt.Errorf("line_items[%d].price_data.recurring is required in subscription mode", i)
+		case s.Mode == "payment" && li.Interval != "":
+			return nil, fmt.Errorf("line_items[%d] is a recurring price; use mode=subscription", i)
+		case s.Mode == "subscription" && i > 0 && (li.Interval != s.LineItems[0].Interval || li.IntervalCount != s.LineItems[0].IntervalCount):
+			return nil, fmt.Errorf("line_items[%d] has a different billing interval; all prices on a subscription must share one", i)
 		}
 		if s.Currency == "" {
 			s.Currency = li.Currency
@@ -367,12 +445,26 @@ func buildLineItem(item map[string]any, idx int) (stripeLineItem, error) {
 	productData, _ := priceData["product_data"].(map[string]any)
 	name := getString(productData, "name")
 
-	return stripeLineItem{
+	li := stripeLineItem{
 		Name:       name,
 		UnitAmount: unitAmount,
 		Quantity:   qty,
 		Currency:   currency,
-	}, nil
+	}
+	if rec, ok := priceData["recurring"].(map[string]any); ok {
+		li.Interval = strings.ToLower(getString(rec, "interval"))
+		switch li.Interval {
+		case "day", "week", "month", "year":
+		default:
+			return stripeLineItem{}, fmt.Errorf("line_items[%d].price_data.recurring.interval must be one of day, week, month, year", idx)
+		}
+		n, ok := getInt64(rec, "interval_count")
+		if !ok || n < 0 {
+			return stripeLineItem{}, fmt.Errorf("line_items[%d].price_data.recurring.interval_count must be a positive integer", idx)
+		}
+		li.IntervalCount = max(n, 1)
+	}
+	return li, nil
 }
 
 // serializeSession builds the JSON wire representation matching Stripe's
@@ -381,22 +473,31 @@ func buildLineItem(item map[string]any, idx int) (stripeLineItem, error) {
 // as unset.
 func (m *StripeMock) serializeSession(s *stripeSession) map[string]any {
 	out := map[string]any{
-		"id":              s.ID,
-		"object":          "checkout.session",
-		"created":         s.Created.Unix(),
-		"livemode":        false,
-		"mode":            s.Mode,
-		"currency":        s.Currency,
-		"amount_total":    s.AmountTotal,
-		"amount_subtotal": s.AmountTotal,
-		"payment_intent":  s.PaymentIntentID,
-		"success_url":     s.SuccessURL,
-		"cancel_url":      s.CancelURL,
-		"customer_email":  nullableString(s.CustomerEmail),
-		"status":          s.Status,
-		"payment_status":  s.PaymentStatus,
-		"url":             m.baseURL + "/__hamr/stripe/checkout?session=" + s.ID,
+		"id":                    s.ID,
+		"object":                "checkout.session",
+		"created":               s.Created.Unix(),
+		"livemode":              false,
+		"mode":                  s.Mode,
+		"currency":              s.Currency,
+		"amount_total":          s.Total(),
+		"amount_subtotal":       s.AmountTotal,
+		"allow_promotion_codes": s.AllowPromotionCodes,
+		"total_details":         map[string]any{"amount_discount": s.AmountDiscount, "amount_shipping": 0, "amount_tax": 0},
+		"payment_intent":        nullableString(s.PaymentIntentID),
+		"customer":              nullableString(s.CustomerID),
+		"subscription":          nullableString(s.SubscriptionID),
+		"success_url":           s.SuccessURL,
+		"cancel_url":            s.CancelURL,
+		"customer_email":        nullableString(s.CustomerEmail),
+		"status":                s.Status,
+		"payment_status":        s.PaymentStatus,
+		"url":                   m.baseURL + "/__hamr/stripe/checkout?session=" + s.ID,
 	}
+	discounts := make([]map[string]any, len(s.Discounts))
+	for i, d := range s.Discounts {
+		discounts[i] = map[string]any{"coupon": d.CouponID, "promotion_code": nullableString(d.PromotionCodeID)}
+	}
+	out["discounts"] = discounts
 	if s.Metadata != nil {
 		out["metadata"] = s.Metadata
 	} else {

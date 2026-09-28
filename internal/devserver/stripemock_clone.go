@@ -20,8 +20,58 @@ func cloneSession(s *stripeSession) *stripeSession {
 	c := *s
 	c.Metadata = cloneStringMap(s.Metadata)
 	c.PaymentIntentMetadata = cloneStringMap(s.PaymentIntentMetadata)
+	c.SubscriptionMetadata = cloneStringMap(s.SubscriptionMetadata)
 	if s.LineItems != nil {
 		c.LineItems = append([]stripeLineItem(nil), s.LineItems...)
+	}
+	if s.Discounts != nil {
+		c.Discounts = append([]stripeDiscount(nil), s.Discounts...)
+	}
+	return &c
+}
+
+func cloneCoupon(c *stripeCoupon) *stripeCoupon {
+	if c == nil {
+		return nil
+	}
+	cc := *c
+	cc.Metadata = cloneStringMap(c.Metadata)
+	return &cc
+}
+
+func clonePromotionCode(p *stripePromotionCode) *stripePromotionCode {
+	if p == nil {
+		return nil
+	}
+	c := *p
+	c.Metadata = cloneStringMap(p.Metadata)
+	return &c
+}
+
+func cloneSubscription(s *stripeSubscription) *stripeSubscription {
+	if s == nil {
+		return nil
+	}
+	c := *s
+	c.Metadata = cloneStringMap(s.Metadata)
+	if s.Items != nil {
+		c.Items = append([]stripeSubscriptionItem(nil), s.Items...)
+	}
+	if s.Discount != nil {
+		d := *s.Discount
+		c.Discount = &d
+	}
+	return &c
+}
+
+func cloneInvoice(in *stripeInvoice) *stripeInvoice {
+	if in == nil {
+		return nil
+	}
+	c := *in
+	c.Metadata = cloneStringMap(in.Metadata)
+	if in.Lines != nil {
+		c.Lines = append([]stripeInvoiceLine(nil), in.Lines...)
 	}
 	return &c
 }

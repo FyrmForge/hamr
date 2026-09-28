@@ -27,6 +27,13 @@ type stripeStateFile struct {
 	V2Accounts      map[string]*stripeV2Account       `json:"v2_accounts"`
 	BalanceSettings map[string]*stripeBalanceSettings `json:"balance_settings"`
 	Disputes        map[string]*stripeDispute         `json:"disputes"`
+	Coupons         map[string]*stripeCoupon          `json:"coupons"`
+	PromotionCodes  map[string]*stripePromotionCode   `json:"promotion_codes"`
+	Subscriptions   map[string]*stripeSubscription    `json:"subscriptions"`
+	Invoices        map[string]*stripeInvoice         `json:"invoices"`
+	// ClockOffset is how far ahead of real time the mock clock runs, in
+	// seconds. Persisted so an advanced clock stays advanced across restarts.
+	ClockOffset int64 `json:"clock_offset,omitempty"`
 }
 
 // persist serializes the entire in-memory state and atomically writes it
@@ -51,6 +58,11 @@ func (m *StripeMock) persist() {
 		V2Accounts:      m.v2Accounts,
 		BalanceSettings: m.balanceSettings,
 		Disputes:        m.disputes,
+		Coupons:         m.coupons,
+		PromotionCodes:  m.promotionCodes,
+		Subscriptions:   m.subscriptions,
+		Invoices:        m.invoices,
+		ClockOffset:     m.clockOffset.Load(),
 	}
 	if err := writeStripeState(m.persistPath, state); err != nil {
 		m.reportPersistErr(err)
@@ -125,7 +137,19 @@ func (m *StripeMock) loadFromDisk() {
 	if state.Disputes != nil {
 		m.disputes = state.Disputes
 	}
-
+	if state.Coupons != nil {
+		m.coupons = state.Coupons
+	}
+	if state.PromotionCodes != nil {
+		m.promotionCodes = state.PromotionCodes
+	}
+	if state.Subscriptions != nil {
+		m.subscriptions = state.Subscriptions
+	}
+	if state.Invoices != nil {
+		m.invoices = state.Invoices
+	}
+	m.clockOffset.Store(state.ClockOffset)
 }
 
 // writeStripeState atomically writes the state to path via tmp + rename.

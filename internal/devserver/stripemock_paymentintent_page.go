@@ -6,7 +6,6 @@ import (
 	"html/template"
 	"net/http"
 	"strings"
-	"time"
 )
 
 // registerPaymentIntentUIRoutes mounts the dev-facing PI page + outcome
@@ -156,7 +155,7 @@ func (m *StripeMock) handlePaymentIntentComplete(w http.ResponseWriter, r *http.
 			Description:          pi.Description,
 			ReceiptEmail:         pi.ReceiptEmail,
 			Customer:             pi.Customer,
-			Created:              time.Now(),
+			Created:              m.now(),
 			Metadata:             pi.Metadata,
 		}
 		m.charges[ch.ID] = ch
@@ -176,7 +175,7 @@ func (m *StripeMock) handlePaymentIntentComplete(w http.ResponseWriter, r *http.
 				Currency:            pi.Currency,
 				Destination:         pi.TransferDataDestination,
 				SourceTransactionID: ch.ID,
-				Created:             time.Now(),
+				Created:             m.now(),
 			}
 			m.transfers[tr.ID] = tr
 			pi.TransferID = tr.ID

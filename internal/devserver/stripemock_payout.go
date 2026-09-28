@@ -97,7 +97,7 @@ func (m *StripeMock) createPayout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	po.ID = "po_test_" + randomHex(24)
-	po.Created = time.Now()
+	po.Created = m.now()
 	po.Status = "pending"
 	po.Automatic = false
 	// Real Stripe sets arrival_date based on the bank's clearing window —

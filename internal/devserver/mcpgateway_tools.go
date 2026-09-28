@@ -373,7 +373,7 @@ func (g *mcpGateway) stripeComplete(body []byte) (any, error) {
 	if a.Session == "" {
 		return nil, fmt.Errorf("session is required")
 	}
-	if _, _, err := g.stripeMock.completeCheckout(a.Session, a.Outcome); err != nil {
+	if _, _, err := g.stripeMock.completeCheckout(a.Session, a.Outcome, a.PromotionCode); err != nil {
 		return nil, err
 	}
 	return okResult{OK: true}, nil
@@ -412,4 +412,41 @@ func (g *mcpGateway) stripeRefund(body []byte) (any, error) {
 		return nil, err
 	}
 	return stripeRefundResult{ID: rf.ID, Amount: rf.Amount, Status: rf.Status}, nil
+}
+
+func (g *mcpGateway) stripeAdvance(body []byte) (any, error) {
+	if g.stripeMock == nil {
+		return nil, fmt.Errorf("stripe mock not enabled")
+	}
+	var a stripeAdvanceArgs
+	if err := decodeArgs(body, &a); err != nil {
+		return nil, err
+	}
+	to, err := g.stripeMock.parseClockTarget(a.By, a.To)
+	if err != nil {
+		return nil, err
+	}
+	cycled, err := g.stripeMock.advanceClock(to)
+	if err != nil {
+		return nil, err
+	}
+	if cycled == nil {
+		cycled = []string{}
+	}
+	return stripeAdvanceResult{Now: g.stripeMock.now().Format(time.RFC3339), Cycled: cycled}, nil
+}
+
+func (g *mcpGateway) stripeSubscription(body []byte) (any, error) {
+	if g.stripeMock == nil {
+		return nil, fmt.Errorf("stripe mock not enabled")
+	}
+	var a stripeSubscriptionArgs
+	if err := decodeArgs(body, &a); err != nil {
+		return nil, err
+	}
+	status, err := g.stripeMock.subscriptionAction(a.Subscription, a.Action)
+	if err != nil {
+		return nil, err
+	}
+	return stripeSubscriptionResult{ID: a.Subscription, Status: status}, nil
 }

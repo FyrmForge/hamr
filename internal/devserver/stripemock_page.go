@@ -98,14 +98,26 @@ func (m *StripeMock) handleCheckoutPage(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, fmt.Sprintf("session already %s; reload the app to start a new checkout", sess.Status), http.StatusGone)
 		return
 	}
+	m.renderCheckoutPage(w, sess, "", "")
+}
 
+// renderCheckoutPage renders the outcome picker for a cloned open session.
+// promoErr and promoCode re-show a rejected promotion code inline, the way
+// Stripe's hosted page does, instead of failing the request.
+func (m *StripeMock) renderCheckoutPage(w http.ResponseWriter, sess *stripeSession, promoErr, promoCode string) {
 	var buf bytes.Buffer
 	if err := stripeCheckoutTmpl.Execute(&buf, struct {
-		Session *stripeSession
-		Total   string
+		Session   *stripeSession
+		Discount  string
+		Total     string
+		PromoErr  string
+		PromoCode string
 	}{
-		Session: sess,
-		Total:   formatStripeAmount(sess.AmountTotal, sess.Currency),
+		Session:   sess,
+		Discount:  formatStripeAmount(sess.AmountDiscount, sess.Currency),
+		Total:     formatStripeAmount(sess.Total(), sess.Currency),
+		PromoErr:  promoErr,
+		PromoCode: promoCode,
 	}); err != nil {
 		http.Error(w, "render: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -126,13 +138,22 @@ func (m *StripeMock) handleComplete(w http.ResponseWriter, r *http.Request) {
 
 	id := strings.TrimSpace(r.FormValue("session"))
 	outcome := strings.TrimSpace(r.FormValue("outcome"))
+	promoCode := strings.TrimSpace(r.FormValue("promotion_code"))
 	if id == "" {
 		http.Error(w, "missing session form field", http.StatusBadRequest)
 		return
 	}
 
-	redirect, leaveOpen, err := m.completeCheckout(id, outcome)
+	redirect, leaveOpen, err := m.completeCheckout(id, outcome, promoCode)
 	if err != nil {
+		var pe *errPromotionCode
+		if errors.As(err, &pe) {
+			m.mu.RLock()
+			sess := cloneSession(m.sessions[id])
+			m.mu.RUnlock()
+			m.renderCheckoutPage(w, sess, pe.Error(), promoCode)
+			return
+		}
 		writeStripeOpError(w, err)
 		return
 	}
@@ -210,6 +231,10 @@ button:hover{filter:brightness(1.1)}
 .session{font-size:11px;color:#5a7a9a;margin-top:20px;word-break:break-all;font-family:'SF Mono',Monaco,Consolas,monospace}
 .meta{font-size:12px;color:#5a7a9a;margin-top:8px}
 .hint{font-size:12px;color:#a3c4e0;margin:18px 0 14px}
+.discount{display:flex;justify-content:space-between;padding:10px 0;font-size:14px;color:#86efac}
+.promo{display:flex;gap:8px;margin-bottom:10px}
+.promo input{flex:1;padding:12px;border:1px solid rgba(255,255,255,0.15);border-radius:8px;background:#0a2540;color:#fff;font-size:14px;font-family:inherit;text-transform:uppercase}
+.promo-err{font-size:12px;color:#fca5a5;margin:-4px 0 10px}
 </style>
 </head>
 <body>
@@ -222,10 +247,16 @@ button:hover{filter:brightness(1.1)}
 {{range .Session.LineItems}}
 <div class="item">
 <span class="item-name">{{.Name}} ×{{.Quantity}}</span>
-<span class="item-price">{{itemTotal .}}</span>
+<span class="item-price">{{itemTotal .}}{{if .Interval}} / {{.Interval}}{{end}}</span>
 </div>
 {{end}}
 </div>
+{{if .Session.Discounts}}
+<div class="discount">
+<span>Discount ({{(index .Session.Discounts 0).CouponID}})</span>
+<span>−{{.Discount}}</span>
+</div>
+{{end}}
 <div class="total">
 <span>Total</span>
 <span>{{.Total}}</span>
@@ -236,6 +267,10 @@ button:hover{filter:brightness(1.1)}
 <form method="POST" action="/__hamr/stripe/complete">
 <input type="hidden" name="session" value="{{.Session.ID}}">
 <input type="hidden" name="outcome" value="paid">
+{{if and .Session.AllowPromotionCodes (not .Session.Discounts)}}
+<div class="promo"><input type="text" name="promotion_code" placeholder="Promotion code" value="{{.PromoCode}}" autocomplete="off"></div>
+{{end}}
+{{if .PromoErr}}<p class="promo-err">{{.PromoErr}}</p>{{end}}
 <button type="submit" class="btn-pay">Pay Successfully</button>
 </form>
 <form method="POST" action="/__hamr/stripe/complete">

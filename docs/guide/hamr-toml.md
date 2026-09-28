@@ -379,7 +379,7 @@ See [`hamr mcp`](cli.md) and the security notes below.
 | `mail`   | `mail.list`, `mail.get`       | `mail.clear`, `mail.ingest`           |
 | `sms`    | `sms.list`, `sms.get`         | `sms.clear`, `sms.ingest`             |
 | `build`  | — (write-only)                | `rule.run`, `rebuild.all`, `make.run` |
-| `stripe` | `stripe.list`                 | `stripe.complete`, `stripe.expire`, `stripe.refund`, `stripe.mode` |
+| `stripe` | `stripe.list`                 | `stripe.complete`, `stripe.expire`, `stripe.refund`, `stripe.advance`, `stripe.subscription`, `stripe.mode` |
 
 ```toml
 [dev.mcp]

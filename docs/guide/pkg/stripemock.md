@@ -110,8 +110,9 @@ also set `DEV_MODE=true`.
 | Card Declined | *(none)* | stays open | back to checkout page |
 | Cancel Payment | `checkout.session.expired` | expired | cancel_url |
 
-**Pay Successfully** also materialises the `PaymentIntent` (the id the session
-advertised) and its `Charge`, so the app can retrieve the PI and refund the
+**Pay Successfully** also creates the `PaymentIntent` and its `Charge` at
+that moment; the app learns the PI id from `checkout.session.completed` (or
+the invoice, for a subscription) and can then retrieve it and refund the
 checkout payment — mirroring real Stripe, which fires the payment events
 alongside `checkout.session.completed`.
 
@@ -119,6 +120,105 @@ alongside `checkout.session.completed`.
 webhook fires, and the buyer is sent back to the checkout page to retry with
 another card — exactly as real Stripe behaves (the decline is surfaced inline,
 not as an event; `async_payment_failed` is only for delayed/async methods).
+
+For a `mode=subscription` session, **Pay Successfully** also creates the
+Subscription and its first paid Invoice and fires, between
+`checkout.session.completed` and the payment events,
+`customer.subscription.created`, `invoice.paid` and
+`invoice.payment_succeeded`. A session whose total is zero after a 100%
+coupon completes with `payment_status=no_payment_required` and no
+PaymentIntent. As on Stripe, `payment_intent` on the session is null until
+the buyer pays, and stays null for a subscription, whose PaymentIntent
+hangs off the invoice.
+
+## Coupons and promotion codes
+
+The app creates coupons and codes the way it would against Stripe:
+
+```go
+coupon.New(&stripe.CouponParams{ID: stripe.String("SPRING25"), PercentOff: stripe.Float64(25),
+    Duration: stripe.String("repeating"), DurationInMonths: stripe.Int64(3)})
+promotioncode.New(&stripe.PromotionCodeParams{Code: stripe.String("SPRING"),
+    Promotion: &stripe.PromotionCodePromotionParams{Type: stripe.String("coupon"), Coupon: stripe.String("SPRING25")}})
+```
+
+A discount reaches a checkout session one of two ways:
+
+- The app passes `Discounts: [{Coupon: ...}]` or `[{PromotionCode: ...}]`
+  when creating the session. An unknown, expired or exhausted coupon fails
+  the create with a 400, like Stripe.
+- The app sets `AllowPromotionCodes: true` and the buyer types a code on the
+  mock's hosted page. A rejected code (unknown, inactive, expired, maxed
+  out) re-renders the page with Stripe's inline message and leaves the
+  session open. Codes match case-insensitively.
+
+Either way the session reports `amount_subtotal` (gross), `amount_total`
+(after discount), `total_details.amount_discount` and `discounts[]`. The
+PaymentIntent and Charge are for the discounted total. `times_redeemed` on
+the coupon and the code is counted when the session completes, not when it
+is created. Percent discounts round to the nearest minor unit; an
+`amount_off` coupon must be in the session's currency.
+
+## Subscriptions and the mock clock
+
+A subscription starts from a checkout session in `mode=subscription` whose
+line items carry `price_data.recurring` (all items must share one
+interval). Paying it creates:
+
+- a Subscription (`sub_test_…`, `status=active`), with one item per line
+  item, a synthesised Price and Product id, and `current_period_start/end`
+  on the item;
+- a Customer id (`cus_test_…`) on the session and subscription — an id
+  only, the mock has no Customer resource;
+- the first Invoice (`in_test_…`, `billing_reason=subscription_create`,
+  `status=paid`), linked to the session's PaymentIntent through
+  `payments[]`.
+
+From then on the **mock clock** drives it. The clock is real time plus a
+persisted offset, the mock's stand-in for Stripe's test clocks. Advance it
+from the bar at the top of `/__hamr/stripe` (+1 day / +1 week / +1 month /
+to a date), from the subscription row ("Next period" advances to that
+subscription's period end, or just runs what is already due once real
+time has passed it), or from an agent with `stripe.advance`. Every
+renewal that falls due in between runs in time order, each stamped at its
+own period end, so a three-month advance on a monthly plan produces three
+cycles. Month and year periods keep the anchor day and clamp to month end
+(a Jan 31 anchor bills Feb 28, then Mar 31); "+1 month" on the clock
+clamps the same way. Webhook signatures stay on real time so
+`webhook.ConstructEvent` keeps passing its tolerance check; every object's
+`created` and period timestamps, and each event's `created`, come from the
+mock clock. The clock never runs backwards and one advance covers at most
+five years; the offset lives in the state file, so delete it to reset.
+
+What a cycle does:
+
+| Situation at period end | Result | Events |
+|---|---|---|
+| active | new period, paid renewal invoice (`subscription_cycle`) | `invoice.paid`, `invoice.payment_succeeded`, `customer.subscription.updated`, `payment_intent.succeeded`, `charge.succeeded` |
+| active, "Fail next renewal" set | new period, invoice `open`, subscription `past_due` (a zero-total invoice cannot fail: it pays as above) | `invoice.payment_failed`, `customer.subscription.updated`, `payment_intent.payment_failed` |
+| `cancel_at_period_end` (or `cancel_at` reached) | subscription `canceled` | `customer.subscription.deleted` |
+| still `past_due` from the last cycle | dunning gives up: `canceled`, open invoice `void` | `customer.subscription.deleted`, `invoice.voided` |
+
+"Retry payment" on a `past_due` row pays the open invoice and returns the
+subscription to `active` with the paid events. A coupon on the session is
+snapshotted onto the subscription: `once` covers the first invoice only,
+`repeating` the first N months, `forever` every invoice; the discount is
+removed from the subscription when it runs out, as Stripe does.
+
+The app manages the subscription through the usual calls:
+`subscription.Get`, `subscription.Update` (`cancel_at_period_end`,
+`cancel_at`, `metadata`, `description`; fires
+`customer.subscription.updated`), `subscription.Cancel` (ends it now, fires
+`customer.subscription.deleted`), `subscription.List` (by `customer`,
+`status`, `price`; canceled ones hidden unless `status=all` or `canceled`),
+`invoice.Get` and `invoice.List` (by `subscription`, `customer`,
+`status`). `subscription.New` is refused with a message pointing at
+Checkout.
+
+Gate access on the subscription `status` from these events, not on a
+wall-clock comparison with `current_period_end`: after an advance the
+mock's timestamps sit ahead of the app's clock, exactly as under a Stripe
+test clock.
 
 ## Connect with Accounts v2
 
@@ -152,7 +252,15 @@ still recorded in the event log, but not sent.
 **Checkout sessions**
 - `POST /v1/checkout/sessions` — create. `payment_intent_data.metadata`
   lands on the PaymentIntent and Charge; without it the session metadata
-  is used. `customer_email` is echoed.
+  is used. `customer_email` is echoed. `mode` is `payment` (default) or
+  `subscription`; subscription mode needs `price_data.recurring` on every
+  line item, payment mode refuses it. `subscription_data.metadata` lands on
+  the subscription. `discounts[0].coupon` / `.promotion_code` and
+  `allow_promotion_codes` (not both) apply a discount; the response carries
+  `amount_subtotal`, `amount_total`, `total_details.amount_discount`,
+  `discounts[]`, and after a subscription completes, `customer` and
+  `subscription`. `payment_intent` is null until paid (always for a
+  subscription).
 - `GET /v1/checkout/sessions/{id}` — retrieve
 - `POST /v1/checkout/sessions/{id}/expire` — expire an open session, fires
   `checkout.session.expired`; 400 if the session is not open
@@ -286,6 +394,68 @@ still recorded in the event log, but not sent.
   scheduled payout: it creates a pending automatic payout for the account's
   whole balance, then opens the payout page.
 
+**Coupons and promotion codes**
+- `POST /v1/coupons` — create: `id` (optional, else generated), `name`,
+  exactly one of `percent_off` / `amount_off` + `currency`, `duration`
+  (`once` default, `repeating` + `duration_in_months`, `forever`),
+  `max_redemptions`, `redeem_by`, metadata. A repeated `id` fails with
+  `resource_already_exists`.
+- `GET /v1/coupons` (paged) and `GET /v1/coupons/{id}`; `DELETE
+  /v1/coupons/{id}` — sessions and subscriptions that already carry the
+  coupon keep their snapshotted amounts.
+- `POST /v1/promotion_codes` — `promotion[type]=coupon` +
+  `promotion[coupon]`, `code` (generated when omitted; an active duplicate
+  is a 400), `active`, `max_redemptions`, `expires_at`, metadata. The
+  coupon is inlined under `promotion.coupon`.
+- `GET /v1/promotion_codes` filtered by `code` (case-insensitive),
+  `coupon`, `active`, paged; `GET` and `POST /v1/promotion_codes/{id}`
+  (update `active`, metadata).
+- Redemption checks: coupon `redeem_by` and `max_redemptions`, code
+  `active`, `expires_at`, `max_redemptions`, run when the discount is
+  attached and again when the session is paid, so a limit reached or a
+  code deactivated while the session sat open stops the payment with the
+  same inline message. `times_redeemed` and `valid` are kept current. A
+  code's text can be reused once the old code is inactive; the active one
+  is the one a buyer gets. Not modelled: minimum amount, first-purchase-only,
+  customer and product restrictions, currency options.
+
+**Subscriptions and invoices**
+- Created only by completing a `mode=subscription` checkout session.
+  `POST /v1/subscriptions` answers 400 with a message saying so.
+- `GET /v1/subscriptions/{id}` — items with price (`recurring.interval`,
+  `interval_count`, `unit_amount`), `current_period_start/end` on each
+  item, `latest_invoice`, `discounts[]` (coupon under `source.coupon`),
+  `cancel_at_period_end`, `cancel_at`, `canceled_at`, `ended_at`.
+- `POST /v1/subscriptions/{id}` — `cancel_at_period_end`, `cancel_at`
+  (empty clears), `metadata`, `description`; fires
+  `customer.subscription.updated`. 400 on a canceled subscription.
+- `DELETE /v1/subscriptions/{id}` — cancel now; fires
+  `customer.subscription.deleted`. An open renewal invoice is voided
+  (`invoice.voided`), as on Stripe.
+- `GET /v1/subscriptions` — filters `customer`, `status` (default hides
+  `canceled`; `all` shows everything), `price`; paged.
+- `GET /v1/invoices/{id}` and `GET /v1/invoices` (filters `subscription`,
+  `customer`, `status`; paged) — `parent.subscription_details.subscription`,
+  `payments[]` with the PaymentIntent, `lines[]` with `pricing.price_details`
+  and `parent.subscription_item_details`, `total_discount_amounts`,
+  `status_transitions`. `next_payment_attempt` is always null: the mock
+  never retries on its own, only through the "Retry payment" action.
+- Renewal invoices create their own PaymentIntent and Charge, so balances
+  and the payments views follow.
+- Not modelled: trials, proration, quantity or plan changes, pausing,
+  invoice items, the billing portal.
+
+**Mock clock**
+- `now()` is real time plus a persisted offset, second granularity. Every
+  object and event the mock creates is stamped with it; webhook signatures
+  use real time.
+- Advance from the dashboard bar (`POST /__hamr/stripe/clock` with `by=`
+  `<n>d|<n>w|<n>m|<n>y` (months and years clamp to month end) or a Go
+  duration such as `90m`, or `to=<RFC 3339 | unix seconds>`), a
+  subscription row ("Next period": to its due time, or now if that has
+  passed), or `stripe.advance`. Never backwards, at most five years per
+  call. Runs every due cycle in time order.
+
 **Cross-cutting**
 - Bracket-form decoding for `stripe-go`'s v1 nested params; JSON bodies for v2
 - Real signed webhook delivery (HMAC-SHA256, `Stripe-Signature: t=...,v1=...`)
@@ -299,10 +469,13 @@ still recorded in the event log, but not sent.
 - Same-origin guard on every state-mutating UI POST
 - 409 Conflict on double-submit; 410 Gone on stale completed-session reload
 
-**Not yet mocked.** Customer, Price, Subscription, Invoice, list endpoints
-for transfers and reversals, v2 account update/close, dispute evidence, and
-GET endpoints for Charge / ApplicationFee. The patterns from the existing
-resources transfer directly — add as needed.
+**Not yet mocked.** Customer, Product and Price resources (the mock
+synthesises ids only), `POST /v1/subscriptions`, trials, proration, plan
+changes, the billing portal, Stripe's `/v1/test_helpers/test_clocks` API
+(the mock has one global clock instead), list endpoints for transfers and
+reversals, v2 account update/close, dispute evidence, and GET endpoints for
+Charge / ApplicationFee. The patterns from the existing resources transfer
+directly — add as needed.
 
 ## API version pinning
 
@@ -351,8 +524,10 @@ See [`[dev.stripe]`](../hamr-toml.md) for the full behaviour.
 State is persisted to a single JSON file at `.hamr/stripe/state.json`
 (default), atomically rewritten on every mutation. On `hamr dev` restart
 the file is loaded so sessions, PaymentIntents, v1 and v2 accounts,
-transfers, refunds, payouts, balance settings and disputes all survive — useful for long-running dev sessions and for
-LLM-driven workflows that need to read prior state across restarts.
+transfers, refunds, payouts, balance settings, disputes, coupons,
+promotion codes, subscriptions, invoices and the mock clock's offset all
+survive — useful for long-running dev sessions and for LLM-driven
+workflows that need to read prior state across restarts.
 
 The event log and idempotency keys are kept in memory only; a restart
 clears them.
@@ -400,10 +575,17 @@ way to know which `/v1/*` paths are yours vs Stripe's, and `stripe-go`'s
 ## Dashboard
 
 Open `http://<proxy>/__hamr/stripe` to see every resource the mock has
-captured: checkout sessions, v1 accounts, v2 accounts, PaymentIntents,
-refunds, payouts, disputes and the event log, newest-first, capped at 25
-rows per table. Connected account rows show the account's balance. The `hamr dev` panel shows an
-"Open Stripe mock" shortcut that links here.
+captured: checkout sessions, subscriptions, invoices, v1 accounts, v2
+accounts, PaymentIntents, refunds, payouts, disputes, coupons (with their
+promotion codes and redemption counts) and the event log, newest-first,
+capped at 25 rows per table. Connected account rows show the account's
+balance. The `hamr dev` panel shows an "Open Stripe mock" shortcut that
+links here.
+
+A bar at the top shows the mock clock and how far ahead of real time it
+runs, with **+1 day**, **+1 week**, **+1 month** and **Advance to** a date.
+Advancing runs every subscription renewal that falls due (see
+"Subscriptions and the mock clock").
 
 Per-row actions:
 - **All terminal resources**: "Resend webhook" — re-fires the natural
@@ -412,6 +594,14 @@ Per-row actions:
   `charge.succeeded`, `transfer.created`) in order.
 - **Sessions (open)**: "Expire" — flips status to `expired` and fires
   `checkout.session.expired`.
+- **Subscriptions**: "Next period" advances the clock to the row's period
+  end (or runs the overdue renewal at the current time); "Fail next renewal" toggles the next cycle's payment failing
+  (`past_due`); "Retry payment" on a `past_due` row pays the open invoice;
+  "Cancel" ends it now; "Resend" re-fires `customer.subscription.updated`
+  (or `.deleted` once canceled).
+- **Invoices**: "Resend" re-fires `invoice.paid` + `invoice.payment_succeeded`
+  for a paid invoice, `invoice.payment_failed` for an open one,
+  `invoice.voided` for a void one.
 - **PaymentIntents (succeeded)**: inline refund form — empty amount =
   full refund, set amount for partial. The "reverse" checkbox toggles
   `reverse_transfer` for destination charges. Calls the same internal

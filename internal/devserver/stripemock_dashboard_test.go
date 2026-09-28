@@ -283,6 +283,8 @@ func TestStripeMock_Dashboard_RejectsCrossOrigin(t *testing.T) {
 		{"/__hamr/stripe/resend", url.Values{"resource": {"payment_intent"}, "id": {piID}}},
 		{"/__hamr/stripe/refund", url.Values{"payment_intent": {piID}}},
 		{"/__hamr/stripe/expire", url.Values{"session": {"cs_test_x"}}},
+		{"/__hamr/stripe/clock", url.Values{"by": {"1d"}}},
+		{"/__hamr/stripe/subscription", url.Values{"subscription": {"sub_test_x"}, "action": {"cancel"}}},
 	} {
 		req, err := http.NewRequest(http.MethodPost, mock.baseURL+target.path, strings.NewReader(target.form.Encode()))
 		require.NoError(t, err)

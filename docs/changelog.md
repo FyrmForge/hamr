@@ -244,6 +244,40 @@ the TL;DR on top of it.
 
 ### Features
 
+- **Stripe mock: subscriptions, coupons and a test clock.** A checkout
+  session in `mode=subscription` (line items with `price_data.recurring`)
+  now creates a Subscription and its first paid Invoice when paid, with
+  `customer.subscription.created`, `invoice.paid` and
+  `invoice.payment_succeeded` fired alongside the payment events. The app
+  reads and manages them through `subscription.Get/Update/Cancel/List` and
+  `invoice.Get/List`. Renewals are driven by a mock clock, the stand-in for
+  Stripe's test clocks: advance it from the bar on `/__hamr/stripe`
+  (+1 day / week / month / to a date), from a subscription row ("Next
+  period", "Fail next renewal", "Retry payment", "Cancel") or with the new
+  `stripe.advance` and `stripe.subscription` MCP tools, and every renewal
+  that falls due runs in time order. The clock never runs backwards, moves
+  at most five years per call, its offset persists in `state.json`, events
+  are stamped with it and webhook signatures stay on real time. Coupons
+  and promotion codes are mocked too: `coupon.New` / `promotioncode.New`,
+  `discounts[]` or `allow_promotion_codes` on the session (the hosted page
+  gets a code input), Stripe's inline rejection messages, redemption
+  limits (checked again when the session is paid), and coupon durations
+  honoured on renewal. `subscription.*`, `invoice.*`, `coupon.New` and
+  `promotioncode.New` are the stripe-go v86 client calls, not a hamr API.
+  A 100% coupon completes with `no_payment_required` and no
+  PaymentIntent; the same now holds for an undiscounted zero-total payment
+  session, which used to get a 0-amount PaymentIntent and Charge. A
+  session's `payment_intent` is now null until the buyer pays, and always
+  for a subscription, as on Stripe since API 2022-08-01: read it from
+  `checkout.session.completed` or the invoice, not from the create
+  response. Cancelling a subscription voids its open invoice
+  (`invoice.voided`). Scaffolded webhook handlers stub the seven new
+  events. Not mocked: Customer / Price resources,
+  `POST /v1/subscriptions`, trials, proration,
+  plan changes and the billing portal. See the "Coupons and promotion
+  codes" and "Subscriptions and the mock clock" sections of the Stripe
+  mock guide.
+
 - **hamr mock image.** Each release now publishes
   `ghcr.io/fyrmforge/hamr:<version>` and `:latest` for linux/amd64 and arm64.
   It runs `hamr mock-serve` by default, so a compose stack can use

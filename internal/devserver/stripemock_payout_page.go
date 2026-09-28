@@ -72,7 +72,7 @@ func (m *StripeMock) handlePayoutPage(w http.ResponseWriter, r *http.Request) {
 	}{
 		Payout:    po,
 		AmountFmt: formatStripeAmount(po.Amount, po.Currency),
-		ArrivesIn: arrivalLabel(po.ArrivalDate),
+		ArrivesIn: arrivalLabel(po.ArrivalDate, m.now()),
 	}); err != nil {
 		http.Error(w, "render: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -155,8 +155,8 @@ func payoutOutcomeHeading(outcome string) string {
 
 // arrivalLabel renders a friendly relative time for the payout's expected
 // arrival date — e.g. "in 2 days" or "today" for instant payouts.
-func arrivalLabel(t time.Time) string {
-	d := time.Until(t)
+func arrivalLabel(t, now time.Time) string {
+	d := t.Sub(now)
 	switch {
 	case d <= time.Hour:
 		return "today"

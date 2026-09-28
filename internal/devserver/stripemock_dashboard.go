@@ -21,11 +21,15 @@ import (
 //	POST /__hamr/stripe/resend                — re-fire natural events for ?resource=&id=, or a logged event by ?event=
 //	POST /__hamr/stripe/refund                — issue refund on a PI from the dashboard
 //	POST /__hamr/stripe/expire                — mark an open session expired
+//	POST /__hamr/stripe/clock                 — advance the mock clock (by= or to=), cycling due subscriptions
+//	POST /__hamr/stripe/subscription          — next | retry | fail_next | cancel on one subscription
 func (m *StripeMock) registerDashboardRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/__hamr/stripe", guardUnsafe(m.handleDashboard))
 	mux.HandleFunc("/__hamr/stripe/resend", guardUnsafe(m.handleResend))
 	mux.HandleFunc("/__hamr/stripe/refund", guardUnsafe(m.handleDashboardRefund))
 	mux.HandleFunc("/__hamr/stripe/expire", guardUnsafe(m.handleDashboardExpire))
+	mux.HandleFunc("/__hamr/stripe/clock", guardUnsafe(m.handleDashboardClock))
+	mux.HandleFunc("/__hamr/stripe/subscription", guardUnsafe(m.handleDashboardSubscription))
 }
 
 // dashboardLimit caps the number of rows shown per table. Plenty for dev;
@@ -49,13 +53,18 @@ func (m *StripeMock) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	m.mu.RLock()
 	data := dashboardData{
+		Now:         m.now(),
+		ClockAhead:  time.Duration(m.clockOffset.Load()) * time.Second,
 		Sessions:    snapshotSessions(m.sessions),
+		Subs:        m.snapshotSubscriptionRows(),
+		Invoices:    snapshotInvoices(m.invoices),
 		Accounts:    snapshotAccounts(m.accounts),
 		PIs:         snapshotPaymentIntents(m.paymentIntents),
 		Refunds:     snapshotRefunds(m.refunds),
 		Payouts:     snapshotPayouts(m.payouts),
 		V2Accounts:  m.snapshotV2AccountRows(),
 		Disputes:    snapshotDisputes(m.disputes),
+		Coupons:     m.snapshotCouponRows(),
 		Events:      snapshotEvents(m.events),
 		DisputedPIs: map[string]bool{},
 		Balances:    map[string]string{},
@@ -190,6 +199,33 @@ func (m *StripeMock) handleResend(w http.ResponseWriter, r *http.Request) {
 		case "failed":
 			fires = append(fires, webhookFire{eventType: "payout.failed", object: m.serializePayout(po), account: po.AccountID})
 		}
+	case "subscription":
+		sub, ok := m.subscriptions[id]
+		if !ok {
+			notFound = true
+			break
+		}
+		evt := "customer.subscription.updated"
+		if sub.Status == "canceled" {
+			evt = "customer.subscription.deleted"
+		}
+		fires = append(fires, webhookFire{eventType: evt, object: m.serializeSubscription(sub)})
+	case "invoice":
+		in, ok := m.invoices[id]
+		if !ok {
+			notFound = true
+			break
+		}
+		switch in.Status {
+		case "paid":
+			fires = append(fires,
+				webhookFire{eventType: "invoice.paid", object: m.serializeInvoice(in)},
+				webhookFire{eventType: "invoice.payment_succeeded", object: m.serializeInvoice(in)})
+		case "void":
+			fires = append(fires, webhookFire{eventType: "invoice.voided", object: m.serializeInvoice(in)})
+		default:
+			fires = append(fires, webhookFire{eventType: "invoice.payment_failed", object: m.serializeInvoice(in)})
+		}
 	default:
 		m.mu.RUnlock()
 		http.Error(w, fmt.Sprintf("unknown resource %q", resource), http.StatusBadRequest)
@@ -258,6 +294,117 @@ func (m *StripeMock) handleDashboardExpire(w http.ResponseWriter, r *http.Reques
 	http.Redirect(w, r, "/__hamr/stripe", http.StatusSeeOther)
 }
 
+// handleDashboardClock advances the mock clock from the dashboard form:
+// by=1d|1w|1m|… or to=<RFC 3339>.
+func (m *StripeMock) handleDashboardClock(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	to, err := m.parseClockTarget(strings.TrimSpace(r.FormValue("by")), strings.TrimSpace(r.FormValue("to")))
+	if err == nil {
+		_, err = m.advanceClock(to)
+	}
+	if err != nil {
+		writeStripeOpError(w, err)
+		return
+	}
+	http.Redirect(w, r, "/__hamr/stripe#subscriptions", http.StatusSeeOther)
+}
+
+// handleDashboardSubscription runs one subscription action from its row.
+func (m *StripeMock) handleDashboardSubscription(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if _, err := m.subscriptionAction(strings.TrimSpace(r.FormValue("subscription")), strings.TrimSpace(r.FormValue("action"))); err != nil {
+		writeStripeOpError(w, err)
+		return
+	}
+	http.Redirect(w, r, "/__hamr/stripe#subscriptions", http.StatusSeeOther)
+}
+
+// nextPeriodTarget is the clock target that cycles this subscription: its
+// due time, or the zero time when real time already passed it, which
+// advanceClock reads as "now" under its lock.
+func (m *StripeMock) nextPeriodTarget(id string) (time.Time, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	sub, ok := m.subscriptions[id]
+	if !ok {
+		return time.Time{}, stripeErr(http.StatusNotFound, "subscription not found")
+	}
+	if sub.Status == "canceled" {
+		return time.Time{}, stripeErr(http.StatusConflict, "subscription is canceled; it has no next period")
+	}
+	if due := sub.dueAt(); due.After(m.now()) {
+		return due, nil
+	}
+	return time.Time{}, nil
+}
+
+// subscriptionAction is the dashboard's and the MCP tool's shared entry:
+// next advances the clock to the subscription's due time, retry pays a
+// past_due subscription's open invoice, fail_next toggles the next renewal
+// failing, cancel ends it now. Returns the subscription's new status.
+func (m *StripeMock) subscriptionAction(id, action string) (string, error) {
+	if id == "" {
+		return "", stripeErr(http.StatusBadRequest, "subscription is required")
+	}
+	if action == "next" {
+		due, err := m.nextPeriodTarget(id)
+		if err != nil {
+			return "", err
+		}
+		if _, err := m.advanceClock(due); err != nil {
+			return "", err
+		}
+		m.mu.RLock()
+		defer m.mu.RUnlock()
+		return m.subscriptions[id].Status, nil
+	}
+
+	m.mu.Lock()
+	sub, ok := m.subscriptions[id]
+	if !ok {
+		m.mu.Unlock()
+		return "", stripeErr(http.StatusNotFound, "subscription not found")
+	}
+	var fires []webhookFire
+	var err error
+	switch action {
+	case "retry":
+		fires, err = m.retrySubscriptionLocked(sub, m.now())
+	case "fail_next":
+		if sub.Status != "active" {
+			err = stripeErr(http.StatusConflict, "subscription is %s; only an active subscription has a next renewal", sub.Status)
+		} else {
+			sub.FailNextRenewal = !sub.FailNextRenewal
+		}
+	case "cancel":
+		if sub.Status == "canceled" {
+			err = stripeErr(http.StatusConflict, "subscription already canceled")
+		} else {
+			fires = m.cancelSubscriptionLocked(sub, m.now())
+		}
+	default:
+		err = stripeErr(http.StatusBadRequest, "unknown action %q (allowed: next, retry, fail_next, cancel)", action)
+	}
+	if err != nil {
+		m.mu.Unlock()
+		return "", err
+	}
+	status := sub.Status
+	m.persist()
+	m.mu.Unlock()
+
+	if len(fires) > 0 {
+		m.fireEventsAsync(fires, "subscription", id)
+	}
+	return status, nil
+}
+
 // sessionResendEvent picks the right event type to re-fire based on the
 // session's current outcome state. Returns "" if the session is open
 // (nothing to resend until an outcome runs).
@@ -265,7 +412,7 @@ func sessionResendEvent(s *stripeSession) string {
 	switch {
 	case s.Status == "expired":
 		return "checkout.session.expired"
-	case s.Status == "complete" && s.PaymentStatus == "paid":
+	case s.Status == "complete" && (s.PaymentStatus == "paid" || s.PaymentStatus == "no_payment_required"):
 		return "checkout.session.completed"
 	case s.Status == "complete":
 		return "checkout.session.async_payment_failed"
@@ -409,6 +556,87 @@ func (m *StripeMock) snapshotV2AccountRows() []v2AccountRow {
 	return rows
 }
 
+// subscriptionRow is one subscription on the control page.
+type subscriptionRow struct {
+	Sub  *stripeSubscription
+	Plan string // "Pro × 1 at £20.00 / month"
+}
+
+// snapshotSubscriptionRows builds the Subscriptions rows, newest first.
+// Caller holds m.mu.
+func (m *StripeMock) snapshotSubscriptionRows() []subscriptionRow {
+	subs := make([]*stripeSubscription, 0, len(m.subscriptions))
+	for _, s := range m.subscriptions {
+		subs = append(subs, s)
+	}
+	sortNewestFirst(subs, func(s *stripeSubscription) (time.Time, string) { return s.Created, s.ID })
+	if len(subs) > dashboardLimit {
+		subs = subs[:dashboardLimit]
+	}
+	rows := make([]subscriptionRow, len(subs))
+	for i, s := range subs {
+		var parts []string
+		for _, it := range s.Items {
+			every := it.Interval
+			if it.IntervalCount > 1 {
+				every = fmt.Sprintf("%d %ss", it.IntervalCount, it.Interval)
+			}
+			parts = append(parts, fmt.Sprintf("%s × %d at %s / %s", it.ProductName, it.Quantity, formatStripeAmount(it.UnitAmount, s.Currency), every))
+		}
+		rows[i] = subscriptionRow{Sub: cloneSubscription(s), Plan: strings.Join(parts, ", ")}
+	}
+	return rows
+}
+
+func snapshotInvoices(m map[string]*stripeInvoice) []*stripeInvoice {
+	out := make([]*stripeInvoice, 0, len(m))
+	for _, v := range m {
+		out = append(out, v)
+	}
+	sortNewestFirst(out, func(in *stripeInvoice) (time.Time, string) { return in.Created, in.ID })
+	if len(out) > dashboardLimit {
+		out = out[:dashboardLimit]
+	}
+	for i, v := range out {
+		out[i] = cloneInvoice(v)
+	}
+	return out
+}
+
+// couponRow is one coupon with its promotion codes on the control page.
+type couponRow struct {
+	Coupon *stripeCoupon
+	Off    string // "25%" or "£5.00"
+	Codes  []*stripePromotionCode
+}
+
+// snapshotCouponRows builds the Coupons rows, newest first. Caller holds m.mu.
+func (m *StripeMock) snapshotCouponRows() []couponRow {
+	coupons := make([]*stripeCoupon, 0, len(m.coupons))
+	for _, c := range m.coupons {
+		coupons = append(coupons, c)
+	}
+	sortNewestFirst(coupons, func(c *stripeCoupon) (time.Time, string) { return c.Created, c.ID })
+	if len(coupons) > dashboardLimit {
+		coupons = coupons[:dashboardLimit]
+	}
+	rows := make([]couponRow, len(coupons))
+	for i, c := range coupons {
+		row := couponRow{Coupon: cloneCoupon(c), Off: fmt.Sprintf("%g%%", c.PercentOff)}
+		if c.AmountOff > 0 {
+			row.Off = formatStripeAmount(c.AmountOff, c.Currency)
+		}
+		for _, pc := range m.promotionCodes {
+			if pc.CouponID == c.ID {
+				row.Codes = append(row.Codes, clonePromotionCode(pc))
+			}
+		}
+		sortNewestFirst(row.Codes, func(pc *stripePromotionCode) (time.Time, string) { return pc.Created, pc.ID })
+		rows[i] = row
+	}
+	return rows
+}
+
 // formatBalances renders a per-currency balance map, e.g. "£12.00, $3.00".
 func formatBalances(b map[string]int64) string {
 	var parts []string
@@ -425,13 +653,18 @@ func formatBalances(b map[string]int64) string {
 
 // dashboardData is the template input.
 type dashboardData struct {
+	Now         time.Time     // the mock clock
+	ClockAhead  time.Duration // how far it runs ahead of real time
 	Sessions    []*stripeSession
+	Subs        []subscriptionRow
+	Invoices    []*stripeInvoice
 	Accounts    []*stripeAccount
 	V2Accounts  []v2AccountRow
 	PIs         []*stripePaymentIntent
 	Refunds     []*stripeRefund
 	Payouts     []*stripePayout
 	Disputes    []*stripeDispute
+	Coupons     []couponRow
 	Events      []*stripeEvent
 	DisputedPIs map[string]bool   // PI id → no Dispute button: already disputed or fully refunded
 	Balances    map[string]string // v1 account id → formatted balance
@@ -458,8 +691,19 @@ var dashboardFuncs = template.FuncMap{
 	"payoutResendable": func(p *stripePayout) bool {
 		return p.Status == "paid" || p.Status == "failed"
 	},
-	"since": func(t time.Time) string {
-		return time.Since(t).Round(time.Second).String() + " ago"
+	"date": func(t time.Time) string {
+		if t.IsZero() {
+			return "—"
+		}
+		return t.Format("2006-01-02 15:04")
+	},
+	"ahead": func(d time.Duration) string {
+		days := int(d.Hours() / 24)
+		rest := (d - time.Duration(days)*24*time.Hour).Round(time.Second)
+		if days > 0 {
+			return fmt.Sprintf("%dd %s", days, rest)
+		}
+		return rest.String()
 	},
 }
 
@@ -491,7 +735,7 @@ tr:last-child td{border-bottom:none}
 .status-paid,.status-succeeded,.status-complete,.status-active,.status-won{background:#14532d;color:#86efac}
 .status-failed,.status-canceled,.status-lost,.status-restricted{background:#481414;color:#fca5a5}
 .status-needs_response,.status-pending,.status-requires_payment_method,.status-requires_confirmation,.status-requires_action,.status-requires_capture{background:#422006;color:#fbbf24}
-.status-expired,.status-unpaid{background:#3f1d52;color:#c4b5fd}
+.status-expired,.status-unpaid,.status-past_due{background:#3f1d52;color:#c4b5fd}
 .status-open{background:#1e3a5f;color:#93c5fd}
 .flag-on{color:#86efac;font-weight:600}
 .flag-off{color:#fca5a5}
@@ -503,12 +747,25 @@ button.action.danger{color:#f87171;border-color:#481414}
 button.action.primary{background:#635bff;color:#fff;border-color:#635bff}
 .actions-cell{white-space:nowrap;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .tag{display:inline-block;background:#5a7a9a;color:#0a2540;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;text-transform:uppercase;letter-spacing:0.05em;margin-left:4px}
+.clock{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:#161b22;border:1px solid #2e3642;border-radius:8px;padding:10px 14px;margin-bottom:20px;font-size:12px}
+.clock strong{color:#e8e8e8}
+.clock form{display:inline-flex;gap:6px;margin:0;align-items:center}
+.clock input[type=text]{background:#0a2540;color:#d4d4d4;border:1px solid #2e3642;border-radius:4px;padding:4px 6px;font-size:11px;font-family:inherit;width:170px}
 </style>
 </head>
 <body>
 <div class="wrap">
 <h1>Stripe Mock <span class="badge">Dev Dashboard</span></h1>
 <p class="sub">Snapshot of every resource the local Stripe mock has captured, with controls to drive it. State is persisted to <code>.hamr/stripe/state.json</code> by default — survives <code>hamr dev</code> restart. Read-only views laid out like Stripe's: <a href="/__hamr/stripe/dashboard">platform dashboard</a>, and an Express view per connected account.</p>
+
+<div class="clock">
+<span>Mock clock: <strong>{{date .Now}}</strong>{{if .ClockAhead}} <span class="tag">{{ahead .ClockAhead}} ahead</span>{{end}}</span>
+<form method="POST" action="/__hamr/stripe/clock"><input type="hidden" name="by" value="1d"><button class="action">+1 day</button></form>
+<form method="POST" action="/__hamr/stripe/clock"><input type="hidden" name="by" value="1w"><button class="action">+1 week</button></form>
+<form method="POST" action="/__hamr/stripe/clock"><input type="hidden" name="by" value="1m"><button class="action">+1 month</button></form>
+<form method="POST" action="/__hamr/stripe/clock"><input type="text" name="to" placeholder="2027-01-01T00:00:00Z"><button class="action">Advance to</button></form>
+<span style="color:#64748b">Advancing runs every subscription renewal that falls due. Webhook signatures stay on real time.</span>
+</div>
 
 <section>
 <h2>Checkout Sessions <span class="count">{{len .Sessions}}</span></h2>
@@ -520,7 +777,7 @@ button.action.primary{background:#635bff;color:#fff;border-color:#635bff}
 <tr>
 <td><code>{{shortID .ID}}</code></td>
 <td><span class="status-tag status-{{.Status}}">{{.Status}}</span>{{if eq .Status "complete"}} <span class="status-tag status-{{.PaymentStatus}}">{{.PaymentStatus}}</span>{{end}}</td>
-<td>{{amount .AmountTotal .Currency}}</td>
+<td>{{amount .Total .Currency}}{{if .Discounts}} <span class="tag">{{(index .Discounts 0).CouponID}}</span>{{end}}</td>
 <td class="actions-cell">
 {{if eq .Status "open"}}
 <form class="row-form" method="POST" action="/__hamr/stripe/expire"><input type="hidden" name="session" value="{{.ID}}"><button class="action danger">Expire</button></form>
@@ -534,6 +791,65 @@ button.action.primary{background:#635bff;color:#fff;border-color:#635bff}
 </tbody>
 </table>
 {{- else}}<div class="empty">No checkout sessions captured yet.</div>{{end}}
+</section>
+
+<section id="subscriptions">
+<h2>Subscriptions <span class="count">{{len .Subs}}</span></h2>
+{{if .Subs -}}
+<table>
+<thead><tr><th>ID</th><th>Status</th><th>Customer</th><th>Plan</th><th>Period ends</th><th>Actions</th></tr></thead>
+<tbody>
+{{range .Subs}}
+<tr>
+<td><code>{{shortID .Sub.ID}}</code></td>
+<td><span class="status-tag status-{{.Sub.Status}}">{{.Sub.Status}}</span>{{if .Sub.CancelAtPeriodEnd}} <span class="tag">cancels at period end</span>{{end}}{{if .Sub.FailNextRenewal}} <span class="tag">next renewal fails</span>{{end}}</td>
+<td><code>{{shortID .Sub.CustomerID}}</code></td>
+<td>{{.Plan}}{{if .Sub.Discount}} <span class="tag">{{.Sub.Discount.CouponID}}</span>{{end}}</td>
+<td>{{date .Sub.CurrentPeriodEnd}}</td>
+<td class="actions-cell">
+{{if ne .Sub.Status "canceled"}}
+<form class="row-form" method="POST" action="/__hamr/stripe/subscription"><input type="hidden" name="subscription" value="{{.Sub.ID}}"><input type="hidden" name="action" value="next"><button class="action primary">Next period</button></form>
+{{end}}
+{{if eq .Sub.Status "past_due"}}
+<form class="row-form" method="POST" action="/__hamr/stripe/subscription"><input type="hidden" name="subscription" value="{{.Sub.ID}}"><input type="hidden" name="action" value="retry"><button class="action">Retry payment</button></form>
+{{end}}
+{{if eq .Sub.Status "active"}}
+<form class="row-form" method="POST" action="/__hamr/stripe/subscription"><input type="hidden" name="subscription" value="{{.Sub.ID}}"><input type="hidden" name="action" value="fail_next"><button class="action">{{if .Sub.FailNextRenewal}}Renew normally{{else}}Fail next renewal{{end}}</button></form>
+{{end}}
+{{if ne .Sub.Status "canceled"}}
+<form class="row-form" method="POST" action="/__hamr/stripe/subscription"><input type="hidden" name="subscription" value="{{.Sub.ID}}"><input type="hidden" name="action" value="cancel"><button class="action danger">Cancel</button></form>
+{{end}}
+<form class="row-form" method="POST" action="/__hamr/stripe/resend"><input type="hidden" name="resource" value="subscription"><input type="hidden" name="id" value="{{.Sub.ID}}"><button class="action">Resend</button></form>
+</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{- else}}<div class="empty">No subscriptions. Complete a checkout session created with <code>mode=subscription</code>.</div>{{end}}
+</section>
+
+<section>
+<h2>Invoices <span class="count">{{len .Invoices}}</span></h2>
+{{if .Invoices -}}
+<table>
+<thead><tr><th>Number</th><th>Subscription</th><th>Status</th><th>Total</th><th>Period</th><th>Reason</th><th>Actions</th></tr></thead>
+<tbody>
+{{range .Invoices}}
+<tr>
+<td><code>{{.Number}}</code></td>
+<td><code>{{shortID .SubscriptionID}}</code></td>
+<td><span class="status-tag status-{{.Status}}">{{.Status}}</span></td>
+<td>{{amount .Total .Currency}}{{if .Discount}} <span class="tag">−{{amount .Discount .Currency}}</span>{{end}}</td>
+<td>{{date .PeriodStart}} → {{date .PeriodEnd}}</td>
+<td>{{.BillingReason}}</td>
+<td class="actions-cell">
+<form class="row-form" method="POST" action="/__hamr/stripe/resend"><input type="hidden" name="resource" value="invoice"><input type="hidden" name="id" value="{{.ID}}"><button class="action">Resend</button></form>
+</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{- else}}<div class="empty">No invoices yet.</div>{{end}}
 </section>
 
 <section>
@@ -706,6 +1022,27 @@ button.action.primary{background:#635bff;color:#fff;border-color:#635bff}
 </tbody>
 </table>
 {{- else}}<div class="empty">No disputes. Open one from a succeeded PaymentIntent.</div>{{end}}
+</section>
+
+<section>
+<h2>Coupons <span class="count">{{len .Coupons}}</span></h2>
+{{if .Coupons -}}
+<table>
+<thead><tr><th>ID</th><th>Name</th><th>Off</th><th>Duration</th><th>Redeemed</th><th>Promotion codes</th></tr></thead>
+<tbody>
+{{range .Coupons}}
+<tr>
+<td><code>{{.Coupon.ID}}</code></td>
+<td>{{.Coupon.Name}}</td>
+<td>{{.Off}}</td>
+<td>{{.Coupon.Duration}}{{if eq .Coupon.Duration "repeating"}} ({{.Coupon.DurationInMonths}} months){{end}}</td>
+<td>{{.Coupon.TimesRedeemed}}{{if .Coupon.MaxRedemptions}} / {{.Coupon.MaxRedemptions}}{{end}}</td>
+<td>{{range $i, $pc := .Codes}}{{if $i}}, {{end}}<code>{{$pc.Code}}</code>{{if not $pc.Active}} <span class="tag">inactive</span>{{end}}{{end}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{- else}}<div class="empty">No coupons. Create them from your app with <code>coupon.New</code> and <code>promotioncode.New</code>.</div>{{end}}
 </section>
 
 <section id="events">

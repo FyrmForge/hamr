@@ -29,6 +29,7 @@ func TestStripeMock_Persist_RoundTrip(t *testing.T) {
 	})
 	poID := seedPayout(t, mock, acctID)
 	sessID := seedCheckoutSession(t, mock)
+	promoID := seedCouponWithCode(t, mock)
 	// Drive the PI through a successful outcome so charges + transfers + a
 	// completed PI all end up in the persist file. This goes through the
 	// real handler so persist fires automatically.
@@ -51,7 +52,7 @@ func TestStripeMock_Persist_RoundTrip(t *testing.T) {
 	require.NotEmpty(t, data)
 	var raw map[string]any
 	require.NoError(t, json.Unmarshal(data, &raw))
-	for _, key := range []string{"sessions", "accounts", "payment_intents", "charges", "transfers", "refunds", "payouts"} {
+	for _, key := range []string{"sessions", "accounts", "payment_intents", "charges", "transfers", "refunds", "payouts", "coupons", "promotion_codes"} {
 		assert.Contains(t, raw, key, "persist file should contain all resource maps even if empty")
 	}
 
@@ -95,6 +96,14 @@ func TestStripeMock_Persist_RoundTrip(t *testing.T) {
 	assert.Equal(t, "paid", restored.payouts[poID].Status)
 
 	require.Contains(t, restored.sessions, sessID)
+
+	require.Contains(t, restored.coupons, "TEN")
+	assert.Equal(t, float64(10), restored.coupons["TEN"].PercentOff)
+	assert.Equal(t, int64(5), restored.coupons["TEN"].MaxRedemptions)
+	require.Contains(t, restored.promotionCodes, promoID)
+	assert.Equal(t, "TENOFF", restored.promotionCodes[promoID].Code)
+	assert.Equal(t, "TEN", restored.promotionCodes[promoID].CouponID)
+	assert.True(t, restored.promotionCodes[promoID].Active)
 }
 
 // TestStripeMock_Persist_NoPathIsNoOp confirms that constructing without a
@@ -186,6 +195,19 @@ func TestStripeMock_Persist_AtomicWrite(t *testing.T) {
 }
 
 // --- helpers ---
+
+// seedCouponWithCode inserts a coupon and a promotion code for it directly
+// into the mock and returns the promotion code id.
+func seedCouponWithCode(t *testing.T, mock *StripeMock) string {
+	t.Helper()
+	id := "promo_test_" + randomHex(16)
+	mock.mu.Lock()
+	mock.coupons["TEN"] = &stripeCoupon{ID: "TEN", PercentOff: 10, Duration: "once", MaxRedemptions: 5, Created: mock.now()}
+	mock.promotionCodes[id] = &stripePromotionCode{ID: id, Code: "TENOFF", CouponID: "TEN", Active: true, Created: mock.now()}
+	mock.persist()
+	mock.mu.Unlock()
+	return id
+}
 
 // seedCheckoutSession inserts a checkout session directly into the mock so
 // persist tests can verify it round-trips. Mirrors the helper-style of

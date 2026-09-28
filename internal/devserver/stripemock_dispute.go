@@ -84,7 +84,7 @@ func (m *StripeMock) openDispute(piID string) (*stripeDispute, error) {
 		m.mu.Unlock()
 		return nil, stripeErr(http.StatusBadRequest, "charge %s is fully refunded, nothing to dispute", ch.ID)
 	}
-	now := time.Now()
+	now := m.now()
 	dp := &stripeDispute{
 		ID:              "dp_test_" + randomHex(24),
 		ChargeID:        ch.ID,
@@ -127,7 +127,7 @@ func (m *StripeMock) closeDispute(id, outcome string) error {
 		return stripeErr(http.StatusConflict, "dispute already %s", st)
 	}
 	dp.Status = outcome
-	dp.ClosedAt = time.Now()
+	dp.ClosedAt = m.now()
 	obj := m.serializeDisputeLocked(dp)
 	m.persist()
 	m.mu.Unlock()
@@ -200,7 +200,7 @@ func (m *StripeMock) payoutAccountBalance(acct string) (*stripePayout, error) {
 		if amount <= 0 {
 			continue
 		}
-		now := time.Now()
+		now := m.now()
 		po := &stripePayout{
 			ID:          "po_test_" + randomHex(24),
 			Amount:      amount,

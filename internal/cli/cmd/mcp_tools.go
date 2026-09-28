@@ -119,13 +119,13 @@ var bridgeTools = []bridgeTool{
 	},
 	{
 		name:        "stripe.list",
-		description: "Read-only snapshot of the Stripe mock state: sessions, payment intents, payouts, refunds, accounts (id/status/amount).",
+		description: "Read-only snapshot of the Stripe mock state: the mock clock (RFC 3339), sessions, subscriptions (status, customer, per-period amount, period end, cancel/fail flags), payment intents, payouts, refunds, accounts (id/status/amount), coupons with their promotion codes.",
 		inputSchema: noArgs,
 	},
 	{
 		name:        "stripe.complete",
-		description: "Apply an outcome to an open checkout session in the Stripe mock, firing the matching webhooks.",
-		inputSchema: `{"type":"object","properties":{"session":{"type":"string"},"outcome":{"type":"string","enum":["paid","failed","cancelled"]}},"required":["session","outcome"]}`,
+		description: "Apply an outcome to an open checkout session in the Stripe mock, firing the matching webhooks. promotion_code is what a buyer would type on the hosted page (session must allow promotion codes; paid only).",
+		inputSchema: `{"type":"object","properties":{"session":{"type":"string"},"outcome":{"type":"string","enum":["paid","failed","cancelled"]},"promotion_code":{"type":"string"}},"required":["session","outcome"]}`,
 	},
 	{
 		name:        "stripe.expire",
@@ -136,6 +136,16 @@ var bridgeTools = []bridgeTool{
 		name:        "stripe.refund",
 		description: "Refund a payment intent in the Stripe mock (fires charge.refunded). amount is in the smallest currency unit.",
 		inputSchema: `{"type":"object","properties":{"payment_intent":{"type":"string"},"amount":{"type":"integer"},"reverse_transfer":{"type":"boolean"},"refund_application_fee":{"type":"boolean"}},"required":["payment_intent"]}`,
+	},
+	{
+		name:        "stripe.advance",
+		description: "Advance the Stripe mock's clock (its test clock) and run every subscription renewal that falls due, firing invoice and subscription webhooks. Pass exactly one of by (1d, 2w, 1m, 1y or a Go duration) or to (RFC 3339 or unix seconds); to jump one subscription to its period end use stripe.subscription with action next. The clock never runs backwards and moves at most five years per call; cycled lists every subscription the advance acted on (renewed or ended).",
+		inputSchema: `{"type":"object","properties":{"by":{"type":"string"},"to":{"type":"string"}}}`,
+	},
+	{
+		name:        "stripe.subscription",
+		description: "Drive one subscription in the Stripe mock: next (advance the clock to its period end), retry (pay a past_due subscription's open invoice), fail_next (toggle the next renewal failing), cancel (end it now, fires customer.subscription.deleted).",
+		inputSchema: `{"type":"object","properties":{"subscription":{"type":"string"},"action":{"type":"string","enum":["next","retry","fail_next","cancel"]}},"required":["subscription","action"]}`,
 	},
 	{
 		name:        "stripe.mode",

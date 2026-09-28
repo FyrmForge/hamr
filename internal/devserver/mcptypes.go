@@ -192,8 +192,9 @@ type smsSummary struct {
 // --- stripe ---
 
 type stripeCompleteArgs struct {
-	Session string `json:"session"`
-	Outcome string `json:"outcome"` // paid | failed | cancelled
+	Session       string `json:"session"`
+	Outcome       string `json:"outcome"`                  // paid | failed | cancelled
+	PromotionCode string `json:"promotion_code,omitempty"` // what a buyer would type on the hosted page; paid only
 }
 
 type stripeExpireArgs struct {
@@ -224,13 +225,69 @@ type stripeRefundResult struct {
 	Status string `json:"status"`
 }
 
+// stripeAdvanceArgs is stripe.advance's input: exactly one of by (1d, 2w,
+// 1m, 1y or a Go duration) or to (RFC 3339 or unix seconds).
+type stripeAdvanceArgs struct {
+	By string `json:"by"`
+	To string `json:"to"`
+}
+
+// stripeAdvanceResult reports the clock after stripe.advance and every
+// subscription the advance acted on (renewed or ended).
+type stripeAdvanceResult struct {
+	Now    string   `json:"now"`
+	Cycled []string `json:"cycled"`
+}
+
+// stripeSubscriptionArgs is stripe.subscription's input.
+type stripeSubscriptionArgs struct {
+	Subscription string `json:"subscription"`
+	Action       string `json:"action"` // next | retry | fail_next | cancel
+}
+
+// stripeSubscriptionResult is the subscription's status after the action.
+type stripeSubscriptionResult struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+}
+
 // StripeStateSummary is the read-only snapshot returned by stripe.list.
 type StripeStateSummary struct {
-	Sessions       []StripeSessionSummary `json:"sessions"`
-	PaymentIntents []StripeObjectSummary  `json:"paymentIntents"`
-	Payouts        []StripeObjectSummary  `json:"payouts"`
-	Refunds        []StripeObjectSummary  `json:"refunds"`
-	Accounts       []StripeAccountSummary `json:"accounts"`
+	Clock          string                      `json:"clock"` // the mock clock, RFC 3339
+	Sessions       []StripeSessionSummary      `json:"sessions"`
+	Subscriptions  []StripeSubscriptionSummary `json:"subscriptions"`
+	PaymentIntents []StripeObjectSummary       `json:"paymentIntents"`
+	Payouts        []StripeObjectSummary       `json:"payouts"`
+	Refunds        []StripeObjectSummary       `json:"refunds"`
+	Accounts       []StripeAccountSummary      `json:"accounts"`
+	Coupons        []StripeCouponSummary       `json:"coupons"`
+}
+
+// StripeSubscriptionSummary is one subscription: what it bills per period
+// and when the mock clock next acts on it.
+type StripeSubscriptionSummary struct {
+	ID                string `json:"id"`
+	Status            string `json:"status"`
+	Customer          string `json:"customer"`
+	Amount            int64  `json:"amount"` // per period, before discount
+	Currency          string `json:"currency"`
+	Interval          string `json:"interval"`
+	PeriodEnd         string `json:"periodEnd"`
+	CancelAtPeriodEnd bool   `json:"cancelAtPeriodEnd,omitempty"`
+	FailNextRenewal   bool   `json:"failNextRenewal,omitempty"`
+}
+
+// StripeCouponSummary is one coupon with its active promotion codes, so an
+// agent can pick a code to type at checkout.
+type StripeCouponSummary struct {
+	ID            string   `json:"id"`
+	Name          string   `json:"name,omitempty"`
+	PercentOff    float64  `json:"percentOff,omitempty"`
+	AmountOff     int64    `json:"amountOff,omitempty"`
+	Currency      string   `json:"currency,omitempty"`
+	Duration      string   `json:"duration"`
+	TimesRedeemed int64    `json:"timesRedeemed"`
+	Codes         []string `json:"codes"`
 }
 
 type StripeObjectSummary struct {

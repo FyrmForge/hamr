@@ -86,7 +86,7 @@ func (m *StripeMock) handleV2Accounts(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	acct, err := buildV2Account(body)
+	acct, err := buildV2Account(body, m.now())
 	if err != nil {
 		writeStripeErrorV2(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
@@ -145,7 +145,7 @@ func (m *StripeMock) handleV2AccountLinks(w http.ResponseWriter, r *http.Request
 	m.persist()
 	m.mu.Unlock()
 
-	now := time.Now()
+	now := m.now()
 	writeStripeJSON(w, http.StatusOK, map[string]any{
 		"object":     "v2.core.account_link",
 		"account":    acctID,
@@ -159,7 +159,7 @@ func (m *StripeMock) handleV2AccountLinks(w http.ResponseWriter, r *http.Request
 
 // buildV2Account turns a create body into an account awaiting onboarding:
 // every requested capability starts pending.
-func buildV2Account(body map[string]any) (*stripeV2Account, error) {
+func buildV2Account(body map[string]any, now time.Time) (*stripeV2Account, error) {
 	identity, _ := body["identity"].(map[string]any)
 	defaults, _ := body["defaults"].(map[string]any)
 	resp, _ := defaults["responsibilities"].(map[string]any)
@@ -173,7 +173,7 @@ func buildV2Account(body map[string]any) (*stripeV2Account, error) {
 		FeesCollector:   getString(resp, "fees_collector"),
 		LossesCollector: getString(resp, "losses_collector"),
 		Capabilities:    map[string]string{},
-		Created:         time.Now(),
+		Created:         now,
 		Metadata:        stringMap(body, "metadata"),
 	}
 	configs, _ := body["configuration"].(map[string]any)

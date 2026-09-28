@@ -121,7 +121,7 @@ func (m *StripeMock) createPaymentIntent(w http.ResponseWriter, r *http.Request)
 	}
 	pi.ID = "pi_test_" + randomHex(24)
 	pi.ClientSecret = pi.ID + "_secret_" + randomHex(16)
-	pi.Created = time.Now()
+	pi.Created = m.now()
 	pi.StripeAccount = strings.TrimSpace(r.Header.Get("Stripe-Account"))
 	if pi.PaymentMethod != "" {
 		pi.Status = "requires_confirmation"
@@ -269,7 +269,7 @@ func (m *StripeMock) capturePaymentIntent(w http.ResponseWriter, r *http.Request
 		captureAmount = v
 	}
 
-	now := time.Now()
+	now := m.now()
 	ch := &stripeCharge{
 		ID:                   "ch_test_" + randomHex(24),
 		Amount:               pi.Amount,

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 )
 
 // registerTransferRoutes mounts the separate-charges-and-transfers endpoints.
@@ -106,7 +105,7 @@ func (m *StripeMock) createTransfer(w http.ResponseWriter, r *http.Request) {
 		SourceTransactionID: src,
 		TransferGroup:       getString(p, "transfer_group"),
 		Description:         getString(p, "description"),
-		Created:             time.Now(),
+		Created:             m.now(),
 		Metadata:            stringMap(p, "metadata"),
 	}
 	m.transfers[tr.ID] = tr
@@ -197,7 +196,7 @@ func (m *StripeMock) reverseTransferLocked(tr *stripeTransfer, amount int64, ref
 		ID:       "trr_test_" + randomHex(24),
 		Amount:   amount,
 		RefundID: refundID,
-		Created:  time.Now(),
+		Created:  m.now(),
 		Metadata: meta,
 	}
 	tr.AmountReversed += amount

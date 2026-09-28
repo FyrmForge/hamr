@@ -69,6 +69,17 @@ func NewHandler(webhookSecret, webhookSecretV2 string, client *stripe.Client) *h
 		"charge.dispute.funds_withdrawn":  h.handleDisputeFundsWithdrawn,
 		"charge.dispute.closed":           h.handleDisputeClosed,
 		"charge.dispute.funds_reinstated": h.handleDisputeFundsReinstated,
+
+		// Subscriptions (mock fires when a mode=subscription checkout completes,
+		// and on each renewal when the mock clock is advanced from /__hamr/stripe
+		// or the stripe.advance / stripe.subscription MCP tools).
+		"customer.subscription.created": h.handleSubscriptionCreated,
+		"customer.subscription.updated": h.handleSubscriptionUpdated,
+		"customer.subscription.deleted": h.handleSubscriptionDeleted,
+		"invoice.paid":                  h.handleInvoicePaid,
+		"invoice.payment_succeeded":     h.handleInvoicePaymentSucceeded,
+		"invoice.payment_failed":        h.handleInvoicePaymentFailed,
+		"invoice.voided":                h.handleInvoiceVoided,
 	}
 	h.thinHandlers = map[string]func(ctx context.Context, n stripe.EventNotificationContainer) error{
 		// Connect accounts v2 (mock fires when onboarding completes on
@@ -277,5 +288,46 @@ func (h *handler) handleDisputeClosed(ctx context.Context, event stripe.Event) e
 
 func (h *handler) handleDisputeFundsReinstated(ctx context.Context, event stripe.Event) error {
 	logging.FromContext(ctx).Info("dispute funds reinstated", "eventID", event.ID)
+	return nil
+}
+
+// --- Subscriptions ---
+//
+// Gate access on the subscription's status carried in these events, not on
+// wall-clock comparisons against current_period_end: the mock clock (and a
+// Stripe test clock) can be well ahead of your server's time.
+
+func (h *handler) handleSubscriptionCreated(ctx context.Context, event stripe.Event) error {
+	logging.FromContext(ctx).Info("subscription created", "eventID", event.ID)
+	return nil
+}
+
+func (h *handler) handleSubscriptionUpdated(ctx context.Context, event stripe.Event) error {
+	logging.FromContext(ctx).Info("subscription updated", "eventID", event.ID)
+	return nil
+}
+
+func (h *handler) handleSubscriptionDeleted(ctx context.Context, event stripe.Event) error {
+	logging.FromContext(ctx).Info("subscription deleted", "eventID", event.ID)
+	return nil
+}
+
+func (h *handler) handleInvoicePaid(ctx context.Context, event stripe.Event) error {
+	logging.FromContext(ctx).Info("invoice paid", "eventID", event.ID)
+	return nil
+}
+
+func (h *handler) handleInvoicePaymentSucceeded(ctx context.Context, event stripe.Event) error {
+	logging.FromContext(ctx).Info("invoice payment succeeded", "eventID", event.ID)
+	return nil
+}
+
+func (h *handler) handleInvoicePaymentFailed(ctx context.Context, event stripe.Event) error {
+	logging.FromContext(ctx).Info("invoice payment failed", "eventID", event.ID)
+	return nil
+}
+
+func (h *handler) handleInvoiceVoided(ctx context.Context, event stripe.Event) error {
+	logging.FromContext(ctx).Info("invoice voided", "eventID", event.ID)
 	return nil
 }

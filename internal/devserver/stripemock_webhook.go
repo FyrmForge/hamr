@@ -74,7 +74,7 @@ func (m *StripeMock) FireEvent(ctx context.Context, eventType string, dataObject
 // fireEvent builds, logs and delivers one event. Snapshot events carry the
 // object; thin events carry only a related-object reference.
 func (m *StripeMock) fireEvent(ctx context.Context, f webhookFire) error {
-	now := time.Now()
+	now := m.now() // the signature timestamp in deliverEvent stays on real time
 	ev := &stripeEvent{
 		ID:      "evt_test_" + randomHex(24),
 		Type:    f.eventType,

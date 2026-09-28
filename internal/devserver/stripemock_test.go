@@ -75,11 +75,7 @@ func TestStripeMock_CreateAndRetrieveSession(t *testing.T) {
 		assert.False(t, created.Livemode)
 		assert.Equal(t, "42", created.Metadata["user_id"])
 		assert.Equal(t, "pro", created.Metadata["plan"])
-		assert.NotNil(t, created.PaymentIntent, "payment_intent should be present (as ID-only ref)")
-		if created.PaymentIntent != nil {
-			assert.True(t, strings.HasPrefix(created.PaymentIntent.ID, "pi_test_"),
-				"payment_intent.id %q missing pi_test_ prefix", created.PaymentIntent.ID)
-		}
+		assert.Nil(t, created.PaymentIntent, "payment_intent is null until the buyer pays")
 		assert.Contains(t, created.URL, "/__hamr/stripe/checkout?session="+created.ID)
 
 		// Verify state persisted on the mock side.

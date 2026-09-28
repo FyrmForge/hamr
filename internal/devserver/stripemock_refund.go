@@ -262,7 +262,7 @@ func (m *StripeMock) applyRefund(in refundInput) (rf *stripeRefund, ch *stripeCh
 		Reason:               in.reason,
 		ReverseTransfer:      in.reverseTransfer,
 		RefundApplicationFee: in.refundAppFee,
-		Created:              time.Now(),
+		Created:              m.now(),
 		Metadata:             in.metadata,
 	}
 

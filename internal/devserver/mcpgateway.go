@@ -460,6 +460,10 @@ func (g *mcpGateway) dispatch(tool string, body []byte) (any, error) {
 		return g.stripeExpire(body)
 	case "stripe.refund":
 		return g.stripeRefund(body)
+	case "stripe.advance":
+		return g.stripeAdvance(body)
+	case "stripe.subscription":
+		return g.stripeSubscription(body)
 	case "stripe.mode":
 		return g.stripeMode(body)
 	default:

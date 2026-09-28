@@ -109,7 +109,10 @@ Include which user/profile combinations were driven.
   `sms.list`/`sms.get`) → fired, renders, links land on the right page.
 - Payment surface: flows that charge — `stripe.list` to find sessions, drive
   outcomes with `stripe.complete` / `stripe.expire` / `stripe.refund`, verify
-  the app reacts to each. These need the mock: if `dev.info` shows
+  the app reacts to each. Subscriptions: `stripe.advance {"by":"1m"}` runs a
+  renewal, `stripe.subscription {"subscription":"sub_…","action":"fail_next"}` then `advance` runs a
+  failed one; check the app handles `invoice.payment_failed` and
+  `customer.subscription.deleted`. These need the mock: if `dev.info` shows
   `stripe.mode` = `listen`, switch with `stripe.mode {"mode":"mock"}` first.
 - Expired session mid-flow: log out elsewhere, then click an HTMX action —
   must navigate to login, not swap the login page into a fragment.

@@ -2301,6 +2301,33 @@ from config alone, not from the runtime listener.
 - `POST /v1/checkout/sessions/{id}/expire` — the SDK's `Expire`. Open →
   expired, fires `checkout.session.expired`, returns the session. 400 when
   the session is not open, 404 when unknown.
+- `mode` is `payment` (default) or `subscription`. Subscription mode needs
+  `price_data.recurring{interval, interval_count}` on every line item and
+  one interval per session; payment mode refuses recurring prices.
+  `subscription_data.metadata` is copied onto the subscription.
+- Discounts: `discounts[0].coupon` or `discounts[0].promotion_code` (one,
+  resolved at create — unknown / expired / exhausted is a 400), or
+  `allow_promotion_codes=true` (the hosted page shows a code input on the
+  Pay form; a rejected code re-renders with Stripe's inline message and
+  leaves the session open); never both. The stored session keeps
+  `AmountTotal` (gross; JSON name kept for old state files) and a
+  snapshotted `AmountDiscount`; `Total()` is what the buyer pays. Response:
+  `amount_subtotal`, `amount_total`, `total_details.amount_discount`,
+  `discounts[]`, `allow_promotion_codes`. `times_redeemed` on the coupon and
+  code bump on completion (`redeemDiscount`), not on create; it re-runs
+  the coupon and code validation first, so a limit reached or a code
+  deactivated while the session sat open fails the payment with the same
+  inline message (`errPromotionCode`). `findPromotionCode` prefers an
+  active code over an inactive one with the same text, so reused text
+  resolves deterministically. A zero total completes as
+  `payment_status=no_payment_required` with `payment_intent` null and no
+  PI/Charge. `payment_intent` is null on every session until it is paid
+  (`PaymentIntentID` is set in `completeCheckout`, not at create) and
+  stays null for a subscription session, whose PI is linked from the
+  invoice only — as Stripe has done since API 2022-08-01.
+- After a subscription-mode session completes the response also carries
+  `customer` (`cus_test_…`, an id only — no Customer resource) and
+  `subscription`.
 
 **API surface (Connect accounts v2).** The default for new projects: Stripe
 refuses v1 Express account creation for new platforms. Implemented in
@@ -2559,6 +2586,142 @@ the app sees the same event id again.
   This is the canonical marketplace dashboard query: "show all payouts to
   this seller's connected account".
 
+**API surface (Coupons and promotion codes).** `stripemock_coupon.go`,
+maps `coupons` and `promotion_codes` in the state file.
+- `POST /v1/coupons` — `id` (optional, else 8 uppercase hex), `name`,
+  exactly one of `percent_off` (0 < x ≤ 100) / `amount_off` + `currency`,
+  `duration` `once` (default) | `repeating` + `duration_in_months` |
+  `forever`, `max_redemptions`, `redeem_by`, metadata. Duplicate id → 400
+  `resource_already_exists`. `GET /v1/coupons` (newest first, `limit` +
+  `starting_after`), `GET /v1/coupons/{id}`, `DELETE /v1/coupons/{id}`
+  (sessions and subscriptions keep their snapshotted discount).
+  `valid` = not past `redeem_by` and not at `max_redemptions`.
+- `POST /v1/promotion_codes` — `promotion[type]=coupon` +
+  `promotion[coupon]` (this API version has no top-level `coupon`),
+  `code` (generated when omitted; an active duplicate, any case, is a 400),
+  `active` (default true), `max_redemptions`, `expires_at`, metadata.
+  Response inlines the coupon under `promotion.coupon`.
+  `GET /v1/promotion_codes` filters `code` (case-insensitive), `coupon`,
+  `active`; paged. `GET` / `POST /v1/promotion_codes/{id}` (update
+  `active`, metadata).
+- `applyDiscount(sess, couponID, promoID, code)` (caller holds the write
+  lock) resolves whichever is set, runs the redemption checks (code
+  `active` / `expires_at` / `max_redemptions`, then coupon `redeem_by` /
+  `max_redemptions`), computes the amount (`percent_off` rounds to nearest
+  minor unit; `amount_off` capped at the subtotal and must match the
+  session currency) and stores `Discounts[0]` + `AmountDiscount`. Errors
+  carry Stripe's wording via `stripeText` so the hosted page can show them
+  inline (`*errPromotionCode`).
+- Not modelled: minimum amount, first-purchase-only, customer/product
+  restrictions, currency options.
+
+**API surface (Subscriptions and invoices).** `stripemock_subscription.go`,
+maps `subscriptions` and `invoices`.
+- Created only by `completeCheckout` on a `mode=subscription` session
+  (`createSubscriptionLocked`): `sub_test_…` active, one
+  `stripeSubscriptionItem` per line item with synthesised `price_test_` /
+  `prod_test_` ids, `BillingCycleAnchor` = completion time, period 0 =
+  [anchor, `periodEnd(0)`), `Cycles` counts completed periods so period
+  bounds derive from the anchor (`addMonthsClamped`: a Jan 31 anchor bills
+  Feb 28 then Mar 31; day/week are plain durations). The session's coupon is
+  snapshotted as `stripeSubscriptionDiscount` (`once` → removed after the
+  first invoice; `repeating` → `End` = start + N months; `forever` → no
+  end). First invoice: `in_test_…`, `MOCK-0001`-style number,
+  `subscription_create`, paid, `PaymentIntentID` = the PI
+  `completeCheckout` creates for it (empty for a zero total; passed in as
+  `piID`, the session's own `payment_intent` stays null). Creation fires,
+  between `checkout.session.completed` and the payment events,
+  `customer.subscription.created`, `invoice.paid` and
+  `invoice.payment_succeeded`; the session response then also carries
+  `customer` and `subscription`. `POST /v1/subscriptions` → 400 pointing at
+  Checkout.
+- `GET /v1/subscriptions/{id}` — `items.data[]` carry `price` (`recurring`,
+  `unit_amount`, `unit_amount_decimal` as a string, `product` id) and
+  `current_period_start/end` (on the item on this API version),
+  `latest_invoice` id, `discounts[]` (Discount object, coupon inlined under
+  `source.coupon`, `end` for repeating), `cancel_at`, `cancel_at_period_end`,
+  `canceled_at`, `ended_at`, `default_payment_method` `pm_card_visa`.
+- `POST /v1/subscriptions/{id}` — `cancel_at_period_end`, `cancel_at`
+  (`cancel_at=` clears), `metadata`, `description`; fires
+  `customer.subscription.updated`; 400 on a canceled subscription.
+  `DELETE /v1/subscriptions/{id}` — `cancelSubscriptionLocked` now:
+  `canceled`, `canceled_at` = `ended_at` = now, any `open` invoice of the
+  subscription → `void` (`status_transitions.voided_at`, `payments[].status`
+  `canceled`), fires `customer.subscription.deleted` then `invoice.voided`;
+  400 `resource_missing` when already
+  canceled (Stripe's answer). `GET /v1/subscriptions` — `customer`,
+  `status` (default hides `canceled`; `all` shows everything; else exact),
+  `price`; paged.
+- `GET /v1/invoices/{id}`, `GET /v1/invoices` (`subscription`, `customer`,
+  `status`; paged). Invoice shape on this API version:
+  `parent.subscription_details.subscription`, `payments.data[]` (one
+  `invoice_payment` with `payment.payment_intent`, status paid | open),
+  `lines.data[]` (`pricing.price_details.{price,product}`,
+  `parent.subscription_item_details`, `period`), `total_discount_amounts`,
+  `discounts[]` (discount ids), `status_transitions.{finalized_at,paid_at}`,
+  `amount_due` / `amount_paid` / `amount_remaining`, `attempt_count`,
+  `next_payment_attempt` always null (no automatic retry; only the
+  `retry` action pays an open invoice).
+- Lifecycle (caller holds the write lock; each returns the events to fire):
+  `cycleSubscriptionLocked(sub, at)` — cancel when `cancel_at_period_end`,
+  `cancel_at` reached, or still `past_due` (dunning gave up; the open
+  invoice is voided, `invoice.voided`); else drop an
+  expired repeating discount, `Cycles++`, new period, `newInvoiceLocked`
+  (`subscription_cycle`), then either `FailNextRenewal` with a non-zero
+  total (a zero invoice cannot fail; the flag is cleared either way) —
+  invoice `open`, `attempt_count` 1, PI
+  `requires_payment_method` + `Failed`, subscription `past_due`; events
+  `invoice.payment_failed`, `customer.subscription.updated`,
+  `payment_intent.payment_failed`) or `payInvoiceLocked` (new PI + Charge
+  `succeeded`; events `invoice.paid`, `invoice.payment_succeeded`,
+  `customer.subscription.updated`, `payment_intent.succeeded`,
+  `charge.succeeded`). `retrySubscriptionLocked` pays a `past_due`
+  subscription's open invoice (409 otherwise) → active with the paid
+  events. Renewal PIs and Charges carry `customer` and `description`
+  `Invoice <number>` and feed the ledgers like any charge.
+- `subscriptionAction(id, action)` is the shared entry for the dashboard
+  row and `stripe.subscription`: `next` (advance the clock to
+  `nextPeriodTarget(id)`: `sub.dueAt()`, or now when real time already
+  passed it; 409 for a canceled subscription), `retry`, `fail_next`
+  (toggle; active only), `cancel`. `POST /v1/subscriptions/{id}`
+  validates `cancel_at` before it touches anything, so a 400 leaves the
+  subscription untouched.
+- Not modelled: trials, proration, quantity / plan changes, pausing,
+  invoice items, billing portal, `/v1/test_helpers/test_clocks`.
+
+**Mock clock.** `stripemock_clock.go`. `now()` = `time.Now()` + persisted
+`clockOffset` seconds, truncated to the second so a period end computed from
+it is reached exactly by an advance to that second. Every object timestamp
+in the mock comes from `now()`, including each event's `created`; the one
+`time.Now()` left in `stripemock_webhook.go` (`deliverEvent`) signs with
+real time so stripe-go's 5-minute tolerance passes. `advanceClock(to)`:
+under the write lock refuses `to` < now (never backwards; `to` == now
+only runs what is already due) and `to` more than `maxClockAdvanceYears`
+(5) ahead, sets the offset from the truncated real time so `now()` lands
+on `to`,
+then repeatedly picks the earliest due subscription
+(`dueSubscriptionsLocked`: live and `dueAt()` — period end, or an earlier
+`cancel_at` — ≤ `to`) and runs `cycleSubscriptionLocked(sub, sub.dueAt())`
+until none is due, so several periods of one subscription and interleaved
+periods of many run in time order, each stamped at its own period end;
+events fire once after the lock is released, each delivery under its own
+30s deadline (`fireEventsAsync`). `parseClockTarget(by, to)`: `by` =
+`<n>d|w|m|y` matched as a whole (months and years via `addMonthsClamped`,
+the same clamping as subscription periods, so "+1 month" from Jan 29
+cannot skip past a Feb 28 period end) else a Go duration (`1m30s`,
+`90m`), `to` = RFC 3339 or all-digit unix seconds; anything else is a
+400. Entry points: `POST /__hamr/stripe/clock` (`by=` | `to=`),
+the subscription row's "Next period", MCP `stripe.advance` (`by` | `to`;
+returns `{now, cycled}`: every subscription the advance acted on, renewed
+or ended). The offset is persisted as
+`clock_offset`; deleting the state file resets it. ponytail: one global
+clock, not per customer as Stripe's test clocks are; map
+`/v1/test_helpers/test_clocks` onto it if an app's tests need that API.
+Consequence for apps: after an advance the mock's timestamps sit ahead of
+the app's wall clock, exactly as under a Stripe test clock — gate access on
+subscription `status` and the `customer.subscription.*` events, not on
+`now < current_period_end`.
+
 **Dev UI (Payout).**
 - `GET /__hamr/stripe/payout?id=<po_id>` — renders amount, expected
   arrival date, connected account tag (if any), method, and Mark
@@ -2603,7 +2766,9 @@ which clears stripe-go's release-train compatibility check.
 **Outcome → event mapping (checkout).**
 | Button | Event(s) | Status, payment_status | Redirect |
 |---|---|---|---|
-| Pay Successfully | `checkout.session.completed`, `payment_intent.succeeded`, `charge.succeeded` (PI + Charge materialised) | complete, paid | success_url |
+| Pay Successfully | `checkout.session.completed`, `payment_intent.succeeded`, `charge.succeeded` (PI + Charge created now; the PI id arrives on `checkout.session.completed`, `session.payment_intent` is null before) | complete, paid | success_url |
+| Pay Successfully (`mode=subscription`) | `checkout.session.completed`, `customer.subscription.created`, `invoice.paid`, `invoice.payment_succeeded`, then `payment_intent.succeeded`, `charge.succeeded` (PI hangs off the invoice; `session.payment_intent` stays null) | complete, paid | success_url |
+| Pay Successfully (zero total / 100% coupon) | `checkout.session.completed` only (no PI, no Charge) | complete, no_payment_required | success_url |
 | Card Declined | *(none — synchronous decline)* | stays open | back to checkout page |
 | Cancel Payment | `checkout.session.expired` | expired, unpaid | cancel_url |
 
@@ -2710,9 +2875,10 @@ crash). Schema is forward-compatible — `encoding/json` ignores unknown
 fields and zeroes missing ones, so adding fields is safe. Set
 `persist = false` for in-memory-only mode. The file holds sessions,
 accounts, `v2_accounts`, payment intents, charges, transfers (with
-reversals), refunds, payouts, `balance_settings` and `disputes`. The event
-log and idempotency cache are memory-only (async webhook goroutines never
-write the file).
+reversals), refunds, payouts, `balance_settings`, `disputes`, `coupons`,
+`promotion_codes`, `subscriptions`, `invoices` and `clock_offset` (seconds
+the mock clock runs ahead). The event log and idempotency cache are
+memory-only (async webhook goroutines never write the file).
 
 Why JSON not mbox: Stripe state is plain Go structs (no MIME equivalent),
 so a single JSON document is the natural shape. The file is human-readable
@@ -2740,6 +2906,23 @@ Per-row actions (all POST endpoints, same-origin guarded):
   all behave identically.
 - `POST /__hamr/stripe/expire` (`session=`) — marks an open session as
   expired and fires `checkout.session.expired`. 409 on already-terminal.
+- `POST /__hamr/stripe/clock` (`by=` or `to=`) — advances the mock clock
+  (see **Mock clock**); 400 when backwards or unparsable. Rendered as a bar
+  above the tables with the mock time, how far ahead it runs, +1 day /
+  +1 week / +1 month buttons and an advance-to-date input.
+- `POST /__hamr/stripe/subscription` (`subscription=`, `action=next |
+  retry | fail_next | cancel`) — `subscriptionAction`. Rendered per row as
+  "Next period" (not canceled), "Retry payment" (`past_due`), "Fail next
+  renewal" / "Renew normally" (active), "Cancel" (not canceled). Row tags
+  show `cancels at period end` and `next renewal fails`. Resend on a
+  subscription re-fires `customer.subscription.updated` (`.deleted` once
+  canceled); on an invoice `invoice.paid` + `invoice.payment_succeeded`,
+  `invoice.payment_failed` while open, or `invoice.voided` once void.
+- Tables added for subscriptions (status, customer, plan text, period end),
+  invoices (number, subscription, status, total with discount tag, period,
+  billing reason) and coupons (id, name, off, duration, redeemed / max,
+  promotion codes with an `inactive` tag). Session rows show the amount
+  after discount with the coupon id as a tag.
 - `POST /__hamr/stripe/resend` (`event=`) — redelivers a logged event by
   id (synchronously, result shown on the row); 404 for an unknown id.
 - `POST /__hamr/stripe/dispute`, `/__hamr/stripe/dispute/close`,
@@ -2842,17 +3025,21 @@ already-set env), so users can't accidentally drift the mock URL from
 the actual proxy port. Hamr knows its own URL — nothing in `.env` should
 be more authoritative than that.
 
-**Known limits.** Mocked today: checkout sessions (incl. expire), Connect
+**Known limits.** Mocked today: checkout sessions (incl. expire, payment
+and subscription mode, discounts), coupons and promotion codes, Connect
 account onboarding on v1 (`Account` + `AccountLink`) and v2
 (`/v2/core/accounts`, `/v2/core/account_links`, thin events),
 Connect-aware PaymentIntents (with auto-cascade to Charge + Transfer on
 success), Refunds (create, retrieve, list; `reverse_transfer` and
 `refund_application_fee`), Transfers + reversals, balance transactions and
-balance settings, dashboard-driven disputes, and Payouts (manual create +
-paid/failed outcomes, scoped list, dashboard balance payout). Not yet
-mocked: Customer, Price, Subscription, Invoice, transfer/reversal list
-endpoints, v2 account update/close, dispute evidence, GET endpoints for
-Charge / ApplicationFee. Patterns are established in
+balance settings, dashboard-driven disputes, Payouts (manual create +
+paid/failed outcomes, scoped list, dashboard balance payout),
+subscriptions and invoices driven by the mock clock. Not yet mocked:
+Customer / Product / Price resources (ids only), `POST /v1/subscriptions`,
+trials, proration, plan changes, billing portal,
+`/v1/test_helpers/test_clocks`, transfer/reversal list endpoints, v2
+account update/close, dispute evidence, GET endpoints for Charge /
+ApplicationFee. Patterns are established in
 `internal/devserver/stripemock*.go` — add as needed. State is persisted
 by default to `.hamr/stripe/state.json` and reloaded across `hamr dev`
 restarts; set `persist = false` for ephemeral in-memory-only mode.

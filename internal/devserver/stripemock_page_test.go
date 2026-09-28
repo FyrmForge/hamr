@@ -102,9 +102,10 @@ func TestStripeMock_Complete_PaidFiresWebhookAndRedirects(t *testing.T) {
 
 // TestStripeMock_Complete_PaidCreatesRetrievablePaymentIntentAndCharge guards
 // the dangling-checkout-PI fix: a paid session must materialise the
-// PaymentIntent (whose id the session advertised) plus its Charge, and fire
-// payment_intent.succeeded + charge.succeeded — so the app can retrieve the PI
-// and refund the checkout payment, not just receive checkout.session.completed.
+// PaymentIntent (whose id the paid session then carries) plus its Charge, and
+// fire payment_intent.succeeded + charge.succeeded — so the app can retrieve
+// the PI and refund the checkout payment, not just receive
+// checkout.session.completed. Until it is paid, payment_intent is null.
 func TestStripeMock_Complete_PaidCreatesRetrievablePaymentIntentAndCharge(t *testing.T) {
 	const secret = "whsec_test_devmock"
 	app := newWebhookSink(t, secret)
@@ -117,13 +118,17 @@ func TestStripeMock_Complete_PaidCreatesRetrievablePaymentIntentAndCharge(t *tes
 	})
 
 	mock.mu.RLock()
-	piID := mock.sessions[sessID].PaymentIntentID
+	require.Empty(t, mock.sessions[sessID].PaymentIntentID, "payment_intent is null until paid")
 	mock.mu.RUnlock()
-	require.NotEmpty(t, piID)
 
 	resp := postComplete(t, mock, sessID, "paid")
 	resp.Body.Close() //nolint:errcheck
 	assert.Equal(t, http.StatusSeeOther, resp.StatusCode)
+
+	mock.mu.RLock()
+	piID := mock.sessions[sessID].PaymentIntentID
+	mock.mu.RUnlock()
+	require.NotEmpty(t, piID)
 
 	// Events fire in order: completed, payment_intent.succeeded, charge.succeeded.
 	e1 := app.Wait(t, 2*time.Second)
@@ -277,16 +282,15 @@ func TestStripeMock_Complete_SubstitutesCheckoutSessionIDPlaceholder(t *testing.
 	id := "cs_test_" + randomHex(16)
 	mock.mu.Lock()
 	mock.sessions[id] = &stripeSession{
-		ID:              id,
-		PaymentIntentID: "pi_test_" + randomHex(16),
-		Mode:            "payment",
-		Currency:        "gbp",
-		AmountTotal:     1000,
-		LineItems:       []stripeLineItem{{Name: "x", UnitAmount: 1000, Quantity: 1, Currency: "gbp"}},
-		SuccessURL:      "https://app.example/checkout/success?session_id={CHECKOUT_SESSION_ID}",
-		CancelURL:       "https://app.example/checkout/cancel",
-		Status:          "open",
-		PaymentStatus:   "unpaid",
+		ID:            id,
+		Mode:          "payment",
+		Currency:      "gbp",
+		AmountTotal:   1000,
+		LineItems:     []stripeLineItem{{Name: "x", UnitAmount: 1000, Quantity: 1, Currency: "gbp"}},
+		SuccessURL:    "https://app.example/checkout/success?session_id={CHECKOUT_SESSION_ID}",
+		CancelURL:     "https://app.example/checkout/cancel",
+		Status:        "open",
+		PaymentStatus: "unpaid",
 	}
 	mock.mu.Unlock()
 
@@ -349,7 +353,6 @@ func newUIOnlyServer(t *testing.T, mock *StripeMock) *httptest.Server {
 func createTestSession(t *testing.T, mock *StripeMock, items []stripe.LineItem) string {
 	t.Helper()
 	id := "cs_test_" + randomHex(16)
-	pi := "pi_test_" + randomHex(16)
 	currency := ""
 	var total int64
 	var lines []stripeLineItem
@@ -367,17 +370,16 @@ func createTestSession(t *testing.T, mock *StripeMock, items []stripe.LineItem) 
 	}
 	mock.mu.Lock()
 	mock.sessions[id] = &stripeSession{
-		ID:              id,
-		PaymentIntentID: pi,
-		Created:         time.Now(),
-		Mode:            "payment",
-		Currency:        currency,
-		AmountTotal:     total,
-		LineItems:       lines,
-		SuccessURL:      "https://app.example/success",
-		CancelURL:       "https://app.example/cancel",
-		Status:          "open",
-		PaymentStatus:   "unpaid",
+		ID:            id,
+		Created:       time.Now(),
+		Mode:          "payment",
+		Currency:      currency,
+		AmountTotal:   total,
+		LineItems:     lines,
+		SuccessURL:    "https://app.example/success",
+		CancelURL:     "https://app.example/cancel",
+		Status:        "open",
+		PaymentStatus: "unpaid",
 	}
 	mock.mu.Unlock()
 	return id

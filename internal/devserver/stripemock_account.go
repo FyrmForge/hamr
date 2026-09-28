@@ -101,7 +101,7 @@ func (m *StripeMock) createAccount(w http.ResponseWriter, r *http.Request) {
 		BusinessType: getString(parsed, "business_type"),
 		Country:      orDefault(getString(parsed, "country"), "US"),
 		Email:        getString(parsed, "email"),
-		Created:      time.Now(),
+		Created:      m.now(),
 		Metadata:     stringMap(parsed, "metadata"),
 		// Pre-onboarding defaults: nothing enabled, several fields outstanding.
 		ChargesEnabled:   false,
@@ -168,8 +168,8 @@ func (m *StripeMock) handleAccountLinks(w http.ResponseWriter, r *http.Request) 
 
 	link := &stripeAccountLink{
 		URL:       m.baseURL + "/__hamr/stripe/onboarding?account=" + url.QueryEscape(acctID),
-		Created:   time.Now(),
-		ExpiresAt: time.Now().Add(5 * time.Minute),
+		Created:   m.now(),
+		ExpiresAt: m.now().Add(5 * time.Minute),
 	}
 
 	writeStripeJSON(w, http.StatusOK, map[string]any{
