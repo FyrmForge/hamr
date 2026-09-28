@@ -249,7 +249,7 @@ now also call — single source of truth — and exposed as tools:
 
 - **`stripe.list`** _(read)_ — state snapshot: the mock clock, sessions,
   subscriptions, payment intents, payouts, refunds, accounts, coupons with
-  their promotion codes. → `StripeStateSummary`.
+  their promotion codes, customers, prices. → `StripeStateSummary`.
 - **`stripe.complete`** _(write)_ — apply an outcome to a checkout session.
   inputs: `session`, `outcome` (paid|failed|cancelled), `promotion_code?`
   (what a buyer would type; paid only).

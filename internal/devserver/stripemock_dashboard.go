@@ -56,6 +56,8 @@ func (m *StripeMock) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		Now:         m.now(),
 		ClockAhead:  time.Duration(m.clockOffset.Load()) * time.Second,
 		Sessions:    snapshotSessions(m.sessions),
+		Customers:   m.snapshotCustomerRows(),
+		Prices:      m.snapshotPriceRows(),
 		Subs:        m.snapshotSubscriptionRows(),
 		Invoices:    snapshotInvoices(m.invoices),
 		Accounts:    snapshotAccounts(m.accounts),
@@ -556,6 +558,69 @@ func (m *StripeMock) snapshotV2AccountRows() []v2AccountRow {
 	return rows
 }
 
+// customerRow is one customer with its subscription count.
+type customerRow struct {
+	Cust *stripeCustomer
+	Subs int
+}
+
+// snapshotCustomerRows builds the Customers rows, newest first. Caller holds m.mu.
+func (m *StripeMock) snapshotCustomerRows() []customerRow {
+	custs := make([]*stripeCustomer, 0, len(m.customers))
+	for _, c := range m.customers {
+		custs = append(custs, c)
+	}
+	sortNewestFirst(custs, func(c *stripeCustomer) (time.Time, string) { return c.Created, c.ID })
+	if len(custs) > dashboardLimit {
+		custs = custs[:dashboardLimit]
+	}
+	rows := make([]customerRow, len(custs))
+	for i, c := range custs {
+		rows[i] = customerRow{Cust: cloneCustomer(c)}
+		for _, s := range m.subscriptions {
+			if s.CustomerID == c.ID {
+				rows[i].Subs++
+			}
+		}
+	}
+	return rows
+}
+
+// priceRow is one price with its product name and formatted amount.
+type priceRow struct {
+	Price   *stripePrice
+	Product string
+	Amount  string // "£20.00 / month" or "£5.00 one-time"
+}
+
+// snapshotPriceRows builds the Prices rows, newest first. Caller holds m.mu.
+func (m *StripeMock) snapshotPriceRows() []priceRow {
+	prices := make([]*stripePrice, 0, len(m.prices))
+	for _, p := range m.prices {
+		prices = append(prices, p)
+	}
+	sortNewestFirst(prices, func(p *stripePrice) (time.Time, string) { return p.Created, p.ID })
+	if len(prices) > dashboardLimit {
+		prices = prices[:dashboardLimit]
+	}
+	rows := make([]priceRow, len(prices))
+	for i, p := range prices {
+		row := priceRow{Price: clonePrice(p), Product: p.ProductID, Amount: formatStripeAmount(p.UnitAmount, p.Currency) + " one-time"}
+		if prod, ok := m.products[p.ProductID]; ok {
+			row.Product = prod.Name
+		}
+		if p.Interval != "" {
+			every := p.Interval
+			if p.IntervalCount > 1 {
+				every = fmt.Sprintf("%d %ss", p.IntervalCount, p.Interval)
+			}
+			row.Amount = formatStripeAmount(p.UnitAmount, p.Currency) + " / " + every
+		}
+		rows[i] = row
+	}
+	return rows
+}
+
 // subscriptionRow is one subscription on the control page.
 type subscriptionRow struct {
 	Sub  *stripeSubscription
@@ -656,6 +721,8 @@ type dashboardData struct {
 	Now         time.Time     // the mock clock
 	ClockAhead  time.Duration // how far it runs ahead of real time
 	Sessions    []*stripeSession
+	Customers   []customerRow
+	Prices      []priceRow
 	Subs        []subscriptionRow
 	Invoices    []*stripeInvoice
 	Accounts    []*stripeAccount
@@ -791,6 +858,45 @@ button.action.primary{background:#635bff;color:#fff;border-color:#635bff}
 </tbody>
 </table>
 {{- else}}<div class="empty">No checkout sessions captured yet.</div>{{end}}
+</section>
+
+<section>
+<h2>Customers <span class="count">{{len .Customers}}</span></h2>
+{{if .Customers -}}
+<table>
+<thead><tr><th>ID</th><th>Email</th><th>Name</th><th>Subscriptions</th></tr></thead>
+<tbody>
+{{range .Customers}}
+<tr>
+<td><code>{{shortID .Cust.ID}}</code></td>
+<td>{{if .Cust.Email}}{{.Cust.Email}}{{else}}—{{end}}</td>
+<td>{{if .Cust.Name}}{{.Cust.Name}}{{else}}—{{end}}</td>
+<td>{{.Subs}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{- else}}<div class="empty">No customers. Create them from your app with <code>customer.New</code>, or pay a <code>mode=subscription</code> checkout.</div>{{end}}
+</section>
+
+<section>
+<h2>Prices <span class="count">{{len .Prices}}</span></h2>
+{{if .Prices -}}
+<table>
+<thead><tr><th>ID</th><th>Product</th><th>Amount</th><th>Lookup key</th><th>Active</th></tr></thead>
+<tbody>
+{{range .Prices}}
+<tr>
+<td><code>{{shortID .Price.ID}}</code></td>
+<td>{{.Product}}</td>
+<td>{{.Amount}}</td>
+<td>{{if .Price.LookupKey}}<code>{{.Price.LookupKey}}</code>{{else}}—{{end}}</td>
+<td>{{if .Price.Active}}yes{{else}}<span class="tag">inactive</span>{{end}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{- else}}<div class="empty">No prices. Create them from your app with <code>product.New</code> and <code>price.New</code>, then reference them as <code>line_items[].price</code>.</div>{{end}}
 </section>
 
 <section id="subscriptions">

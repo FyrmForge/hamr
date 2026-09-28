@@ -272,11 +272,39 @@ the TL;DR on top of it.
   `checkout.session.completed` or the invoice, not from the create
   response. Cancelling a subscription voids its open invoice
   (`invoice.voided`). Scaffolded webhook handlers stub the seven new
-  events. Not mocked: Customer / Price resources,
-  `POST /v1/subscriptions`, trials, proration,
-  plan changes and the billing portal. See the "Coupons and promotion
-  codes" and "Subscriptions and the mock clock" sections of the Stripe
-  mock guide.
+  events. Not mocked: `POST /v1/subscriptions`, trials, proration and
+  plan changes. See the "Coupons and promotion codes" and "Subscriptions
+  and the mock clock" sections of the Stripe mock guide.
+
+- **Stripe mock: Customers, Products, Prices and the billing portal.** The
+  mock now stores the objects an app sets up before Checkout, through the
+  usual stripe-go calls. `customer.New/Get/Update/List` (email filter);
+  `product.New/Get/List`; `price.New/Get/Update/List` with recurring or
+  one-time prices, `product_data` inline, `nickname`, `lookup_key` (and
+  `transfer_lookup_key`) and the `active`, `product`, `type` and
+  `lookup_keys[]` filters. A checkout session can reference a stored price
+  with `line_items[].price` instead of inlining `price_data` (recurring
+  needs `mode=subscription`, one-off works in `mode=payment`; unknown or
+  inactive is a 400) and attach a stored customer with `customer=` (unknown
+  is a 400 `resource_missing`, not with `customer_email`); the session
+  reports `customer_details`, and a subscription created from `price=`
+  carries the real price and product ids. Paying a subscription checkout
+  without `customer=` now stores the minted Customer, so `customer.Get` on
+  the id from `checkout.session.completed` works, and invoices carry
+  `customer_email` / `customer_name`. `client.V1BillingPortalSessions.Create`
+  returns a URL to a dev portal page listing the customer's subscriptions
+  and invoices with "Cancel at period end" / "Keep subscription" (fires
+  `customer.subscription.updated`), a no-op "Update card" and a Back link
+  to `return_url`; `client.V1BillingPortalConfigurations.Create` honours
+  `features[subscription_cancel][enabled]` only. The dashboard gains
+  Customers and Prices tables and `stripe.list` returns `customers` and
+  `prices`. No new webhook events; the scaffold's handler stubs are
+  unchanged. Subscriptions paid before this change hold a customer id
+  with no Customer record — `rm .hamr/stripe/state.json` if they need
+  one. Not mocked: Customer delete, product update, metered and tiered
+  prices, portal plan switching and payment-method collection. See
+  "Customers, products and prices" and "Billing portal" in the Stripe mock
+  guide.
 
 - **hamr mock image.** Each release now publishes
   `ghcr.io/fyrmforge/hamr:<version>` and `:latest` for linux/amd64 and arm64.

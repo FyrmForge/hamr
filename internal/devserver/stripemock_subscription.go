@@ -44,7 +44,8 @@ type stripeSubscription struct {
 }
 
 // stripeSubscriptionItem is one recurring price on the subscription. The
-// Price and Product ids are synthesised from the checkout line item.
+// Price and Product ids are the referenced price's, or synthesised when the
+// checkout line item inlined price_data.
 type stripeSubscriptionItem struct {
 	ID            string `json:"id"`
 	PriceID       string `json:"price_id"`
@@ -398,10 +399,14 @@ func (m *StripeMock) createSubscriptionLocked(sess *stripeSession, piID string, 
 		Metadata:           cloneStringMap(sess.SubscriptionMetadata),
 	}
 	for _, li := range sess.LineItems {
+		priceID, productID := li.PriceID, li.ProductID
+		if priceID == "" { // inline price_data: Stripe mints a price and product
+			priceID, productID = "price_test_"+randomHex(16), "prod_test_"+randomHex(16)
+		}
 		sub.Items = append(sub.Items, stripeSubscriptionItem{
 			ID:            "si_test_" + randomHex(16),
-			PriceID:       "price_test_" + randomHex(16),
-			ProductID:     "prod_test_" + randomHex(16),
+			PriceID:       priceID,
+			ProductID:     productID,
 			ProductName:   li.Name,
 			UnitAmount:    li.UnitAmount,
 			Quantity:      li.Quantity,
@@ -630,7 +635,11 @@ func (m *StripeMock) serializeSubscription(s *stripeSubscription) map[string]any
 			"quantity":             it.Quantity,
 			"metadata":             map[string]string{},
 			"discounts":            []any{},
-			"price": map[string]any{
+		}
+		if p, ok := m.prices[it.PriceID]; ok {
+			items[i]["price"] = m.serializePrice(p)
+		} else {
+			items[i]["price"] = map[string]any{
 				"id":                  it.PriceID,
 				"object":              "price",
 				"active":              true,
@@ -648,7 +657,7 @@ func (m *StripeMock) serializeSubscription(s *stripeSubscription) map[string]any
 					"interval": it.Interval, "interval_count": it.IntervalCount,
 					"usage_type": "licensed", "meter": nil, "trial_period_days": nil,
 				},
-			},
+			}
 		}
 	}
 	out := map[string]any{
@@ -779,11 +788,14 @@ func (m *StripeMock) serializeInvoice(in *stripeInvoice) map[string]any {
 		discounts = []any{in.DiscountID}
 		discountAmounts = []any{map[string]any{"amount": in.Discount, "discount": in.DiscountID}}
 	}
+	customerEmail, customerName := m.customerEmailLocked(in.CustomerID)
 	out := map[string]any{
 		"id":                     in.ID,
 		"object":                 "invoice",
 		"number":                 in.Number,
 		"customer":               in.CustomerID,
+		"customer_email":         nullableString(customerEmail),
+		"customer_name":          nullableString(customerName),
 		"status":                 in.Status,
 		"billing_reason":         in.BillingReason,
 		"collection_method":      "charge_automatically",

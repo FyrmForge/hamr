@@ -32,6 +32,7 @@ func (m *StripeMock) RegisterUIRoutes(mux *http.ServeMux) {
 	m.registerDashboardRoutes(mux)
 	m.registerDisputeRoutes(mux)
 	m.registerViewRoutes(mux)
+	m.registerPortalUIRoutes(mux)
 }
 
 // outcomeRule maps a button press to the resulting session state, the event

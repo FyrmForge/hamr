@@ -162,14 +162,15 @@ is created. Percent discounts round to the nearest minor unit; an
 ## Subscriptions and the mock clock
 
 A subscription starts from a checkout session in `mode=subscription` whose
-line items carry `price_data.recurring` (all items must share one
-interval). Paying it creates:
+line items carry `price_data.recurring` or reference a recurring Price by
+`price=<id>` (all items must share one interval). Paying it creates:
 
 - a Subscription (`sub_test_…`, `status=active`), with one item per line
-  item, a synthesised Price and Product id, and `current_period_start/end`
-  on the item;
-- a Customer id (`cus_test_…`) on the session and subscription — an id
-  only, the mock has no Customer resource;
+  item — the referenced Price and Product ids, or synthesised ones for
+  inline `price_data` — and `current_period_start/end` on the item;
+- a Customer (`cus_test_…`) on the session and subscription, carrying the
+  session's `customer_email`, unless the session was created with
+  `customer=<id>`, which is kept;
 - the first Invoice (`in_test_…`, `billing_reason=subscription_create`,
   `status=paid`), linked to the session's PaymentIntent through
   `payments[]`.
@@ -220,6 +221,87 @@ wall-clock comparison with `current_period_end`: after an advance the
 mock's timestamps sit ahead of the app's clock, exactly as under a Stripe
 test clock.
 
+## Customers, products and prices
+
+The mock stores Customers, Products and Prices, so an app can set them up
+the way it does against Stripe and reference them from Checkout:
+
+```go
+cust, _ := customer.New(&stripe.CustomerParams{
+    Email: stripe.String("ada@example.com"),
+})
+price, _ := price.New(&stripe.PriceParams{
+    Currency: stripe.String("gbp"), UnitAmount: stripe.Int64(2000),
+    Recurring: &stripe.PriceRecurringParams{Interval: stripe.String("month")},
+    ProductData: &stripe.PriceProductDataParams{Name: stripe.String("Pro")},
+    LookupKey: stripe.String("pro_monthly"),
+})
+session.New(&stripe.CheckoutSessionParams{
+    Mode: stripe.String("subscription"), Customer: stripe.String(cust.ID),
+    LineItems: []*stripe.CheckoutSessionLineItemParams{
+        {Price: stripe.String(price.ID), Quantity: stripe.Int64(1)},
+    },
+    SuccessURL: ..., CancelURL: ...,
+})
+```
+
+**Customers.** `customer.New` (`email`, `name`, `description`, metadata),
+`customer.Get`, `customer.Update` (same fields) and `customer.List`
+(`email` filter, exact and case-insensitive; paged). A checkout session
+created with `customer=<id>` must name a stored customer (unknown → 400
+`resource_missing`) and cannot also pass `customer_email`; the session's
+`customer_details {email, name}` is filled from the Customer from the
+start. Without `customer=`, paying a `mode=subscription` session mints a
+Customer carrying the session's `customer_email` and stores it, so
+`customer.Get` on the id from `checkout.session.completed` works.
+`customer_details` is null while a session is open with no customer
+attached. Invoices carry `customer_email` and `customer_name` from the
+Customer.
+
+**Products and prices.** `product.New` (`name`, `description`, metadata,
+`active`), `product.Get`, `product.List` (`active`). `price.New`
+(`currency`, `unit_amount`, `recurring[interval]` +
+`recurring[interval_count]` for a recurring price, `product=<id>` or
+`product_data[name]` to create the product inline, `nickname`,
+`lookup_key` with `transfer_lookup_key`, metadata, `active`), `price.Get`,
+`price.Update` (`active`, metadata, `nickname`, `lookup_key`), `price.List`
+(`active`, `product`, `type`, `lookup_keys[]`). A checkout line item can be
+`price=<id>` instead of `price_data` (not both): a recurring price needs
+`mode=subscription`, a one-off price works in `mode=payment`; unknown →
+400 `resource_missing`, inactive → 400. A subscription created from
+`price=` carries the real price and product ids on its item and serializes
+the stored Price; inline `price_data` still gets synthesised ids.
+
+Not mocked: Customer delete, product update, metered and tiered prices,
+`currency_options`.
+
+**Upgrading.** Subscriptions paid before this change hold a customer id
+with no Customer record behind it, so `customer.Get` on that id is a 404
+and a portal session for it a 400. `rm .hamr/stripe/state.json` if you
+need those subscriptions to have Customers.
+
+## Billing portal
+
+`client.V1BillingPortalSessions.Create(ctx,
+&stripe.BillingPortalSessionCreateParams{Customer: ..., ReturnURL: ...})`
+(`customer` required and must exist; unknown → 400 `resource_missing`)
+returns a session whose `url` is `/__hamr/stripe/portal?session=<id>` on
+the proxy — a dev page standing in for Stripe's hosted customer portal.
+It lists the customer's subscriptions (plan, status, period end,
+cancel-at-period-end) and invoices, with:
+
+- **Cancel at period end** / **Keep subscription** — flips
+  `cancel_at_period_end` and fires `customer.subscription.updated`, the
+  same as `subscription.Update`;
+- **Update card** — a no-op that only shows a notice;
+- **Back** — the session's `return_url`.
+
+`client.V1BillingPortalConfigurations.Create` / `.List` keep one global
+configuration; only `features[subscription_cancel][enabled]` is honoured
+(default true). Set it to false and the cancel button disappears; the
+action then answers 403. Not mocked: plan switching, payment-method
+collection, everything else on the configuration.
+
 ## Connect with Accounts v2
 
 Stripe no longer lets new platforms create v1 Express accounts, so new
@@ -252,15 +334,19 @@ still recorded in the event log, but not sent.
 **Checkout sessions**
 - `POST /v1/checkout/sessions` — create. `payment_intent_data.metadata`
   lands on the PaymentIntent and Charge; without it the session metadata
-  is used. `customer_email` is echoed. `mode` is `payment` (default) or
-  `subscription`; subscription mode needs `price_data.recurring` on every
-  line item, payment mode refuses it. `subscription_data.metadata` lands on
-  the subscription. `discounts[0].coupon` / `.promotion_code` and
-  `allow_promotion_codes` (not both) apply a discount; the response carries
-  `amount_subtotal`, `amount_total`, `total_details.amount_discount`,
-  `discounts[]`, and after a subscription completes, `customer` and
-  `subscription`. `payment_intent` is null until paid (always for a
-  subscription).
+  is used. `customer_email` is echoed; `customer=<id>` attaches a stored
+  Customer instead (unknown → 400 `resource_missing`; not with
+  `customer_email`). Line items are inline `price_data` or `price=<id>`
+  of a stored Price (not both; unknown or inactive → 400). `mode` is
+  `payment` (default) or `subscription`; subscription mode needs a
+  recurring price on every line item, payment mode refuses one.
+  `subscription_data.metadata` lands on the subscription.
+  `discounts[0].coupon` / `.promotion_code` and `allow_promotion_codes`
+  (not both) apply a discount; the response carries `amount_subtotal`,
+  `amount_total`, `total_details.amount_discount`, `discounts[]`,
+  `customer_details` (null while open with no customer), and after a
+  subscription completes, `customer` and `subscription`. `payment_intent`
+  is null until paid (always for a subscription).
 - `GET /v1/checkout/sessions/{id}` — retrieve
 - `POST /v1/checkout/sessions/{id}/expire` — expire an open session, fires
   `checkout.session.expired`; 400 if the session is not open
@@ -438,12 +524,52 @@ still recorded in the event log, but not sent.
   `customer`, `status`; paged) — `parent.subscription_details.subscription`,
   `payments[]` with the PaymentIntent, `lines[]` with `pricing.price_details`
   and `parent.subscription_item_details`, `total_discount_amounts`,
-  `status_transitions`. `next_payment_attempt` is always null: the mock
-  never retries on its own, only through the "Retry payment" action.
+  `status_transitions`, `customer_email` and `customer_name` from the
+  Customer. `next_payment_attempt` is always null: the mock never retries
+  on its own, only through the "Retry payment" action.
 - Renewal invoices create their own PaymentIntent and Charge, so balances
   and the payments views follow.
 - Not modelled: trials, proration, quantity or plan changes, pausing,
-  invoice items, the billing portal.
+  invoice items.
+
+**Customers**
+- `POST /v1/customers` — create: `email`, `name`, `description`, metadata.
+- `GET /v1/customers/{id}`; `POST /v1/customers/{id}` — update the same
+  fields. Unknown id → 404 `resource_missing`.
+- `GET /v1/customers` — `email` filter (exact, case-insensitive); paged.
+- A paid `mode=subscription` session without `customer=` mints and stores
+  one with the session's `customer_email`.
+- Not modelled: delete, payment methods, tax ids.
+
+**Products and prices**
+- `POST /v1/products` — `name` (required), `description`, metadata,
+  `active`. `GET /v1/products/{id}`; `GET /v1/products` (`active`; paged).
+  No update.
+- `POST /v1/prices` — `currency`, `unit_amount` (both required),
+  `recurring[interval]` (`day|week|month|year`) + `recurring[interval_count]`
+  (default 1) for a recurring price, else one-time; exactly one of
+  `product=<id>` (unknown → 400 `resource_missing`) or `product_data[name]`;
+  `nickname`, `lookup_key` (a key held by another price is a 400 unless
+  `transfer_lookup_key=true` moves it), metadata, `active`.
+- `GET /v1/prices/{id}`; `POST /v1/prices/{id}` — update `active`,
+  metadata, `nickname`, `lookup_key` (+ `transfer_lookup_key`).
+- `GET /v1/prices` — filters `active`, `product`, `type`
+  (`one_time|recurring`), `lookup_keys[]`; paged.
+- Prices are `per_unit`; not modelled: tiers, metered usage,
+  `currency_options`.
+
+**Billing portal**
+- `POST /v1/billing_portal/sessions` — `customer` (required, must exist:
+  unknown → 400 `resource_missing`), `return_url`. `url` is
+  `/__hamr/stripe/portal?session=<id>`.
+- `POST /v1/billing_portal/configurations` — creates or replaces the one
+  global configuration; only `features[subscription_cancel][enabled]` is
+  read (default true). `GET /v1/billing_portal/configurations` lists it.
+- Dev UI at `/__hamr/stripe/portal?session=<id>`: the customer's
+  subscriptions and invoices; "Cancel at period end" / "Keep subscription"
+  (fires `customer.subscription.updated`; 403 when cancellation is
+  disabled), "Update card" (no-op with a notice), "Back" to `return_url`.
+- Not modelled: plan switching, payment-method collection.
 
 **Mock clock**
 - `now()` is real time plus a persisted offset, second granularity. Every
@@ -469,12 +595,13 @@ still recorded in the event log, but not sent.
 - Same-origin guard on every state-mutating UI POST
 - 409 Conflict on double-submit; 410 Gone on stale completed-session reload
 
-**Not yet mocked.** Customer, Product and Price resources (the mock
-synthesises ids only), `POST /v1/subscriptions`, trials, proration, plan
-changes, the billing portal, Stripe's `/v1/test_helpers/test_clocks` API
-(the mock has one global clock instead), list endpoints for transfers and
-reversals, v2 account update/close, dispute evidence, and GET endpoints for
-Charge / ApplicationFee. The patterns from the existing resources transfer
+**Not yet mocked.** `POST /v1/subscriptions`, trials, proration, plan
+changes, Customer delete, product update, metered and tiered prices,
+portal plan switching and payment-method collection, Stripe's
+`/v1/test_helpers/test_clocks` API (the mock has one global clock
+instead), list endpoints for transfers and reversals, v2 account
+update/close, dispute evidence, and GET endpoints for Charge /
+ApplicationFee. The patterns from the existing resources transfer
 directly — add as needed.
 
 ## API version pinning
@@ -525,7 +652,8 @@ State is persisted to a single JSON file at `.hamr/stripe/state.json`
 (default), atomically rewritten on every mutation. On `hamr dev` restart
 the file is loaded so sessions, PaymentIntents, v1 and v2 accounts,
 transfers, refunds, payouts, balance settings, disputes, coupons,
-promotion codes, subscriptions, invoices and the mock clock's offset all
+promotion codes, subscriptions, invoices, customers, products, prices,
+portal sessions, the portal configuration and the mock clock's offset all
 survive — useful for long-running dev sessions and for LLM-driven
 workflows that need to read prior state across restarts.
 
@@ -563,6 +691,10 @@ The mock claims:
 - `/v1/payouts{,/}`
 - `/v1/transfers{,/}`
 - `/v1/balance_transactions/`, `/v1/balance_settings`
+- `/v1/coupons{,/}`, `/v1/promotion_codes{,/}`
+- `/v1/subscriptions{,/}`, `/v1/invoices{,/}`
+- `/v1/customers{,/}`, `/v1/products{,/}`, `/v1/prices{,/}`
+- `/v1/billing_portal/sessions`, `/v1/billing_portal/configurations`
 - `/v2/core/accounts{,/}`, `/v2/core/account_links`
 
 If your own REST API is versioned at `/v1/*` and overlaps any of these,
@@ -575,12 +707,15 @@ way to know which `/v1/*` paths are yours vs Stripe's, and `stripe-go`'s
 ## Dashboard
 
 Open `http://<proxy>/__hamr/stripe` to see every resource the mock has
-captured: checkout sessions, subscriptions, invoices, v1 accounts, v2
-accounts, PaymentIntents, refunds, payouts, disputes, coupons (with their
-promotion codes and redemption counts) and the event log, newest-first,
+captured: checkout sessions, customers (email, name, subscription count),
+prices (product, amount and interval, lookup key, active), subscriptions,
+invoices, v1 accounts, v2 accounts, PaymentIntents, refunds, payouts,
+disputes, coupons (with their promotion codes and redemption counts) and
+the event log, newest-first,
 capped at 25 rows per table. Connected account rows show the account's
 balance. The `hamr dev` panel shows an "Open Stripe mock" shortcut that
-links here.
+links here. The `stripe.list` MCP tool returns the same snapshot for an
+agent, customers and prices included.
 
 A bar at the top shows the mock clock and how far ahead of real time it
 runs, with **+1 day**, **+1 week**, **+1 month** and **Advance to** a date.

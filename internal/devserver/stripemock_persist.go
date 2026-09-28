@@ -31,6 +31,11 @@ type stripeStateFile struct {
 	PromotionCodes  map[string]*stripePromotionCode   `json:"promotion_codes"`
 	Subscriptions   map[string]*stripeSubscription    `json:"subscriptions"`
 	Invoices        map[string]*stripeInvoice         `json:"invoices"`
+	Customers       map[string]*stripeCustomer        `json:"customers"`
+	Products        map[string]*stripeProduct         `json:"products"`
+	Prices          map[string]*stripePrice           `json:"prices"`
+	PortalSessions  map[string]*stripePortalSession   `json:"portal_sessions"`
+	PortalConfig    *stripePortalConfig               `json:"portal_config,omitempty"`
 	// ClockOffset is how far ahead of real time the mock clock runs, in
 	// seconds. Persisted so an advanced clock stays advanced across restarts.
 	ClockOffset int64 `json:"clock_offset,omitempty"`
@@ -62,6 +67,11 @@ func (m *StripeMock) persist() {
 		PromotionCodes:  m.promotionCodes,
 		Subscriptions:   m.subscriptions,
 		Invoices:        m.invoices,
+		Customers:       m.customers,
+		Products:        m.products,
+		Prices:          m.prices,
+		PortalSessions:  m.portalSessions,
+		PortalConfig:    &m.portalConfig,
 		ClockOffset:     m.clockOffset.Load(),
 	}
 	if err := writeStripeState(m.persistPath, state); err != nil {
@@ -148,6 +158,21 @@ func (m *StripeMock) loadFromDisk() {
 	}
 	if state.Invoices != nil {
 		m.invoices = state.Invoices
+	}
+	if state.Customers != nil {
+		m.customers = state.Customers
+	}
+	if state.Products != nil {
+		m.products = state.Products
+	}
+	if state.Prices != nil {
+		m.prices = state.Prices
+	}
+	if state.PortalSessions != nil {
+		m.portalSessions = state.PortalSessions
+	}
+	if state.PortalConfig != nil {
+		m.portalConfig = *state.PortalConfig
 	}
 	m.clockOffset.Store(state.ClockOffset)
 }

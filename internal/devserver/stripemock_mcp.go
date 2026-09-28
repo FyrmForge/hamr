@@ -94,10 +94,13 @@ func (m *StripeMock) completeCheckout(id, outcome, promoCode string) (redirect s
 			piID = "pi_test_" + randomHex(24)
 		}
 		if sess.Mode == "subscription" {
-			// Checkout always creates a Customer for a subscription. The mock
-			// keeps only the id: there is no Customer resource to fetch. The
-			// PaymentIntent belongs to the invoice, so the session's stays null.
-			sess.CustomerID = "cus_test_" + randomHex(14)
+			// Checkout creates a Customer for a subscription unless customer=
+			// attached one. The PaymentIntent belongs to the invoice, so the
+			// session's stays null.
+			if sess.CustomerID == "" {
+				sess.CustomerID = "cus_test_" + randomHex(14)
+				m.customers[sess.CustomerID] = &stripeCustomer{ID: sess.CustomerID, Email: sess.CustomerEmail, Created: now}
+			}
 			sub, inv := m.createSubscriptionLocked(sess, piID, now)
 			sess.SubscriptionID = sub.ID
 			subFires = []webhookFire{
@@ -232,6 +235,8 @@ func (m *StripeMock) stateSummary() StripeStateSummary {
 		Refunds:        []StripeObjectSummary{},
 		Accounts:       []StripeAccountSummary{},
 		Coupons:        []StripeCouponSummary{},
+		Customers:      []StripeCustomerSummary{},
+		Prices:         []StripePriceSummary{},
 	}
 	for _, s := range m.sessions {
 		items := make([]StripeLineItemSummary, 0, len(s.LineItems))
@@ -278,6 +283,22 @@ func (m *StripeMock) stateSummary() StripeStateSummary {
 			}
 		}
 		out.Coupons = append(out.Coupons, cs)
+	}
+	for _, c := range m.customers {
+		cs := StripeCustomerSummary{ID: c.ID, Email: c.Email, Name: c.Name}
+		for _, s := range m.subscriptions {
+			if s.CustomerID == c.ID {
+				cs.Subscriptions++
+			}
+		}
+		out.Customers = append(out.Customers, cs)
+	}
+	for _, p := range m.prices {
+		ps := StripePriceSummary{ID: p.ID, Amount: p.UnitAmount, Currency: p.Currency, Interval: p.Interval, LookupKey: p.LookupKey, Active: p.Active}
+		if prod, ok := m.products[p.ProductID]; ok {
+			ps.Product = prod.Name
+		}
+		out.Prices = append(out.Prices, ps)
 	}
 	return out
 }

@@ -30,6 +30,7 @@ func TestStripeMock_Persist_RoundTrip(t *testing.T) {
 	poID := seedPayout(t, mock, acctID)
 	sessID := seedCheckoutSession(t, mock)
 	promoID := seedCouponWithCode(t, mock)
+	custID, priceID, prodID := seedCustomerAndPrice(t, mock, "month")
 	// Drive the PI through a successful outcome so charges + transfers + a
 	// completed PI all end up in the persist file. This goes through the
 	// real handler so persist fires automatically.
@@ -52,7 +53,7 @@ func TestStripeMock_Persist_RoundTrip(t *testing.T) {
 	require.NotEmpty(t, data)
 	var raw map[string]any
 	require.NoError(t, json.Unmarshal(data, &raw))
-	for _, key := range []string{"sessions", "accounts", "payment_intents", "charges", "transfers", "refunds", "payouts", "coupons", "promotion_codes"} {
+	for _, key := range []string{"sessions", "accounts", "payment_intents", "charges", "transfers", "refunds", "payouts", "coupons", "promotion_codes", "customers", "products", "prices"} {
 		assert.Contains(t, raw, key, "persist file should contain all resource maps even if empty")
 	}
 
@@ -104,6 +105,15 @@ func TestStripeMock_Persist_RoundTrip(t *testing.T) {
 	assert.Equal(t, "TENOFF", restored.promotionCodes[promoID].Code)
 	assert.Equal(t, "TEN", restored.promotionCodes[promoID].CouponID)
 	assert.True(t, restored.promotionCodes[promoID].Active)
+
+	require.Contains(t, restored.customers, custID)
+	assert.Equal(t, "ada@example.com", restored.customers[custID].Email)
+	require.Contains(t, restored.products, prodID)
+	assert.Equal(t, "Pro", restored.products[prodID].Name)
+	require.Contains(t, restored.prices, priceID)
+	assert.Equal(t, prodID, restored.prices[priceID].ProductID)
+	assert.Equal(t, "month", restored.prices[priceID].Interval)
+	assert.Equal(t, "pro_monthly", restored.prices[priceID].LookupKey)
 }
 
 // TestStripeMock_Persist_NoPathIsNoOp confirms that constructing without a

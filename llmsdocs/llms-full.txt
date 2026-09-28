@@ -2326,8 +2326,15 @@ from config alone, not from the runtime listener.
   stays null for a subscription session, whose PI is linked from the
   invoice only — as Stripe has done since API 2022-08-01.
 - After a subscription-mode session completes the response also carries
-  `customer` (`cus_test_…`, an id only — no Customer resource) and
-  `subscription`.
+  `customer` (the `customer=` given at create, else a Customer minted at
+  payment with the session's `customer_email`) and `subscription`.
+  `customer_details` is null while open with no customer attached, else
+  `{email, name}` from the Customer or `customer_email`.
+- `line_items[].price=<id>` references a stored Price (resolved at create:
+  unknown → 400 `resource_missing`, inactive → 400; `price` and
+  `price_data` are mutually exclusive, as are `customer` and
+  `customer_email`). The subscription item then carries the real price and
+  product ids and `items[].price` is the stored Price object.
 
 **API surface (Connect accounts v2).** The default for new projects: Stripe
 refuses v1 Express account creation for new platforms. Implemented in
@@ -2619,8 +2626,9 @@ maps `coupons` and `promotion_codes` in the state file.
 maps `subscriptions` and `invoices`.
 - Created only by `completeCheckout` on a `mode=subscription` session
   (`createSubscriptionLocked`): `sub_test_…` active, one
-  `stripeSubscriptionItem` per line item with synthesised `price_test_` /
-  `prod_test_` ids, `BillingCycleAnchor` = completion time, period 0 =
+  `stripeSubscriptionItem` per line item (the referenced Price / Product
+  ids for a `price=<id>` line item, synthesised `price_test_` /
+  `prod_test_` ids for inline `price_data`), `BillingCycleAnchor` = completion time, period 0 =
   [anchor, `periodEnd(0)`), `Cycles` counts completed periods so period
   bounds derive from the anchor (`addMonthsClamped`: a Jan 31 anchor bills
   Feb 28 then Mar 31; day/week are plain durations). The session's coupon is
@@ -2687,7 +2695,76 @@ maps `subscriptions` and `invoices`.
   validates `cancel_at` before it touches anything, so a 400 leaves the
   subscription untouched.
 - Not modelled: trials, proration, quantity / plan changes, pausing,
-  invoice items, billing portal, `/v1/test_helpers/test_clocks`.
+  invoice items, `/v1/test_helpers/test_clocks`.
+
+**API surface (Customers).** `stripemock_customer.go`, map `customers`.
+- `POST /v1/customers` — `email`, `name`, `description`, metadata →
+  `cus_test_…`. `GET /v1/customers` — `email` filter (exact,
+  case-insensitive), newest first, paged. `GET` / `POST
+  /v1/customers/{id}` — retrieve / update the same fields; unknown id →
+  404 `resource_missing`.
+- `completeCheckout` on a `mode=subscription` session without `customer=`
+  mints one carrying the session's `customer_email` and stores it, so the
+  id on `checkout.session.completed` resolves. Invoices serialize
+  `customer_email` / `customer_name` from the stored Customer
+  (`customerEmailLocked`); a checkout session with `customer=` copies
+  email and name onto the session for `customer_details`.
+- Not modelled: delete, payment methods, tax ids, test clocks per
+  customer. Subscriptions paid before Customers existed keep a customer
+  id with no record behind it; `rm .hamr/stripe/state.json` to reset.
+
+**API surface (Products and Prices).** `stripemock_price.go`, maps
+`products` and `prices`; a price stores `product_id`, `interval` (empty =
+one-time), `interval_count`, `lookup_key`, `active`.
+- `POST /v1/products` — `name` (required), `description`, metadata,
+  `active` (default true). `GET /v1/products/{id}`; `GET /v1/products`
+  (`active`; paged). No update endpoint.
+- `POST /v1/prices` — `currency` and `unit_amount` required (non-negative
+  integer); `recurring[interval]` day|week|month|year +
+  `recurring[interval_count]` (default 1) make it recurring; exactly one
+  of `product=<id>` (unknown → 400 `resource_missing`) or
+  `product_data[name]` (creates the product inline); `nickname`,
+  `lookup_key` (`claimLookupKeyLocked`: a key held by another price is a
+  400 unless `transfer_lookup_key=true` moves it), metadata, `active`.
+- `GET /v1/prices/{id}`; `POST /v1/prices/{id}` — update `active`,
+  metadata, `nickname`, `lookup_key` (+ `transfer_lookup_key`).
+- `GET /v1/prices` — filters `active`, `product`, `type`
+  (`one_time|recurring`), `lookup_keys[]` (stripe-go sends
+  `lookup_keys[0]=…`); paged.
+- Checkout `line_items[].price=<id>` is resolved under the lock in
+  `createCheckoutSession` (`resolvePriceLocked`): unknown → 400
+  `resource_missing`, inactive → 400; the line item takes the product
+  name, amount, currency and interval from the price, then
+  `validateLineItems` runs the mode / interval / currency checks for
+  both kinds. A recurring price needs `mode=subscription`; a one-off
+  price works in `mode=payment`. `serializeSubscription` emits the stored
+  Price object for an item whose id is known, else the synthesised one.
+- Serialized as `billing_scheme=per_unit`, `usage_type=licensed`. Not
+  modelled: tiers, metered usage, `currency_options`, product update.
+
+**API surface (Billing portal).** `stripemock_portal.go`, map
+`portal_sessions` and one global `portal_config`
+(`CancelEnabled`, default true).
+- `POST /v1/billing_portal/sessions` — `customer` required and must be a
+  stored Customer (else 400 `resource_missing`), `return_url`; returns
+  `bps_test_…` with `url` = `<baseURL>/__hamr/stripe/portal?session=<id>`.
+- `POST /v1/billing_portal/configurations` — creates or replaces the
+  single configuration; only `features[subscription_cancel][enabled]` is
+  read. `GET /v1/billing_portal/configurations` lists it (empty until
+  one was posted; sessions always report `configuration` =
+  `bpc_test_default`).
+- Dev page `GET /__hamr/stripe/portal?session=<id>` (400 without the
+  param, 404 unknown): customer email/name, the customer's subscriptions
+  (plan text, status, period end, cancel-at-period-end) and invoices
+  (number, status, total, date). `POST /__hamr/stripe/portal/action`
+  (`session=`, `subscription=`, `action=cancel|keep|card`, same-origin
+  guarded): `cancel` / `keep` flip `cancel_at_period_end` and fire
+  `customer.subscription.updated` (403 when `CancelEnabled` is false —
+  the buttons are hidden too —, 403 when the subscription belongs to
+  another customer, 409 once canceled); `card` is a no-op that redirects
+  back with a notice. "Back" links to `return_url` (`/` when unset).
+- Not modelled: plan switching, payment-method collection, any other
+  configuration feature, `flow`.
 
 **Mock clock.** `stripemock_clock.go`. `now()` = `time.Now()` + persisted
 `clockOffset` seconds, truncated to the second so a period end computed from
@@ -2876,7 +2953,8 @@ fields and zeroes missing ones, so adding fields is safe. Set
 `persist = false` for in-memory-only mode. The file holds sessions,
 accounts, `v2_accounts`, payment intents, charges, transfers (with
 reversals), refunds, payouts, `balance_settings`, `disputes`, `coupons`,
-`promotion_codes`, `subscriptions`, `invoices` and `clock_offset` (seconds
+`promotion_codes`, `subscriptions`, `invoices`, `customers`, `products`,
+`prices`, `portal_sessions`, `portal_config` and `clock_offset` (seconds
 the mock clock runs ahead). The event log and idempotency cache are
 memory-only (async webhook goroutines never write the file).
 
@@ -2891,6 +2969,10 @@ disputes and events (`#events`; type with a thin tag, object, account,
 delivered / failed with error on hover / not sent, attempt count) —
 newest-first, capped at 25 rows per table. Designed both for human dev use and for
 LLMs reading the page to inspect prior state.
+MCP `stripe.list` (`stateSummary`) returns the same state as JSON, with
+`customers` (id, email, name, subscription count) and `prices` (id,
+product name, amount, currency, interval, lookupKey, active) so an agent
+can pick a price id for `line_items[].price`.
 
 Per-row actions (all POST endpoints, same-origin guarded):
 - `POST /__hamr/stripe/resend` (`resource=`, `id=`) — re-fires the
@@ -2918,7 +3000,9 @@ Per-row actions (all POST endpoints, same-origin guarded):
   subscription re-fires `customer.subscription.updated` (`.deleted` once
   canceled); on an invoice `invoice.paid` + `invoice.payment_succeeded`,
   `invoice.payment_failed` while open, or `invoice.voided` once void.
-- Tables added for subscriptions (status, customer, plan text, period end),
+- Tables added for customers (id, email, name, subscription count),
+  prices (id, product name, amount + interval or one-time, lookup key,
+  active), subscriptions (status, customer, plan text, period end),
   invoices (number, subscription, status, total with discount tag, period,
   billing reason) and coupons (id, name, off, duration, redeemed / max,
   promotion codes with an `inactive` tag). Session rows show the amount
@@ -3034,10 +3118,12 @@ success), Refunds (create, retrieve, list; `reverse_transfer` and
 `refund_application_fee`), Transfers + reversals, balance transactions and
 balance settings, dashboard-driven disputes, Payouts (manual create +
 paid/failed outcomes, scoped list, dashboard balance payout),
-subscriptions and invoices driven by the mock clock. Not yet mocked:
-Customer / Product / Price resources (ids only), `POST /v1/subscriptions`,
-trials, proration, plan changes, billing portal,
-`/v1/test_helpers/test_clocks`, transfer/reversal list endpoints, v2
+subscriptions and invoices driven by the mock clock, Customers, Products
+and Prices (`line_items[].price=<id>` at checkout), the billing portal
+(sessions, one configuration, a dev page that cancels at period end). Not
+yet mocked: `POST /v1/subscriptions`, trials, proration, plan changes,
+Customer delete, product update, metered / tiered prices, portal plan
+switching and payment-method collection, `/v1/test_helpers/test_clocks`, transfer/reversal list endpoints, v2
 account update/close, dispute evidence, GET endpoints for Charge /
 ApplicationFee. Patterns are established in
 `internal/devserver/stripemock*.go` — add as needed. State is persisted

@@ -261,6 +261,28 @@ type StripeStateSummary struct {
 	Refunds        []StripeObjectSummary       `json:"refunds"`
 	Accounts       []StripeAccountSummary      `json:"accounts"`
 	Coupons        []StripeCouponSummary       `json:"coupons"`
+	Customers      []StripeCustomerSummary     `json:"customers"`
+	Prices         []StripePriceSummary        `json:"prices"`
+}
+
+// StripeCustomerSummary is one customer and how many subscriptions it holds.
+type StripeCustomerSummary struct {
+	ID            string `json:"id"`
+	Email         string `json:"email,omitempty"`
+	Name          string `json:"name,omitempty"`
+	Subscriptions int    `json:"subscriptions"`
+}
+
+// StripePriceSummary is one price, so an agent can pick an id for
+// line_items[].price at checkout.
+type StripePriceSummary struct {
+	ID        string `json:"id"`
+	Product   string `json:"product"` // the product's name
+	Amount    int64  `json:"amount"`
+	Currency  string `json:"currency"`
+	Interval  string `json:"interval,omitempty"` // empty for a one-time price
+	LookupKey string `json:"lookupKey,omitempty"`
+	Active    bool   `json:"active"`
 }
 
 // StripeSubscriptionSummary is one subscription: what it bills per period

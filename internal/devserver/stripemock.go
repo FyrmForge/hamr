@@ -99,7 +99,12 @@ type StripeMock struct {
 	promotionCodes  map[string]*stripePromotionCode
 	subscriptions   map[string]*stripeSubscription
 	invoices        map[string]*stripeInvoice
-	clockOffset     atomic.Int64   // seconds the mock clock runs ahead of real time; see stripemock_clock.go
+	customers       map[string]*stripeCustomer
+	products        map[string]*stripeProduct
+	prices          map[string]*stripePrice
+	portalSessions  map[string]*stripePortalSession
+	portalConfig    stripePortalConfig // one global configuration; see stripemock_portal.go
+	clockOffset     atomic.Int64       // seconds the mock clock runs ahead of real time; see stripemock_clock.go
 	events          []*stripeEvent // newest last, capped at stripeEventLimit
 	idem            map[string]*idemEntry
 	idemMu          sync.Mutex
@@ -165,6 +170,11 @@ func NewStripeMock(opts StripeMockOptions) *StripeMock {
 		promotionCodes:  map[string]*stripePromotionCode{},
 		subscriptions:   map[string]*stripeSubscription{},
 		invoices:        map[string]*stripeInvoice{},
+		customers:       map[string]*stripeCustomer{},
+		products:        map[string]*stripeProduct{},
+		prices:          map[string]*stripePrice{},
+		portalSessions:  map[string]*stripePortalSession{},
+		portalConfig:    stripePortalConfig{CancelEnabled: true},
 		idem:            map[string]*idemEntry{},
 	}
 	m.loadFromDisk()
@@ -192,6 +202,9 @@ func (m *StripeMock) RegisterAPIRoutes(mux *http.ServeMux) {
 	m.registerBalanceRoutes(r)
 	m.registerCouponRoutes(r)
 	m.registerSubscriptionRoutes(r)
+	m.registerCustomerRoutes(r)
+	m.registerPriceRoutes(r)
+	m.registerPortalRoutes(r)
 }
 
 // stripeSession is the in-memory representation. Mirrors the subset of
@@ -223,9 +236,13 @@ type stripeSession struct {
 	// SubscriptionMetadata is subscription_data.metadata: copied onto the
 	// subscription a mode=subscription session creates.
 	SubscriptionMetadata map[string]string `json:"subscription_metadata,omitempty"`
-	CustomerEmail        string            `json:"customer_email,omitempty"`
-	// CustomerID and SubscriptionID are set when a mode=subscription session
-	// completes. The customer is an id only: the mock has no Customer resource.
+	// CustomerEmail is customer_email=, or the Customer's email when
+	// customer= was given; CustomerName is that Customer's name. Both feed
+	// customer_details.
+	CustomerEmail string `json:"customer_email,omitempty"`
+	CustomerName  string `json:"customer_name,omitempty"`
+	// CustomerID is customer= at create, else the Customer a paid
+	// mode=subscription session creates. SubscriptionID is set on completion.
 	CustomerID     string `json:"customer_id,omitempty"`
 	SubscriptionID string `json:"subscription_id,omitempty"`
 	Status         string `json:"status"`         // "open" | "complete" | "expired"
@@ -233,6 +250,10 @@ type stripeSession struct {
 }
 
 type stripeLineItem struct {
+	// PriceID and ProductID are set when the item references an existing
+	// price (line_items[].price=); empty for inline price_data.
+	PriceID    string `json:"price_id,omitempty"`
+	ProductID  string `json:"product_id,omitempty"`
 	Name       string `json:"name"`
 	UnitAmount int64  `json:"unit_amount"`
 	Quantity   int64  `json:"quantity"`
@@ -331,6 +352,44 @@ func (m *StripeMock) createCheckoutSession(w http.ResponseWriter, r *http.Reques
 	sess.PaymentStatus = "unpaid"
 
 	m.mu.Lock()
+	if sess.CustomerID != "" {
+		c, ok := m.customers[sess.CustomerID]
+		if !ok {
+			m.mu.Unlock()
+			writeStripeErrorCode(w, http.StatusBadRequest, "invalid_request_error", "resource_missing",
+				fmt.Sprintf("No such customer: '%s'", sess.CustomerID))
+			return
+		}
+		sess.CustomerEmail, sess.CustomerName = c.Email, c.Name
+	}
+	for i := range sess.LineItems {
+		li := &sess.LineItems[i]
+		if li.PriceID == "" {
+			continue
+		}
+		pr, prod, ok := m.resolvePriceLocked(li.PriceID)
+		if !ok {
+			m.mu.Unlock()
+			writeStripeErrorCode(w, http.StatusBadRequest, "invalid_request_error", "resource_missing",
+				fmt.Sprintf("No such price: '%s'", li.PriceID))
+			return
+		}
+		if !pr.Active {
+			m.mu.Unlock()
+			writeStripeError(w, http.StatusBadRequest, "invalid_request_error", "The price specified is inactive.")
+			return
+		}
+		li.ProductID, li.Name = pr.ProductID, pr.Nickname
+		if prod != nil {
+			li.Name = prod.Name
+		}
+		li.UnitAmount, li.Currency, li.Interval, li.IntervalCount = pr.UnitAmount, pr.Currency, pr.Interval, pr.IntervalCount
+	}
+	if err := sess.validateLineItems(); err != nil {
+		m.mu.Unlock()
+		writeStripeError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return
+	}
 	// discounts[] is resolved now so an unknown or exhausted coupon fails
 	// the create, as in Stripe; the redemption itself is counted on completion.
 	if len(sess.Discounts) > 0 {
@@ -359,6 +418,10 @@ func buildSessionFromParams(p map[string]any) (*stripeSession, error) {
 		CancelURL:     getString(p, "cancel_url"),
 		Metadata:      stringMap(p, "metadata"),
 		CustomerEmail: getString(p, "customer_email"),
+		CustomerID:    getString(p, "customer"),
+	}
+	if s.CustomerID != "" && s.CustomerEmail != "" {
+		return nil, stripeText("You may only specify one of these parameters: customer, customer_email")
 	}
 	if pid, ok := p["payment_intent_data"].(map[string]any); ok {
 		s.PaymentIntentMetadata = stringMap(pid, "metadata")
@@ -401,38 +464,54 @@ func buildSessionFromParams(p map[string]any) (*stripeSession, error) {
 		if err != nil {
 			return nil, err
 		}
-		switch {
-		case s.Mode == "subscription" && li.Interval == "":
-			return nil, fmt.Errorf("line_items[%d].price_data.recurring is required in subscription mode", i)
-		case s.Mode == "payment" && li.Interval != "":
-			return nil, fmt.Errorf("line_items[%d] is a recurring price; use mode=subscription", i)
-		case s.Mode == "subscription" && i > 0 && (li.Interval != s.LineItems[0].Interval || li.IntervalCount != s.LineItems[0].IntervalCount):
-			return nil, fmt.Errorf("line_items[%d] has a different billing interval; all prices on a subscription must share one", i)
-		}
-		if s.Currency == "" {
-			s.Currency = li.Currency
-		} else if s.Currency != li.Currency {
-			return nil, fmt.Errorf(
-				"line_items[%d].price_data.currency=%q does not match earlier currency %q (a session may only have one currency)",
-				i, li.Currency, s.Currency)
-		}
 		s.LineItems = append(s.LineItems, li)
-		s.AmountTotal += li.UnitAmount * li.Quantity
 	}
 	return s, nil
 }
 
-// buildLineItem extracts a single line item from a decoded params map.
-// Supports inline price_data only — referencing existing prices by ID is a
-// later concern.
+// validateLineItems runs the cross-item checks (mode vs recurring, one
+// interval, one currency) and derives Currency and AmountTotal. Called once
+// every price= item has been resolved, so it sees amounts for both kinds.
+func (s *stripeSession) validateLineItems() error {
+	s.Currency, s.AmountTotal = "", 0
+	for i, li := range s.LineItems {
+		switch {
+		case s.Mode == "subscription" && li.Interval == "":
+			return fmt.Errorf("line_items[%d] is a one-time price; subscription mode needs a recurring price", i)
+		case s.Mode == "payment" && li.Interval != "":
+			return fmt.Errorf("line_items[%d] is a recurring price; use mode=subscription", i)
+		case s.Mode == "subscription" && i > 0 && (li.Interval != s.LineItems[0].Interval || li.IntervalCount != s.LineItems[0].IntervalCount):
+			return fmt.Errorf("line_items[%d] has a different billing interval; all prices on a subscription must share one", i)
+		}
+		if s.Currency == "" {
+			s.Currency = li.Currency
+		} else if s.Currency != li.Currency {
+			return fmt.Errorf(
+				"line_items[%d] currency %q does not match earlier currency %q (a session may only have one currency)",
+				i, li.Currency, s.Currency)
+		}
+		s.AmountTotal += li.UnitAmount * li.Quantity
+	}
+	return nil
+}
+
+// buildLineItem extracts a single line item from a decoded params map. A
+// price= reference comes back with only PriceID and Quantity set; the
+// caller resolves it against the stored prices under the lock.
 func buildLineItem(item map[string]any, idx int) (stripeLineItem, error) {
 	qty, _ := getInt64(item, "quantity")
 	if qty <= 0 {
 		qty = 1
 	}
 	priceData, ok := item["price_data"].(map[string]any)
+	if priceID := getString(item, "price"); priceID != "" {
+		if ok {
+			return stripeLineItem{}, stripeText("You may only specify one of these parameters: price, price_data")
+		}
+		return stripeLineItem{PriceID: priceID, Quantity: qty}, nil
+	}
 	if !ok {
-		return stripeLineItem{}, fmt.Errorf("line_items[%d].price_data is required (referencing existing price IDs is not yet mocked)", idx)
+		return stripeLineItem{}, fmt.Errorf("line_items[%d] must specify one of price or price_data", idx)
 	}
 	currency := strings.ToLower(getString(priceData, "currency"))
 	if currency == "" {
@@ -489,6 +568,7 @@ func (m *StripeMock) serializeSession(s *stripeSession) map[string]any {
 		"success_url":           s.SuccessURL,
 		"cancel_url":            s.CancelURL,
 		"customer_email":        nullableString(s.CustomerEmail),
+		"customer_details":      s.customerDetails(),
 		"status":                s.Status,
 		"payment_status":        s.PaymentStatus,
 		"url":                   m.baseURL + "/__hamr/stripe/checkout?session=" + s.ID,
@@ -504,6 +584,23 @@ func (m *StripeMock) serializeSession(s *stripeSession) map[string]any {
 		out["metadata"] = map[string]string{}
 	}
 	return out
+}
+
+// customerDetails renders checkout.session.customer_details. Stripe fills it
+// at completion, or from the start when customer= attached a Customer; an
+// open session without one has null.
+func (s *stripeSession) customerDetails() any {
+	if s.Status == "open" && s.CustomerID == "" {
+		return nil
+	}
+	return map[string]any{
+		"email":      nullableString(s.CustomerEmail),
+		"name":       nullableString(s.CustomerName),
+		"address":    nil,
+		"phone":      nil,
+		"tax_exempt": "none",
+		"tax_ids":    []any{},
+	}
 }
 
 // --- helpers ---
