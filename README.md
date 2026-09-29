@@ -42,10 +42,12 @@ HAMR is two things:
 | `pkg/validate`     | Pure-function validators with custom messages and a plugin registry                | [docs/guide/pkg/validate.md](docs/guide/pkg/validate.md) |
 | `pkg/auth`         | Argon2id password hashing, token generation, session management                    | [docs/guide/pkg/auth.md](docs/guide/pkg/auth.md) |
 | `pkg/db`           | Database connection with retry, keep-alive, and migration runner                   | [docs/guide/pkg/db.md](docs/guide/pkg/db.md) |
+| `pkg/db/sqlite`    | SQLite connection and migrations (pure-Go driver, no CGO)                          | [docs/guide/pkg/sqlite.md](docs/guide/pkg/sqlite.md) |
 | `pkg/htmx`         | HTMX request detection and response header helpers                                 | [docs/guide/pkg/htmx.md](docs/guide/pkg/htmx.md) |
 | `pkg/respond`      | HTTP response helpers (HTML via Templ, JSON, HTMX-aware redirects)                 | [docs/guide/pkg/respond.md](docs/guide/pkg/respond.md) |
 | `pkg/ctx`          | Type-safe Echo context keys using generics                                         | [docs/guide/pkg/ctx.md](docs/guide/pkg/ctx.md) |
 | `pkg/middleware`   | Auth, RBAC, error pages, flash, rate limiting, caching, audit, CSRF, CORS          | [docs/guide/pkg/middleware.md](docs/guide/pkg/middleware.md) |
+| `pkg/i18n`         | Translation bundles, CLDR plural rules, RTL detection                              | [docs/guide/pkg/i18n.md](docs/guide/pkg/i18n.md) |
 | `pkg/server`       | Echo wrapper with functional options and lifecycle hooks                           | [docs/guide/pkg/server.md](docs/guide/pkg/server.md) |
 | `pkg/janitor`      | Background task scheduler                                                          | [docs/guide/pkg/janitor.md](docs/guide/pkg/janitor.md) |
 | `pkg/storage`      | File storage interface with local filesystem and S3/R2/RustFS backends             | [docs/guide/pkg/storage.md](docs/guide/pkg/storage.md) |
@@ -53,6 +55,10 @@ HAMR is two things:
 | `pkg/websocket`    | Session and room-based WebSocket hub with HTMX integration                         | [docs/guide/pkg/websocket.md](docs/guide/pkg/websocket.md) |
 | `pkg/media`        | Image and video upload, processing, and serving on top of storage                  | [docs/guide/pkg/media.md](docs/guide/pkg/media.md) |
 | `pkg/sync`         | S3 sync for static assets with file watching                                       | [docs/guide/pkg/sync.md](docs/guide/pkg/sync.md) |
+| `pkg/email`        | Provider-agnostic `Sender` interface for outbound email                            | [docs/guide/pkg/email.md](docs/guide/pkg/email.md) |
+| `pkg/sms`          | Provider-agnostic `Sender` interface for outbound SMS                              | [docs/guide/pkg/sms.md](docs/guide/pkg/sms.md) |
+| `pkg/emailmock`    | Dev-only `email.Sender` that delivers to the `hamr dev` inbox at `/__hamr/mail`    | [docs/guide/pkg/emailmock.md](docs/guide/pkg/emailmock.md) |
+| `pkg/smsmock`      | Dev-only `sms.Sender` that delivers to the `hamr dev` inbox at `/__hamr/sms`       | [docs/guide/pkg/smsmock.md](docs/guide/pkg/smsmock.md) |
 | `pkg/e2e`          | Reusable go-rod browser helpers for E2E testing                                    | [docs/guide/pkg/e2e.md](docs/guide/pkg/e2e.md) |
 | `pkg/templint`     | Static linter for `.templ` files (control flow, a11y, style rules)                 | [docs/guide/pkg/templint.md](docs/guide/pkg/templint.md) |
 
@@ -64,9 +70,15 @@ HAMR is two things:
 | `hamr dev`                  | File watching, builds, process management, and live-reload proxy    |
 | `hamr setup`                | Interactive AI-agent setup: MCP bridge, tool permissions, skills     |
 | `hamr compose [args]`       | `docker compose` with hamr dev's port-walk override merged in        |
+| `hamr env`                  | Print env-var rewrites from the running dev server's port walks     |
+| `hamr mcp install`          | Register the MCP bridge with Claude Code, Codex, or opencode        |
+| `hamr mock-serve`           | Run the mail, SMS, and Stripe dev mocks standalone (container image) |
+| `hamr add service [name]`   | Add a Go binary (worker, api, html, or empty) to an existing project |
+| `hamr add skill [target]`   | Install AI agent skills                                             |
 | `hamr ai capture <url>`     | Capture a browser screenshot bundle, plus HTML/text/metadata        |
 | `hamr ai upgrade`           | Diff scaffold changes between project version and current HAMR      |
 | `hamr gen static`           | Fingerprint static assets into dist/ with compile-time manifest     |
+| `hamr gen locale`           | Generate type-safe Go accessors from locale JSON                    |
 | `hamr vendor`               | Download and checksum frontend JS dependencies (htmx, alpine, etc) |
 | `hamr sync`                 | Sync a local directory to an S3-compatible bucket                   |
 | `hamr rename-module <path>` | Rename the Go module and update all import paths                    |
@@ -112,7 +124,7 @@ hamr new myproject
 # Follow the prompts to choose:
 #   - GitHub username/org (auto-detected from gh CLI)
 #   - CSS approach (plain CSS with design system or Tailwind)
-#   - Database (PostgreSQL)
+#   - Database (PostgreSQL or SQLite) and connector (sqlx or GORM)
 #   - File storage (none, local, or S3/RustFS)
 #   - WebSocket support
 #   - E2E testing scaffold
@@ -157,7 +169,7 @@ myproject/
 | HTTP            | Echo v4                            |
 | Templates       | Templ                              |
 | Interactivity   | HTMX (+ optional Alpine.js)        |
-| Database        | PostgreSQL via pgx + sqlx          |
+| Database        | PostgreSQL (pgx) or SQLite, via sqlx or GORM |
 | Migrations      | golang-migrate                     |
 | Auth            | Argon2id + cookie sessions         |
 | CSS             | Plain CSS design system or Tailwind |
@@ -189,7 +201,7 @@ make vet
 ## Requirements
 
 - Go 1.25 or later
-- PostgreSQL 15+ (for generated projects)
+- PostgreSQL 15+ (for PostgreSQL projects; SQLite projects need no database server)
 - Docker (optional, for local Postgres via docker-compose)
 
 ## License

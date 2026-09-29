@@ -10,6 +10,12 @@ the TL;DR on top of it.
 
 ### Documentation
 
+- **Root `README.md` caught up with the guide.** The package table gains
+  `pkg/db/sqlite`, `pkg/i18n`, `pkg/email`, `pkg/sms`, `pkg/emailmock` and
+  `pkg/smsmock`; the CLI table gains `env`, `mcp install`, `mock-serve`,
+  `add service`, `add skill` and `gen locale`; the quick start, stack table
+  and requirements no longer say PostgreSQL is the only database.
+
 - **`AGENTS.md` now states the layering rule.** The scaffold's generated code
   always routed handlers through `internal/service/`, but `AGENTS.md` showed
   handler examples holding a `repo.Store` and left `internal/service/` out of
