@@ -15,13 +15,21 @@ Learn how to build full-stack Go applications with HAMR.
 | [`hamr dev`](cli.md#hamr-dev) | Dev server with live reload |
 | [`hamr setup`](cli.md#hamr-setup) | Interactive AI-agent setup: MCP bridge, permissions, skills |
 | [`hamr compose`](cli.md#hamr-compose) | `docker compose` with the port-walk override merged in |
+| [`hamr env`](cli.md#hamr-env) | Print env rewrites from the dev server's port walks |
+| [`hamr mcp`](cli.md#hamr-mcp) | MCP bridge for AI agents; `mcp install` registers it |
+| [`hamr mock-serve`](cli.md#hamr-mock-serve) | Run the mail, SMS and Stripe mocks standalone |
+| [`hamr add service`](cli.md#hamr-add-service) | Add a Go binary to an existing project |
+| [`hamr add skill`](cli.md#hamr-add-skill) | Install AI agent skills |
 | [`hamr ai capture`](cli.md#hamr-ai-capture) | Capture browser screenshots for debugging or LLM use |
+| [`hamr ai upgrade`](cli.md#hamr-ai-upgrade) | Diff scaffold changes between versions |
 | [`hamr gen static`](cli.md#hamr-gen-static) | Fingerprint static assets into dist/ |
+| [`hamr gen locale`](cli.md#hamr-gen-locale) | Type-safe Go accessors from locale JSON |
 | [`hamr sync`](cli.md#hamr-sync) | Sync directory to S3 |
 | [`hamr lint templ`](cli.md#hamr-lint-templ) | Lint `.templ` files |
 | [`hamr vendor`](cli.md#hamr-vendor) | Vendor frontend JS deps |
 | [`hamr rename-module`](cli.md#hamr-rename-module) | Rename Go module + imports |
 | [`hamr version`](cli.md#hamr-version) | Print version |
+| [`hamr completion`](cli.md#hamr-completion) | Shell completion scripts |
 
 ## Guides
 
