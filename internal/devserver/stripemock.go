@@ -236,6 +236,9 @@ type stripeSession struct {
 	// SubscriptionMetadata is subscription_data.metadata: copied onto the
 	// subscription a mode=subscription session creates.
 	SubscriptionMetadata map[string]string `json:"subscription_metadata,omitempty"`
+	// TrialEnd is subscription_data.trial_end: the subscription starts
+	// trialing and is first charged then. Zero = no trial.
+	TrialEnd time.Time `json:"trial_end"`
 	// CustomerEmail is customer_email=, or the Customer's email when
 	// customer= was given; CustomerName is that Customer's name. Both feed
 	// customer_details.
@@ -352,6 +355,12 @@ func (m *StripeMock) createCheckoutSession(w http.ResponseWriter, r *http.Reques
 	sess.PaymentStatus = "unpaid"
 
 	m.mu.Lock()
+	if !sess.TrialEnd.IsZero() && sess.TrialEnd.Before(m.now().Add(48*time.Hour)) {
+		m.mu.Unlock()
+		writeStripeError(w, http.StatusBadRequest, "invalid_request_error",
+			"subscription_data[trial_end] must be at least 48 hours in the future.")
+		return
+	}
 	if sess.CustomerID != "" {
 		c, ok := m.customers[sess.CustomerID]
 		if !ok {
@@ -434,6 +443,16 @@ func buildSessionFromParams(p map[string]any) (*stripeSession, error) {
 	}
 	if s.Mode != "payment" && s.Mode != "subscription" {
 		return nil, fmt.Errorf("mode %q is not mocked (payment and subscription are)", s.Mode)
+	}
+	if sd, ok := p["subscription_data"].(map[string]any); ok && getString(sd, "trial_end") != "" {
+		if s.Mode != "subscription" {
+			return nil, stripeText("subscription_data[trial_end] can only be used in subscription mode")
+		}
+		te, ok := getInt64(sd, "trial_end")
+		if !ok || te <= 0 {
+			return nil, stripeText("subscription_data[trial_end] must be a unix timestamp")
+		}
+		s.TrialEnd = time.Unix(te, 0)
 	}
 	s.AllowPromotionCodes = getString(p, "allow_promotion_codes") == "true"
 	if raw, ok := p["discounts"].([]any); ok && len(raw) > 0 {

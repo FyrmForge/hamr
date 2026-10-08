@@ -119,7 +119,7 @@ var bridgeTools = []bridgeTool{
 	},
 	{
 		name:        "stripe.list",
-		description: "Read-only snapshot of the Stripe mock state: the mock clock (RFC 3339), sessions, subscriptions (status, customer, per-period amount, period end, cancel/fail flags), payment intents, payouts, refunds, accounts (id/status/amount), coupons with their promotion codes, customers (email, subscription count), prices (product, amount, interval, lookup key).",
+		description: "Read-only snapshot of the Stripe mock state: the mock clock (RFC 3339), sessions, subscriptions (status, customer, per-period amount, period end, trial end while trialing, cancel/fail flags), payment intents, payouts, refunds, accounts (id/status/amount), coupons with their promotion codes, customers (email, subscription count), prices (product, amount, interval, lookup key).",
 		inputSchema: noArgs,
 	},
 	{

@@ -41,6 +41,24 @@ func TestStripeMock_CheckoutPage_RendersOpenSession(t *testing.T) {
 	assert.Contains(t, body, sessID)
 }
 
+// TestStripeMock_CheckoutPage_Trial: a trial session shows nothing due today
+// and what is charged from trial_end.
+func TestStripeMock_CheckoutPage_Trial(t *testing.T) {
+	mock, _, _ := newFullStripeStack(t, "")
+	sessID := createTestSession(t, mock, []stripe.LineItem{
+		{Description: "Pro plan", AmountTotal: 1500, Quantity: 1, Currency: "gbp"},
+	})
+	mock.mu.Lock()
+	mock.sessions[sessID].TrialEnd = time.Date(2030, 3, 1, 0, 0, 0, 0, time.UTC)
+	mock.mu.Unlock()
+
+	body := getCheckoutPage(t, mock, sessID, http.StatusOK)
+	assert.Contains(t, body, "Total due today")
+	assert.Contains(t, body, "£0.00")
+	assert.Contains(t, body, "Then £15.00")
+	assert.Contains(t, body, "from 1 Mar 2030")
+}
+
 // TestStripeMock_CheckoutPage_GoneAfterCompletion ensures a stale browser
 // tab can't double-fire — once the session is no longer "open", the page
 // returns 410 instead of re-rendering.

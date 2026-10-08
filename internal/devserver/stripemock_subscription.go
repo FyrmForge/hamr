@@ -13,12 +13,14 @@ import (
 // renewal invoice is paid, or fails when "fail next renewal" is set, or the
 // subscription ends when cancellation was scheduled. Every object here is
 // stamped with the mock clock's time at the moment it would have happened.
+// A session with a trial_end starts the subscription trialing with a £0
+// first invoice; the first real invoice is cut when the clock reaches it.
 //
-// ponytail: no trials, proration, quantity changes or plan swaps. The
+// ponytail: no proration, quantity changes or plan swaps. The
 // subscription keeps the items it was created with.
 
 // stripeSubscription is a Stripe Subscription. Status is one of
-// active | past_due | canceled.
+// trialing | active | past_due | canceled.
 type stripeSubscription struct {
 	ID                 string                      `json:"id"`
 	CustomerID         string                      `json:"customer_id"`
@@ -38,6 +40,8 @@ type stripeSubscription struct {
 	Discount           *stripeSubscriptionDiscount `json:"discount,omitempty"`
 	FailNextRenewal    bool                        `json:"fail_next_renewal,omitempty"` // dashboard toggle: the next cycle's payment fails
 	Description        string                      `json:"description,omitempty"`
+	TrialStart         time.Time                   `json:"trial_start"` // zero = no trial
+	TrialEnd           time.Time                   `json:"trial_end"`   // zero = no trial
 	StartDate          time.Time                   `json:"start_date"`
 	Created            time.Time                   `json:"created"`
 	Metadata           map[string]string           `json:"metadata,omitempty"`
@@ -416,6 +420,14 @@ func (m *StripeMock) createSubscriptionLocked(sess *stripeSession, piID string, 
 	}
 	sub.CurrentPeriodStart = at
 	sub.CurrentPeriodEnd = sub.periodEnd(0)
+	trial := !sess.TrialEnd.IsZero()
+	if trial {
+		// The trial is the first period; billing starts at its end, so the
+		// anchor is TrialEnd (periodEnd(0) would be one interval past it).
+		sub.Status = "trialing"
+		sub.TrialStart, sub.TrialEnd = at, sess.TrialEnd
+		sub.BillingCycleAnchor, sub.CurrentPeriodEnd = sess.TrialEnd, sess.TrialEnd
+	}
 	if len(sess.Discounts) > 0 {
 		d := sess.Discounts[0]
 		disc := &stripeSubscriptionDiscount{
@@ -437,12 +449,20 @@ func (m *StripeMock) createSubscriptionLocked(sess *stripeSession, piID string, 
 	m.subscriptions[sub.ID] = sub
 
 	inv := m.newInvoiceLocked(sub, "subscription_create", at)
-	inv.Discount = sess.AmountDiscount // the session's snapshot, so what the buyer saw is what is billed
+	if trial {
+		// A £0 invoice covers the trial; the coupon waits for the first real one.
+		inv.Subtotal, inv.Discount, inv.DiscountID = 0, 0, ""
+		for i := range inv.Lines {
+			inv.Lines[i].Amount = 0
+		}
+	} else {
+		inv.Discount = sess.AmountDiscount // the session's snapshot, so what the buyer saw is what is billed
+	}
 	inv.Status, inv.PaidAt, inv.AttemptCount = "paid", at, 1
 	inv.PaymentIntentID = piID
 	m.invoices[inv.ID] = inv
 	sub.LatestInvoiceID = inv.ID
-	if sub.Discount != nil && sub.Discount.Duration == "once" {
+	if !trial && sub.Discount != nil && sub.Discount.Duration == "once" {
 		sub.Discount = nil // Stripe removes a once coupon after its single invoice
 	}
 	return sub, inv
@@ -496,12 +516,21 @@ func (m *StripeMock) cycleSubscriptionLocked(sub *stripeSubscription, at time.Ti
 	if sub.Discount != nil && !sub.Discount.End.IsZero() && !at.Before(sub.Discount.End) {
 		sub.Discount = nil
 	}
-	sub.Cycles++
 	sub.CurrentPeriodStart = at
-	sub.CurrentPeriodEnd = sub.periodEnd(sub.Cycles)
+	if sub.Status == "trialing" {
+		// The trial was period zero: first real period, anchored at TrialEnd.
+		sub.Status = "active"
+		sub.CurrentPeriodEnd = sub.periodEnd(0)
+	} else {
+		sub.Cycles++
+		sub.CurrentPeriodEnd = sub.periodEnd(sub.Cycles)
+	}
 	inv := m.newInvoiceLocked(sub, "subscription_cycle", at)
 	m.invoices[inv.ID] = inv
 	sub.LatestInvoiceID = inv.ID
+	if sub.Discount != nil && sub.Discount.Duration == "once" {
+		sub.Discount = nil // only reachable after a trial, whose £0 invoice left the coupon unused
+	}
 
 	// A zero-total invoice (100% coupon) has nothing to fail, as on Stripe.
 	failNext := sub.FailNextRenewal && inv.Total() > 0
@@ -678,8 +707,8 @@ func (m *StripeMock) serializeSubscription(s *stripeSubscription) map[string]any
 		"description":            nullableString(s.Description),
 		"latest_invoice":         nullableString(s.LatestInvoiceID),
 		"livemode":               false,
-		"trial_start":            nil,
-		"trial_end":              nil,
+		"trial_start":            nullableUnix(s.TrialStart),
+		"trial_end":              nullableUnix(s.TrialEnd),
 		"items": map[string]any{
 			"object": "list", "url": "/v1/subscription_items?subscription=" + s.ID,
 			"has_more": false, "total_count": len(items), "data": items,

@@ -2704,10 +2704,11 @@ maps `subscriptions` and `invoices`.
   row and `stripe.subscription`: `next` (advance the clock to
   `nextPeriodTarget(id)`: `sub.dueAt()`, or now when real time already
   passed it; 409 for a canceled subscription), `retry`, `fail_next`
-  (toggle; active only), `cancel`. `POST /v1/subscriptions/{id}`
+  (toggle; active or trialing), `cancel`. `POST /v1/subscriptions/{id}`
   validates `cancel_at` before it touches anything, so a 400 leaves the
   subscription untouched.
-- Not modelled: trials, proration, quantity / plan changes, pausing,
+- Trials: session `subscription_data[trial_end]` (mode=subscription only, ≥ mock now + 48h at create and again at pay, else 400) → `trialing`, `trial_start/end`, period end = anchor = trial end, £0 paid first invoice, `no_payment_required`, no PI/Charge; checkout page shows £0 due today then the price from trial end; `once` coupon survives to the first real invoice; at `trial_end` → `active` + `subscription_cycle` invoice (Cycles not incremented); cancel in trial never charges.
+- Not modelled: `trial_period_days`, `trial_settings`, proration, quantity / plan changes, pausing,
   invoice items, `/v1/test_helpers/test_clocks`.
 
 **API surface (Customers).** `stripemock_customer.go`, map `customers`.
@@ -3009,7 +3010,7 @@ Per-row actions (all POST endpoints, same-origin guarded):
   retry | fail_next | cancel`) — `subscriptionAction`. Rendered per row as
   "Next period" (not canceled), "Retry payment" (`past_due`), "Fail next
   renewal" / "Renew normally" (active), "Cancel" (not canceled). Row tags
-  show `cancels at period end` and `next renewal fails`. Resend on a
+  show `trial`, `cancels at period end` and `next renewal fails`. Resend on a
   subscription re-fires `customer.subscription.updated` (`.deleted` once
   canceled); on an invoice `invoice.paid` + `invoice.payment_succeeded`,
   `invoice.payment_failed` while open, or `invoice.voided` once void.
@@ -3134,7 +3135,7 @@ paid/failed outcomes, scoped list, dashboard balance payout),
 subscriptions and invoices driven by the mock clock, Customers, Products
 and Prices (`line_items[].price=<id>` at checkout), the billing portal
 (sessions, one configuration, a dev page that cancels at period end). Not
-yet mocked: `POST /v1/subscriptions`, trials, proration, plan changes,
+yet mocked: `POST /v1/subscriptions`, `trial_period_days`, proration, plan changes,
 Customer delete, product update, metered / tiered prices, portal plan
 switching and payment-method collection, `/v1/test_helpers/test_clocks`, transfer/reversal list endpoints, v2
 account update/close, dispute evidence, GET endpoints for Charge /

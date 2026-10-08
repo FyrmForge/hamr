@@ -165,7 +165,7 @@ A subscription starts from a checkout session in `mode=subscription` whose
 line items carry `price_data.recurring` or reference a recurring Price by
 `price=<id>` (all items must share one interval). Paying it creates:
 
-- a Subscription (`sub_test_…`, `status=active`), with one item per line
+- a Subscription (`sub_test_…`, `status=active`, or `trialing` with `subscription_data[trial_end]`), with one item per line
   item — the referenced Price and Product ids, or synthesised ones for
   inline `price_data` — and `current_period_start/end` on the item;
 - a Customer (`cus_test_…`) on the session and subscription, carrying the
@@ -195,10 +195,33 @@ What a cycle does:
 
 | Situation at period end | Result | Events |
 |---|---|---|
+| trialing, at `trial_end` | `active`, first real invoice (`subscription_cycle`) for the period starting at `trial_end`; paid or failed like a renewal, and the `once` coupon applies here | `customer.subscription.updated` (`trialing` to `active`), then the paid or failed events below |
 | active | new period, paid renewal invoice (`subscription_cycle`) | `invoice.paid`, `invoice.payment_succeeded`, `customer.subscription.updated`, `payment_intent.succeeded`, `charge.succeeded` |
 | active, "Fail next renewal" set | new period, invoice `open`, subscription `past_due` (a zero-total invoice cannot fail: it pays as above) | `invoice.payment_failed`, `customer.subscription.updated`, `payment_intent.payment_failed` |
 | `cancel_at_period_end` (or `cancel_at` reached) | subscription `canceled` | `customer.subscription.deleted` |
 | still `past_due` from the last cycle | dunning gives up: `canceled`, open invoice `void` | `customer.subscription.deleted`, `invoice.voided` |
+
+**Trials.** A session in `mode=subscription` may carry
+`subscription_data[trial_end]` (unix seconds). It must be at least 48 hours
+after the mock clock, as on Stripe, and is refused with a 400 on
+`mode=payment`. Mock sessions never expire, so the rule is checked again
+at pay time: a session whose `trial_end` went stale is refused and stays
+open. Paying such a session creates the subscription as
+`trialing` (`trial_start` now, `trial_end` and `current_period_end` at
+`trial_end`, `billing_cycle_anchor` = `trial_end`) with a £0 paid first
+invoice and `payment_status=no_payment_required`: no PaymentIntent, no
+Charge. The session's `amount_total` still shows the plan price; it is not
+money received. The hosted checkout page shows £0 due today, then the
+plan price from `trial_end`. Events: `checkout.session.completed`,
+`customer.subscription.created`, `invoice.paid`,
+`invoice.payment_succeeded`. A `once` coupon is not used up by the £0
+invoice; it applies to the first real one. A `repeating` coupon's months
+count from checkout, so the trial uses part of them, as on Stripe. "Fail next renewal" is allowed
+while trialing and makes the first real invoice fail (`past_due`).
+Cancelling during the trial (now, or `cancel_at_period_end`) never charges.
+`trial_start` and `trial_end` stay on the subscription after the trial.
+`trial_period_days`, `trial_settings` and trials without a card are not
+modelled.
 
 "Retry payment" on a `past_due` row pays the open invoice and returns the
 subscription to `active` with the paid events. A coupon on the session is
@@ -529,7 +552,7 @@ still recorded in the event log, but not sent.
   on its own, only through the "Retry payment" action.
 - Renewal invoices create their own PaymentIntent and Charge, so balances
   and the payments views follow.
-- Not modelled: trials, proration, quantity or plan changes, pausing,
+- Not modelled: `trial_period_days`, proration, quantity or plan changes, pausing,
   invoice items.
 
 **Customers**
@@ -595,7 +618,7 @@ still recorded in the event log, but not sent.
 - Same-origin guard on every state-mutating UI POST
 - 409 Conflict on double-submit; 410 Gone on stale completed-session reload
 
-**Not yet mocked.** `POST /v1/subscriptions`, trials, proration, plan
+**Not yet mocked.** `POST /v1/subscriptions`, `trial_period_days`, proration, plan
 changes, Customer delete, product update, metered and tiered prices,
 portal plan switching and payment-method collection, Stripe's
 `/v1/test_helpers/test_clocks` API (the mock has one global clock

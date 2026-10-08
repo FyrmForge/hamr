@@ -8,6 +8,16 @@ the TL;DR on top of it.
 
 ## [Unreleased]
 
+### Added
+
+- **Stripe mock supports Checkout trials.** A `mode=subscription` session
+  accepts `subscription_data[trial_end]` (at least 48 hours after the mock
+  clock). Paying it creates a `trialing` subscription with a £0 paid first
+  invoice and no charge; at `trial_end` the clock moves it to `active` with
+  the first real invoice. "Fail next renewal" works during a trial and the
+  dashboard shows a `trial` tag. The hosted checkout page shows
+  nothing due today and the price from `trial_end`. `trial_period_days` is still not mocked.
+
 ### Documentation
 
 - **Root `README.md` caught up with the guide.** The package table gains

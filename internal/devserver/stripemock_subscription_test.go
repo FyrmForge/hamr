@@ -542,6 +542,232 @@ func TestStripeMock_Dashboard_ClockAndSubscriptions(t *testing.T) {
 	})
 }
 
+// TestStripeMock_Subscription_TrialStartAndFirstCharge: a session with
+// subscription_data[trial_end] starts a trialing subscription with a £0 paid
+// invoice and no money movement; crossing trial_end charges the full price,
+// and later cycles run monthly from trial_end.
+func TestStripeMock_Subscription_TrialStartAndFirstCharge(t *testing.T) {
+	mock, srv, _ := newFullStripeStack(t, "")
+	sink := newWebhookSink(t, "whsec_test")
+	mock.SetWebhookEndpoint(WebhookEndpoint{URL: sink.URL, Secret: "whsec_test"})
+	withStripeBackend(t, srv.URL, func() {
+		trialEnd := mock.now().Add(14 * 24 * time.Hour).Truncate(time.Second)
+		sessID, subID := createTrial(t, mock, trialEnd)
+
+		var types []string
+		var subCreated stripe.Subscription
+		for range 4 {
+			evt := sink.Wait(t, 3*time.Second)
+			types = append(types, string(evt.Type))
+			if evt.Type == "customer.subscription.created" {
+				require.NoError(t, json.Unmarshal(evt.Data.Raw, &subCreated))
+			}
+		}
+		assert.ElementsMatch(t, []string{
+			"checkout.session.completed", "customer.subscription.created", "invoice.paid", "invoice.payment_succeeded",
+		}, types)
+		assert.Equal(t, stripe.SubscriptionStatusTrialing, subCreated.Status)
+
+		sess, err := session.Get(sessID, nil)
+		require.NoError(t, err)
+		assert.Equal(t, stripe.CheckoutSessionPaymentStatusNoPaymentRequired, sess.PaymentStatus)
+
+		sub, err := subscription.Get(subID, nil)
+		require.NoError(t, err)
+		assert.Equal(t, stripe.SubscriptionStatusTrialing, sub.Status)
+		assert.Equal(t, sub.Created, sub.TrialStart)
+		assert.Equal(t, trialEnd.Unix(), sub.TrialEnd)
+		assert.Equal(t, trialEnd.Unix(), sub.BillingCycleAnchor)
+		assert.Equal(t, trialEnd.Unix(), sub.Items.Data[0].CurrentPeriodEnd)
+
+		invs := listInvoices(t, subID)
+		require.Len(t, invs, 1)
+		assert.Equal(t, stripe.InvoiceStatusPaid, invs[0].Status)
+		assert.Equal(t, stripe.InvoiceBillingReasonSubscriptionCreate, invs[0].BillingReason)
+		assert.Zero(t, invs[0].Total)
+		assert.Empty(t, invs[0].Payments.Data, "a £0 invoice has no PaymentIntent")
+		mock.mu.RLock()
+		assert.Empty(t, mock.paymentIntents)
+		assert.Empty(t, mock.charges)
+		mock.mu.RUnlock()
+
+		// Past trial_end: active, first real invoice for the full price.
+		_, err = mock.advanceClock(trialEnd.Add(time.Hour))
+		require.NoError(t, err)
+		types = nil
+		for range 5 {
+			types = append(types, string(sink.Wait(t, 3*time.Second).Type))
+		}
+		assert.Contains(t, types, "customer.subscription.updated")
+		sub, err = subscription.Get(subID, nil)
+		require.NoError(t, err)
+		assert.Equal(t, stripe.SubscriptionStatusActive, sub.Status)
+		assert.Equal(t, trialEnd.Unix(), sub.TrialEnd, "trial fields stay set after the trial")
+		assert.Equal(t, addMonthsClamped(trialEnd, 1).Unix(), sub.Items.Data[0].CurrentPeriodEnd, "no skipped month")
+		invs = listInvoices(t, subID)
+		require.Len(t, invs, 2)
+		assert.Equal(t, stripe.InvoiceBillingReasonSubscriptionCycle, invs[0].BillingReason)
+		assert.Equal(t, stripe.InvoiceStatusPaid, invs[0].Status)
+		assert.Equal(t, int64(1500), invs[0].AmountPaid)
+		assert.Equal(t, trialEnd.Unix(), invs[0].PeriodStart)
+		assert.Equal(t, addMonthsClamped(trialEnd, 1).Unix(), invs[0].PeriodEnd)
+
+		// One more month: a third invoice, monthly from trial_end.
+		_, err = mock.advanceClock(addMonthsClamped(trialEnd, 1).Add(time.Hour))
+		require.NoError(t, err)
+		sub, err = subscription.Get(subID, nil)
+		require.NoError(t, err)
+		assert.Equal(t, addMonthsClamped(trialEnd, 2).Unix(), sub.Items.Data[0].CurrentPeriodEnd)
+		assert.Len(t, listInvoices(t, subID), 3)
+	})
+}
+
+// TestStripeMock_Subscription_TrialEndFailsPayment: fail_next may be armed
+// while trialing; the first real charge then fails into past_due.
+func TestStripeMock_Subscription_TrialEndFailsPayment(t *testing.T) {
+	mock, srv, _ := newFullStripeStack(t, "")
+	sink := newWebhookSink(t, "whsec_test")
+	mock.SetWebhookEndpoint(WebhookEndpoint{URL: sink.URL, Secret: "whsec_test"})
+	withStripeBackend(t, srv.URL, func() {
+		trialEnd := mock.now().Add(14 * 24 * time.Hour).Truncate(time.Second)
+		_, subID := createTrial(t, mock, trialEnd)
+		drainEvents(t, sink, 4)
+
+		status, err := mock.subscriptionAction(subID, "fail_next")
+		require.NoError(t, err, "fail_next is allowed while trialing")
+		assert.Equal(t, "trialing", status)
+		_, err = mock.advanceClock(trialEnd.Add(time.Hour))
+		require.NoError(t, err)
+
+		sub, err := subscription.Get(subID, nil)
+		require.NoError(t, err)
+		assert.Equal(t, stripe.SubscriptionStatusPastDue, sub.Status)
+		invs := listInvoices(t, subID)
+		require.Len(t, invs, 2)
+		assert.Equal(t, stripe.InvoiceStatusOpen, invs[0].Status)
+		assert.Equal(t, stripe.EventType("invoice.payment_failed"), sink.Wait(t, 3*time.Second).Type)
+	})
+}
+
+// TestStripeMock_Subscription_TrialCancelAndResume: cancelling during the
+// trial never charges; resuming before trial_end charges at trial_end.
+func TestStripeMock_Subscription_TrialCancelAndResume(t *testing.T) {
+	cases := []struct {
+		name         string
+		act          func(t *testing.T, id string)
+		wantStatus   stripe.SubscriptionStatus
+		wantInvoices int
+		wantCharges  int
+	}{
+		{"cancel_at_period_end", func(t *testing.T, id string) {
+			_, err := subscription.Update(id, &stripe.SubscriptionParams{CancelAtPeriodEnd: stripe.Bool(true)})
+			require.NoError(t, err)
+		}, stripe.SubscriptionStatusCanceled, 1, 0},
+		{"cancel_now", func(t *testing.T, id string) {
+			got, err := subscription.Cancel(id, nil)
+			require.NoError(t, err)
+			assert.Equal(t, stripe.SubscriptionStatusCanceled, got.Status, "canceled at once")
+		}, stripe.SubscriptionStatusCanceled, 1, 0},
+		{"resume", func(t *testing.T, id string) {
+			for _, v := range []bool{true, false} {
+				_, err := subscription.Update(id, &stripe.SubscriptionParams{CancelAtPeriodEnd: stripe.Bool(v)})
+				require.NoError(t, err)
+			}
+		}, stripe.SubscriptionStatusActive, 2, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mock, srv, _ := newFullStripeStack(t, "")
+			sink := newWebhookSink(t, "whsec_test")
+			mock.SetWebhookEndpoint(WebhookEndpoint{URL: sink.URL, Secret: "whsec_test"})
+			withStripeBackend(t, srv.URL, func() {
+				trialEnd := mock.now().Add(14 * 24 * time.Hour).Truncate(time.Second)
+				_, subID := createTrial(t, mock, trialEnd)
+				drainEvents(t, sink, 4)
+				tc.act(t, subID)
+				_, err := mock.advanceClock(trialEnd.Add(time.Hour))
+				require.NoError(t, err)
+
+				sub, err := subscription.Get(subID, nil)
+				require.NoError(t, err)
+				assert.Equal(t, tc.wantStatus, sub.Status)
+				assert.Len(t, listInvoices(t, subID), tc.wantInvoices)
+				mock.mu.RLock()
+				assert.Len(t, mock.charges, tc.wantCharges)
+				mock.mu.RUnlock()
+				if tc.wantStatus == stripe.SubscriptionStatusCanceled {
+					deleted := false
+					for range 4 { // at most updated + deleted + invoice noise follow
+						if sink.Wait(t, 3*time.Second).Type == "customer.subscription.deleted" {
+							deleted = true
+							break
+						}
+					}
+					assert.True(t, deleted, "customer.subscription.deleted fired")
+				}
+			})
+		})
+	}
+}
+
+// TestStripeMock_Subscription_TrialEndValidation: trial_end must be at least
+// 48h out on the mock clock and is a subscription-mode field.
+// TestStripeMock_Subscription_TrialOnceCoupon: the £0 trial invoice leaves a
+// once coupon unused; the first real invoice spends it, the next pays full.
+func TestStripeMock_Subscription_TrialOnceCoupon(t *testing.T) {
+	mock, srv, _ := newFullStripeStack(t, "")
+	withStripeBackend(t, srv.URL, func() {
+		_, err := coupon.New(&stripe.CouponParams{ID: stripe.String("ONCE"), PercentOff: stripe.Float64(10), Duration: stripe.String("once")})
+		require.NoError(t, err)
+		trialEnd := mock.now().Add(14 * 24 * time.Hour).Truncate(time.Second)
+		p := subscriptionSessionParams(1500, "month")
+		p.Discounts = []*stripe.CheckoutSessionDiscountParams{{Coupon: stripe.String("ONCE")}}
+		p.SubscriptionData = &stripe.CheckoutSessionSubscriptionDataParams{TrialEnd: stripe.Int64(trialEnd.Unix())}
+		subID := createSubscription(t, mock, p)
+		assert.Zero(t, listInvoices(t, subID)[0].Total, "the trial invoice is £0 even with a coupon")
+
+		_, err = mock.advanceClock(trialEnd.Add(time.Hour))
+		require.NoError(t, err)
+		assert.Equal(t, int64(1350), listInvoices(t, subID)[0].Total, "first real invoice spends the once coupon")
+
+		_, err = mock.advanceClock(addMonthsClamped(trialEnd, 1).Add(time.Hour))
+		require.NoError(t, err)
+		assert.Equal(t, int64(1500), listInvoices(t, subID)[0].Total, "then full price")
+	})
+}
+
+func TestStripeMock_Subscription_TrialEndValidation(t *testing.T) {
+	mock, srv, _ := newFullStripeStack(t, "")
+	withStripeBackend(t, srv.URL, func() {
+		at := func(p *stripe.CheckoutSessionParams, d time.Duration) error {
+			p.SubscriptionData = &stripe.CheckoutSessionSubscriptionDataParams{TrialEnd: stripe.Int64(mock.now().Add(d).Unix())}
+			_, err := session.New(p)
+			return err
+		}
+		var se *stripe.Error
+		err := at(subscriptionSessionParams(1500, "month"), 47*time.Hour)
+		require.ErrorAs(t, err, &se)
+		assert.Equal(t, http.StatusBadRequest, se.HTTPStatusCode)
+		assert.NoError(t, at(subscriptionSessionParams(1500, "month"), 49*time.Hour))
+		err = at(sessionParams(2000), 72*time.Hour)
+		require.ErrorAs(t, err, &se, "trial_end on mode=payment")
+		assert.Equal(t, http.StatusBadRequest, se.HTTPStatusCode)
+
+		// Valid at create, stale by pay time: refused, session stays open.
+		p := subscriptionSessionParams(1500, "month")
+		p.SubscriptionData = &stripe.CheckoutSessionSubscriptionDataParams{TrialEnd: stripe.Int64(mock.now().Add(72 * time.Hour).Unix())}
+		sess, err := session.New(p)
+		require.NoError(t, err)
+		_, err = mock.advanceClock(mock.now().Add(48 * time.Hour))
+		require.NoError(t, err)
+		_, _, err = mock.completeCheckout(sess.ID, "paid", "")
+		require.Error(t, err)
+		mock.mu.RLock()
+		assert.Equal(t, "open", mock.sessions[sess.ID].Status)
+		mock.mu.RUnlock()
+	})
+}
+
 // --- helpers ---
 
 // subscriptionSessionParams is a one-item gbp subscription session.
@@ -661,4 +887,19 @@ func TestStripeMock_Clock_OverdueNextPeriod(t *testing.T) {
 		assert.Equal(t, []string{subID}, cycled)
 		assert.False(t, mock.now().Before(before), "clock did not move backwards")
 	})
+}
+
+// createTrial creates and pays a subscription session with
+// subscription_data[trial_end], returning the session and subscription ids.
+func createTrial(t *testing.T, mock *StripeMock, trialEnd time.Time) (sessID, subID string) {
+	t.Helper()
+	p := subscriptionSessionParams(1500, "month")
+	p.SubscriptionData = &stripe.CheckoutSessionSubscriptionDataParams{TrialEnd: stripe.Int64(trialEnd.Unix())}
+	sess, err := session.New(p)
+	require.NoError(t, err)
+	_, _, err = mock.completeCheckout(sess.ID, "paid", "")
+	require.NoError(t, err)
+	mock.mu.RLock()
+	defer mock.mu.RUnlock()
+	return sess.ID, mock.sessions[sess.ID].SubscriptionID
 }

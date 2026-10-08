@@ -295,6 +295,7 @@ type StripeSubscriptionSummary struct {
 	Currency          string `json:"currency"`
 	Interval          string `json:"interval"`
 	PeriodEnd         string `json:"periodEnd"`
+	TrialEnd          string `json:"trialEnd,omitempty"` // set while trialing
 	CancelAtPeriodEnd bool   `json:"cancelAtPeriodEnd,omitempty"`
 	FailNextRenewal   bool   `json:"failNextRenewal,omitempty"`
 }

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // RegisterRoutes mounts all Stripe mock endpoints (API + UI) on mux.
@@ -111,12 +112,14 @@ func (m *StripeMock) renderCheckoutPage(w http.ResponseWriter, sess *stripeSessi
 		Session   *stripeSession
 		Discount  string
 		Total     string
+		TrialEnd  string // set for a trial: nothing is due today
 		PromoErr  string
 		PromoCode string
 	}{
 		Session:   sess,
 		Discount:  formatStripeAmount(sess.AmountDiscount, sess.Currency),
 		Total:     formatStripeAmount(sess.Total(), sess.Currency),
+		TrialEnd:  trialEndText(sess.TrialEnd),
 		PromoErr:  promoErr,
 		PromoCode: promoCode,
 	}); err != nil {
@@ -178,6 +181,14 @@ func writeStripeOpError(w http.ResponseWriter, err error) {
 	http.Error(w, err.Error(), http.StatusInternalServerError)
 }
 
+// trialEndText is the trial end as the checkout page shows it, "" for none.
+func trialEndText(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format("2 Jan 2006")
+}
+
 // formatStripeAmount renders an amount in the smallest currency unit using
 // a currency-appropriate symbol. Currency is the lowercase ISO code as
 // stored on the session. Unknown codes fall through as "<code> x.xx".
@@ -203,7 +214,7 @@ func stripeFmtAmountForItem(item stripeLineItem) string {
 }
 
 var stripeCheckoutTmpl = template.Must(template.New("stripe-checkout").
-	Funcs(template.FuncMap{"itemTotal": stripeFmtAmountForItem}).
+	Funcs(template.FuncMap{"itemTotal": stripeFmtAmountForItem, "formatAmount": formatStripeAmount}).
 	Parse(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -258,10 +269,18 @@ button:hover{filter:brightness(1.1)}
 <span>−{{.Discount}}</span>
 </div>
 {{end}}
+{{if .TrialEnd}}
+<div class="total">
+<span>Total due today</span>
+<span>{{formatAmount 0 .Session.Currency}}</span>
+</div>
+<p class="hint">Then {{.Total}}{{with (index .Session.LineItems 0).Interval}} / {{.}}{{end}} from {{.TrialEnd}}.</p>
+{{else}}
 <div class="total">
 <span>Total</span>
 <span>{{.Total}}</span>
 </div>
+{{end}}
 
 <p class="hint">Choose the outcome for this payment:</p>
 <div class="actions">

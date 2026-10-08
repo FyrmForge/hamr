@@ -54,6 +54,12 @@ func (m *StripeMock) completeCheckout(id, outcome, promoCode string) (redirect s
 		m.mu.Unlock()
 		return "", true, nil
 	}
+	// Re-checked at pay time: mock sessions never expire, so the clock may
+	// have passed trial_end since create. Real sessions expire within 24h.
+	if rule.createPayment && !sess.TrialEnd.IsZero() && sess.TrialEnd.Before(m.now().Add(48*time.Hour)) {
+		m.mu.Unlock()
+		return "", false, stripeErr(http.StatusBadRequest, "subscription_data[trial_end] must be at least 48 hours in the future.")
+	}
 	// Remembered so a typed code that applies but then fails redemption is
 	// rolled back: otherwise the session keeps the discount, the hosted page
 	// hides the code input and the buyer can never pay.
@@ -85,9 +91,9 @@ func (m *StripeMock) completeCheckout(id, outcome, promoCode string) (redirect s
 	var subFires []webhookFire
 	var piID string
 	if rule.createPayment {
-		if sess.Total() == 0 {
-			// A 100% coupon: Stripe completes the session without any payment
-			// and never creates a PaymentIntent.
+		if sess.Total() == 0 || !sess.TrialEnd.IsZero() {
+			// A 100% coupon or a trial: Stripe completes the session without
+			// any payment and never creates a PaymentIntent.
 			sess.PaymentStatus = "no_payment_required"
 			rule.createPayment = false
 		} else {
@@ -268,11 +274,15 @@ func (m *StripeMock) stateSummary() StripeStateSummary {
 		out.Accounts = append(out.Accounts, StripeAccountSummary{ID: a.ID, Email: a.ContactEmail, V2: true, Onboarded: a.onboarded()})
 	}
 	for _, s := range m.subscriptions {
-		out.Subscriptions = append(out.Subscriptions, StripeSubscriptionSummary{
+		sum := StripeSubscriptionSummary{
 			ID: s.ID, Status: s.Status, Customer: s.CustomerID, Amount: s.perPeriod(), Currency: s.Currency,
 			Interval: s.Items[0].Interval, PeriodEnd: s.CurrentPeriodEnd.Format(time.RFC3339),
 			CancelAtPeriodEnd: s.CancelAtPeriodEnd, FailNextRenewal: s.FailNextRenewal,
-		})
+		}
+		if s.Status == "trialing" {
+			sum.TrialEnd = s.TrialEnd.Format(time.RFC3339)
+		}
+		out.Subscriptions = append(out.Subscriptions, sum)
 	}
 	for _, c := range m.coupons {
 		cs := StripeCouponSummary{ID: c.ID, Name: c.Name, PercentOff: c.PercentOff, AmountOff: c.AmountOff,

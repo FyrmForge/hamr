@@ -379,8 +379,8 @@ func (m *StripeMock) subscriptionAction(id, action string) (string, error) {
 	case "retry":
 		fires, err = m.retrySubscriptionLocked(sub, m.now())
 	case "fail_next":
-		if sub.Status != "active" {
-			err = stripeErr(http.StatusConflict, "subscription is %s; only an active subscription has a next renewal", sub.Status)
+		if sub.Status != "active" && sub.Status != "trialing" {
+			err = stripeErr(http.StatusConflict, "subscription is %s; only an active or trialing subscription has a next renewal", sub.Status)
 		} else {
 			sub.FailNextRenewal = !sub.FailNextRenewal
 		}
@@ -803,7 +803,7 @@ tr:last-child td{border-bottom:none}
 .status-failed,.status-canceled,.status-lost,.status-restricted{background:#481414;color:#fca5a5}
 .status-needs_response,.status-pending,.status-requires_payment_method,.status-requires_confirmation,.status-requires_action,.status-requires_capture{background:#422006;color:#fbbf24}
 .status-expired,.status-unpaid,.status-past_due{background:#3f1d52;color:#c4b5fd}
-.status-open{background:#1e3a5f;color:#93c5fd}
+.status-open,.status-trialing{background:#1e3a5f;color:#93c5fd}
 .flag-on{color:#86efac;font-weight:600}
 .flag-off{color:#fca5a5}
 form.row-form{display:inline-flex;gap:6px;margin:0;align-items:center}
@@ -908,7 +908,7 @@ button.action.primary{background:#635bff;color:#fff;border-color:#635bff}
 {{range .Subs}}
 <tr>
 <td><code>{{shortID .Sub.ID}}</code></td>
-<td><span class="status-tag status-{{.Sub.Status}}">{{.Sub.Status}}</span>{{if .Sub.CancelAtPeriodEnd}} <span class="tag">cancels at period end</span>{{end}}{{if .Sub.FailNextRenewal}} <span class="tag">next renewal fails</span>{{end}}</td>
+<td><span class="status-tag status-{{.Sub.Status}}">{{.Sub.Status}}</span>{{if eq .Sub.Status "trialing"}} <span class="tag">trial</span>{{end}}{{if .Sub.CancelAtPeriodEnd}} <span class="tag">cancels at period end</span>{{end}}{{if .Sub.FailNextRenewal}} <span class="tag">next renewal fails</span>{{end}}</td>
 <td><code>{{shortID .Sub.CustomerID}}</code></td>
 <td>{{.Plan}}{{if .Sub.Discount}} <span class="tag">{{.Sub.Discount.CouponID}}</span>{{end}}</td>
 <td>{{date .Sub.CurrentPeriodEnd}}</td>
@@ -919,7 +919,7 @@ button.action.primary{background:#635bff;color:#fff;border-color:#635bff}
 {{if eq .Sub.Status "past_due"}}
 <form class="row-form" method="POST" action="/__hamr/stripe/subscription"><input type="hidden" name="subscription" value="{{.Sub.ID}}"><input type="hidden" name="action" value="retry"><button class="action">Retry payment</button></form>
 {{end}}
-{{if eq .Sub.Status "active"}}
+{{if or (eq .Sub.Status "active") (eq .Sub.Status "trialing")}}
 <form class="row-form" method="POST" action="/__hamr/stripe/subscription"><input type="hidden" name="subscription" value="{{.Sub.ID}}"><input type="hidden" name="action" value="fail_next"><button class="action">{{if .Sub.FailNextRenewal}}Renew normally{{else}}Fail next renewal{{end}}</button></form>
 {{end}}
 {{if ne .Sub.Status "canceled"}}

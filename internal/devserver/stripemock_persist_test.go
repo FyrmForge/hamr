@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -114,6 +115,30 @@ func TestStripeMock_Persist_RoundTrip(t *testing.T) {
 	assert.Equal(t, prodID, restored.prices[priceID].ProductID)
 	assert.Equal(t, "month", restored.prices[priceID].Interval)
 	assert.Equal(t, "pro_monthly", restored.prices[priceID].LookupKey)
+}
+
+// TestStripeMock_Persist_TrialSurvivesReload: a trialing subscription and its
+// session keep their trial fields across a save and load.
+func TestStripeMock_Persist_TrialSurvivesReload(t *testing.T) {
+	persistPath := filepath.Join(t.TempDir(), "state.json")
+	mock, srv, _ := newFullStripeStack(t, persistPath)
+	trialEnd := mock.now().Add(14 * 24 * time.Hour).Truncate(time.Second)
+	var sessID, subID string
+	withStripeBackend(t, srv.URL, func() { sessID, subID = createTrial(t, mock, trialEnd) })
+
+	restored := NewStripeMock(StripeMockOptions{
+		BaseURL:     "http://restored.test",
+		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		PersistPath: persistPath,
+	})
+	restored.mu.RLock()
+	defer restored.mu.RUnlock()
+	sub := restored.subscriptions[subID]
+	require.NotNil(t, sub)
+	assert.Equal(t, "trialing", sub.Status)
+	assert.True(t, trialEnd.Equal(sub.TrialEnd), "sub trial_end: %v", sub.TrialEnd)
+	assert.False(t, sub.TrialStart.IsZero())
+	assert.True(t, trialEnd.Equal(restored.sessions[sessID].TrialEnd), "session trial_end")
 }
 
 // TestStripeMock_Persist_NoPathIsNoOp confirms that constructing without a
