@@ -27,6 +27,16 @@ the TL;DR on top of it.
   `X-Forwarded-Proto`** to the app, alongside `X-Forwarded-For`. It moved
   off the `ReverseProxy.Director` hook, which Go 1.26 deprecated.
 
+### Fixed
+
+- **`hamr dev` keeps walked compose ports when it adopts a running stack.**
+  Docker lists every published port twice (IPv4 and IPv6), and adopt
+  failed to match the duplicates to the compose file. It dropped the shift
+  (e.g. postgres on 5433 instead of 5432), left `DATABASE_URL` on the base
+  port and deleted `.hamr/compose.<name>.override.yaml`. The app then
+  reached whatever else held the base port. Adopt now reads the live ports
+  correctly, records them in `walks.json` and rewrites `.env`.
+
 ### Documentation
 
 - **Root `README.md` caught up with the guide.** The package table gains

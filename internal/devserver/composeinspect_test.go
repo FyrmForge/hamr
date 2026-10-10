@@ -1,6 +1,8 @@
 package devserver
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -347,4 +349,52 @@ func TestStateShiftsForServices_skipsRandomBaseHostPort(t *testing.T) {
 
 	shifts := stateShiftsForServices(services, publishers, nil)
 	assert.Empty(t, shifts, "random host port has no declared baseline to diff against")
+}
+
+// Regression: docker publishes each binding once per address family
+// (0.0.0.0 and ::). Adopting a stack walked in a prior session, with the
+// override file gone, must still derive the shift from the live ports and
+// rewrite .env — previously the duplicate rows defeated the pairing, the
+// shift was dropped, and the app connected to whatever held the base port.
+func TestAdoptDualStackPublishers_rewritesEnvToLivePort(t *testing.T) {
+	dir := t.TempDir()
+	composeFile := filepath.Join(dir, "docker-compose.yaml")
+	require.NoError(t, os.WriteFile(composeFile, []byte("services:\n  postgres:\n    image: postgres\n    ports:\n      - \"5432:5432\"\n  rustfs:\n    image: rustfs\n    ports:\n      - \"9000:9000\"\n      - \"9001:9001\"\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".env"), []byte("DATABASE_URL=postgres://u:p@localhost:5432/app\nS3_ENDPOINT=http://localhost:9000\n"), 0o644))
+	_, err := os.Stat(filepath.Join(dir, composeOverridePath("deps")))
+	require.True(t, os.IsNotExist(err), "no override file on adopt")
+
+	// Verbatim shape of `docker compose ps --format json` on a dual-stack host.
+	raw := []byte(`{"Service":"postgres","State":"running","Health":"healthy","Publishers":[{"URL":"0.0.0.0","TargetPort":5432,"PublishedPort":5433,"Protocol":"tcp"},{"URL":"::","TargetPort":5432,"PublishedPort":5433,"Protocol":"tcp"}]}
+{"Service":"rustfs","State":"running","Health":"healthy","Publishers":[{"URL":"0.0.0.0","TargetPort":9000,"PublishedPort":9002,"Protocol":"tcp"},{"URL":"::","TargetPort":9000,"PublishedPort":9002,"Protocol":"tcp"},{"URL":"0.0.0.0","TargetPort":9001,"PublishedPort":9003,"Protocol":"tcp"},{"URL":"::","TargetPort":9001,"PublishedPort":9003,"Protocol":"tcp"}]}`)
+	entries, err := decodeComposePS(raw)
+	require.NoError(t, err)
+	state := interpretComposePS(entries)
+	require.Len(t, state.Publishers, 3, "IPv4/IPv6 duplicates collapse")
+
+	services, err := parseComposePorts(composeFile)
+	require.NoError(t, err)
+	require.True(t, allServicesAdopted(expectedServiceNames(&DockerCompose{}, services), state.Adopted))
+
+	shifts := stateShiftsForServices(services, state.Publishers, nil)
+	assert.ElementsMatch(t, []portShift{
+		{Service: "postgres", Old: 5432, New: 5433},
+		{Service: "rustfs", Old: 9000, New: 9002},
+		{Service: "rustfs", Old: 9001, New: 9003},
+	}, shifts)
+
+	// Override reconcile renders the live ports, not base.
+	for _, svc := range overrideServices(services, state, nil) {
+		if svc.Name == "postgres" {
+			assert.Equal(t, 5433, svc.Ports[0].HostPort)
+		}
+	}
+
+	require.NoError(t, writeWalks(dir, buildWalkRecords(0, 0, 0, 0, shifts, nil)))
+	got, err := ResolveEnvRewrites(dir)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{
+		"DATABASE_URL=postgres://u:p@localhost:5433/app",
+		"S3_ENDPOINT=http://localhost:9002",
+	}, got)
 }

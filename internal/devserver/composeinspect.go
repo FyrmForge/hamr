@@ -168,6 +168,11 @@ func interpretComposePS(entries []composePSEntry) composeStackState {
 		Adopted: make(map[string]bool, len(entries)),
 		Owned:   make(map[string]bool),
 	}
+	// Docker reports each binding once per address family (0.0.0.0 and
+	// ::). After canonComposeHost both rows are identical; keeping both
+	// makes resolvedPortsForService see 2 publishers for 1 binding and
+	// drop the pairing, losing the shift.
+	seen := make(map[composeStackPublisher]bool)
 	for _, e := range entries {
 		if e.Service == "" {
 			continue
@@ -183,13 +188,18 @@ func interpretComposePS(entries []composePSEntry) composeStackState {
 				continue
 			}
 			state.Owned[hostPortKey(p.URL, p.PublishedPort)] = true
-			state.Publishers = append(state.Publishers, composeStackPublisher{
+			pub := composeStackPublisher{
 				Service:       e.Service,
 				HostIP:        canonComposeHost(p.URL),
 				Container:     p.TargetPort,
 				PublishedPort: p.PublishedPort,
 				Protocol:      p.Protocol,
-			})
+			}
+			if seen[pub] {
+				continue
+			}
+			seen[pub] = true
+			state.Publishers = append(state.Publishers, pub)
 		}
 	}
 	return state
