@@ -89,8 +89,8 @@ func TestBoolToYesNo(t *testing.T) {
 		in   *bool
 		want string
 	}{
-		{"true", ptr.To(true), "Yes"},
-		{"false", ptr.To(false), "No"},
+		{"true", new(true), "Yes"},
+		{"false", new(false), "No"},
 		{"nil", nil, ""},
 	}
 	for _, tt := range tests {

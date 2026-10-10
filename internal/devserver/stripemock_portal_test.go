@@ -116,7 +116,7 @@ func TestStripeMock_Portal_ConfigurationDisablesCancel(t *testing.T) {
 
 		cfg, err := portalconfig.New(&stripe.BillingPortalConfigurationParams{
 			Features: &stripe.BillingPortalConfigurationFeaturesParams{
-				SubscriptionCancel: &stripe.BillingPortalConfigurationFeaturesSubscriptionCancelParams{Enabled: stripe.Bool(false)},
+				SubscriptionCancel: &stripe.BillingPortalConfigurationFeaturesSubscriptionCancelParams{Enabled: new(false)},
 			},
 		})
 		require.NoError(t, err)

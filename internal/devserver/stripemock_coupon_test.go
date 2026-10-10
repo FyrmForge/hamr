@@ -126,10 +126,10 @@ func TestStripeMock_PromotionCode_RoundTrip(t *testing.T) {
 		assert.False(t, iter.Next())
 
 		// Deactivate, then the active filter excludes it.
-		upd, err := promotioncode.Update(pc.ID, &stripe.PromotionCodeParams{Active: stripe.Bool(false)})
+		upd, err := promotioncode.Update(pc.ID, &stripe.PromotionCodeParams{Active: new(false)})
 		require.NoError(t, err)
 		assert.False(t, upd.Active)
-		iter = promotioncode.List(&stripe.PromotionCodeListParams{Code: stripe.String("summer20"), Active: stripe.Bool(true)})
+		iter = promotioncode.List(&stripe.PromotionCodeListParams{Code: stripe.String("summer20"), Active: new(true)})
 		assert.False(t, iter.Next())
 		require.NoError(t, iter.Err())
 	})
@@ -140,7 +140,7 @@ func TestStripeMock_PromotionCode_RoundTrip(t *testing.T) {
 func TestStripeMock_Session_DiscountAtCreate(t *testing.T) {
 	mock, srv := newTestStripeServer(t)
 	withStripeBackend(t, srv.URL, func() {
-		_, err := coupon.New(&stripe.CouponParams{ID: stripe.String("THIRD"), PercentOff: stripe.Float64(33.333)})
+		_, err := coupon.New(&stripe.CouponParams{ID: stripe.String("THIRD"), PercentOff: new(33.333)})
 		require.NoError(t, err)
 
 		params := sessionParams(3000)
@@ -188,7 +188,7 @@ func TestStripeMock_Session_DiscountAtCreate(t *testing.T) {
 		assert.Contains(t, se.Msg, "currency")
 
 		p = sessionParams(3000)
-		p.AllowPromotionCodes = stripe.Bool(true)
+		p.AllowPromotionCodes = new(true)
 		p.Discounts = []*stripe.CheckoutSessionDiscountParams{{Coupon: stripe.String("THIRD")}}
 		_, err = session.New(p)
 		require.ErrorAs(t, err, &se)
@@ -215,7 +215,7 @@ func TestStripeMock_Checkout_PromotionCodeOnHostedPage(t *testing.T) {
 		require.NoError(t, err)
 
 		p := sessionParams(2000)
-		p.AllowPromotionCodes = stripe.Bool(true)
+		p.AllowPromotionCodes = new(true)
 		sess, err := session.New(p)
 		require.NoError(t, err)
 		assert.True(t, sess.AllowPromotionCodes)
@@ -308,7 +308,7 @@ func TestStripeMock_Checkout_FailedRedemptionKeepsSessionPayable(t *testing.T) {
 		require.NoError(t, err)
 
 		p := sessionParams(2000)
-		p.AllowPromotionCodes = stripe.Bool(true)
+		p.AllowPromotionCodes = new(true)
 		first, err := session.New(p)
 		require.NoError(t, err)
 		second, err := session.New(p)
@@ -371,7 +371,7 @@ func TestStripeMock_Session_DiscountRules(t *testing.T) {
 		past := time.Now().Add(-time.Hour).Unix()
 		_, err := coupon.New(&stripe.CouponParams{ID: stripe.String("TEN"), PercentOff: stripe.Float64(10)})
 		require.NoError(t, err)
-		_, err = coupon.New(&stripe.CouponParams{ID: stripe.String("OLD"), PercentOff: stripe.Float64(10), RedeemBy: stripe.Int64(past)})
+		_, err = coupon.New(&stripe.CouponParams{ID: stripe.String("OLD"), PercentOff: stripe.Float64(10), RedeemBy: new(past)})
 		require.NoError(t, err)
 		_, err = coupon.New(&stripe.CouponParams{ID: stripe.String("GBP50"), AmountOff: stripe.Int64(5000), Currency: stripe.String("gbp")})
 		require.NoError(t, err)
@@ -381,7 +381,7 @@ func TestStripeMock_Session_DiscountRules(t *testing.T) {
 				Code: stripe.String(code), Promotion: &stripe.PromotionCodePromotionParams{Type: stripe.String("coupon"), Coupon: stripe.String(couponID)},
 			}
 			if expiresAt > 0 {
-				params.ExpiresAt = stripe.Int64(expiresAt)
+				params.ExpiresAt = new(expiresAt)
 			}
 			pc, err := promotioncode.New(params)
 			require.NoError(t, err)
@@ -440,7 +440,7 @@ func TestStripeMock_MCP_CompleteWithPromotionCode(t *testing.T) {
 		})
 		require.NoError(t, err)
 		p := sessionParams(2000)
-		p.AllowPromotionCodes = stripe.Bool(true)
+		p.AllowPromotionCodes = new(true)
 		sess, err := session.New(p)
 		require.NoError(t, err)
 
@@ -469,7 +469,7 @@ func sessionParams(unitAmount int64) *stripe.CheckoutSessionParams {
 			PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
 				Currency:    stripe.String("gbp"),
 				ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{Name: stripe.String("Thing")},
-				UnitAmount:  stripe.Int64(unitAmount),
+				UnitAmount:  new(unitAmount),
 			},
 			Quantity: stripe.Int64(1),
 		}},

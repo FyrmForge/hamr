@@ -162,8 +162,8 @@ func TestStripeMock_CreateRefund_ReverseTransfer(t *testing.T) {
 
 		rf, err := refund.New(&stripe.RefundParams{
 			PaymentIntent:        stripe.String(pi.ID),
-			ReverseTransfer:      stripe.Bool(true),
-			RefundApplicationFee: stripe.Bool(true),
+			ReverseTransfer:      new(true),
+			RefundApplicationFee: new(true),
 		})
 		require.NoError(t, err)
 		assert.NotEmpty(t, rf.SourceTransferReversal, "reverse_transfer=true should populate source_transfer_reversal id")
@@ -237,8 +237,8 @@ func TestStripeMock_FullDestinationChargeRefundLoop_ViaRealStripeGoClient(t *tes
 		// Issue a refund with reverse_transfer.
 		rf, err := refund.New(&stripe.RefundParams{
 			PaymentIntent:        stripe.String(pi.ID),
-			ReverseTransfer:      stripe.Bool(true),
-			RefundApplicationFee: stripe.Bool(true),
+			ReverseTransfer:      new(true),
+			RefundApplicationFee: new(true),
 		})
 		require.NoError(t, err)
 		assert.Equal(t, int64(5000), rf.Amount, "no amount = full refund")
@@ -273,11 +273,11 @@ func TestStripeMock_FullDestinationChargeRefundLoop_ViaRealStripeGoClient(t *tes
 func createAndSucceedPI(t *testing.T, mock *StripeMock, amount int64, dest string) *stripe.PaymentIntent {
 	t.Helper()
 	params := &stripe.PaymentIntentParams{
-		Amount:   stripe.Int64(amount),
+		Amount:   new(amount),
 		Currency: stripe.String("gbp"),
 	}
 	if dest != "" {
-		params.ApplicationFeeAmount = stripe.Int64(amount / 10)
+		params.ApplicationFeeAmount = new(amount / 10)
 		params.TransferData = &stripe.PaymentIntentTransferDataParams{Destination: stripe.String(dest)}
 	}
 	pi, err := paymentintent.New(params)

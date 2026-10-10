@@ -233,8 +233,7 @@ func (m *MailMock) handleIngest(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, m.maxMessageBytes)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		var mbe *http.MaxBytesError
-		if errors.As(err, &mbe) {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "message too large"})
 			return
 		}

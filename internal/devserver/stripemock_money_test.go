@@ -50,7 +50,7 @@ func TestStripeMock_Transfer_NeedsBalance(t *testing.T) {
 	ctx := context.Background()
 	acctID := seedConnectedAccount(t, mock)
 	transfer := func(amount int64, src string) error {
-		p := &stripe.TransferCreateParams{Amount: stripe.Int64(amount), Currency: stripe.String("gbp"), Destination: stripe.String(acctID)}
+		p := &stripe.TransferCreateParams{Amount: new(amount), Currency: stripe.String("gbp"), Destination: stripe.String(acctID)}
 		if src != "" {
 			p.SourceTransaction = stripe.String(src)
 		}

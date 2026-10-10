@@ -165,7 +165,7 @@ myproject/
 
 | Layer           | Technology                         |
 |-----------------|------------------------------------|
-| Language        | Go 1.25+                           |
+| Language        | Go 1.27+                           |
 | HTTP            | Echo v4                            |
 | Templates       | Templ                              |
 | Interactivity   | HTMX (+ optional Alpine.js)        |
@@ -200,7 +200,7 @@ make vet
 
 ## Requirements
 
-- Go 1.25 or later
+- Go 1.27 or later
 - PostgreSQL 15+ (for PostgreSQL projects; SQLite projects need no database server)
 - Docker (optional, for local Postgres via docker-compose)
 

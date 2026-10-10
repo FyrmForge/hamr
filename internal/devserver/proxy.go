@@ -44,14 +44,17 @@ func NewProxyHandler(target string, broker *SSEBroker, errorState *ErrorState, l
 		Host:   normalizeHost(target),
 	}
 
-	proxy := httputil.NewSingleHostReverseProxy(targetURL)
-	origDirector := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		origDirector(req)
-		if injectReload {
-			// Force identity responses so HTML injection can safely mutate bytes.
-			req.Header.Del("Accept-Encoding")
-		}
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(targetURL)
+			// Keep the browser's Host header; SetURL would replace it with the target's.
+			pr.Out.Host = pr.In.Host
+			pr.SetXForwarded()
+			if injectReload {
+				// Force identity responses so HTML injection can safely mutate bytes.
+				pr.Out.Header.Del("Accept-Encoding")
+			}
+		},
 	}
 	dialer := &net.Dialer{Timeout: 2 * time.Second, KeepAlive: 30 * time.Second}
 	proxy.Transport = &http.Transport{

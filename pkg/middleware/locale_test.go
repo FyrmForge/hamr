@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/FyrmForge/hamr/pkg/i18n"
-	"github.com/FyrmForge/hamr/pkg/ptr"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,7 +26,7 @@ func setupTestBundle(t *testing.T) *i18n.Bundle {
 	b, err := i18n.NewBundle(i18n.BundleConfig{
 		LocaleDir:         dir,
 		DefaultLocale:     "en",
-		FallbackToDefault: ptr.To(true),
+		FallbackToDefault: new(true),
 	})
 	require.NoError(t, err)
 	return b

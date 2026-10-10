@@ -40,14 +40,14 @@ const smsIngestMaxBytes = 64 * 1024
 // Mutable state (Status, StatusNote) is protected by SMSMock.mu. Accessors
 // return copies so callers never read while another goroutine mutates.
 type smsMessage struct {
-	ID         string            `json:"id"`
-	ReceivedAt time.Time         `json:"received_at"`
-	Status     string            `json:"status"` // "delivered", "failed", "delayed"
-	StatusNote string            `json:"status_note,omitempty"`
-	From       string `json:"From"`
-	To         string `json:"To"`
-	Body       string `json:"Body"`
-	Ref        string `json:"Ref,omitempty"`
+	ID         string    `json:"id"`
+	ReceivedAt time.Time `json:"received_at"`
+	Status     string    `json:"status"` // "delivered", "failed", "delayed"
+	StatusNote string    `json:"status_note,omitempty"`
+	From       string    `json:"From"`
+	To         string    `json:"To"`
+	Body       string    `json:"Body"`
+	Ref        string    `json:"Ref,omitempty"`
 }
 
 func cloneSMSMessage(msg *smsMessage) *smsMessage {
@@ -225,8 +225,7 @@ func (m *SMSMock) handleIngest(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, smsIngestMaxBytes)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		var mbe *http.MaxBytesError
-		if errors.As(err, &mbe) {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "message too large"})
 			return
 		}

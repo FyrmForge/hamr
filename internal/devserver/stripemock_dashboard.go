@@ -106,8 +106,7 @@ func (m *StripeMock) handleResend(w http.ResponseWriter, r *http.Request) {
 		// Delivery failures are recorded on the event row; only a missing
 		// event is an error here.
 		if err := m.resendEvent(ctx, evID); err != nil {
-			var oe *stripeOpError
-			if errors.As(err, &oe) {
+			if _, ok := errors.AsType[*stripeOpError](err); ok {
 				writeStripeOpError(w, err)
 				return
 			}

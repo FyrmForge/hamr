@@ -75,8 +75,7 @@ func runCompose(cmd *cobra.Command, args []string) error {
 	docker.Stderr = os.Stderr
 
 	if err := docker.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 			// Propagate docker's exit code verbatim: callers (Makefiles, CI,
 			// scripts) branch on it, and cobra's own error path would flatten
 			// every failure to 1 plus a redundant "Error:" line.

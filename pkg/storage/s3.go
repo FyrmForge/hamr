@@ -162,12 +162,10 @@ func (s *S3Storage) EnsureBucket(ctx context.Context) error {
 // exist, across AWS S3 (typed *s3types.NotFound) and S3-compatible backends
 // that return a generic API error with a NotFound / NoSuchBucket code.
 func isBucketNotFound(err error) bool {
-	var notFound *s3types.NotFound
-	if errors.As(err, &notFound) {
+	if _, ok := errors.AsType[*s3types.NotFound](err); ok {
 		return true
 	}
-	var apiErr smithy.APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[smithy.APIError](err); ok {
 		switch apiErr.ErrorCode() {
 		case "NotFound", "NoSuchBucket", "404":
 			return true

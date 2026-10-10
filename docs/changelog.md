@@ -18,6 +18,15 @@ the TL;DR on top of it.
   dashboard shows a `trial` tag. The hosted checkout page shows
   nothing due today and the price from `trial_end`. `trial_period_days` is still not mocked.
 
+### Changed
+
+- **Go 1.27 is now required.** `go.mod`, the Docker build image and the docs
+  move from Go 1.25 to 1.27. CI was failing because projects made by
+  `hamr new` pulled templ v0.3.1070, which needs Go 1.26 or newer.
+- **The `hamr dev` proxy now sends `X-Forwarded-Host` and
+  `X-Forwarded-Proto`** to the app, alongside `X-Forwarded-For`. It moved
+  off the `ReverseProxy.Director` hook, which Go 1.26 deprecated.
+
 ### Documentation
 
 - **Root `README.md` caught up with the guide.** The package table gains

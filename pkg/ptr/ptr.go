@@ -9,8 +9,10 @@ package ptr
 import "strconv"
 
 // To returns a pointer to v.
+//
+//go:fix inline
 func To[T any](v T) *T {
-	return &v
+	return new(v)
 }
 
 // From dereferences p, returning the zero value of T when p is nil.

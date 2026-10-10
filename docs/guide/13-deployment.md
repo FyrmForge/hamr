@@ -12,7 +12,7 @@ A typical HAMR deployment is a single Go binary + PostgreSQL or SQLite + optiona
 
 ```dockerfile
 # Build stage
-FROM golang:1.23-alpine AS builder
+FROM golang:1.27-alpine AS builder
 # Update the Go version to match your go.mod
 
 RUN apk --no-cache add git

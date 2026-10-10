@@ -150,8 +150,7 @@ func (m *StripeMock) handleComplete(w http.ResponseWriter, r *http.Request) {
 
 	redirect, leaveOpen, err := m.completeCheckout(id, outcome, promoCode)
 	if err != nil {
-		var pe *errPromotionCode
-		if errors.As(err, &pe) {
+		if pe, ok := errors.AsType[*errPromotionCode](err); ok {
 			m.mu.RLock()
 			sess := cloneSession(m.sessions[id])
 			m.mu.RUnlock()
@@ -173,8 +172,7 @@ func (m *StripeMock) handleComplete(w http.ResponseWriter, r *http.Request) {
 // writeStripeOpError maps a *stripeOpError to its HTTP status, falling back to
 // 500 for any other error type.
 func writeStripeOpError(w http.ResponseWriter, err error) {
-	var oe *stripeOpError
-	if errors.As(err, &oe) {
+	if oe, ok := errors.AsType[*stripeOpError](err); ok {
 		http.Error(w, oe.msg, oe.status)
 		return
 	}

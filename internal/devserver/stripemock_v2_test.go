@@ -44,7 +44,7 @@ func recipientAccountParams(email string) *stripe.V2CoreAccountCreateParams {
 				Capabilities: &stripe.V2CoreAccountCreateConfigurationRecipientCapabilitiesParams{
 					StripeBalance: &stripe.V2CoreAccountCreateConfigurationRecipientCapabilitiesStripeBalanceParams{
 						StripeTransfers: &stripe.V2CoreAccountCreateConfigurationRecipientCapabilitiesStripeBalanceStripeTransfersParams{
-							Requested: stripe.Bool(true),
+							Requested: new(true),
 						},
 					},
 				},
@@ -350,7 +350,7 @@ func TestStripeMock_BalanceSettings_ScopedToAccount(t *testing.T) {
 
 	p := &stripe.BalanceSettingsUpdateParams{
 		Payments: &stripe.BalanceSettingsUpdatePaymentsParams{
-			DebitNegativeBalances: stripe.Bool(true),
+			DebitNegativeBalances: new(true),
 			Payouts: &stripe.BalanceSettingsUpdatePaymentsPayoutsParams{
 				Schedule: &stripe.BalanceSettingsUpdatePaymentsPayoutsScheduleParams{
 					Interval:          stripe.String("monthly"),

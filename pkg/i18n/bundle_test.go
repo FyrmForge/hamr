@@ -5,15 +5,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/FyrmForge/hamr/pkg/ptr"
 )
 
 func TestNewBundle(t *testing.T) {
 	b, err := NewBundle(BundleConfig{
 		LocaleDir:         "testdata",
 		DefaultLocale:     "en",
-		FallbackToDefault: ptr.To(true),
+		FallbackToDefault: new(true),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -40,7 +38,7 @@ func TestBundleTranslator(t *testing.T) {
 	b, err := NewBundle(BundleConfig{
 		LocaleDir:         "testdata",
 		DefaultLocale:     "en",
-		FallbackToDefault: ptr.To(true),
+		FallbackToDefault: new(true),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +59,7 @@ func TestBundleUnknownLocaleFallsBack(t *testing.T) {
 	b, err := NewBundle(BundleConfig{
 		LocaleDir:         "testdata",
 		DefaultLocale:     "en",
-		FallbackToDefault: ptr.To(true),
+		FallbackToDefault: new(true),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -107,7 +105,7 @@ func TestBundleFrenchPlural(t *testing.T) {
 	b, err := NewBundle(BundleConfig{
 		LocaleDir:         "testdata",
 		DefaultLocale:     "en",
-		FallbackToDefault: ptr.To(true),
+		FallbackToDefault: new(true),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -143,7 +141,7 @@ func TestBundleFallbackToDefaultFalse(t *testing.T) {
 	b, err := NewBundle(BundleConfig{
 		LocaleDir:         "testdata",
 		DefaultLocale:     "en",
-		FallbackToDefault: ptr.To(false),
+		FallbackToDefault: new(false),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -172,7 +170,7 @@ func TestNewBundleInterpolationMismatch(t *testing.T) {
 	_, err := NewBundle(BundleConfig{
 		LocaleDir:         dir,
 		DefaultLocale:     "en",
-		FallbackToDefault: ptr.To(true),
+		FallbackToDefault: new(true),
 	})
 	if err == nil {
 		t.Fatal("expected error for interpolation mismatch")
@@ -186,7 +184,7 @@ func TestBundleResolveLocale(t *testing.T) {
 	b, err := NewBundle(BundleConfig{
 		LocaleDir:         "testdata",
 		DefaultLocale:     "en",
-		FallbackToDefault: ptr.To(true),
+		FallbackToDefault: new(true),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -216,7 +214,7 @@ func TestBundleInterpolation(t *testing.T) {
 	b, err := NewBundle(BundleConfig{
 		LocaleDir:         "testdata",
 		DefaultLocale:     "en",
-		FallbackToDefault: ptr.To(true),
+		FallbackToDefault: new(true),
 	})
 	if err != nil {
 		t.Fatal(err)
