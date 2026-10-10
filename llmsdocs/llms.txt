@@ -209,7 +209,8 @@
 - **Compose adoption**: On startup `hamr dev` runs `docker compose ps`
   per `[[dev.docker_compose]]` entry. If every expected service is
   running + ready (healthy or no healthcheck), hamr adopts the stack —
-  skips `compose up -d`, leaves the override file alone, and treats
+  skips `compose up -d`, rewrites the override to the live published
+  ports (IPv4/IPv6 rows count once), and treats
   the project's already-published ports as "owned" so port-walk doesn't
   shift away from them. Anything missing/exited/unhealthy/starting
   triggers the apply path for that entry (walk only the missing

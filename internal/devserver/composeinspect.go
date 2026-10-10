@@ -48,8 +48,8 @@ type composeStackState struct {
 
 	// Publishers carries actual published-port info per service so the
 	// adopt path can derive port shifts vs. base compose without re-
-	// parsing the override file. One entry per publisher row in compose
-	// ps output.
+	// parsing the override file. One entry per distinct publisher; the
+	// IPv4/IPv6 rows docker reports for one binding collapse to one.
 	Publishers []composeStackPublisher
 }
 

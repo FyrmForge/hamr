@@ -126,7 +126,8 @@ func TestManageComposeOverride_writesWhenCombinedNonEmpty(t *testing.T) {
 	}
 	combined := []portShift{{Service: "db", Old: 5432, New: 5433}}
 
-	require.NoError(t, manageComposeOverride(override, services, state, combined, nil))
+	_, err := manageComposeOverride(override, services, state, combined, nil)
+	require.NoError(t, err)
 
 	data, err := os.ReadFile(override)
 	require.NoError(t, err)
@@ -139,9 +140,10 @@ func TestManageComposeOverride_removesStaleWhenColdAndNoShifts(t *testing.T) {
 	require.NoError(t, os.WriteFile(override, []byte("services: {}\n"), 0o644))
 
 	state := composeStackState{} // cold: no Adopted, no Publishers
-	require.NoError(t, manageComposeOverride(override, nil, state, nil, nil))
+	_, err := manageComposeOverride(override, nil, state, nil, nil)
+	require.NoError(t, err)
 
-	_, err := os.Stat(override)
+	_, err = os.Stat(override)
 	assert.ErrorIs(t, err, os.ErrNotExist, "stale override must be removed on truly cold start")
 }
 
@@ -154,9 +156,6 @@ func TestManageComposeOverride_removesStaleWhenPartialRestartHasNoDrift(t *testi
 	// override must be removed — leaving it would force `compose up -d`
 	// to recreate redis on 6380 instead of returning to 6379.
 	//
-	// Running peers on non-base ports always produce a state-derived
-	// shift (non-empty combined), so the empty-combined branch can never
-	// strand a real running mapping.
 	dir := t.TempDir()
 	override := filepath.Join(dir, "compose.infra.override.yaml")
 	require.NoError(t, os.WriteFile(override, []byte("services:\n  redis:\n    ports:\n      - \"6380:6379\"\n"), 0o644))
@@ -167,9 +166,10 @@ func TestManageComposeOverride_removesStaleWhenPartialRestartHasNoDrift(t *testi
 			{Service: "db", Container: 5432, PublishedPort: 5432}, // running on base, no drift
 		},
 	}
-	require.NoError(t, manageComposeOverride(override, nil, state, nil, nil))
+	_, err := manageComposeOverride(override, nil, state, nil, nil)
+	require.NoError(t, err)
 
-	_, err := os.Stat(override)
+	_, err = os.Stat(override)
 	assert.ErrorIs(t, err, os.ErrNotExist, "stale override for stopped service must be removed when nothing drifts")
 }
 

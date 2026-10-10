@@ -35,7 +35,9 @@ the TL;DR on top of it.
   (e.g. postgres on 5433 instead of 5432), left `DATABASE_URL` on the base
   port and deleted `.hamr/compose.<name>.override.yaml`. The app then
   reached whatever else held the base port. Adopt now reads the live ports
-  correctly, records them in `walks.json` and rewrites `.env`.
+  correctly, records them in `walks.json` and rewrites `.env`. If a running
+  service's ports still can't be matched, hamr keeps the override and logs a
+  `WARN` instead of deleting it.
 
 ### Documentation
 

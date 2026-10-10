@@ -3520,11 +3520,13 @@ Per entry, hamr decides between two paths:
 
 - **Adopt** — every expected service (`dc.Services` if set; otherwise
   every service in the compose file) is `running` AND ready (`healthy`
-  or no healthcheck defined). hamr skips `compose up -d` entirely and
-  leaves the override file alone. Shifts for env injection come from
-  diffing the `compose ps` published ports against the base compose
-  file, so `DATABASE_URL` on the spawned app still points at whatever
-  port a prior session walked the db to.
+  or no healthcheck defined). hamr skips `compose up -d` entirely.
+  Shifts for env injection come from diffing the `compose ps` published
+  ports against the base compose file (docker's IPv4 and IPv6 rows for
+  one binding count once), so `DATABASE_URL` on the spawned app still
+  points at whatever port a prior session walked the db to. The override
+  file is rewritten to those live ports, so a deleted override comes
+  back.
 - **Apply** — at least one expected service is missing, exited,
   `unhealthy`, or `starting`. hamr walks only the non-running services
   (peers stay on whatever ports they're already bound to), passes the
@@ -3540,9 +3542,11 @@ Per entry, hamr decides between two paths:
   unhealthy peer.
 
 Override management is state-aware: a stale `.hamr/compose.<name>.override.yaml`
-is only auto-removed when the project has zero running containers AND
-nothing drifted. Anything running → leave the override alone. This
-keeps `keep_running` containers from bouncing on the next session.
+is only auto-removed when nothing drifted from base AND every running
+service's declared ports were matched to a live published port. If a
+running service's ports can't be matched, hamr keeps the override and
+logs a `WARN` (its `.env` rewrite may be missing). This keeps
+`keep_running` containers from bouncing on the next session.
 
 Adoption applies regardless of `keep_running` — that flag governs
 shutdown only. If a `keep_running = false` stack is somehow already up

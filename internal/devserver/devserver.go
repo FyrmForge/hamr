@@ -1279,16 +1279,17 @@ func composeArgsForInspect(dc *DockerCompose) []string {
 //     errors so a missing daemon aborts hamr dev with a surfaced error
 //     instead of silently rebuilding state)
 //   - if every expected service is running + ready → adopt: derive
-//     shifts from actual published ports vs. base compose; do NOT touch
-//     the override file; do NOT run `up -d`
+//     shifts from actual published ports vs. base compose; reconcile
+//     the override to the live ports; do NOT run `up -d`
 //   - otherwise → apply: walk only the non-adopted services (peers'
 //     ports stay unchanged), pass the project's owned ports into the
 //     walk so probes against our own ports return as-is, run `up -d`
 //
 // Override file management is state-aware: an existing override is only
-// removed when the project has zero running containers AND walk
-// produced no shifts. With anything running we leave it alone — auto-
-// removing risks recreating peers that are already up on walked ports.
+// removed when nothing drifts from base AND every running service's
+// declared bindings were paired with a live publisher. If pairing failed
+// for any running service, "no drift" is unproven, so the override is
+// kept — removing it would strand containers already up on walked ports.
 func (r *Runner) ensureDockerCompose(ctx context.Context, dc *DockerCompose) (string, []portShift, error) {
 	state, err := r.inspectRunningCompose(ctx, dc)
 	if err != nil {
@@ -1330,9 +1331,11 @@ func (r *Runner) ensureDockerCompose(ctx context.Context, dc *DockerCompose) (st
 		//     override missing (e.g. cleaned .hamr/, switched worktrees)
 		//     would have wipe/restart fall back to base ports and clash.
 		override := composeOverridePath(dc.Name)
-		if err := manageComposeOverride(override, services, state, shifts, nil); err != nil {
+		unmatched, err := manageComposeOverride(override, services, state, shifts, nil)
+		if err != nil {
 			return "", nil, err
 		}
+		r.warnUnmatchedComposeServices(dc, unmatched)
 		return "", shifts, nil
 	}
 
@@ -1363,9 +1366,11 @@ func (r *Runner) ensureDockerCompose(ctx context.Context, dc *DockerCompose) (st
 	// were walked to in a prior session).
 	combined := combinedComposeShifts(services, state, walkShifts)
 
-	if err := manageComposeOverride(override, services, state, combined, walkedByService); err != nil {
+	unmatched, err := manageComposeOverride(override, services, state, combined, walkedByService)
+	if err != nil {
 		return "", nil, err
 	}
+	r.warnUnmatchedComposeServices(dc, unmatched)
 
 	args := append(composeArgs(dc), "up", "-d")
 	if dc.WaitReady {
@@ -1444,23 +1449,64 @@ func servicesNeedingWalk(services []composeService, running map[string]bool) []c
 //     service. This includes running peers so `compose up -d` doesn't
 //     see drift and recreate them.
 //   - If nothing drifts, remove any stale override. Running peers on
-//     base ports don't need an override; running peers on non-base
-//     ports always produce a state-derived shift (non-empty combined),
-//     so the empty-combined branch can never strand a real running
-//     mapping. A stale override left on disk would otherwise force
-//     `compose up -d` to recreate a stopped service on the previously-
-//     walked port instead of returning it to base.
-func manageComposeOverride(override string, services []composeService, state composeStackState, combined []portShift, walkedByService map[string]composeService) error {
+//     base ports don't need an override. A stale override left on disk
+//     would otherwise force `compose up -d` to recreate a stopped
+//     service on the previously-walked port instead of returning it to
+//     base.
+//   - Unless a running service has a declared binding that couldn't be
+//     paired with a live publisher: then "no drift" is unproven (the
+//     container may sit on a walked port we failed to read), so the
+//     override is kept and the unpaired services are returned for the
+//     caller to warn about.
+func manageComposeOverride(override string, services []composeService, state composeStackState, combined []portShift, walkedByService map[string]composeService) ([]string, error) {
 	if len(combined) > 0 {
 		updated := overrideServices(services, state, walkedByService)
 		affected := make(map[string]bool, len(combined))
 		for _, s := range combined {
 			affected[s.Service] = true
 		}
-		return writeComposeOverride(override, updated, affected)
+		return nil, writeComposeOverride(override, updated, affected)
+	}
+	if unmatched := unmatchedRunningServices(services, state); len(unmatched) > 0 {
+		return unmatched, nil
 	}
 	_ = os.Remove(override)
-	return nil
+	return nil, nil
+}
+
+// unmatchedRunningServices returns running services with at least one
+// declared (non-random) binding that resolvedPortsForService couldn't
+// pair with a live publisher.
+func unmatchedRunningServices(services []composeService, state composeStackState) []string {
+	running := runningServiceSet(state)
+	var out []string
+	for _, svc := range services {
+		if !running[svc.Name] {
+			continue
+		}
+		resolved := resolvedPortsForService(svc.Name, svc.Ports, state.Publishers)
+		for i, b := range svc.Ports {
+			if b.HostPort == 0 {
+				continue
+			}
+			if _, ok := resolved[i]; !ok {
+				out = append(out, svc.Name)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// warnUnmatchedComposeServices logs services whose live ports couldn't
+// be paired with the compose declaration. Their shifts (if any) are
+// missing from walks.json, so env injection may point at base ports.
+func (r *Runner) warnUnmatchedComposeServices(dc *DockerCompose, unmatched []string) {
+	if len(unmatched) == 0 {
+		return
+	}
+	r.logger.Warn("docker compose ports could not be matched to the compose file; kept override, .env may point at base ports",
+		"name", dc.Name, "services", unmatched)
 }
 
 // overrideServices builds the services list that the override file

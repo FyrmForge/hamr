@@ -172,6 +172,8 @@ keep_running = true
 
 Adoption deliberately does not reconcile config edits against running containers. If you change a base port (or anything else) in the compose file while the stack is still up, the running container keeps its old config and hamr logs a `WARN` per adopted-on-non-base-port service. Wipe the stack from the browser dev panel (or run `docker compose down -v` directly, or wire it into a Makefile target and trigger it from the TUI's `m` palette) to make the edit take effect.
 
+If hamr can't match a running service's published ports to the compose file, it keeps `.hamr/compose.<name>.override.yaml` and logs a `WARN` naming the service. Its port may be missing from `.env` rewrites until you wipe the stack.
+
 ---
 
 ## Port Walks
