@@ -2,7 +2,6 @@ package devserver
 
 import (
 	"context"
-	"crypto/subtle"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -36,11 +35,14 @@ import (
 // where sibling containers reach it by service name). Set HAMR_MOCK_BIND to
 // restrict the bind host (e.g. 127.0.0.1) when running on a shared host.
 //
+// Front-door mode (HAMR_MOCK_UPSTREAM set, see frontdoor.go) turns the UI port
+// into the public entry point that proxies to the app.
+//
 // Two optional gates for when the ports must be reachable beyond the compose
 // network:
-//   - HAMR_MOCK_UI_PASSWORD: HTTP basic auth on every /__hamr/* dashboard
-//     route (any username, this password). The dashboards expose captured
-//     emails (reset tokens, magic links) and a signed-webhook trigger.
+//   - HAMR_MOCK_UI_PASSWORD: password gate (NewGate) on every /__hamr/* dashboard
+//     route. The dashboards expose captured emails (reset tokens, magic
+//     links) and a signed-webhook trigger.
 //   - HAMR_MOCK_API_ALLOW: comma-separated IPs/CIDRs allowed to reach the
 //     app-facing listener. Checked against the TCP peer only — forwarded
 //     headers are spoofable and ignored — so behind a proxy keep the port
@@ -104,8 +106,20 @@ func buildSMSMock(logger *slog.Logger) (*MountedMock, error) {
 	}, nil
 }
 
+// stripeBaseURL is HAMR_STRIPE_BASE_URL, falling back to HAMR_BASE_URL (the
+// public origin) in front-door mode, where the mock UI is served on it.
+func stripeBaseURL() string {
+	if v := os.Getenv("HAMR_STRIPE_BASE_URL"); v != "" {
+		return v
+	}
+	if os.Getenv("HAMR_MOCK_UPSTREAM") != "" {
+		return os.Getenv("HAMR_BASE_URL")
+	}
+	return ""
+}
+
 func buildStripeMock(logger *slog.Logger) (*MountedMock, error) {
-	baseURL := os.Getenv("HAMR_STRIPE_BASE_URL")
+	baseURL := stripeBaseURL()
 	if baseURL == "" {
 		// No sensible default in a container: localhost:<port> is not
 		// reachable from the host (published port differs) or sibling
@@ -166,7 +180,15 @@ func RunMockServe(ctx context.Context, logger *slog.Logger) error {
 		return fmt.Errorf("HAMR_MOCK_UI_PORT (%d) must differ from HAMR_MOCK_PORT; leave it unset to serve the UI on the app-facing port", port)
 	}
 
-	apiHandler, uiHandler, err := buildMockHandlers(logger, selected, uiPort != 0)
+	var apiHandler, uiHandler http.Handler
+	if upstream := strings.TrimSpace(os.Getenv("HAMR_MOCK_UPSTREAM")); upstream != "" {
+		if uiPort == 0 {
+			return errors.New("HAMR_MOCK_UI_PORT is required when HAMR_MOCK_UPSTREAM is set (the public port; HAMR_MOCK_PORT stays private)")
+		}
+		apiHandler, uiHandler, err = buildFrontDoor(logger, selected, upstream)
+	} else {
+		apiHandler, uiHandler, err = buildMockHandlers(logger, selected, uiPort != 0)
+	}
 	if err != nil {
 		return err
 	}
@@ -208,13 +230,37 @@ func RunMockServe(ctx context.Context, logger *slog.Logger) error {
 // /__hamr/sms/ingest) are exact patterns on the API mux and win over the
 // prefix, so they stay open to the app.
 func buildMockHandlers(logger *slog.Logger, selected []MockProvider, split bool) (api, ui http.Handler, err error) {
-	apiMux := http.NewServeMux()
+	apiMux, uiRoutes, err := buildMocks(logger, selected)
+	if err != nil {
+		return nil, nil, err
+	}
 	uiMux := apiMux
 	if split {
 		uiMux = http.NewServeMux()
 	}
-	uiRoutes := http.NewServeMux()
 
+	var uiGated http.Handler = uiRoutes
+	if pw := os.Getenv("HAMR_MOCK_UI_PASSWORD"); pw != "" {
+		uiGated = NewGate(pw, nil, baseURLIsHTTPS(), uiRoutes)
+		logger.Info("mock UI password protected")
+	}
+	uiMux.Handle("/__hamr/", uiGated)
+
+	api, err = restrictAPI(logger, apiMux)
+	if err != nil {
+		return nil, nil, err
+	}
+	if split {
+		ui = uiMux
+	}
+	return api, ui, nil
+}
+
+// buildMocks builds the selected mocks onto an API mux (app-facing) and a
+// separate UI mux (human dashboards, mounted under /__hamr/ by the caller).
+func buildMocks(logger *slog.Logger, selected []MockProvider) (apiMux, uiRoutes *http.ServeMux, err error) {
+	apiMux = http.NewServeMux()
+	uiRoutes = http.NewServeMux()
 	for _, p := range selected {
 		mounted, berr := p.Build(logger)
 		if berr != nil {
@@ -228,41 +274,27 @@ func buildMockHandlers(logger *slog.Logger, selected []MockProvider, split bool)
 		}
 		logger.Info("mock enabled", "name", p.Name)
 	}
-
-	var uiGated http.Handler = uiRoutes
-	if pw := os.Getenv("HAMR_MOCK_UI_PASSWORD"); pw != "" {
-		uiGated = requirePassword(pw, uiRoutes)
-		logger.Info("mock UI password protected")
-	}
-	uiMux.Handle("/__hamr/", uiGated)
-
-	api = apiMux
-	if allow := config.GetEnvCSV("HAMR_MOCK_API_ALLOW"); len(allow) > 0 {
-		prefixes, perr := parsePrefixes(allow)
-		if perr != nil {
-			return nil, nil, fmt.Errorf("HAMR_MOCK_API_ALLOW: %w", perr)
-		}
-		api = allowPeers(logger, prefixes, apiMux)
-		logger.Info("mock API restricted to peers", "allow", allow)
-	}
-	if split {
-		ui = uiMux
-	}
-	return api, ui, nil
+	return apiMux, uiRoutes, nil
 }
 
-// requirePassword gates next behind HTTP basic auth. The username is ignored;
-// only the password is compared (constant-time).
-func requirePassword(password string, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, got, ok := r.BasicAuth()
-		if !ok || subtle.ConstantTimeCompare([]byte(got), []byte(password)) != 1 {
-			w.Header().Set("WWW-Authenticate", `Basic realm="hamr mocks", charset="UTF-8"`)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+// restrictAPI applies HAMR_MOCK_API_ALLOW to the app-facing handler.
+func restrictAPI(logger *slog.Logger, apiMux http.Handler) (http.Handler, error) {
+	allow := config.GetEnvCSV("HAMR_MOCK_API_ALLOW")
+	if len(allow) == 0 {
+		return apiMux, nil
+	}
+	prefixes, err := parsePrefixes(allow)
+	if err != nil {
+		return nil, fmt.Errorf("HAMR_MOCK_API_ALLOW: %w", err)
+	}
+	logger.Info("mock API restricted to peers", "allow", allow)
+	return allowPeers(logger, prefixes, apiMux), nil
+}
+
+// baseURLIsHTTPS reports whether HAMR_BASE_URL is https, i.e. whether the gate
+// cookie should be Secure.
+func baseURLIsHTTPS() bool {
+	return strings.HasPrefix(os.Getenv("HAMR_BASE_URL"), "https://")
 }
 
 // allowPeers rejects requests whose TCP peer is outside the given prefixes.

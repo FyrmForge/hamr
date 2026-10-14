@@ -1,0 +1,12 @@
+-- Dev seed, run by the "reseed" dev action. Safe to re-run.
+-- Test accounts use password: Test1234!
+-- hamr_disposable marks this database as safe to wipe; only this seed creates it.
+CREATE TABLE IF NOT EXISTS hamr_disposable (id INTEGER PRIMARY KEY);
+{{- if and .IncludeAuth .AuthWithTables}}
+
+INSERT INTO users (id, email, password_hash, name, role, active, created_at, updated_at)
+VALUES
+    ('dev-admin-001', 'admin@test.com', '$argon2id$v=19$m=65536,t=3,p=2$ZTJlX3Rlc3Rfc2FsdCEhIQ$bomHV69Vpgt6LTl83QWN02LhEdsWsb9+b6ZC2VYML9w', 'Test Admin', 'admin', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+    ('dev-user-001', 'user@test.com', '$argon2id$v=19$m=65536,t=3,p=2$ZTJlX3Rlc3Rfc2FsdCEhIQ$bomHV69Vpgt6LTl83QWN02LhEdsWsb9+b6ZC2VYML9w', 'Test User', 'user', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON CONFLICT DO NOTHING;
+{{- end}}

@@ -746,3 +746,19 @@ func TestStripImgSrc_ReplacesSrcSrcsetAndStyleURL(t *testing.T) {
 	passthrough := `<a href="https://keep.example/page">link</a>`
 	assert.Equal(t, passthrough, stripImgSrc(passthrough))
 }
+
+func TestInbox_ToFilter(t *testing.T) {
+	t.Parallel()
+	_, mux := newTestMailMock(t)
+	postJSON(t, mux, "/__hamr/mail/ingest", map[string]any{"Subject": "for jack", "To": []map[string]string{{"Email": "Jack@Test.com"}}})
+	postJSON(t, mux, "/__hamr/mail/ingest", map[string]any{"Subject": "jack cc", "Cc": []map[string]string{{"Email": "jack@test.com"}}})
+	postJSON(t, mux, "/__hamr/mail/ingest", map[string]any{"Subject": "mentions jack@test.com", "To": []map[string]string{{"Email": "amy@test.com"}}})
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/__hamr/mail?to=jack@test.com", nil))
+	body := rec.Body.String()
+	assert.Contains(t, body, "for jack", "To match is case-insensitive")
+	assert.Contains(t, body, "jack cc", "Cc counts as sent to")
+	assert.NotContains(t, body, "mentions jack@test.com", "a subject mention is not a recipient")
+	assert.Contains(t, body, "Showing mail sent to")
+}

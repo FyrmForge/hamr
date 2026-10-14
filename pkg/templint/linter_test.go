@@ -630,11 +630,11 @@ func TestAllRuleIDsCoversEveryRule(t *testing.T) {
 
 func TestDefaultSeverityKnownAndUnknown(t *testing.T) {
 	cases := map[string]Severity{
-		"inline-if":              Error,
-		"no-native-form-actions": Error,
-		"htmx-conflict":          Error,
-		"img-alt":                Warning,
-		"js-href":                Warning,
+		"inline-if":                Error,
+		"no-native-form-actions":   Error,
+		"htmx-conflict":            Error,
+		"img-alt":                  Warning,
+		"js-href":                  Warning,
 		"this-rule-does-not-exist": Warning, // fallback
 	}
 	for id, want := range cases {

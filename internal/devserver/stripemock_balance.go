@@ -98,7 +98,7 @@ func serializeBalanceTxn(id, source, typ, category string, amount, fee int64, cu
 		"type":               typ,
 		"reporting_category": category,
 		"source":             source,
-		"fee_details": feeDetails,
+		"fee_details":        feeDetails,
 	}
 }
 

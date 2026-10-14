@@ -21,15 +21,15 @@ const (
 
 // Response headers consumed by htmx.
 const (
-	HeaderRedirect          = "HX-Redirect"
-	HeaderTriggerResponse   = "HX-Trigger"
+	HeaderRedirect           = "HX-Redirect"
+	HeaderTriggerResponse    = "HX-Trigger"
 	HeaderTriggerAfterSettle = "HX-Trigger-After-Settle"
-	HeaderTriggerAfterSwap  = "HX-Trigger-After-Swap"
-	HeaderReswap            = "HX-Reswap"
-	HeaderRetarget          = "HX-Retarget"
-	HeaderRefresh           = "HX-Refresh"
-	HeaderPushURL           = "HX-Push-Url"
-	HeaderReplaceURL        = "HX-Replace-Url"
+	HeaderTriggerAfterSwap   = "HX-Trigger-After-Swap"
+	HeaderReswap             = "HX-Reswap"
+	HeaderRetarget           = "HX-Retarget"
+	HeaderRefresh            = "HX-Refresh"
+	HeaderPushURL            = "HX-Push-Url"
+	HeaderReplaceURL         = "HX-Replace-Url"
 )
 
 // IsHTMX reports whether the request was made by htmx.

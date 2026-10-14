@@ -106,7 +106,7 @@ Allow the app's exact address, not a whole private range:
 services:
   mocks:
     environment:
-      HAMR_MOCK_UI_PASSWORD: "pick-something-long" # dashboards ask for basic auth (any username)
+      HAMR_MOCK_UI_PASSWORD: "pick-something-long" # dashboards ask for this (X-Hamr-Gate header for scripts)
       HAMR_MOCK_API_ALLOW: "172.30.0.10"            # only the app reaches the app-facing port
   app:
     networks:
@@ -132,7 +132,7 @@ rejected request logs a warning with its `remote` address.
 `HAMR_MOCK_UI_PASSWORD` covers every `/__hamr/*` dashboard route, including
 the Stripe checkout and onboarding pages your browser is sent to. The mail and
 SMS ingest sinks stay open even on a shared port, so the app keeps working.
-Basic auth sends the password in cleartext over plain HTTP, so put the UI
+The gate sends the password in cleartext over plain HTTP, so put the UI
 port behind TLS (your platform's HTTPS proxy) when it crosses a network you
 don't trust.
 
@@ -143,6 +143,8 @@ networking instead. On a shared port the allowlist applies to the dashboards
 too.
 
 ## Environment Variables
+
+To put the mocks in front of a deployed staging app behind one password, see [Front-door mode](../cli.md#front-door-mode-staging) and [Dev Actions](../dev-actions.md).
 
 Full reference: [CLI reference — hamr mock-serve](../cli.md#hamr-mock-serve).
 

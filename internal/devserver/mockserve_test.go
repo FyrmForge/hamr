@@ -140,18 +140,19 @@ func TestMockServeGates(t *testing.T) {
 		assert.Equal(t, http.StatusOK, serve(api, http.MethodPost, "/__hamr/mail/ingest", "", nil))
 	})
 
-	t.Run("password: any user, right password passes", func(t *testing.T) {
+	t.Run("password: header gate, right password passes", func(t *testing.T) {
 		t.Setenv("HAMR_MOCK_UI_PASSWORD", "s3cret")
 		_, ui, err := buildMockHandlers(slog.Default(), mail, true)
 		require.NoError(t, err)
 
 		assert.Equal(t, http.StatusUnauthorized, serve(ui, http.MethodGet, "/__hamr/mail", "", nil))
 		assert.Equal(t, http.StatusUnauthorized, serve(ui, http.MethodGet, "/__hamr/mail", "", func(r *http.Request) {
-			r.SetBasicAuth("whoever", "wrong")
+			r.Header.Set("X-Hamr-Gate", "wrong")
 		}))
 		assert.Equal(t, http.StatusOK, serve(ui, http.MethodGet, "/__hamr/mail", "", func(r *http.Request) {
-			r.SetBasicAuth("whoever", "s3cret")
+			r.Header.Set("X-Hamr-Gate", "s3cret")
 		}))
+		assert.Equal(t, http.StatusOK, serve(ui, http.MethodGet, "/__hamr/gate", "", nil), "gate page is reachable unauthenticated")
 	})
 
 	t.Run("password on shared port: UI gated, ingest open", func(t *testing.T) {

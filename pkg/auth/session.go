@@ -45,14 +45,14 @@ type SessionToucher interface {
 
 // SessionManager manages session lifecycle on top of a SessionStore.
 type SessionManager struct {
-	store             SessionStore
-	duration          time.Duration
-	slidingThreshold  time.Duration
-	cookieName        string
-	cookiePath        string
-	cookieDomain      string
-	cookieSecure      bool
-	sameSite          http.SameSite
+	store            SessionStore
+	duration         time.Duration
+	slidingThreshold time.Duration
+	cookieName       string
+	cookiePath       string
+	cookieDomain     string
+	cookieSecure     bool
+	sameSite         http.SameSite
 }
 
 // SessionOption configures a SessionManager.

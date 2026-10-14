@@ -105,6 +105,8 @@ By default, `hamr dev` also mirrors its recent log stream to `.hamr/dev_logs.txt
 
 The TUI shows an MCP indicator when `[dev.mcp]` is configured; press `M` to toggle the gateway on/off for the session (a runtime kill-switch that doesn't rewrite `hamr.toml`).
 
+On the local listener, hamr's own `/__hamr/*` routes (widget, inboxes, Stripe mock, dev actions) only answer when the Host is `localhost`, `*.localhost` or an IP address; any other hostname gets 403. This blocks DNS-rebinding pages from reading your inboxes or running dev actions. Open the app via `localhost` or an IP, not a custom `/etc/hosts` name.
+
 Press `T` to open a public tunnel to the dev proxy (`cloudflared` by default, or `ngrok` / a custom command). hamr sets `BASE_URL` to the public URL and restarts your app; every hamr route except live reload and the mail/SMS/Stripe mocks is blocked through the tunnel, and process output is kept out of live reload and error pages. See [`[dev.tunnel]`](hamr-toml.md).
 
 Press `S` to flip Stripe between hamr's mock and `stripe listen` against your sandbox. hamr runs the Stripe CLI with `STRIPE_KEY` from `.env`, injects the signing secret it prints, and restarts your app. See [`[dev.stripe]`](hamr-toml.md).
@@ -126,7 +128,7 @@ Two listeners:
 - **app-facing** (`HAMR_MOCK_PORT`): the surface your app talks to — stripe `/v1/*` API and the mail/SMS ingest sinks.
 - **UI** (`HAMR_MOCK_UI_PORT`): the human dashboards (captured email, fake payments). Optional — when unset the UI mounts on the app-facing port too. Splitting it onto its own port lets your deployment expose the two surfaces differently — e.g. publish the app-facing port to the app while keeping the dashboards on a port you only publish to `127.0.0.1`.
 
-Both listeners bind all interfaces by default (`HAMR_MOCK_BIND` empty), which is correct inside a container where sibling containers reach the mock by service name; isolate by controlling which ports you publish. **The mock surfaces are open by default** — the UI serves every captured email (which can contain password-reset tokens and magic-login links) over plain GET, and the Stripe surface will fire a correctly-signed webhook at your app on request. When a port must be reachable beyond the compose network, gate it: `HAMR_MOCK_UI_PASSWORD` puts HTTP basic auth (any username, that password) on every `/__hamr/*` dashboard route, and `HAMR_MOCK_API_ALLOW` restricts the app-facing listener to the listed IPs/CIDRs. The allowlist checks the TCP peer only — `X-Forwarded-For` is client-set and ignored — so behind a public proxy keep the app-facing port unpublished and reach it over private networking. Allow the app's exact address, not a whole private range: a broad range contains the Docker bridge gateway, which is where published-port traffic comes from on some Docker setups. Rejected requests log their `remote` address. Basic auth is cleartext over plain HTTP; put the UI behind TLS when it crosses an untrusted network. When running outside a container on a shared host, set `HAMR_MOCK_BIND=127.0.0.1`.
+Both listeners bind all interfaces by default (`HAMR_MOCK_BIND` empty), which is correct inside a container where sibling containers reach the mock by service name; isolate by controlling which ports you publish. **The mock surfaces are open by default** — the UI serves every captured email (which can contain password-reset tokens and magic-login links) over plain GET, and the Stripe surface will fire a correctly-signed webhook at your app on request. When a port must be reachable beyond the compose network, gate it: `HAMR_MOCK_UI_PASSWORD` puts a password gate on every `/__hamr/*` dashboard route (browser password page, or an `X-Hamr-Gate` header for scripts; see [Password gate](#password-gate)), and `HAMR_MOCK_API_ALLOW` restricts the app-facing listener to the listed IPs/CIDRs. The allowlist checks the TCP peer only — `X-Forwarded-For` is client-set and ignored — so behind a public proxy keep the app-facing port unpublished and reach it over private networking. Allow the app's exact address, not a whole private range: a broad range contains the Docker bridge gateway, which is where published-port traffic comes from on some Docker setups. Rejected requests log their `remote` address. The gate password is cleartext over plain HTTP; put the UI behind TLS when it crosses an untrusted network. When running outside a container on a shared host, set `HAMR_MOCK_BIND=127.0.0.1`.
 
 | Env | Purpose | Default |
 | --- | --- | --- |
@@ -134,20 +136,72 @@ Both listeners bind all interfaces by default (`HAMR_MOCK_BIND` empty), which is
 | `HAMR_MOCK_PORT` | app-facing port (stripe `/v1`, mail/sms ingest) | `4500` |
 | `HAMR_MOCK_UI_PORT` | dashboards port; unset → UI on `HAMR_MOCK_PORT` | unset |
 | `HAMR_MOCK_BIND` | bind host for both listeners; empty → all interfaces | empty |
-| `HAMR_MOCK_UI_PASSWORD` | basic-auth password for `/__hamr/*` dashboards (any username); empty → open | empty |
+| `HAMR_MOCK_UI_PASSWORD` | gate password for `/__hamr/*` (cookie via `/__hamr/gate`, or `X-Hamr-Gate` header); empty → open. Required in front-door mode. Replaced HTTP basic auth | empty |
 | `HAMR_MOCK_API_ALLOW` | IPs/CIDRs allowed on the app-facing port, e.g. the app's address `172.30.0.10`; empty → open | empty |
 | `HAMR_MAIL_MAX_MESSAGES` | inbox cap | `500` |
 | `HAMR_MAIL_MAX_MESSAGE_BYTES` | per-message byte cap | `10MiB` |
 | `HAMR_MAIL_PERSIST_PATH` | mbox path; empty → in-memory only | empty |
 | `HAMR_SMS_MAX_MESSAGES` | SMS inbox cap | `500` |
 | `HAMR_SMS_PERSIST_PATH` | JSONL path; empty → in-memory only | empty |
-| `HAMR_STRIPE_BASE_URL` | browser-reachable origin of the mock UI (required for stripe) | — |
+| `HAMR_MOCK_UPSTREAM` | front-door mode: the app's private `http://host:port`. Requires `HAMR_MOCK_UI_PORT` and `HAMR_MOCK_UI_PASSWORD` | unset |
+| `HAMR_BASE_URL` | public origin, e.g. `https://staging.example.com`; `https://` makes the gate cookie `Secure`. Front door: default for `HAMR_STRIPE_BASE_URL` | — |
+| `HAMR_GATE_BYPASS` | comma-separated paths that skip the gate, matched on whole path segments | empty |
+| `HAMR_ACTIONS_TOKEN` | front door: same token as the app's `HAMR_ACTIONS_TOKEN`; unset → no app actions in the widget | empty |
+| `HAMR_STRIPE_BASE_URL` | browser-reachable origin of the mock UI (required for stripe; front door: defaults to `HAMR_BASE_URL`) | — |
 | `HAMR_STRIPE_WEBHOOK_URL` | app's webhook handler (required for stripe) | — |
 | `HAMR_STRIPE_THIN_WEBHOOK_URL` | app's v2 thin-event handler; empty → thin events are not sent | empty |
 | `HAMR_STRIPE_WEBHOOK_SECRET` | matches the app's `STRIPE_WEBHOOK_SECRET` (required for stripe) | — |
 | `HAMR_STRIPE_PERSIST_PATH` | state JSON path; empty → in-memory only | empty |
 
 Stripe has no sensible auto-default for its base URL in a container (`localhost:<port>` isn't reachable from the host's published port or sibling containers), so `HAMR_STRIPE_BASE_URL` is required whenever stripe is selected, alongside the webhook url + secret. Point your app at the mock by setting its `HAMR_DEV_URL` / Stripe base to `HAMR_MOCK_PORT`'s URL.
+
+### Password gate
+
+> **Breaking:** `HAMR_MOCK_UI_PASSWORD` used to be HTTP basic auth. It is now a cookie/header gate. Scripts that sent basic auth must send `X-Hamr-Gate: <password>` instead.
+
+When `HAMR_MOCK_UI_PASSWORD` is set:
+
+- Browsers get a password page at `/__hamr/gate`. A correct password sets an `HttpOnly`, `SameSite=Lax` cookie `__hamr_gate`, valid 7 days (enforced by the server; changing the password invalidates every cookie). The cookie is `Secure` when `HAMR_BASE_URL` is `https://`.
+- Scripts send `X-Hamr-Gate: <password>`.
+- The cookie and header are stripped before a request reaches the app; the app's own `Authorization` header passes untouched.
+- Unauthenticated HTML GETs redirect to the gate page; everything else gets `401` JSON.
+- `HAMR_GATE_BYPASS` lists paths that skip the gate (for example provider webhooks that hit the public domain). Matching is on whole path segments: `/payments` covers `/payments/x` but not `/payments-admin`.
+
+In plain mode the gate covers `/__hamr/*` only. In front-door mode it covers the whole site.
+
+### Front-door mode (staging)
+
+Set `HAMR_MOCK_UPSTREAM` and `hamr mock-serve` sits on the public domain in front of your app, so testers on a deployed dev/staging environment get the captured mail/SMS, the Stripe mock, the hamr widget and [dev actions](dev-actions.md) behind one password.
+
+- `HAMR_MOCK_UI_PORT` is the **public** port. `/__hamr/*` (dashboards, gate, widget) is served by hamr; everything else is proxied to the upstream with the widget injected into HTML. Response-header timeout to the upstream is 60s.
+- `HAMR_MOCK_PORT` stays the **private** port (Stripe `/v1` `/v2` API, mail/SMS ingest). It is never gated and must not be exposed on the public domain.
+- `HAMR_MOCK_UPSTREAM` must be `http://` and requires both `HAMR_MOCK_UI_PORT` and `HAMR_MOCK_UI_PASSWORD`. Missing either is a startup error: the front door fails closed rather than expose an ungated site.
+- `/_devactions` always returns 404 on the public port. `/__hamr/app/actions` and `/__hamr/app/whoami` are served there behind the gate when `HAMR_ACTIONS_TOKEN` is set, so anyone with the gate password can run the app's actions. hamr calls the app's `/_devactions` itself, server-side, with the token.
+- Client IP: hamr keeps the edge's `X-Forwarded-For` and appends its own peer (the edge), and passes `X-Real-IP` through untouched. On Railway, read the visitor from `X-Real-IP` (the edge overwrites it); the first `X-Forwarded-For` entry is client-set and can be faked.
+
+Railway / compose-style example:
+
+```yaml
+services:
+  mocks:                          # the public service; attach the domain here
+    image: ghcr.io/fyrmforge/hamr:latest
+    environment:
+      HAMR_MOCKS: mail,sms,stripe
+      HAMR_MOCK_UPSTREAM: http://app:8080
+      HAMR_MOCK_UI_PORT: "8000"   # public
+      HAMR_MOCK_PORT: "4500"      # private, app-only
+      HAMR_MOCK_UI_PASSWORD: ${TESTER_PASSWORD}
+      HAMR_BASE_URL: https://staging.example.com
+      HAMR_GATE_BYPASS: /webhooks
+      HAMR_ACTIONS_TOKEN: ${ACTIONS_TOKEN}
+      HAMR_STRIPE_WEBHOOK_URL: http://app:8080/webhooks/stripe
+      HAMR_STRIPE_WEBHOOK_SECRET: whsec_mock
+  app:                            # no public domain
+    environment:
+      HAMR_ACTIONS_TOKEN: ${ACTIONS_TOKEN}
+      HAMR_ACTIONS_ENV: staging
+      HAMR_DEV_URL: http://mocks:4500
+```
 
 ---
 

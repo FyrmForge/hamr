@@ -4,15 +4,23 @@ import (
 	"bytes"
 	"html/template"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 )
 
 // handleInbox renders the newest-first inbox list. Supports ?q= substring
-// match against from, to, and body.
+// match against from, to, and body, and ?to= for one recipient's texts only
+// (compared on digits, so "+44 7700 900123" matches "+447700900123").
 func (m *SMSMock) handleInbox(w http.ResponseWriter, r *http.Request) {
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	to := strings.TrimSpace(r.URL.Query().Get("to"))
 	msgs := m.List()
+	if to != "" {
+		// A non-empty ?to= with no digits matches nothing, never everything.
+		want := phoneDigits(to)
+		msgs = slices.DeleteFunc(slices.Clone(msgs), func(msg *smsMessage) bool { return want == "" || phoneDigits(msg.To) != want })
+	}
 
 	var filtered []*smsMessage
 	if query == "" {
@@ -29,9 +37,11 @@ func (m *SMSMock) handleInbox(w http.ResponseWriter, r *http.Request) {
 	var buf bytes.Buffer
 	err := smsInboxTmpl.Execute(&buf, struct {
 		Query    string
+		To       string
 		Messages []*smsMessage
 	}{
 		Query:    query,
+		To:       to,
 		Messages: filtered,
 	})
 	if err != nil {
@@ -101,9 +111,10 @@ var smsInboxTmpl = template.Must(template.New("sms-inbox").Funcs(smsTmplFuncs).P
 <p class="sub">Captured messages sent through <code>sms.Sender</code> during this <code>hamr dev</code> session. Inbox lives in memory; it survives app restarts but is wiped when <code>hamr dev</code> itself restarts (e.g. on <code>hamr.toml</code> change).</p>
 <div class="toolbar">
 <form method="GET" action="/__hamr/sms" style="display:flex;gap:8px">
+{{if .To}}<input type="hidden" name="to" value="{{.To}}">{{end}}
 <input type="text" name="q" value="{{.Query}}" placeholder="search from, to, body…" autofocus>
 <button type="submit" class="btn">Search</button>
-{{if .Query}}<a href="/__hamr/sms" class="btn">Clear</a>{{end}}
+{{if .Query}}<a href="/__hamr/sms{{if .To}}?to={{.To}}{{end}}" class="btn">Clear</a>{{end}}
 </form>
 <div style="flex:1"></div>
 {{if .Messages}}
@@ -112,6 +123,7 @@ var smsInboxTmpl = template.Must(template.New("sms-inbox").Funcs(smsTmplFuncs).P
 </form>
 {{end}}
 </div>
+{{if .To}}<p class="sub">Showing texts sent to <strong>{{.To}}</strong> · <a href="/__hamr/sms">show all</a></p>{{end}}
 <div class="list">
 {{if not .Messages}}
 <div class="list-empty">
@@ -186,3 +198,14 @@ var smsDetailTmpl = template.Must(template.New("sms-detail").Funcs(smsTmplFuncs)
 </body>
 </html>
 `))
+
+// phoneDigits keeps only the digits of a phone number, so formatting
+// differences don't defeat the ?to= filter.
+func phoneDigits(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= '0' && r <= '9' {
+			return r
+		}
+		return -1
+	}, s)
+}

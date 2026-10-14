@@ -31,7 +31,7 @@
   `internal/db/models.go` only registers them for auto-migration. Never put a
   `default:` tag on a field whose zero value matters (a `bool`, a counter):
   GORM omits zero values from the INSERT when a default is declared.
-- **hamr dev**: Dev server with file watching, auto-rebuild, and live reload. Any file event on a watched path reruns its `[[dev.watch]]` rule, including timestamp-only ones (`touch .env` restarts the app) but not a bare `chmod`/`chown`.
+- **hamr dev**: Dev server with file watching, auto-rebuild, and live reload. On the local listener `/__hamr/*` answers only for Host `localhost`, `*.localhost` or an IP literal (403 otherwise; DNS-rebinding guard, `loopbackOnlyHamr` in `internal/devserver/proxy.go`); the tunnel listener is unaffected. Any file event on a watched path reruns its `[[dev.watch]]` rule, including timestamp-only ones (`touch .env` restarts the app) but not a bare `chmod`/`chown`.
   `--headless` (automatic when stdout is not a terminal) skips the TUI and
   streams every line — hamr, rules, daemons, docker logs — to stdout, for
   agents/CI running `hamr dev --headless > dev.log &`; no hotkeys, stop
@@ -160,8 +160,12 @@
   surfaces are open by default (the UI serves every captured email, which may contain reset tokens /
   magic links, over plain GET, and the Stripe surface fires a correctly-signed webhook at the app on
   request). Two optional gates for ports that must be reachable beyond the compose network:
-  `HAMR_MOCK_UI_PASSWORD` puts HTTP basic auth (any username, that password, constant-time compare)
-  on every `/__hamr/*` dashboard route — the UI routes are mounted on their own mux under `/__hamr/`
+  `HAMR_MOCK_UI_PASSWORD` puts a password gate (constant-time compare)
+  on every `/__hamr/*` dashboard route: browser password page at `/__hamr/gate` sets HttpOnly SameSite=Lax
+  cookie `__hamr_gate` (7 days, server-enforced via issue time in the token; changing the password invalidates
+  all cookies; Secure when `HAMR_BASE_URL` is https), scripts send `X-Hamr-Gate: <password>`; cookie and header
+  are stripped before reaching the app, the app's `Authorization` passes untouched; HTML GETs redirect to the
+  gate, others get 401 JSON. BREAKING: this was HTTP basic auth. The UI routes are mounted on their own mux under `/__hamr/`
   so one handler covers them, and on a shared port the exact-pattern ingest sinks win over the prefix
   and stay open to the app; `HAMR_MOCK_API_ALLOW` (csv of IPs and CIDRs, v4-mapped v6 peers unmapped
   so v4 CIDRs match on a dual-stack listener) restricts the app-facing listener by TCP peer address,
@@ -171,7 +175,7 @@
   `172.16.0.0/12`: those contain the Docker bridge gateway, and with Docker Desktop, rootless Docker
   or the userland proxy, published-port traffic arrives from that gateway, so the list would admit
   everyone. Each rejected request logs a warning with its `remote` address, which is how to find the
-  app's source address on other platforms (e.g. an IPv6 private network). Basic auth is cleartext
+  app's source address on other platforms (e.g. an IPv6 private network). The gate password is cleartext
   over plain HTTP; put the UI behind TLS across untrusted networks. Stripe needs
   `HAMR_STRIPE_BASE_URL` (browser-reachable origin of the mock UI — required
   because `localhost:<port>` has no container-safe default: not reachable via the
@@ -184,6 +188,31 @@
   only); stripe persist:
   `HAMR_STRIPE_PERSIST_PATH`. Graceful shutdown on SIGINT/SIGTERM. Reuses the
   same mock implementations as `hamr dev` via split route-registration methods.
+  **Front-door mode (staging):** `HAMR_MOCK_UPSTREAM=http://host:port` (http only) turns `hamr mock-serve`
+  into the public entry point. `HAMR_MOCK_UI_PORT` becomes the public port: `/__hamr/*` (dashboards, gate,
+  widget) is served by hamr and everything else is reverse-proxied to the app with the widget injected
+  (60s upstream response-header timeout). Requires `HAMR_MOCK_UI_PORT` and `HAMR_MOCK_UI_PASSWORD` — startup
+  error otherwise (fails closed). `HAMR_MOCK_PORT` stays the private API/ingest port (Stripe `/v1` `/v2`, mail/SMS
+  ingest), never gated. `/_devactions` always 404s on the public port; `/__hamr/app/actions` + `/__hamr/app/whoami` are served behind the gate when `HAMR_ACTIONS_TOKEN` is set. `HAMR_BASE_URL`
+  is the public origin: in front-door mode it is the default for `HAMR_STRIPE_BASE_URL` (which still overrides), and
+  `https://` makes the gate cookie Secure. `HAMR_GATE_BYPASS` is a csv of paths that skip the gate, matched on
+  whole path segments after path cleaning (`/payments` covers `/payments/x`, not `/payments-admin`). In plain
+  mode (no upstream) the gate covers `/__hamr/*` only. `HAMR_ACTIONS_TOKEN` (same value as the app's) enables the
+  app's dev actions in the widget. Client IP behind the front door: `X-Forwarded-For` keeps the edge's
+  value plus the edge address (first entry is client-set, forgeable); `X-Real-IP` passes through untouched — on
+  Railway read it (edge-overwritten).
+- **dev actions** (`pkg/devactions`, see `### devactions`): the app mounts the package's handler at `/_devactions`;
+  it only exists when `HAMR_ACTIONS_TOKEN` is set AND `HAMR_ACTIONS_ENV` is `development` or `staging`. `hamr dev`
+  generates a per-run random token and injects `HAMR_ACTIONS_TOKEN` + `HAMR_ACTIONS_ENV=development` into the app
+  (`buildHamrInjectedEnv` in `internal/devserver/devserver.go`); the dev tunnel blocks `/__hamr/app/`. The widget
+  proxies through `/__hamr/app/actions` (list, `POST .../<name>`), which forwards with `X-Hamr-Actions-Token`, and
+  `/__hamr/app/whoami`, which also forwards the browser's cookies (minus `__hamr_gate`) so the app resolves its
+  session: the panel shows "Logged in as" with mail/texts links to `/__hamr/mail?to=` / `/__hamr/sms?to=`
+  (exact-recipient filters; SMS compared on digits).
+  Widget: actions panel, test-accounts list, and login-form detection (a form with a password field not
+  `autocomplete="new-password"`, re-checked after htmx swaps) with a count badge; clicking an account fills email +
+  password and submits. Scaffolded `internal/devactions`: reseed (dangerous), create-account, logout-everyone;
+  accounts `admin@test.com` / `user@test.com` (`Test1234!`); seed `internal/devactions/seed.sql`, loaded by `make seed`.
 - **hamr ai capture**: Browser screenshot capture with HTML/text/metadata sidecars.
 - **hamr ai upgrade**: Git-based scaffold upgrade report. Clones the HAMR repo and diffs between version tags to produce a unified diff and stat summary of all changes between the project's baseline and current HAMR.
 - **.pref.hamr.toml**: Optional per-developer override file sitting next to `hamr.toml`, merged over it at load time. Gitignored by the scaffold so local preferences never reach the team's committed config. Covers the dev-server config (`[proxy]`, `[dev]`, `[dev.*]`) read by `hamr dev`/`compose`/`mcp`/`add service`, plus `[static].dir`. Does NOT cover `[lint.templ]` (loaded via `pkg/templint`) or `[hamr]`/`[options]`/`[ai]` (scaffold metadata, not preferences); `hamr setup` ignores it too, since it writes the values it shows back into hamr.toml (`devserver.LoadConfigNoPrefs`). Merge is per-key at any depth — write only the keys you want changed. Arrays of tables (`[[dev.watch]]`, `[[dev.daemon]]`, `[[dev.docker_compose]]`) replace the whole list rather than merging, so a `hamr add service` rule appended to hamr.toml is invisible while the override defines watch rules. An override must use the same spelling as the base file: `[proxy].listen` vs `[dev].proxy_listen` across the two files is a load error. Editing it hot-reloads `hamr dev`.
@@ -3437,6 +3466,74 @@ don't bind the proxy to a public interface.
 **Known limits.**
 - Text only: no MMS media, delivery receipts, or inbound-reply simulation
 - Single shared inbox — no per-user segmentation
+
+---
+
+### devactions
+
+> Package devactions exposes app-defined dev/staging actions (wipe, reseed,
+> create account, ...) and test accounts to hamr over one token-gated endpoint.
+
+```go
+const Prefix = "/_devactions"
+
+type InputType string // InputText "text", InputNumber "number", InputBool "bool", InputSelect "select"
+
+type Input struct {
+    Name, Label string
+    Type        InputType
+    Options     []string // InputSelect only
+    Default     string
+    Required    bool
+}
+
+type Action struct {
+    Name, Label, Description string
+    Inputs    []Input
+    Dangerous bool
+    Run       func(ctx context.Context, in map[string]string) (message string, err error)
+}
+
+type Account struct{ Email, Password, Label, Phone string } // Phone optional
+
+type Registry struct {
+    Accounts   func(ctx context.Context) ([]Account, error)
+    Disposable func(ctx context.Context) (bool, error)
+    WhoAmI     func(r *http.Request) (*Account, error) // optional; SessionWhoAmI(sm, lookup) builds it from pkg/auth
+}
+
+func (r *Registry) Register(a Action) // panics on empty or duplicate Name, "whoami" (reserved), or a Name outside [A-Za-z0-9._-] / "." / ".."
+func (r *Registry) Handler() http.Handler
+```
+
+`Handler()` returns nil unless `HAMR_ACTIONS_TOKEN` is non-empty and
+`HAMR_ACTIONS_ENV` is `development` or `staging`. It panics if a `Dangerous`
+action is registered without `Registry.Disposable`. Mount it on the root echo
+instance at `Prefix` and `Prefix+"/*"` (it matches the full path), outside
+CSRF/session/auth middleware — the scaffold does this in `internal/web/server.go`
+via `Deps.DevActions` (nil when the gate fails).
+
+**Wire format.** Every request needs `X-Hamr-Actions-Token` (constant-time
+compare; 401 otherwise).
+```
+GET  /_devactions        → 200 {"actions":[{name,label,description,dangerous,inputs:[{name,label,type,options,default,required}]}],
+                                "accounts":[{email,password,label}]}
+POST /_devactions/<name> {"inputs":{...},"confirm":true} → 200 {"message":"..."}
+GET  /_devactions/whoami → 200 {"account":{email,label,phone}} | {"account":null}; 404 without WhoAmI (no password)
+errors {"error":"..."}: 400 bad input/body | 401 token | 404 unknown action | 405 method
+                        | 409 dangerous without confirm | 412 not disposable | 500 Run/Accounts error
+```
+Inputs reach `Run` as strings; empty falls back to `Default`; `Required`,
+number, bool (`true`/`false`) and select-option validation happens before `Run`.
+
+**Dangerous actions** need `"confirm": true` and `Disposable()` returning true.
+The scaffold's `Disposable` checks for the `hamr_disposable` table, which only
+the dev seed creates. On a fresh database run `make seed` (`go run ./cmd/site --seed`) once, after
+migrations, before dangerous actions unlock.
+
+**Staging.** Set the same `HAMR_ACTIONS_TOKEN` on `hamr mock-serve` (front-door
+mode) and on the app, plus `HAMR_ACTIONS_ENV=staging` on the app. `hamr dev`
+injects both automatically.
 
 ---
 

@@ -6,16 +6,23 @@ import (
 	"html/template"
 	"net/http"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 )
 
 // handleInbox renders the newest-first inbox list. Supports ?q= substring
-// match against subject and recipient email fields.
+// match against subject and recipient email fields, and ?to= for one
+// recipient's mail only (exact address, any of To/Cc/Bcc) — the widget's
+// "<user>'s mail" link.
 func (m *MailMock) handleInbox(w http.ResponseWriter, r *http.Request) {
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	to := strings.TrimSpace(r.URL.Query().Get("to"))
 	msgs := m.List()
+	if to != "" {
+		msgs = slices.DeleteFunc(slices.Clone(msgs), func(msg *mailMessage) bool { return !mailSentTo(msg, to) })
+	}
 
 	var filtered []*mailMessage
 	if query == "" {
@@ -32,10 +39,12 @@ func (m *MailMock) handleInbox(w http.ResponseWriter, r *http.Request) {
 	var buf bytes.Buffer
 	err := inboxTmpl.Execute(&buf, struct {
 		Query    string
+		To       string
 		Messages []*mailMessage
 		Now      time.Time
 	}{
 		Query:    query,
+		To:       to,
 		Messages: filtered,
 		Now:      time.Now(),
 	})
@@ -168,6 +177,18 @@ func (m *MailMock) handleHTMLFrame(w http.ResponseWriter, r *http.Request, msg *
 }
 
 // --- helpers ---
+
+// mailSentTo reports whether addr is among the message's recipients.
+func mailSentTo(msg *mailMessage, addr string) bool {
+	for _, list := range [][]mailAddress{msg.To, msg.Cc, msg.Bcc} {
+		for _, a := range list {
+			if strings.EqualFold(a.Email, addr) {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 func matchesQuery(msg *mailMessage, needle string) bool {
 	if strings.Contains(strings.ToLower(msg.Subject), needle) {
@@ -456,9 +477,10 @@ var inboxTmpl = template.Must(template.New("inbox").Funcs(mailTmplFuncs).Parse(`
 <p class="sub">Captured messages sent through <code>email.Sender</code> during this <code>hamr dev</code> session. Inbox lives in memory; it survives app restarts but is wiped when <code>hamr dev</code> itself restarts (e.g. on <code>hamr.toml</code> change).</p>
 <div class="toolbar">
 <form method="GET" action="/__hamr/mail" style="display:flex;gap:8px">
+{{if .To}}<input type="hidden" name="to" value="{{.To}}">{{end}}
 <input type="text" name="q" value="{{.Query}}" placeholder="search subject, recipient, sender…" autofocus>
 <button type="submit" class="btn">Search</button>
-{{if .Query}}<a href="/__hamr/mail" class="btn">Clear</a>{{end}}
+{{if .Query}}<a href="/__hamr/mail{{if .To}}?to={{.To}}{{end}}" class="btn">Clear</a>{{end}}
 </form>
 <div style="flex:1"></div>
 {{if .Messages}}
@@ -467,6 +489,7 @@ var inboxTmpl = template.Must(template.New("inbox").Funcs(mailTmplFuncs).Parse(`
 </form>
 {{end}}
 </div>
+{{if .To}}<p class="sub">Showing mail sent to <strong>{{.To}}</strong> · <a href="/__hamr/mail">show all</a></p>{{end}}
 <div class="list">
 {{if not .Messages}}
 <div class="list-empty">

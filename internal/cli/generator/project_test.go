@@ -2,6 +2,8 @@ package generator
 
 import (
 	"fmt"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -1803,4 +1805,152 @@ func readFile(t *testing.T, dir, rel string) string {
 	data, err := os.ReadFile(filepath.Join(dir, rel))
 	require.NoError(t, err, "read file: %s", rel)
 	return strings.TrimSpace(string(data))
+}
+
+func TestGenerateProject_devActionsMatrix(t *testing.T) {
+	for _, connector := range []string{"gorm", "sqlx"} {
+		for _, database := range []string{"postgres", "sqlite"} {
+			for _, withAuth := range []bool{true, false} {
+				name := fmt.Sprintf("%s/%s/auth=%t", connector, database, withAuth)
+				t.Run(name, func(t *testing.T) {
+					dir := filepath.Join(t.TempDir(), "devproj")
+					cfg := &ProjectConfig{
+						Name:            "devproj",
+						Module:          "github.com/test/devproj",
+						CSS:             "plain",
+						Database:        database,
+						DBConnector:     connector,
+						GoVersion:       "1.25.0",
+						IncludeSessions: withAuth,
+						IncludeAuth:     withAuth,
+						AuthWithTables:  withAuth,
+					}
+					require.NoError(t, GenerateProject(dir, cfg))
+
+					seed := readFile(t, dir, "internal/devactions/seed.sql")
+					assert.Contains(t, seed, "CREATE TABLE IF NOT EXISTS hamr_disposable (id INTEGER PRIMARY KEY);")
+					assert.Contains(t, seed, "Test1234!")
+					if database == "sqlite" {
+						assert.NotContains(t, seed, "NOW()")
+					}
+
+					actions := readFile(t, dir, "internal/devactions/devactions.go")
+					assert.Contains(t, actions, `Name:        "reseed"`)
+					assert.Contains(t, actions, "Dangerous:   true")
+					assert.Contains(t, actions, "disposableQuery")
+					if database == "sqlite" {
+						assert.Contains(t, actions, "sqlite_master")
+					} else {
+						assert.Contains(t, actions, "to_regclass('hamr_disposable')")
+					}
+					if connector == "gorm" {
+						assert.Contains(t, actions, "*gorm.DB")
+						assert.NotContains(t, actions, "sqlx")
+					} else {
+						assert.Contains(t, actions, "*sqlx.DB")
+						assert.NotContains(t, actions, "gorm")
+					}
+
+					// Rendered Go must at least parse in every combination.
+					for _, f := range []string{"internal/devactions/devactions.go", "internal/web/server.go", "cmd/site/main.go"} {
+						_, err := parser.ParseFile(token.NewFileSet(), f, readFile(t, dir, f), parser.AllErrors)
+						require.NoError(t, err, f)
+					}
+
+					mainGo := readFile(t, dir, "cmd/site/main.go")
+					serverGo := readFile(t, dir, "internal/web/server.go")
+					assert.Contains(t, serverGo, "echo.WrapHandler(deps.DevActions)")
+					assert.Contains(t, serverGo, "devactions.Prefix+\"/*\"")
+					// Mounted before the site group, so site middleware never wraps it.
+					assert.Less(t, strings.Index(serverGo, "deps.DevActions != nil"), strings.Index(serverGo, "site := e.Group"))
+
+					if withAuth {
+						assert.Contains(t, seed, "admin@test.com")
+						assert.Contains(t, actions, `Name:        "create-account"`)
+						assert.Contains(t, actions, `Name:        "logout-everyone"`)
+						assert.Contains(t, actions, "Accounts:")
+						assert.Contains(t, actions, "WhoAmI: hamrdev.SessionWhoAmI(sessions,")
+						assert.Contains(t, mainGo, "devactions.New(database, store, sessionManager).Handler()")
+					} else {
+						assert.NotContains(t, seed, "INSERT INTO users")
+						assert.NotContains(t, actions, "create-account")
+						assert.NotContains(t, actions, "logout-everyone")
+						assert.NotContains(t, actions, "DELETE FROM")
+						assert.NotContains(t, actions, "Accounts:")
+						assert.NotContains(t, actions, "WhoAmI")
+						assert.Contains(t, mainGo, "devactions.New(database).Handler()")
+					}
+				})
+			}
+		}
+	}
+}
+
+// The accounts slice in the generated devactions.go and the dev seed are two
+// copies of the same data; this keeps them from drifting.
+func TestGenerateProject_devActionsAccountsMatchSeed(t *testing.T) {
+	re := regexp.MustCompile(`Email: "([^"]+)"`)
+	for _, database := range []string{"postgres", "sqlite"} {
+		for _, connector := range []string{"gorm", "sqlx"} {
+			t.Run(database+"/"+connector, func(t *testing.T) {
+				dir := filepath.Join(t.TempDir(), "devproj")
+				require.NoError(t, GenerateProject(dir, &ProjectConfig{
+					Name:            "devproj",
+					Module:          "github.com/test/devproj",
+					Database:        database,
+					DBConnector:     connector,
+					GoVersion:       "1.25.0",
+					IncludeSessions: true,
+					IncludeAuth:     true,
+					AuthWithTables:  true,
+				}))
+
+				matches := re.FindAllStringSubmatch(readFile(t, dir, "internal/devactions/devactions.go"), -1)
+				require.Len(t, matches, 2)
+				seed := readFile(t, dir, "internal/devactions/seed.sql")
+				for _, m := range matches {
+					assert.Contains(t, seed, "'"+m[1]+"'")
+				}
+			})
+		}
+	}
+}
+
+func TestGenerateProject_authAutocomplete(t *testing.T) {
+	for _, css := range []string{"plain", "tailwind"} {
+		t.Run(css, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "acproj")
+			require.NoError(t, GenerateProject(dir, &ProjectConfig{
+				Name:            "acproj",
+				Module:          "github.com/test/acproj",
+				CSS:             css,
+				GoVersion:       "1.25.0",
+				IncludeSessions: true,
+				IncludeAuth:     true,
+				AuthWithTables:  true,
+			}))
+
+			login := readFile(t, dir, "internal/web/handler/auth/login/login.templ")
+			assert.Equal(t, 1, strings.Count(login, `autocomplete="email"`))
+			assert.Equal(t, 1, strings.Count(login, `autocomplete="current-password"`))
+			assert.NotContains(t, login, `autocomplete="new-password"`)
+
+			register := readFile(t, dir, "internal/web/handler/auth/register/register.templ")
+			assert.Equal(t, 1, strings.Count(register, `autocomplete="email"`))
+			assert.Equal(t, 1, strings.Count(register, `autocomplete="new-password"`))
+			assert.NotContains(t, register, `autocomplete="current-password"`)
+		})
+	}
+}
+
+func TestGenerateProject_envExampleDevActions(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "envproj")
+	require.NoError(t, GenerateProject(dir, &ProjectConfig{
+		Name:      "envproj",
+		Module:    "github.com/test/envproj",
+		GoVersion: "1.25.0",
+	}))
+	env := readFile(t, dir, ".env.example")
+	assert.Contains(t, env, "# HAMR_ACTIONS_TOKEN=")
+	assert.Contains(t, env, "# HAMR_ACTIONS_ENV=")
 }

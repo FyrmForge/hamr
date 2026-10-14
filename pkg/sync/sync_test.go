@@ -25,10 +25,10 @@ func (s *recordingStore) Save(_ context.Context, path string, r io.Reader) error
 	s.saved[path] = b
 	return nil
 }
-func (s *recordingStore) Open(context.Context, string) (io.ReadCloser, error)  { return nil, nil }
-func (s *recordingStore) Delete(context.Context, string) error                 { return nil }
-func (s *recordingStore) Exists(context.Context, string) (bool, error)         { return false, nil }
-func (s *recordingStore) List(context.Context, string) ([]string, error)       { return nil, nil }
+func (s *recordingStore) Open(context.Context, string) (io.ReadCloser, error) { return nil, nil }
+func (s *recordingStore) Delete(context.Context, string) error                { return nil }
+func (s *recordingStore) Exists(context.Context, string) (bool, error)        { return false, nil }
+func (s *recordingStore) List(context.Context, string) ([]string, error)      { return nil, nil }
 
 // TestSyncExistingFiles covers the case fsnotify misses: a directory that
 // appears with files already inside it. All contained files must be synced,

@@ -76,4 +76,3 @@ func staticPathToFile(dir, urlPath string) string {
 	}
 	return filepath.Join(dir, p, "index.html")
 }
-

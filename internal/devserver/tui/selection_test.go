@@ -153,12 +153,12 @@ func TestSelection_SnapshotSkipsOutOfRange(t *testing.T) {
 
 func TestStripANSI(t *testing.T) {
 	cases := map[string]string{
-		"plain":                       "plain",
-		"\x1b[31mred\x1b[0m":          "red",
-		"a\x1b[1;33mb\x1b[0mc":        "abc",
-		"[\x1b[36mtag\x1b[0m] hello":  "[tag] hello",
-		"":                            "",
-		"trailing\x1b[":               "trailing\x1b[",
+		"plain":                      "plain",
+		"\x1b[31mred\x1b[0m":         "red",
+		"a\x1b[1;33mb\x1b[0mc":       "abc",
+		"[\x1b[36mtag\x1b[0m] hello": "[tag] hello",
+		"":                           "",
+		"trailing\x1b[":              "trailing\x1b[",
 	}
 	for in, want := range cases {
 		if got := stripANSI(in); got != want {

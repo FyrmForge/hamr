@@ -4,7 +4,9 @@ import (
 {{- if .IncludeAuth}}
 	"context"
 {{- end}}
+	"net/http"
 
+	"github.com/FyrmForge/hamr/pkg/devactions"
 	hamrmw "github.com/FyrmForge/hamr/pkg/middleware"
 	"github.com/FyrmForge/hamr/pkg/server"
 {{- if .IncludeSessions}}
@@ -22,6 +24,7 @@ import (
 {{- if .IncludeEmailMock}}
 	"github.com/FyrmForge/hamr/pkg/email"
 {{- end}}
+	"github.com/labstack/echo/v4"
 
 	"{{.Module}}/internal/middleware"
 	"{{.Module}}/internal/repo"
@@ -44,6 +47,10 @@ type Deps struct {
 	BaseURL        string
 	StaticBaseURL  string
 	DevMode        bool
+	// DevActions is the hamr dev/staging actions endpoint (see
+	// internal/devactions). Nil unless HAMR_ACTIONS_TOKEN and
+	// HAMR_ACTIONS_ENV enable it.
+	DevActions http.Handler
 {{- if .IncludeSessions}}
 	SessionManager *auth.SessionManager
 {{- end}}
@@ -75,6 +82,15 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 	// WebSocket endpoint.
 	e.GET("/ws", deps.Hub.Handler())
 {{- end}}
+
+	// Dev actions endpoint for the hamr widget. Registered on the root echo
+	// instance, not the site group, so the site CSRF, session and auth
+	// middleware never run for it; it authenticates with its own token.
+	if deps.DevActions != nil {
+		h := echo.WrapHandler(deps.DevActions)
+		e.Any(devactions.Prefix, h)
+		e.Any(devactions.Prefix+"/*", h)
+	}
 
 	// Content Security Policy.
 	csp := "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"

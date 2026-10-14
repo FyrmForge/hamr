@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -38,7 +39,54 @@ func init() {
 // If console is non-nil, the browser console transport is mounted as a
 // WebSocket at /__hamr/console; the injected reload script connects to it
 // and pipes window.console.* + uncaught errors back into the dev TUI/log.
-func NewProxyHandler(target string, broker *SSEBroker, errorState *ErrorState, logBuf *LogBuffer, actions *DevActions, mailMock *MailMock, smsMock *SMSMock, stripeMock *StripeMock, console *ConsoleSink, gateway *mcpGateway, requestLog *RequestLog, injectReload bool) http.Handler {
+func NewProxyHandler(target string, broker *SSEBroker, errorState *ErrorState, logBuf *LogBuffer, actions *DevActions, mailMock *MailMock, smsMock *SMSMock, stripeMock *StripeMock, console *ConsoleSink, gateway *mcpGateway, requestLog *RequestLog, appActions *AppActions, injectReload bool) http.Handler {
+	return newProxyHandler(target, proxyOpts{headerTimeout: 2 * time.Second}, broker, errorState, logBuf, actions, mailMock, smsMock, stripeMock, console, gateway, requestLog, appActions, injectReload)
+}
+
+// loopbackOnlyHamr refuses /__hamr/* requests whose Host is a DNS name other
+// than localhost/*.localhost. Under DNS rebinding a hostile site's own domain
+// resolves to this server, so Origin and Host match and checkSameOrigin passes;
+// only the Host name betrays it. IP-literal hosts (127.0.0.1, ::1, LAN IPs)
+// cannot be rebound and pass. Wrap only the local hamr dev listener: the tunnel
+// (public Host) and the front door (public domain) must not use it.
+func loopbackOnlyHamr(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/__hamr/") && !localDevHost(r.Host) {
+			http.Error(w, "hamr dev tools are only served on localhost", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func localDevHost(hostport string) bool {
+	h := hostport
+	if sh, _, err := net.SplitHostPort(hostport); err == nil {
+		h = sh
+	}
+	h = strings.ToLower(strings.Trim(h, "[]"))
+	if _, err := netip.ParseAddr(h); err == nil {
+		return true
+	}
+	return h == "localhost" || strings.HasSuffix(h, ".localhost")
+}
+
+// proxyOpts tunes newProxyHandler for callers other than the dev loop.
+type proxyOpts struct {
+	// headerTimeout bounds the wait for upstream response headers.
+	headerTimeout time.Duration
+	// extraRoutes, if set, registers more routes on the handler's mux.
+	extraRoutes func(*http.ServeMux)
+	// forwardedProto, if set, overrides X-Forwarded-Proto. Behind a platform
+	// edge that terminates TLS (Railway, Fly) hamr itself sees plain http, so
+	// without this the app would think every request is insecure.
+	forwardedProto string
+	// keepForwardedFor keeps the incoming X-Forwarded-For chain (set by that
+	// edge) and appends to it, instead of starting a new one at the edge's IP.
+	keepForwardedFor bool
+}
+
+func newProxyHandler(target string, opts proxyOpts, broker *SSEBroker, errorState *ErrorState, logBuf *LogBuffer, actions *DevActions, mailMock *MailMock, smsMock *SMSMock, stripeMock *StripeMock, console *ConsoleSink, gateway *mcpGateway, requestLog *RequestLog, appActions *AppActions, injectReload bool) http.Handler {
 	targetURL := &url.URL{
 		Scheme: "http",
 		Host:   normalizeHost(target),
@@ -49,7 +97,15 @@ func NewProxyHandler(target string, broker *SSEBroker, errorState *ErrorState, l
 			pr.SetURL(targetURL)
 			// Keep the browser's Host header; SetURL would replace it with the target's.
 			pr.Out.Host = pr.In.Host
+			if opts.keepForwardedFor {
+				if xff := pr.In.Header.Values("X-Forwarded-For"); len(xff) > 0 {
+					pr.Out.Header["X-Forwarded-For"] = xff
+				}
+			}
 			pr.SetXForwarded()
+			if opts.forwardedProto != "" {
+				pr.Out.Header.Set("X-Forwarded-Proto", opts.forwardedProto)
+			}
 			if injectReload {
 				// Force identity responses so HTML injection can safely mutate bytes.
 				pr.Out.Header.Del("Accept-Encoding")
@@ -66,7 +122,7 @@ func NewProxyHandler(target string, broker *SSEBroker, errorState *ErrorState, l
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return dialer.DialContext(ctx, network, addr)
 		},
-		ResponseHeaderTimeout: 2 * time.Second,
+		ResponseHeaderTimeout: opts.headerTimeout,
 		IdleConnTimeout:       30 * time.Second,
 		MaxIdleConns:          100,
 	}
@@ -129,6 +185,10 @@ func NewProxyHandler(target string, broker *SSEBroker, errorState *ErrorState, l
 	}
 	if gateway != nil {
 		gateway.RegisterRoutes(mux)
+	}
+	appActions.RegisterRoutes(mux)
+	if opts.extraRoutes != nil {
+		opts.extraRoutes(mux)
 	}
 	mux.Handle("/", rootHandler)
 

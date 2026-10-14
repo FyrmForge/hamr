@@ -13,11 +13,11 @@ import (
 // LocaleConfig configures locale middleware.
 type LocaleConfig struct {
 	Bundle         *i18n.Bundle
-	CookieName     string                         // default: "hamr_locale"
-	CookieMaxAge   int                            // default: 31536000 (1 year)
+	CookieName     string // default: "hamr_locale"
+	CookieMaxAge   int    // default: 31536000 (1 year)
 	CookieSecure   bool
-	DefaultLocale  string                         // from bundle if empty
-	UserLocaleFunc func(c echo.Context) string    // optional: load from user preference
+	DefaultLocale  string                      // from bundle if empty
+	UserLocaleFunc func(c echo.Context) string // optional: load from user preference
 }
 
 func (cfg *LocaleConfig) defaults() {

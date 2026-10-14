@@ -3,6 +3,8 @@ package devserver
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -247,12 +249,15 @@ func (r *Runner) baseLogWriter() io.Writer {
 //   - HAMR_STRIPE_MOCK_URL: proxy origin, set when [dev.stripe] is on (either
 //     mode; the Stripe vars that change per mode live in the stripe env layer).
 //     Scaffolded main.go points stripe-go at this URL when STRIPE_MOCK=true.
+//   - HAMR_ACTIONS_TOKEN / HAMR_ACTIONS_ENV=development: set when actionsToken
+//     is non-empty; they switch on the app's /_devactions endpoint, which the
+//     proxy reaches with the same per-run token.
 //
 // godotenv.Load() in the spawned site honors pre-set env vars (doesn't
 // overwrite), so these injected values win over any conflicting entry in
 // the user's .env — by design. Hamr knows its own proxy URL and the app
 // port it has chosen; nothing in .env should be more authoritative.
-func buildHamrInjectedEnv(cfg *Config, proxyOrigin string, appPort int) []string {
+func buildHamrInjectedEnv(cfg *Config, proxyOrigin string, appPort int, actionsToken string) []string {
 	if !cfg.ProxyConfigured {
 		return nil
 	}
@@ -268,7 +273,21 @@ func buildHamrInjectedEnv(cfg *Config, proxyOrigin string, appPort int) []string
 			injected = append(injected, "HAMR_STRIPE_MOCK_URL="+proxyOrigin)
 		}
 	}
+	if actionsToken != "" {
+		injected = append(injected, "HAMR_ACTIONS_TOKEN="+actionsToken, "HAMR_ACTIONS_ENV=development")
+	}
 	return injected
+}
+
+// newActionsToken returns a fresh random token shared by the proxy and the app
+// for one run. Empty on the (practically impossible) entropy failure, which
+// leaves the actions endpoint off rather than guessable.
+func newActionsToken() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(b)
 }
 
 // Run starts the dev server and blocks until ctx is cancelled.
@@ -530,7 +549,9 @@ func (r *Runner) Run(ctx context.Context) error {
 	if r.cfg.Dev.MCP.Enabled && (r.noProxy || !r.cfg.ProxyConfigured) {
 		r.logger.Warn("[dev.mcp] enabled but no reverse proxy will run (needs [proxy] and not --no-proxy); the MCP gateway is unavailable")
 	}
+	var actionsToken string
 	if !r.noProxy && r.cfg.ProxyConfigured {
+		actionsToken = newActionsToken()
 		if _, p, perr := splitListenAddr(r.cfg.Proxy.Listen); perr == nil {
 			originalProxyPort = p
 		}
@@ -665,8 +686,8 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 
 		inject := r.cfg.Proxy.InjectReload != nil && *r.cfg.Proxy.InjectReload
-		handler := NewProxyHandler(r.cfg.Proxy.Target, broker, errorState, logBuf, actions, mailMock, smsMock, stripeMock, consoleSink, mcpGw, requestLog, inject)
-		proxySrv = serveProxy(ln, handler)
+		handler := NewProxyHandler(r.cfg.Proxy.Target, broker, errorState, logBuf, actions, mailMock, smsMock, stripeMock, consoleSink, mcpGw, requestLog, NewAppActions(r.cfg.Proxy.Target, actionsToken), inject)
+		proxySrv = serveProxy(ln, loopbackOnlyHamr(handler))
 
 		// The tunnel (T hotkey) serves the same handler on its own loopback
 		// listener with the command-running routes blocked. Off until toggled.
@@ -761,7 +782,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	// PORT=:8080 in .env and the whole-value rule would otherwise emit
 	// PORT=:8081, breaking int-parsing in the scaffolded main.go.
 	merged := append([]string(nil), envRewrites...)
-	merged = append(merged, buildHamrInjectedEnv(r.cfg, proxyOrigin, actualAppPort)...)
+	merged = append(merged, buildHamrInjectedEnv(r.cfg, proxyOrigin, actualAppPort, actionsToken)...)
 	envLayers.setBase(merged)
 	// Before the first build so apps start on the right Stripe env. Blocks
 	// while a configured listener connects to Stripe.

@@ -59,6 +59,7 @@ import (
 	"{{.Module}}/internal/service"
 {{- end}}
 	"{{.Module}}/internal/api"
+	"{{.Module}}/internal/devactions"
 	"{{.Module}}/internal/web"
 	"{{.Module}}/internal/web/components"
 )
@@ -114,6 +115,7 @@ var (
 
 func main() {
 	generateFlag := flag.Bool("generate", false, "generate static pages and exit")
+	seedFlag := flag.Bool("seed", false, "load the dev seed (internal/devactions/seed.sql) and exit")
 	flag.Parse()
 
 	log := logging.New(!envDevMode)
@@ -223,6 +225,15 @@ func main() {
 	store := postgres.NewStore(database)
 {{- end}}
 {{- end}}
+
+	if *seedFlag {
+		if err := devactions.Seed(context.Background(), database); err != nil {
+			log.Error("seed failed", "error", err)
+			os.Exit(1)
+		}
+		log.Info("dev seed loaded")
+		return
+	}
 {{- if .IncludeSessions}}
 
 	// Sessions.
@@ -342,6 +353,14 @@ func main() {
 		BaseURL:       baseOrigin,
 		StaticBaseURL: envStaticBaseURL,
 		DevMode:       envDevMode,
+		// Nil unless HAMR_ACTIONS_TOKEN and HAMR_ACTIONS_ENV enable it.
+{{- if and .IncludeAuth .AuthWithTables .IncludeSessions}}
+		DevActions: devactions.New(database, store, sessionManager).Handler(),
+{{- else if and .IncludeAuth .AuthWithTables}}
+		DevActions: devactions.New(database, store).Handler(),
+{{- else}}
+		DevActions: devactions.New(database).Handler(),
+{{- end}}
 {{- if .IncludeSessions}}
 		SessionManager: sessionManager,
 {{- end}}

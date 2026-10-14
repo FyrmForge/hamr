@@ -1353,7 +1353,7 @@ func (m *Model) applyBrokerEvent(evt devserver.SSEEvent) {
 		m.deactivate("starting " + evt.Data)
 	case devserver.EvRestarting:
 		m.restarting = true
-		m.clearTunnel() // the restarted server comes up with the tunnel off
+		m.clearTunnel()   // the restarted server comes up with the tunnel off
 		m.stripeMode = "" // the restarted server reports its mode again
 	case devserver.EvTunnelStart:
 		m.activate("tunnel " + evt.Data)

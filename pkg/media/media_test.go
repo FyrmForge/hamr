@@ -762,8 +762,8 @@ func TestImageStore_UploadFromReaderWithID_InvalidID(t *testing.T) {
 		{"control-char", "abc\x00def"},
 		{"plain-string", "not-a-uuid"},
 		{"truncated-uuid", "12345678-1234-1234-1234-1234567890"}, // 35 chars
-		{"hyphenless-32", "12345678123412341234123456789012"},     // valid uuid.Parse but not canonical
-		{"braced", "{12345678-1234-1234-1234-123456789012}"},      // accepted by uuid.Parse, rejected here
+		{"hyphenless-32", "12345678123412341234123456789012"},    // valid uuid.Parse but not canonical
+		{"braced", "{12345678-1234-1234-1234-123456789012}"},     // accepted by uuid.Parse, rejected here
 		{"urn-form", "urn:uuid:12345678-1234-1234-1234-123456789012"},
 	}
 	for _, tc := range cases {
@@ -893,11 +893,11 @@ func TestVideoStore_UploadFromReaderWithID_InvalidID(t *testing.T) {
 	require.NoError(t, err)
 
 	cases := []string{
-		"",                                              // empty — rejected at WithID entry
-		"../etc/passwd",                                 // path traversal
-		"not-a-uuid",                                    // garbage
-		"12345678123412341234123456789012",              // hyphenless 32-char
-		"{12345678-1234-1234-1234-123456789012}",        // braced
+		"",                                       // empty — rejected at WithID entry
+		"../etc/passwd",                          // path traversal
+		"not-a-uuid",                             // garbage
+		"12345678123412341234123456789012",       // hyphenless 32-char
+		"{12345678-1234-1234-1234-123456789012}", // braced
 		"urn:uuid:12345678-1234-1234-1234-123456789012", // urn
 	}
 	for _, id := range cases {

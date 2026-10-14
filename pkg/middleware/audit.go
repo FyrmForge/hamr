@@ -61,7 +61,7 @@ func redactQuery(raw string) string {
 type AuditEntry struct {
 	ActorID    string         `json:"actor_id"`
 	Action     string         `json:"action"`      // HTTP method
-	EntityType string         `json:"entity_type"`  // route path pattern
+	EntityType string         `json:"entity_type"` // route path pattern
 	Data       map[string]any `json:"data"`
 	Timestamp  time.Time      `json:"timestamp"`
 }

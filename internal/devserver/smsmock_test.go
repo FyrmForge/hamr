@@ -201,3 +201,40 @@ func TestSMSMockUIPages(t *testing.T) {
 		t.Errorf("unknown id status = %d, want 404", resp.StatusCode)
 	}
 }
+
+func TestSMSInbox_ToFilter(t *testing.T) {
+	m, srv := newSMSTestServer(t, SMSMockOptions{})
+	for _, msg := range []string{
+		`{"From":"app","To":"+44 7700 900123","Body":"code for jack"}`,
+		`{"From":"app","To":"+447700900999","Body":"code for amy, not +447700900123"}`,
+	} {
+		resp, err := http.Post(srv.URL+"/__hamr/sms/ingest", "application/json", strings.NewReader(msg))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+	}
+	if len(m.List()) != 2 {
+		t.Fatalf("ingested %d", len(m.List()))
+	}
+	resp, err := http.Get(srv.URL + "/__hamr/sms?to=%2B447700900123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	body := string(b)
+	if !strings.Contains(body, "code for jack") || strings.Contains(body, "code for amy") {
+		t.Errorf("filter wrong:\n%s", body)
+	}
+
+	resp, err = http.Get(srv.URL + "/__hamr/sms?to=abc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ = io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if body = string(b); strings.Contains(body, "code for jack") || strings.Contains(body, "code for amy") {
+		t.Errorf("digitless to= should show no texts:\n%s", body)
+	}
+}

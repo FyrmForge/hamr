@@ -24,6 +24,18 @@
     var dockerPollTimer = null;
     var closeMenusListener = null;  // stored to avoid leak on re-render
     var darkOn = false;       // dark comfort filter state (server-owned)
+    var appActions = [];      // actions from /__hamr/app/actions (empty when unavailable)
+    var appAccounts = [];     // test accounts from the same endpoint
+    var appMe = null;         // {email,label,phone} from /__hamr/app/whoami, null when logged out/unsupported
+    var actionRunning = {};   // action name -> true while its POST is in flight
+    var actionForms = {};     // action name -> {inputIdx: value} kept across panel re-renders
+    var openForm = "";        // name of the action whose inline form is open
+    var actionMsg = null;     // {ok, text} last action result
+    var actionMsgTimer = null;
+    var loginMsg = "";        // "Open the login page first" hint
+    var loginMsgTimer = null;
+    var loginTarget = null;   // {form, email, pass} when a login form is on the page
+    var detectTimer = null;
 
     // --- Logs State ---
 
@@ -241,6 +253,28 @@
             "#__hamr-panel .hp-mail-btn:hover{color:#E8E8E8;border-color:#FFB347;background:#2F3438;}" +
             "#__hamr-panel .hp-mail-btn svg{flex-shrink:0;}" +
 
+            // Dev actions, test accounts, login badge
+            "#__hamr-status .hp-badge{position:absolute;top:2px;right:2px;min-width:16px;height:16px;" +
+            "padding:0 4px;border-radius:8px;background:#FFB347;color:#1F2326;font:700 10px/16px sans-serif;" +
+            "text-align:center;pointer-events:none;display:none;}" +
+            "#__hamr-panel .hp-app-btn{display:flex;align-items:center;justify-content:space-between;gap:8px;" +
+            "width:100%;margin:0 0 6px;padding:6px 8px;background:#2A2E33;border:1px solid #3A3F45;" +
+            "border-radius:6px;color:#E8E8E8;font-size:12px;text-align:left;cursor:pointer;" +
+            "transition:border-color 0.15s,background 0.15s;}" +
+            "#__hamr-panel .hp-app-btn:hover{border-color:#FFB347;background:#2F3438;}" +
+            "#__hamr-panel .hp-app-btn:disabled{opacity:0.5;cursor:default;}" +
+            "#__hamr-panel .hp-app-btn.danger{color:#F87171;border-color:#7F1D1D;}" +
+            "#__hamr-panel .hp-app-btn.danger:hover{border-color:#EF4444;background:#3A2020;}" +
+            "#__hamr-panel .hp-app-sub{color:#6B7280;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}" +
+            "#__hamr-panel .hp-app-form{margin:0 0 8px;padding:8px;background:#18181B;border:1px solid #3A3F45;border-radius:6px;}" +
+            "#__hamr-panel .hp-app-form label{display:block;margin-bottom:6px;font-size:11px;color:#8B8B8B;}" +
+            "#__hamr-panel .hp-app-form input[type=text],#__hamr-panel .hp-app-form input[type=number]," +
+            "#__hamr-panel .hp-app-form select{display:block;width:100%;margin-top:2px;padding:4px 6px;" +
+            "background:#2A2E33;border:1px solid #3A3F45;border-radius:4px;color:#E8E8E8;font-size:12px;}" +
+            "#__hamr-panel .hp-app-form input[type=checkbox]{margin-right:6px;accent-color:#FFB347;}" +
+            "#__hamr-panel .hp-app-msg{font-size:11px;color:#4ADE80;word-break:break-word;}" +
+            "#__hamr-panel .hp-app-msg.err{color:#F87171;}" +
+
             // Dark comfort filter: invert the whole document, then re-invert
             // media and hamr's own overlay so photos and the panel stay true.
             // Inline <svg> is deliberately left inverted — icons should flip
@@ -293,7 +327,7 @@
         widget = document.createElement("div");
         widget.id = "__hamr-status";
         widget.title = "hamr: connecting...";
-        widget.innerHTML = '<img src="/__hamr/logo.png" width="48" height="48" alt="hamr" style="display:block;pointer-events:none">';
+        widget.innerHTML = '<img src="/__hamr/logo.png" width="48" height="48" alt="hamr" style="display:block;pointer-events:none"><span class="hp-badge"></span>';
         widget.addEventListener("click", function(e) {
             e.stopPropagation();
             togglePanel();
@@ -306,6 +340,13 @@
                 openLogOverlay();
             }
         } catch(e) {}
+
+        loadApp();
+        detectLogin();
+        scheduleDetect();
+        document.addEventListener("htmx:afterSwap", scheduleDetect);
+        document.addEventListener("htmx:load", scheduleDetect);
+        new MutationObserver(scheduleDetect).observe(document.body, {childList: true, subtree: true});
 
         // Close panel on outside click.
         document.addEventListener("click", function(e) {
@@ -385,6 +426,7 @@
     function openPanel() {
         if (!config) return;
         ensurePanel();
+        loadApp();
         pollDockerStatus();
         renderPanel();
         panelOpen = true;
@@ -448,6 +490,14 @@
             '<span class="hp-title">hamr dev</span>' +
             '<span class="hp-dot ' + dotClass + '"></span>' +
             '</div>';
+
+        // Who the app says is logged in, with their own inboxes.
+        html += meHtml();
+
+        // Test accounts lead when a login form is on the page.
+        var acctHtml = accountsHtml();
+        var loginFirst = hasLogin();
+        if (loginFirst) html += acctHtml;
 
         // Watch rules section.
         if (config.rules && config.rules.length > 0) {
@@ -544,6 +594,9 @@
             html += '</div>';
         }
 
+        if (!loginFirst) html += acctHtml;
+        html += actionsHtml();
+
         // Logs toggle + optional mail-inbox shortcut.
         var logsChecked = isLogOverlayOpen();
         html += '<div class="hp-footer">' +
@@ -570,6 +623,7 @@
         html += '</div>';
 
         panel.innerHTML = html;
+        wireApp();
 
         // Wire up logs toggle.
         var logsToggle = panel.querySelector(".hp-logs-toggle");
@@ -664,6 +718,278 @@
         var d = document.createElement("div");
         d.textContent = s;
         return d.innerHTML;
+    }
+
+
+    // --- App Actions & Test Logins ---
+
+    function escA(s) {
+        return esc(s).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    }
+
+    // A 404 (actions not configured), 502 or any non-2xx drops the sections
+    // silently; a network error keeps whatever was loaded before.
+    function loadApp() {
+        // The app resolves its own session cookie; hamr just forwards it.
+        fetch("/__hamr/app/whoami")
+            .then(function(resp) { return resp.ok ? resp.json() : null; })
+            .then(function(d) {
+                appMe = (d && d.account && d.account.email) ? d.account : null;
+                if (panelOpen) renderPanel();
+            })
+            .catch(function() {});
+        fetch("/__hamr/app/actions")
+            .then(function(resp) { return resp.ok ? resp.json() : null; })
+            .then(function(d) {
+                appActions = (d && Array.isArray(d.actions)) ? d.actions : [];
+                appAccounts = (d && Array.isArray(d.accounts)) ? d.accounts : [];
+                updateBadge();
+                if (panelOpen) renderPanel();
+            })
+            .catch(function() {});
+    }
+
+    function hasLogin() {
+        return !!loginTarget && appAccounts.length > 0;
+    }
+
+    function updateBadge() {
+        if (!widget) return;
+        var b = widget.querySelector(".hp-badge");
+        if (!b) return;
+        var show = hasLogin();
+        b.textContent = show ? String(appAccounts.length) : "";
+        b.style.display = show ? "block" : "none";
+    }
+
+    function scheduleDetect() {
+        if (detectTimer) clearTimeout(detectTimer);
+        detectTimer = setTimeout(detectLogin, 200);
+    }
+
+    function findLoginForm() {
+        var forms = document.forms;
+        for (var i = 0; i < forms.length; i++) {
+            var f = forms[i];
+            var pass = null;
+            var pws = f.querySelectorAll("input[type=password]");
+            for (var p = 0; p < pws.length; p++) {
+                if ((pws[p].getAttribute("autocomplete") || "").toLowerCase() !== "new-password") { pass = pws[p]; break; }
+            }
+            if (!pass) continue;
+            var email = null;
+            var ins = f.querySelectorAll("input");
+            for (var j = 0; j < ins.length && !email; j++) {
+                var t = (ins[j].getAttribute("type") || "text").toLowerCase();
+                var ac = (ins[j].getAttribute("autocomplete") || "").toLowerCase();
+                if (t === "email" || ac === "username" || ac === "email") email = ins[j];
+            }
+            for (var k = 0; k < ins.length && !email; k++) {
+                var t2 = (ins[k].getAttribute("type") || "text").toLowerCase();
+                if ((t2 === "text" || t2 === "tel") && /email|user|login/i.test((ins[k].name || "") + " " + (ins[k].id || ""))) email = ins[k];
+            }
+            if (email) return {form: f, email: email, pass: pass};
+        }
+        return null;
+    }
+
+    // Only re-renders when presence flips, so our own DOM changes (which
+    // retrigger the observer) cannot loop.
+    function detectLogin() {
+        var had = hasLogin();
+        loginTarget = findLoginForm();
+        updateBadge();
+        if (had !== hasLogin() && panelOpen) renderPanel();
+    }
+
+    function setNative(el, v) {
+        var d = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+        d.set.call(el, v);
+        el.dispatchEvent(new Event("input", {bubbles: true}));
+        el.dispatchEvent(new Event("change", {bubbles: true}));
+    }
+
+    function loginAs(i) {
+        var a = appAccounts[i];
+        loginTarget = findLoginForm();
+        if (!a) return;
+        if (!loginTarget) {
+            loginMsg = "Open the login page first";
+            if (loginMsgTimer) clearTimeout(loginMsgTimer);
+            loginMsgTimer = setTimeout(function() { loginMsg = ""; if (panelOpen) renderPanel(); }, 4000);
+            renderPanel();
+            return;
+        }
+        setNative(loginTarget.email, a.email || "");
+        setNative(loginTarget.pass, a.password || "");
+        closePanel();
+        if (loginTarget.form.requestSubmit) loginTarget.form.requestSubmit();
+        else loginTarget.form.submit();
+    }
+
+    // "Logged in as Jack" plus links to the inboxes filtered to Jack, so a
+    // tester sees only what that user would have received.
+    function meHtml() {
+        if (!appMe) return "";
+        var name = appMe.label || appMe.email;
+        var h = '<div class="hp-section"><div class="hp-label">Logged in as</div>' +
+            '<div class="hp-app-btn" style="cursor:default"><span>' + esc(name) + '</span>' +
+            '<span class="hp-app-sub">' + esc(appMe.email) + '</span></div>';
+        if (config.mail_mock) {
+            h += '<a class="hp-mail-btn" href="/__hamr/mail?to=' + encodeURIComponent(appMe.email) +
+                '" target="_blank" rel="noopener">Open their mail</a>';
+        }
+        if (config.sms_mock && appMe.phone) {
+            h += '<a class="hp-mail-btn" href="/__hamr/sms?to=' + encodeURIComponent(appMe.phone) +
+                '" target="_blank" rel="noopener">Open their texts</a>';
+        }
+        return h + '</div>';
+    }
+
+    function accountsHtml() {
+        if (appAccounts.length === 0) return "";
+        var h = '<div class="hp-section"><div class="hp-label">Test accounts</div>';
+        for (var i = 0; i < appAccounts.length; i++) {
+            var a = appAccounts[i];
+            h += '<button class="hp-app-btn hp-acct" data-acct="' + i + '">' +
+                '<span>' + esc(a.label || a.email || "") + '</span>' +
+                '<span class="hp-app-sub">' + esc(a.email || "") + '</span></button>';
+        }
+        if (loginMsg) h += '<div class="hp-app-msg err">' + esc(loginMsg) + '</div>';
+        return h + '</div>';
+    }
+
+    function actionFormHtml(a, ai) {
+        var vals = actionForms[a.name] || {};
+        var h = '<form class="hp-app-form" data-form="' + ai + '" novalidate>';
+        var ins = a.inputs || [];
+        for (var i = 0; i < ins.length; i++) {
+            var inp = ins[i];
+            var v = vals[i] !== undefined ? vals[i] : (inp.default || "");
+            var lbl = esc(inp.label || inp.name) + (inp.required ? " *" : "");
+            var req = inp.required ? " required" : "";
+            if (inp.type === "bool") {
+                h += '<label><input type="checkbox" data-in="' + i + '"' + (v === "true" ? " checked" : "") + '>' + lbl + '</label>';
+            } else if (inp.type === "select") {
+                h += '<label>' + lbl + '<select data-in="' + i + '"' + req + '>';
+                var opts = inp.options || [];
+                for (var o = 0; o < opts.length; o++) {
+                    h += '<option value="' + escA(opts[o]) + '"' + (opts[o] === v ? " selected" : "") + '>' + esc(opts[o]) + '</option>';
+                }
+                h += '</select></label>';
+            } else {
+                h += '<label>' + lbl + '<input type="' + (inp.type === "number" ? "number" : "text") +
+                    '" data-in="' + i + '" value="' + escA(v) + '"' + req + '></label>';
+            }
+        }
+        return h + '<button type="submit" class="hp-app-btn' + (a.dangerous ? " danger" : "") + '"' +
+            (actionRunning[a.name] ? " disabled" : "") + '>Run</button></form>';
+    }
+
+    function actionsHtml() {
+        if (appActions.length === 0) return "";
+        var h = '<div class="hp-section"><div class="hp-label">Actions</div>';
+        for (var i = 0; i < appActions.length; i++) {
+            var a = appActions[i];
+            h += '<button class="hp-app-btn hp-act' + (a.dangerous ? " danger" : "") + '" data-act="' + i + '"' +
+                (actionRunning[a.name] ? " disabled" : "") + ' title="' + escA(a.description || "") + '">' +
+                '<span>' + esc(a.label || a.name) + '</span></button>';
+            if (openForm === a.name && a.inputs && a.inputs.length > 0) h += actionFormHtml(a, i);
+        }
+        if (actionMsg) h += '<div class="hp-app-msg' + (actionMsg.ok ? "" : " err") + '">' + esc(actionMsg.text) + '</div>';
+        return h + '</div>';
+    }
+
+    function setActionMsg(ok, text) {
+        actionMsg = {ok: ok, text: text};
+        if (actionMsgTimer) clearTimeout(actionMsgTimer);
+        actionMsgTimer = setTimeout(function() { actionMsg = null; if (panelOpen) renderPanel(); }, 6000);
+    }
+
+    function runAction(a, inputs) {
+        if (actionRunning[a.name]) return;
+        if (a.dangerous && !window.confirm((a.label || a.name) + ": this cannot be undone. Continue?")) return;
+        actionRunning[a.name] = true;
+        renderPanel();
+        var status = 0;
+        fetch("/__hamr/app/actions/" + encodeURIComponent(a.name), {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({inputs: inputs, confirm: !!a.dangerous})
+        }).then(function(resp) {
+            status = resp.status;
+            return resp.json().catch(function() { return {}; });
+        }).then(function(d) {
+            if (status >= 200 && status < 300) setActionMsg(true, d.message || "Done");
+            else setActionMsg(false, d.error || ("Failed (HTTP " + status + ")"));
+        }).catch(function() {
+            setActionMsg(false, "Request failed");
+        }).then(function() {
+            delete actionRunning[a.name];
+            if (panelOpen) renderPanel();
+        });
+    }
+
+    function collectInputs(a, form) {
+        var out = {};
+        var ins = a.inputs || [];
+        for (var i = 0; i < ins.length; i++) {
+            var el = form.querySelector('[data-in="' + i + '"]');
+            if (!el) continue;
+            out[ins[i].name] = ins[i].type === "bool" ? (el.checked ? "true" : "false") : el.value;
+        }
+        return out;
+    }
+
+    function wireApp() {
+        var i;
+        var accts = panel.querySelectorAll(".hp-acct");
+        for (i = 0; i < accts.length; i++) {
+            (function(btn) {
+                btn.addEventListener("click", function(e) {
+                    e.stopPropagation();
+                    loginAs(parseInt(btn.getAttribute("data-acct"), 10));
+                });
+            })(accts[i]);
+        }
+        var acts = panel.querySelectorAll(".hp-act");
+        for (i = 0; i < acts.length; i++) {
+            (function(btn) {
+                btn.addEventListener("click", function(e) {
+                    e.stopPropagation();
+                    var a = appActions[parseInt(btn.getAttribute("data-act"), 10)];
+                    if (!a) return;
+                    if (a.inputs && a.inputs.length > 0) {
+                        openForm = (openForm === a.name) ? "" : a.name;
+                        renderPanel();
+                    } else {
+                        runAction(a, {});
+                    }
+                });
+            })(acts[i]);
+        }
+        var forms = panel.querySelectorAll(".hp-app-form");
+        for (i = 0; i < forms.length; i++) {
+            (function(form) {
+                var a = appActions[parseInt(form.getAttribute("data-form"), 10)];
+                if (!a) return;
+                var keep = function(e) {
+                    var idx = e.target.getAttribute("data-in");
+                    if (idx === null) return;
+                    if (!actionForms[a.name]) actionForms[a.name] = {};
+                    actionForms[a.name][idx] = e.target.type === "checkbox" ? (e.target.checked ? "true" : "false") : e.target.value;
+                };
+                form.addEventListener("input", keep);
+                form.addEventListener("change", keep);
+                form.addEventListener("click", function(e) { e.stopPropagation(); });
+                form.addEventListener("submit", function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (!form.reportValidity()) return;
+                    runAction(a, collectInputs(a, form));
+                });
+            })(forms[i]);
+        }
     }
 
     // --- Logs Overlay ---

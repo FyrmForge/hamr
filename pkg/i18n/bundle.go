@@ -11,18 +11,17 @@ import (
 
 // BundleConfig configures how a Bundle loads locale files.
 type BundleConfig struct {
-	LocaleDir         string // directory containing *.json files
-	DefaultLocale     string // e.g. "en"
-	FallbackToDefault *bool  // fall back to default locale for missing keys (default true; nil = true)
+	LocaleDir         string       // directory containing *.json files
+	DefaultLocale     string       // e.g. "en"
+	FallbackToDefault *bool        // fall back to default locale for missing keys (default true; nil = true)
 	Logger            *slog.Logger // receives missing/extra-key warnings; nil = slog.Default()
 }
 
-
 // Bundle holds translators for all loaded locales.
 type Bundle struct {
-	translators    map[string]*Translator
-	defaultLocale  string
-	supported      []string
+	translators   map[string]*Translator
+	defaultLocale string
+	supported     []string
 }
 
 // NewBundle reads all *.json files from cfg.LocaleDir, validates them against

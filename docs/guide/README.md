@@ -46,6 +46,7 @@ Learn how to build full-stack Go applications with HAMR.
 11. [Real-Time](11-real-time.md) — WebSocket hub, rooms, HTMX integration
 12. [Testing](12-testing.md) — Unit tests, E2E with go-rod, CI setup
 13. [Deployment](13-deployment.md) — Docker, CI/CD, production config
+14. [Dev Actions](dev-actions.md) — Widget actions, seeded test logins, staging front door
 
 ## Package Reference
 

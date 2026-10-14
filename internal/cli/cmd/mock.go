@@ -21,8 +21,21 @@ configuration comes from environment variables:
   HAMR_MOCK_PORT               app-facing port: stripe /v1/* + mail/sms ingest (default 4500)
   HAMR_MOCK_UI_PORT            dashboards port; unset → UI on HAMR_MOCK_PORT
   HAMR_MOCK_BIND               bind host; empty → all interfaces (set 127.0.0.1 on a shared host)
-  HAMR_MOCK_UI_PASSWORD        basic-auth password for the /__hamr/* dashboards (any username); empty → open
+  HAMR_MOCK_UI_PASSWORD        password gate for the /__hamr/* dashboards (browser: /__hamr/gate page + cookie;
+                               scripts: X-Hamr-Gate header); empty → open
   HAMR_MOCK_API_ALLOW          comma-separated IPs/CIDRs allowed on the app-facing port (peer address only); empty → open
+
+Front-door mode — set HAMR_MOCK_UPSTREAM to put the mocks in front of your app
+on the public domain. HAMR_MOCK_PORT stays the private port (stripe API + mail/sms
+ingest, never gated); HAMR_MOCK_UI_PORT becomes the public port and serves the
+dashboards, the hamr widget, and a proxy to the app, all behind the password gate:
+
+  HAMR_MOCK_UPSTREAM           app's private URL, e.g. http://app:8080 (requires HAMR_MOCK_UI_PORT and HAMR_MOCK_UI_PASSWORD)
+  HAMR_BASE_URL                public origin, e.g. https://staging.example.com; https makes the gate cookie Secure
+                               and is the default for HAMR_STRIPE_BASE_URL
+  HAMR_GATE_BYPASS             comma-separated paths that skip the gate, matched on whole segments
+                               (/payments covers /payments/x, not /payments-admin)
+  HAMR_ACTIONS_TOKEN           shared token for the app's /_devactions endpoint; unset → no app actions in the widget
 
   HAMR_MAIL_MAX_MESSAGES       inbox cap (default 500)
   HAMR_MAIL_MAX_MESSAGE_BYTES  per-message byte cap (default 10MiB)
@@ -31,7 +44,7 @@ configuration comes from environment variables:
   HAMR_SMS_MAX_MESSAGES        SMS inbox cap (default 500)
   HAMR_SMS_PERSIST_PATH        JSONL path; empty → in-memory only
 
-  HAMR_STRIPE_BASE_URL         browser-reachable origin of the mock UI (required for stripe)
+  HAMR_STRIPE_BASE_URL         browser-reachable origin of the mock UI (required for stripe; front door: defaults to HAMR_BASE_URL)
   HAMR_STRIPE_WEBHOOK_URL      app's webhook handler (required for stripe)
   HAMR_STRIPE_THIN_WEBHOOK_URL app's v2 thin-event handler; empty → thin events are not sent
   HAMR_STRIPE_WEBHOOK_SECRET   matches the app's STRIPE_WEBHOOK_SECRET (required for stripe)

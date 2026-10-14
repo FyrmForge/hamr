@@ -415,7 +415,7 @@ func TestRunImmediately_preTickCalled(t *testing.T) {
 	task := &stubTask{name: "imm-pt", affected: 1}
 
 	var (
-		preTicked atomic.Bool
+		preTicked  atomic.Bool
 		postTicked atomic.Bool
 	)
 

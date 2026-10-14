@@ -10,6 +10,32 @@ the TL;DR on top of it.
 
 ### Added
 
+- **Staging front door and dev actions.** `hamr mock-serve` with
+  `HAMR_MOCK_UPSTREAM=http://app:8080` sits on the public domain: it serves
+  the mail/SMS/Stripe dashboards and the hamr widget, and proxies everything
+  else to the app, behind one password. It requires `HAMR_MOCK_UI_PORT` (the
+  public port) and `HAMR_MOCK_UI_PASSWORD` and refuses to start without them;
+  `HAMR_MOCK_PORT` stays the private, ungated API/ingest port. New env:
+  `HAMR_BASE_URL` (public origin; default for `HAMR_STRIPE_BASE_URL`; `https://`
+  makes the gate cookie Secure), `HAMR_GATE_BYPASS` (paths that skip the gate,
+  matched on whole path segments) and `HAMR_ACTIONS_TOKEN`. The new
+  `pkg/devactions` lets an app expose buttons (reseed, create account, ...)
+  and seeded test logins at `/_devactions`, enabled only when
+  `HAMR_ACTIONS_TOKEN` is set and `HAMR_ACTIONS_ENV` is `development` or
+  `staging`. Dangerous actions need a confirm and the `hamr_disposable` marker
+  table that only the dev seed creates; on a fresh database run
+  `make seed` (`./bin/site --seed`) once first. `hamr new` scaffolds
+  `internal/devactions` with reseed, create-account and logout-everyone and the
+  accounts `admin@test.com` / `user@test.com` (`Test1234!`); `hamr dev`
+  injects the token and env automatically. The widget shows the actions, the
+  test accounts, and a count badge on login forms (a password field that is
+  not `autocomplete="new-password"`); click an account to fill and submit. The
+  scaffolded login and register forms now set `autocomplete`. With
+  `Registry.WhoAmI` (scaffolded via `devactions.SessionWhoAmI`) the widget
+  also shows who is logged in, with "Open their mail" / "Open their texts"
+  links; the mail and SMS inboxes gained a `?to=` filter for one recipient.
+  See [Dev Actions](guide/dev-actions.md).
+
 - **Stripe mock supports Checkout trials.** A `mode=subscription` session
   accepts `subscription_data[trial_end]` (at least 48 hours after the mock
   clock). Paying it creates a `trialing` subscription with a £0 paid first
@@ -20,12 +46,23 @@ the TL;DR on top of it.
 
 ### Changed
 
+- **Breaking: `HAMR_MOCK_UI_PASSWORD` is no longer HTTP basic auth.** It is
+  now a gate: browsers get a password page at `/__hamr/gate` that sets an
+  HttpOnly cookie valid 7 days (changing the password invalidates every
+  cookie); scripts send `X-Hamr-Gate: <password>`. Both are stripped before the
+  app sees the request. Scripts that sent basic auth must send `X-Hamr-Gate`
+  instead. In plain mode the gate still covers `/__hamr/*` only.
 - **Go 1.27 is now required.** `go.mod`, the Docker build image and the docs
   move from Go 1.25 to 1.27. CI was failing because projects made by
   `hamr new` pulled templ v0.3.1070, which needs Go 1.26 or newer.
 - **The `hamr dev` proxy now sends `X-Forwarded-Host` and
   `X-Forwarded-Proto`** to the app, alongside `X-Forwarded-For`. It moved
   off the `ReverseProxy.Director` hook, which Go 1.26 deprecated.
+
+- **`hamr dev` serves `/__hamr/*` only for `localhost`, `*.localhost` or IP
+  Hosts.** Other hostnames get 403, which stops DNS-rebinding pages from
+  reading the inboxes or running dev actions. Use `localhost` or an IP rather
+  than a custom `/etc/hosts` name; the tunnel is unaffected.
 
 ### Fixed
 

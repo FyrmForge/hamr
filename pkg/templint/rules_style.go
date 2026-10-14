@@ -3,10 +3,10 @@ package templint
 import "regexp"
 
 var (
-	inlineStyleRe     = regexp.MustCompile(`style="[^"]*"`)
+	inlineStyleRe      = regexp.MustCompile(`style="[^"]*"`)
 	inlineStyleTemplRe = regexp.MustCompile(`style=\{`)
-	emptyClassRe      = regexp.MustCompile(`class=""`)
-	jsHrefRe          = regexp.MustCompile(`href="javascript:`)
+	emptyClassRe       = regexp.MustCompile(`class=""`)
+	jsHrefRe           = regexp.MustCompile(`href="javascript:`)
 )
 
 type inlineStyleRule struct {

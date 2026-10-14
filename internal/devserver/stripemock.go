@@ -105,7 +105,7 @@ type StripeMock struct {
 	portalSessions  map[string]*stripePortalSession
 	portalConfig    stripePortalConfig // one global configuration; see stripemock_portal.go
 	clockOffset     atomic.Int64       // seconds the mock clock runs ahead of real time; see stripemock_clock.go
-	events          []*stripeEvent // newest last, capped at stripeEventLimit
+	events          []*stripeEvent     // newest last, capped at stripeEventLimit
 	idem            map[string]*idemEntry
 	idemMu          sync.Mutex
 	webhookEP       WebhookEndpoint // destination + secret for outbound signed events; zero value disables firing

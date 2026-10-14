@@ -85,9 +85,9 @@ type mcpGateway struct {
 	makefile    string
 	logger      *slog.Logger
 
-	auditPath string                    // resolved audit-log path ("" = disabled)
+	auditPath string                      // resolved audit-log path ("" = disabled)
 	audit     atomic.Pointer[mcpAuditLog] // opened lazily on first activation; atomic so the M-toggle goroutine can publish it while handlers read it
-	logSink   func(string)              // live feed for the TUI MCP tab (every request)
+	logSink   func(string)                // live feed for the TUI MCP tab (every request)
 }
 
 // mcpGatewayDeps groups the gateway's collaborators so the constructor stays

@@ -37,11 +37,11 @@ type ProjectConfig struct {
 	// in sync without manual coordination.
 	StripeWebhookSecret string
 	IncludeEmailMock    bool // wire pkg/emailmock + enable /__hamr/mail in hamr.toml
-	IncludeLocale    bool
-	IncludeAlpine    bool
-	DefaultLocale    string // default: "en"
-	HamrVersion      string // HAMR version at scaffold time
-	ScaffoldedAt     string // date the project was scaffolded (YYYY-MM-DD)
+	IncludeLocale       bool
+	IncludeAlpine       bool
+	DefaultLocale       string // default: "en"
+	HamrVersion         string // HAMR version at scaffold time
+	ScaffoldedAt        string // date the project was scaffolded (YYYY-MM-DD)
 }
 
 // Validate checks that the ProjectConfig has all required fields and valid values.
@@ -231,6 +231,9 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 		{"templates/new/internal/web/handler/about/handler.go.tmpl", "internal/web/handler/about/handler.go"},
 		{"templates/new/internal/web/handler/about/about.templ.tmpl", "internal/web/handler/about/about.templ"},
 
+		// internal/devactions
+		{"templates/new/internal/devactions/devactions.go.tmpl", "internal/devactions/devactions.go"},
+
 		// internal/middleware
 		{"templates/new/internal/middleware/logging.go.tmpl", "internal/middleware/logging.go"},
 
@@ -280,6 +283,7 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 	if cfg.DBConnector == "gorm" {
 		repoTmplDir = "templates/new/internal/repo/gorm"
 	}
+	files = append(files, templateFile{"templates/new/internal/devactions/seed." + dbDir + ".sql.tmpl", "internal/devactions/seed.sql"})
 	files = append(files, templateFile{repoTmplDir + "/store.go.tmpl", "internal/repo/" + dbDir + "/store.go"})
 
 	// Session model — gorm scaffolds carry the sessions schema as a struct;

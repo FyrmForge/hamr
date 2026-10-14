@@ -105,7 +105,7 @@ type stripeSwitch struct {
 	// is in flight; the process-exit and .env paths wait their turn.
 	switchMu sync.Mutex
 
-	mu   sync.Mutex
+	mu     sync.Mutex
 	mode   string // StripeModeMock / StripeModeListen; "" until boot
 	proc   *childProc
 	key    string // STRIPE_KEY the current layer was built with

@@ -31,7 +31,7 @@ type LocaleSection struct {
 
 // HamrSection holds the HAMR scaffold tracking fields.
 type HamrSection struct {
-	Version     string `toml:"version"`
+	Version      string `toml:"version"`
 	ScaffoldedAt string `toml:"scaffolded_at"`
 }
 

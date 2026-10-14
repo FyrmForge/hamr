@@ -1,5 +1,5 @@
 {{- $hasCompose := or (ne .Database "sqlite") (eq .StorageBackend "s3") -}}
-.PHONY: build test lint templint{{- if not .MigrateAtStartup}} migrate{{- if eq .DBConnector "sqlx"}} migrate-down migrate-status migrate-create{{- end}}{{- end}} db-sh{{- if $hasCompose}} docker-up docker-down docker-delete docker-reload{{- end}} clean install check-templ generate{{- if eq .CSS "tailwind"}} check-node-modules css-build{{- end}}{{- if .StaticS3}} sync-static{{- end}}{{- if .IncludeLocale}} locale-gen{{- end}}{{- if .IncludeE2E}} e2e e2e-local e2e-run e2e-run-local{{- end}}
+.PHONY: build test lint templint{{- if not .MigrateAtStartup}} migrate{{- if eq .DBConnector "sqlx"}} migrate-down migrate-status migrate-create{{- end}}{{- end}} seed db-sh{{- if $hasCompose}} docker-up docker-down docker-delete docker-reload{{- end}} clean install check-templ generate{{- if eq .CSS "tailwind"}} check-node-modules css-build{{- end}}{{- if .StaticS3}} sync-static{{- end}}{{- if .IncludeLocale}} locale-gen{{- end}}{{- if .IncludeE2E}} e2e e2e-local e2e-run e2e-run-local{{- end}}
 
 # Force bash so the ENV_LOAD eval below works cross-shell (sh on Debian/Ubuntu
 # is dash, which doesn't grok `eval "$(...)"` quoting consistently).
@@ -91,6 +91,10 @@ migrate-create:
 	$(ENV_LOAD) go run ./cmd/migrate create $(NAME)
 {{- end}}
 {{- end}}
+
+## seed: Load the dev seed (test accounts + the hamr_disposable marker that unlocks wipe/reseed). Safe to re-run.
+seed:
+	$(ENV_LOAD) go run ./cmd/site --seed
 
 ## db-sh: Open an interactive shell to the local dev database
 db-sh:

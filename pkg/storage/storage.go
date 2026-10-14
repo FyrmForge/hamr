@@ -90,10 +90,10 @@ func contentDispositionAttachment(name string) string {
 
 // S3Config holds the parameters needed to connect to an S3-compatible service.
 type S3Config struct {
-	Endpoint       string // e.g. "http://localhost:9000" for RustFS
-	Bucket         string
-	Region         string
-	AccessKeyID    string
+	Endpoint        string // e.g. "http://localhost:9000" for RustFS
+	Bucket          string
+	Region          string
+	AccessKeyID     string
 	SecretAccessKey string
-	UsePathStyle   bool // true for RustFS / path-style addressing
+	UsePathStyle    bool // true for RustFS / path-style addressing
 }
