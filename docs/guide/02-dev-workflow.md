@@ -44,12 +44,12 @@ On startup, `hamr dev` compares `[hamr].version` in `hamr.toml` against the CLI.
 
 - Status bar at the top with the active tab, the proxy (or tunnel) URL, and MCP state.
 - A scrollable log viewport in the middle (`PgUp`/`PgDn`/arrows to scroll). Long log lines soft-wrap to the viewport width so nothing gets clipped at the right edge; resizing the terminal re-wraps in place.
-- Hotkey hints at the bottom, ending in `? help`, with the system status (build state, failing rules) pinned bottom-right.
+- A short hint bar at the bottom (`r` rebuild, `o` open, `m` make, `:` commands, `/` search, `? help`, `q` quit), with the system status (build state, failing rules) pinned bottom-right. The other hotkeys are hidden from it but listed in `?` help and in the command palette.
 - Modal overlays for actions that need confirmation.
 
 `q` / `Ctrl+C` work even when the dev server is parked on a `hamr.toml` parse error — the TUI quits cleanly instead of getting stuck on "waiting for config fix...". `R` works there too, retrying immediately: the config can be valid and startup still have failed on a clashing port or a bad `.env`, and neither of those touches `hamr.toml`, so waiting on a file write would hang forever.
 
-Hotkeys include a Makefile-target runner, a help overlay, and per-stack log tabs:
+Hotkeys include a command palette, a Makefile-target runner, a help overlay, and per-stack log tabs:
 
 | Key | Action |
 |-----|--------|
@@ -57,7 +57,9 @@ Hotkeys include a Makefile-target runner, a help overlay, and per-stack log tabs
 | `R` | **Restart the dev server** — re-runs the whole startup lifecycle (config, docker compose, port resolution, `.env` injection, builds, daemons, watcher) without dropping the TUI. For stale startup-only state: a clashing port, an edited `.env`, a bad container. Also retries while parked on a config error. Ignored while the server is still starting up, and refused for the first 5 seconds after it becomes ready. |
 | `o` | Open the proxy URL in the browser — the public tunnel URL while `T` is on |
 | `c` | Clear the active tab's log buffer |
-| `m` | **Run a Makefile target** — opens a fuzzy palette listing every target in the project's `./Makefile` (in declaration order). Type to filter, `↑/↓` to move, `↩` to run, `Esc` to cancel. Hidden when no `Makefile` is present. |
+| `:` | **Command palette** — one fuzzy-searchable list of the hamr commands (`rebuild`, `restart`, `open browser`, `clear logs`, `toggle mcp`, `toggle tunnel`, `stripe mode`, `help`, `quit` — each shown with its hotkey on the right) plus every Makefile target as `make:<target>`. Type to filter (`db-see` finds `make:db-seed`), `↑/↓` to move, `↩` to run, `Esc` to cancel. Commands that don't apply right now (no proxy yet, no MCP gateway, no `[dev.stripe]`) are left out, and `make:` entries only appear when a `Makefile` exists. |
+| `m` | **Run a Makefile target** — opens the same palette pre-filtered with `make:` typed in, so it lists every target in the project's `./Makefile` (in declaration order). Backspace the prefix to widen it to all commands. Does nothing when no `Makefile` is present. |
+| `M` | **Toggle the MCP gateway** — runtime kill-switch for `[dev.mcp]`. Only when the gateway is known. |
 | `T` | **Toggle a public tunnel** — runs `cloudflared` (default), `ngrok`, or a custom command against the dev proxy, sets `BASE_URL` to the public URL, and restarts your app. Only live reload, the logo and the mail/SMS/Stripe mocks are reachable under `/__hamr/` through the tunnel; every other hamr route returns 403, and live reload and error pages there carry no process output. Off at every start. See [`[dev.tunnel]`](hamr-toml.md). |
 | `S` | **Flip Stripe mock ⇄ `stripe listen`** — switches `[dev.stripe]` between hamr's Stripe mock and `stripe listen` against your sandbox (`STRIPE_KEY` from `.env`), injects the matching `STRIPE_*` env, and restarts your app. The status bar shows `stripe: mock` / `stripe: listen`. A failed switch keeps the current mode. Hidden when `[dev.stripe]` is off. See [`[dev.stripe]`](hamr-toml.md). |
 | `Tab` / `Shift+Tab` | Cycle log tabs — `hamr dev` plus one tab per `[[dev.docker_compose]]` entry, fed by `docker compose logs -f` |
@@ -86,7 +88,7 @@ Line selection (click, then `y` to copy) is reverse-video and replaces the botto
 
 `Shift+Click` and `Ctrl+Click` rely on the terminal forwarding the modifier flag through its mouse encoding. Modern terminals (Alacritty, WezTerm, Kitty, Ghostty, iTerm2) do; some others (older gnome-terminal, certain PuTTY builds) intercept shift to trigger native text selection instead — if the modifier doesn't reach the TUI, those clicks behave as plain clicks. Plain click and `y`/`esc` work everywhere mouse capture itself works.
 
-Picking a target closes the palette straight away — nothing is modal, so the TUI stays usable while the target runs. The status indicator shows a spinner and `make <target>` for the duration, and stdout and stderr stream into the hamr tab, prefixed `[make:<target>] ` per line, ending with `[make:<target>] exited <n>`. `Ctrl+C` quits the TUI, taking the run and its children with it. Define `docker-wipe`, `migrate`, or whatever else you need as Makefile targets and chain them however you like — `m` then becomes the single front door for project-specific scripts.
+Picking a target closes the palette straight away — nothing is modal, so the TUI stays usable while the target runs. The status indicator shows a spinner and `make <target>` for the duration, and stdout and stderr stream into the hamr tab, prefixed `[make:<target>] ` per line, ending with `[make:<target>] exited <n>`. `Ctrl+C` quits the TUI, taking the run and its children with it. Define `docker-wipe`, `migrate`, or whatever else you need as Makefile targets and chain them however you like — `m` (or `:` then `make:`) becomes the single front door for project-specific scripts.
 
 ---
 

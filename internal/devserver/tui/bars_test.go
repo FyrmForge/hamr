@@ -14,6 +14,7 @@ import (
 // terminal width, the bar must truncate it rather than overflow and wrap — a
 // wrapped bar pushes every row down and corrupts the whole frame.
 func TestModel_Bars_TruncateOverflowingLeftCluster(t *testing.T) {
+	withoutMakefile(t)
 	m := NewModel(NewHotkeySource())
 	m.width = 30
 
@@ -214,6 +215,7 @@ func TestMarquee(t *testing.T) {
 // a real appetite. Overflowing would wrap a bar onto a second line, and the
 // status must survive narrowing — the hints truncate instead.
 func TestStatusBar_FitsNarrowTerminal(t *testing.T) {
+	withoutMakefile(t)
 	for _, width := range []int{40, 60, 100} {
 		m := NewModel(NewHotkeySource())
 		m.width = width
@@ -236,6 +238,7 @@ func TestStatusBar_FitsNarrowTerminal(t *testing.T) {
 // TestStatusBar_TunnelURLReplacesProxyURL: while the tunnel is on its public
 // URL takes the proxy URL's slot (it's what `o` opens); off restores it.
 func TestStatusBar_TunnelURLReplacesProxyURL(t *testing.T) {
+	withoutMakefile(t)
 	m := NewModel(NewHotkeySource())
 	m.width = 200
 	m.proxyURL = "http://localhost:3000"
@@ -321,5 +324,28 @@ func TestActionsReady_ReleasesSpinnerChain(t *testing.T) {
 	_, cmd := m.Update(brokerEventMsg{evt: devserver.SSEEvent{Type: devserver.EvBuilding, Data: "site"}})
 	if cmd == nil {
 		t.Fatal("chain must restart for the new run's first build")
+	}
+}
+
+// TestHintBar_DefaultRowIsSlim: the everyday row carries only the core hints;
+// the rest live in the command palette and the help modal.
+func TestHintBar_DefaultRowIsSlim(t *testing.T) {
+	withMakefile(t, "build")
+	m := NewModel(NewHotkeySource())
+	m.width = 200
+	m.mcpKnown = true
+	m.proxyURL = "http://localhost:3000"
+	m.stripeMode = "mock"
+	m.setDockerTabs([]string{"infra"})
+	bar := stripANSI(m.hintBar())
+	for _, want := range []string{"r rebuild", "o open", "m make", ": commands", "/ search", "? help", "q quit"} {
+		if !strings.Contains(bar, want) {
+			t.Fatalf("hint bar missing %q: %q", want, bar)
+		}
+	}
+	for _, gone := range []string{"restart", "clear", "mcp", "tunnel", "stripe", "tabs"} {
+		if strings.Contains(bar, gone) {
+			t.Fatalf("hint bar still shows %q: %q", gone, bar)
+		}
 	}
 }

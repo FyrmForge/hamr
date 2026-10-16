@@ -109,6 +109,8 @@ On the local listener, hamr's own `/__hamr/*` routes (widget, inboxes, Stripe mo
 
 Press `T` to open a public tunnel to the dev proxy (`cloudflared` by default, or `ngrok` / a custom command). hamr sets `BASE_URL` to the public URL and restarts your app; every hamr route except live reload and the mail/SMS/Stripe mocks is blocked through the tunnel, and process output is kept out of live reload and error pages. See [`[dev.tunnel]`](hamr-toml.md).
 
+Press `:` for the command palette: the hamr commands (`rebuild`, `restart`, `open browser`, `clear logs`, `toggle mcp`, `toggle tunnel`, `stripe mode`, `help`, `quit`) plus each Makefile target as `make:<target>`, fuzzy-searchable (`m` opens it pre-filtered to `make:`). The bottom hint bar shows only the core keys; `?` lists them all.
+
 Press `S` to flip Stripe between hamr's mock and `stripe listen` against your sandbox. hamr runs the Stripe CLI with `STRIPE_KEY` from `.env`, injects the signing secret it prints, and restarts your app. See [`[dev.stripe]`](hamr-toml.md).
 
 ---

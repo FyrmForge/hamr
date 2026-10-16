@@ -124,7 +124,7 @@ func runDev(cmd *cobra.Command, _ []string) error {
 	if err := rt.Start(); err != nil {
 		// Bubbletea bailed before the runner finished: tear it down so
 		// goroutines drain and we surface the most informative error.
-		<-runnerErrCh
+		<-runnerErrCh //nolint:errcheck // drained only to wait for teardown; err is the one to surface
 		return err
 	}
 	return <-runnerErrCh

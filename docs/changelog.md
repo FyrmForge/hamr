@@ -10,6 +10,17 @@ the TL;DR on top of it.
 
 ### Added
 
+- **`hamr dev` command palette.** `:` opens one fuzzy-searchable list of
+  hamr commands (`rebuild`, `restart`, `open browser`, `clear logs`,
+  `toggle mcp`, `toggle tunnel`, `stripe mode`, `help`, `quit`; each with its
+  hotkey on the right) plus every
+  Makefile target as `make:<target>`, so `db-see` finds `make:db-seed`.
+  `m` now opens the same palette pre-filtered with `make:` (backspace widens
+  it). All single-key bindings still work. The bottom hint bar is trimmed to
+  `r` rebuild, `o` open, `m` make, `:` commands, `/` search, `? help`,
+  `q` quit; the rest are in `?` help (which now lists `:` and `M`) and the
+  palette.
+
 - **Staging front door and dev actions.** `hamr mock-serve` with
   `HAMR_MOCK_UPSTREAM=http://app:8080` sits on the public domain: it serves
   the mail/SMS/Stripe dashboards and the hamr widget, and proxies everything

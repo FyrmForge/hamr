@@ -2,7 +2,7 @@ package tui
 
 // helpState is the (very) small state machine for the help modal. Only
 // two states (open/closed) but expressed as a struct for symmetry with
-// runState — keeps the model's modal handling uniform.
+// paletteState — keeps the model's modal handling uniform.
 type helpState struct {
 	open bool
 }
@@ -38,15 +38,17 @@ type helpEntry struct {
 	desc string
 }
 
-// helpEntries is the canonical list rendered inside the modal. Kept in a
-// single place so the hint bar and the help modal can never drift —
-// future bindings should be added here and tagged into both surfaces.
+// helpEntries is the canonical list rendered inside the modal. The hint bar
+// shows only the everyday subset; every binding belongs here, and hamr
+// commands also belong in paletteEntries (model.go).
 var helpEntries = []helpEntry{
 	{"r", "rebuild all watch rules"},
 	{"R", "restart the dev server (full startup: docker, ports, .env, builds)"},
 	{"o", "open the proxy URL in browser (the tunnel URL while it's on)"},
 	{"c", "clear the active tab's log buffer"},
-	{"m", "run a Makefile target (fuzzy palette)"},
+	{":", "command palette — fuzzy-find any command or make target"},
+	{"m", "command palette filtered to Makefile targets"},
+	{"M", "toggle the MCP gateway (runtime only)"},
 	{"T", "toggle the public tunnel ([dev.tunnel]; sets BASE_URL, restarts apps)"},
 	{"S", "flip Stripe mock ⇄ stripe listen ([dev.stripe]; injects STRIPE_*, restarts apps)"},
 	{"Tab / Shift+Tab", "cycle log tabs (hamr ↔ docker stacks)"},

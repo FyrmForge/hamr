@@ -18,10 +18,11 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// makefilePath is the path the run-overlay reads. Project-root relative —
-// hamr dev is always invoked from the project root, so an unqualified
-// "Makefile" resolves to the right file.
-const makefilePath = "Makefile"
+// makefilePath is the path the command palette reads (a var so tests can
+// point it elsewhere). Project-root relative — hamr dev is always invoked
+// from the project root, so an unqualified "Makefile" resolves to the right
+// file.
+var makefilePath = "Makefile"
 
 // Reserved rows for the chrome: status bar (1) + hint bar (1). The view
 // renders status, the viewport, and hint joined by single newlines, so
@@ -155,7 +156,7 @@ type Model struct {
 
 	hotkeys *HotkeySource
 
-	run runState
+	palette paletteState
 	// runMake dispatches `make <target>` through the dev server so its
 	// output reaches every consumer (this viewport, the browser panel, MCP
 	// logs.read). Nil until the runner reports its actions are up.
@@ -414,7 +415,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Modal overlays own input — wheel under a modal would otherwise
 		// scroll the log pane behind it, which is disorienting.
-		if m.help.active() || m.run.active() {
+		if m.help.active() || m.palette.active() {
 			return m, nil
 		}
 		if !m.ready {
@@ -445,8 +446,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
 	// Help is the outermost modal — always closeable on any key, never
-	// blocks ctrl+c. Take it before the run modal so '?' inside the run
-	// palette doesn't accidentally toggle help.
+	// blocks ctrl+c. Take it before the palette so '?' typed into the palette
+	// doesn't accidentally toggle help.
 	if m.help.active() {
 		if key == "ctrl+c" {
 			m.hotkeys.Send(devserver.HotkeyQuit)
@@ -456,17 +457,27 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Run overlay owns the keyboard while open — but only until a target is
+	// The palette owns the keyboard while open — but only until an entry is
 	// confirmed, at which point it closes and the keyboard comes back. Ctrl+C
 	// still quits from inside it.
-	if m.run.active() {
+	if m.palette.active() {
 		if key == "ctrl+c" {
 			m.hotkeys.Send(devserver.HotkeyQuit)
 			return m, nil
 		}
-		decision := m.run.handleOverlayKey(key, printableRune(msg))
+		decision := m.palette.handleKey(key, printableRune(msg))
 		if decision.trigger {
-			return m, m.dispatchRun(decision.triggerTgt)
+			e := decision.entry
+			if e.key != "" {
+				// Replaying through runBinding skips the search/selection guards,
+				// so palette entries must not use keys those guards claim
+				// (y, n, N, f, esc).
+				cmd, _ := m.runBinding(e.key)
+				return m, cmd
+			}
+			if e.target != "" {
+				return m, m.dispatchRun(e.target)
+			}
 		}
 		return m, nil
 	}
@@ -518,78 +529,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	switch key {
-	case "ctrl+c", "q":
-		// Send through the hotkey channel so the runner shuts down
-		// gracefully (stops compose, kills children). The bubbletea
-		// program will be quit by the runtime once Runner.Run returns.
-		m.hotkeys.Send(devserver.HotkeyQuit)
-		return m, nil
-	case "r":
-		m.hotkeys.Send(devserver.HotkeyRebuild)
-		return m, nil
-	case "R":
-		// Full restart: the runner unwinds (stopping children, compose and the
-		// proxy) and the dev loop re-runs it from scratch. The TUI process and
-		// its log buffers survive, so the restart is visible in place.
-		m.hotkeys.Send(devserver.HotkeyRestart)
-		return m, nil
-	case "o":
-		m.hotkeys.Send(devserver.HotkeyOpenBrowser)
-		return m, nil
-	case "c":
-		// Clear the active tab's buffer in place — entirely a TUI-side
-		// concern, no runner involvement.
-		m.clearActiveLog()
-		return m, nil
-	case "m":
-		// Read the Makefile lazily on press: this picks up newly added
-		// targets without restart and skips the keypress entirely if
-		// no Makefile is present (matches the hint-bar gating).
-		targets, err := devserver.MakefileTargetsFromPath(makefilePath)
-		if err != nil {
-			m.appendHamrLog("[hamr:tui] makefile: " + err.Error())
-			return m, nil
-		}
-		if len(targets) == 0 {
-			return m, nil
-		}
-		m.run.openOverlay(targets)
-		return m, nil
-	case "M":
-		// Toggle the MCP gateway kill-switch (runtime only; doesn't touch
-		// hamr.toml). The runner flips the gateway and pushes new state back
-		// via mcpStatusMsg, so the indicator reflects the result.
-		m.hotkeys.Send(devserver.HotkeyMCPToggle)
-		return m, nil
-	case "T":
-		// Toggle the public tunnel ([dev.tunnel]). The runner pushes the URL
-		// (or "" when off) back via tunnel_up / tunnel_down on the event bus.
-		m.hotkeys.Send(devserver.HotkeyTunnelToggle)
-		return m, nil
-	case "S":
-		// Flip [dev.stripe] mock ⇄ listen. The runner reports progress and
-		// the result back via stripe_mode on the event bus.
-		m.hotkeys.Send(devserver.HotkeyStripeMode)
-		return m, nil
-	case "?":
-		m.help.toggle()
-		return m, nil
-	case "/":
-		m.activeSearch().open()
-		m.refreshViewport()
-		return m, nil
-	case "tab":
-		m.cycleTab(true)
-		return m, nil
-	case "shift+tab":
-		m.cycleTab(false)
-		return m, nil
-	case "enter":
-		if m.ready {
-			m.view.GotoBottom()
-		}
-		return m, nil
+	if cmd, ok := m.runBinding(key); ok {
+		return m, cmd
 	}
 
 	// Forward navigation keys to the viewport so PageUp/PageDown/Home/End
@@ -600,6 +541,127 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
+}
+
+// makePrefix is the name prefix of make entries, and what `m` pre-types.
+const makePrefix = "make:"
+
+// paletteEntries lists everything the command palette offers: the hamr
+// commands (gated like their hint-bar counterparts used to be), then one
+// entry per Makefile target. The Makefile is read lazily on each open so
+// newly added targets show up without a restart.
+func (m *Model) paletteEntries() []paletteEntry {
+	entries := []paletteEntry{
+		{name: "rebuild", key: "r"},
+		{name: "restart", key: "R"},
+		{name: "open browser", key: "o"},
+		{name: "clear logs", key: "c"},
+	}
+	if m.mcpKnown {
+		entries = append(entries, paletteEntry{name: "toggle mcp", key: "M"})
+	}
+	if m.proxyURL != "" {
+		entries = append(entries, paletteEntry{name: "toggle tunnel", key: "T"})
+	}
+	if m.stripeMode != "" {
+		entries = append(entries, paletteEntry{name: "stripe mode", key: "S"})
+	}
+	entries = append(entries,
+		paletteEntry{name: "help", key: "?"},
+		paletteEntry{name: "quit", key: "q"},
+	)
+	// No Makefile is normal, not an error worth logging.
+	if !makefileExists() {
+		return entries
+	}
+	targets, err := devserver.MakefileTargetsFromPath(makefilePath)
+	if err != nil {
+		m.appendHamrLog("[hamr:tui] makefile: " + err.Error())
+		return entries
+	}
+	for _, t := range targets {
+		entries = append(entries, paletteEntry{name: makePrefix + t, target: t})
+	}
+	return entries
+}
+
+// runBinding runs the action bound to a single hotkey. The bool reports
+// whether the key is bound at all; unbound keys fall through to the viewport.
+// The command palette replays hamr commands through here, so a palette entry
+// and its hotkey can never drift apart.
+func (m *Model) runBinding(key string) (tea.Cmd, bool) {
+	switch key {
+	case "ctrl+c", "q":
+		// Send through the hotkey channel so the runner shuts down
+		// gracefully (stops compose, kills children). The bubbletea
+		// program will be quit by the runtime once Runner.Run returns.
+		m.hotkeys.Send(devserver.HotkeyQuit)
+		return nil, true
+	case "r":
+		m.hotkeys.Send(devserver.HotkeyRebuild)
+		return nil, true
+	case "R":
+		// Full restart: the runner unwinds (stopping children, compose and the
+		// proxy) and the dev loop re-runs it from scratch. The TUI process and
+		// its log buffers survive, so the restart is visible in place.
+		m.hotkeys.Send(devserver.HotkeyRestart)
+		return nil, true
+	case "o":
+		m.hotkeys.Send(devserver.HotkeyOpenBrowser)
+		return nil, true
+	case "c":
+		// Clear the active tab's buffer in place — entirely a TUI-side
+		// concern, no runner involvement.
+		m.clearActiveLog()
+		return nil, true
+	case ":":
+		m.palette.open(m.paletteEntries(), "")
+		return nil, true
+	case "m":
+		// The palette pre-filtered to Makefile targets. A missing Makefile
+		// or one without targets leaves the keypress a no-op (matches the
+		// hint-bar gating).
+		m.palette.open(m.paletteEntries(), makePrefix)
+		if len(m.palette.filtered()) == 0 {
+			m.palette.close()
+		}
+		return nil, true
+	case "M":
+		// Toggle the MCP gateway kill-switch (runtime only; doesn't touch
+		// hamr.toml). The runner flips the gateway and pushes new state back
+		// via mcpStatusMsg, so the indicator reflects the result.
+		m.hotkeys.Send(devserver.HotkeyMCPToggle)
+		return nil, true
+	case "T":
+		// Toggle the public tunnel ([dev.tunnel]). The runner pushes the URL
+		// (or "" when off) back via tunnel_up / tunnel_down on the event bus.
+		m.hotkeys.Send(devserver.HotkeyTunnelToggle)
+		return nil, true
+	case "S":
+		// Flip [dev.stripe] mock ⇄ listen. The runner reports progress and
+		// the result back via stripe_mode on the event bus.
+		m.hotkeys.Send(devserver.HotkeyStripeMode)
+		return nil, true
+	case "?":
+		m.help.toggle()
+		return nil, true
+	case "/":
+		m.activeSearch().open()
+		m.refreshViewport()
+		return nil, true
+	case "tab":
+		m.cycleTab(true)
+		return nil, true
+	case "shift+tab":
+		m.cycleTab(false)
+		return nil, true
+	case "enter":
+		if m.ready {
+			m.view.GotoBottom()
+		}
+		return nil, true
+	}
+	return nil, false
 }
 
 // setViewContent wraps content to the current viewport width before
@@ -1433,7 +1495,7 @@ func (m *Model) dispatchRun(target string) tea.Cmd {
 
 // printableRune extracts a single printable rune from a tea.KeyMsg if
 // the key represents a typed character. Control keys, function keys,
-// and named keys (esc/enter/etc.) return 0. Used by the run overlay to
+// and named keys (esc/enter/etc.) return 0. Used by the command palette to
 // append to its query without having to special-case every key string.
 func printableRune(msg tea.KeyMsg) rune {
 	switch msg.Type {
@@ -1480,8 +1542,8 @@ func (m *Model) View() string {
 	if m.help.active() {
 		return overlay(b.String(), m.helpView(), m.width, m.height)
 	}
-	if m.run.active() {
-		return overlay(b.String(), m.runOverlayView(), m.width, m.height)
+	if m.palette.active() {
+		return overlay(b.String(), m.paletteView(), m.width, m.height)
 	}
 	return b.String()
 }
@@ -1917,28 +1979,16 @@ func (m *Model) hintBar() string {
 	}
 	left := []string{
 		statusKey.Render("r") + statusDim.Render(" rebuild"),
-		statusKey.Render("R") + statusDim.Render(" restart"),
 		statusKey.Render("o") + statusDim.Render(" open"),
-		statusKey.Render("c") + statusDim.Render(" clear"),
 	}
 	if makefileExists() {
 		left = append(left, statusKey.Render("m")+statusDim.Render(" make"))
 	}
-	if m.mcpKnown {
-		left = append(left, statusKey.Render("M")+statusDim.Render(" mcp"))
-	}
-	if m.proxyURL != "" {
-		left = append(left, statusKey.Render("T")+statusDim.Render(" tunnel"))
-	}
-	if m.stripeMode != "" {
-		left = append(left, statusKey.Render("S")+statusDim.Render(" stripe"))
-	}
-	if m.tabCount() > 1 {
-		left = append(left, statusKey.Render("Tab")+statusDim.Render(" tabs"))
-	}
 	left = append(left,
-		statusKey.Render("q")+statusDim.Render(" quit"),
+		statusKey.Render(":")+statusDim.Render(" commands"),
+		statusKey.Render("/")+statusDim.Render(" search"),
 		statusKey.Render("?")+statusDim.Render(" help"),
+		statusKey.Render("q")+statusDim.Render(" quit"),
 	)
 
 	// Explicitly bg-styled separators so the bar reads as a single
@@ -1967,25 +2017,44 @@ func (m *Model) bottomBar(left, right string) string {
 	return fitBarLeft(left, avail, hintPad) + hintPad(statusGap) + status + hintPad(trail)
 }
 
-// runOverlayView is the only run surface left: confirming a target closes
-// the palette immediately, so nothing renders while make runs.
-// runOverlayView renders the fuzzy palette: prompt at top, list of
-// matches below with the cursor row highlighted. Limited to a sane
-// height so very large Makefiles don't push the modal past the
-// viewport.
-func (m *Model) runOverlayView() string {
+// paletteView renders the command palette: prompt at top, list of matches
+// below with the cursor row highlighted and each entry's hotkey dimmed at the
+// right. Limited to a sane height so very large Makefiles don't push the modal
+// past the viewport. Confirming an entry closes the palette immediately, so
+// nothing renders while make runs.
+func (m *Model) paletteView() string {
 	// Modal chrome (border + padding = 4) plus title, two blanks,
 	// prompt, blank, hint (6) consume 10 rows. Reserve one more for the
 	// "...showing X of Y" indicator that appears when truncated, so the
 	// modal still fits even when the list overflows.
 	const fixedChrome = 11
+	// Fixed floor so the modal doesn't jitter in width as the query
+	// narrows the list; grows only for a longer name or key.
+	const minNameW = 28
 	maxRows := max(min(m.availableModalHeight()-fixedChrome, 12), 1)
-	filtered := m.run.filtered()
+	filtered := m.palette.filtered()
 
-	prompt := modalKey.Render("›") + " " + modalDim.Render(m.run.query) + modalKey.Render("_")
+	// Width comes from every entry, not just the visible ones.
+	nameW, keyW := minNameW, 0
+	for _, e := range m.palette.entries {
+		nameW = max(nameW, lipgloss.Width(e.name))
+		keyW = max(keyW, lipgloss.Width(e.key))
+	}
+
+	// Clamp to the terminal: modal chrome (border 2 + padding 4), the 2-col
+	// cursor gutter and the 2-col gap before the key column.
+	if m.width > 0 {
+		nameW = max(min(nameW, m.width-6-2-2-keyW), 1)
+	}
+	// Prompt: "› " (2) + query + "_" (1) must fit the same inner width.
+	query := m.palette.query
+	if m.width > 0 {
+		query = lipgloss.NewStyle().MaxWidth(max(m.width-6-3, 1)).Render(query)
+	}
+	prompt := modalKey.Render("›") + " " + modalDim.Render(query) + modalKey.Render("_")
 
 	lines := []string{
-		modalTitle.Render("Run a Makefile target"),
+		modalTitle.Render("Commands"),
 		"",
 		prompt,
 		"",
@@ -1996,15 +2065,19 @@ func (m *Model) runOverlayView() string {
 	} else {
 		// Slide the visible window so the cursor stays in view.
 		start := 0
-		if m.run.cursor >= maxRows {
-			start = m.run.cursor - maxRows + 1
+		if m.palette.cursor >= maxRows {
+			start = m.palette.cursor - maxRows + 1
 		}
 		end := min(start+maxRows, len(filtered))
 		for i := start; i < end; i++ {
-			name := filtered[i]
-			row := "  " + name
-			if i == m.run.cursor {
-				row = modalKey.Render("› ") + searchCurrent.Render(name)
+			e := filtered[i]
+			name := lipgloss.NewStyle().MaxWidth(nameW).Render(e.name)
+			pad := strings.Repeat(" ", max(nameW-lipgloss.Width(name), 0))
+			// The key sits right-aligned in its column, after a gap.
+			keyCol := modalDim.Render(strings.Repeat(" ", keyW-lipgloss.Width(e.key)) + e.key)
+			row := "  " + name + pad + "  " + keyCol
+			if i == m.palette.cursor {
+				row = modalKey.Render("› ") + searchCurrent.Render(name) + pad + "  " + keyCol
 			}
 			lines = append(lines, row)
 		}

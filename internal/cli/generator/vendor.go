@@ -328,8 +328,8 @@ func resolveURL(urlTemplate, version string) string {
 // parseNameVersion splits "name@version" into its parts.
 // If there is no "@", version is empty.
 func parseNameVersion(s string) (name, version string) {
-	if i := strings.LastIndex(s, "@"); i >= 0 {
-		return s[:i], s[i+1:]
+	if before, after, ok := strings.CutLast(s, "@"); ok {
+		return before, after
 	}
 	return s, ""
 }

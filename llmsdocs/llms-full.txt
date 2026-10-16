@@ -3656,7 +3656,7 @@ up, the running containers keep their old config; hamr logs a `WARN`
 per adopted-on-non-base-port service. To apply edits, wipe the stack
 from the browser dev panel, run `docker compose down -v` directly, or
 wire it into a Makefile target and trigger it via the TUI's `m`
-fuzzy palette.
+make palette.
 
 The file is the contract surface between the writer (hamr dev) and the
 readers (`hamr env`, `hamr sync`, scaffold Makefile, scaffold
@@ -3690,8 +3690,9 @@ this automatically.
 ### hamr dev (terminal hotkeys)
 
 `hamr dev` runs as a bubbletea-driven TUI with a scrollable log viewport,
-a status bar, modal overlays, and an `m` hotkey opening a fuzzy palette
-over the project's `./Makefile` targets so docker wipes, migrations,
+a status bar, modal overlays, a `:` command palette (fuzzy list of hamr
+commands plus `make:<target>` entries), and an `m` hotkey opening it
+pre-filtered to the project's `./Makefile` targets so docker wipes, migrations,
 and any other project-defined scripts can be triggered from inside dev.
 
 | Key                | Action                                                 |
@@ -3701,7 +3702,9 @@ and any other project-defined scripts can be triggered from inside dev.
 | `R` (parked)       | Retry now when stuck on a `hamr.toml` parse error      |
 | `o`                | Open the proxy URL (the tunnel URL while it's on)      |
 | `c`                | Clear the active tab's log buffer                      |
-| `m`                | Run a Makefile target (fuzzy palette over `./Makefile`)|
+| `:`                | Command palette: hamr commands + `make:<target>`, fuzzy |
+| `m`                | Palette pre-filtered `make:` (no-op without a Makefile)|
+| `M`                | Toggle the MCP gateway (`[dev.mcp]`)                   |
 | `T`                | Toggle the public tunnel (`[dev.tunnel]`)              |
 | `S`                | Flip Stripe mock ⇄ `stripe listen` (`[dev.stripe]`)    |
 | `Tab` / Shift+Tab  | Cycle log tabs (hamr ↔ docker stacks)                  |
@@ -3761,6 +3764,10 @@ checked in the `make.run` handler, not inside `RunMake`, so the
 whitelist that governs agents doesn't silently restrict the developer's
 own `m` hotkey.
 
+The hint bar lists only `r` rebuild, `o` open, `m` make (if a Makefile
+exists), `:` commands, `/` search, `? help`, `q` quit; every other binding
+is in `?` help and the palette.
+
 The TUI hint bar carries a single system indicator, pinned bottom-right
 (the hints to its left truncate first on a narrow terminal), fed entirely by
 these events, so it lights up for work triggered from anywhere (file
@@ -3798,11 +3805,16 @@ The runner also spawns one `docker compose --ansi=always -f <file> logs -f --tai
 
 Search (`/`) is per-tab, case-insensitive substring, and incremental — matches recompute on every keystroke and the viewport jumps to the first hit as you type, with yellow highlights for matches and a brighter orange for the cursored one. `↩` locks the query in so `n`/`N` start navigating instead of being treated as more query characters; `Esc` cancels. After commit, `f` toggles a filter view that shows only lines containing the search term (press `f` again to restore the full view); n/N still navigates inside the filtered view. New log lines arriving while a search is in progress are scanned and the `[k/n]` counter updates automatically.
 
-`m` opens a fuzzy palette listing every target in the project-root
-`./Makefile` (parsed lazily on press; targets appear in declaration
-order on empty query, ranked by `sahilm/fuzzy` as the user types).
-The hotkey is hidden from the hint bar and ignored when no Makefile
-exists. Selecting a target closes the palette and asks the dev server to
+`:` opens a command palette: hamr commands (`rebuild`, `restart`, `open browser`, `clear logs`,
+`toggle mcp`, `toggle tunnel`, `stripe mode`, `help`, `quit`; each row shows
+its hotkey on the right; `toggle mcp` only when the gateway is known,
+`toggle tunnel` only when the dev proxy is up, `stripe mode` only with
+`[dev.stripe]`) followed by
+`make:<target>` for every target in the project-root `./Makefile` (parsed
+lazily on press, declaration order on empty query, ranked by
+`sahilm/fuzzy` as the user types, so `db-see` finds `make:db-seed`). `m`
+opens the same palette pre-filtered with `make:`; backspace widens it. `m`
+is ignored when no Makefile exists. Selecting a target closes the palette and asks the dev server to
 run `make <target>` from the
 project root via `DevActions.RunMake` — the TUI never spawns make
 itself, so the output fans out through the ProcessManager to the hamr
