@@ -1,0 +1,331 @@
+package flags
+
+import (
+	"github.com/labstack/echo/v4"
+	"{{.Module}}/internal/web/components"
+	"{{.Module}}/internal/web/components/form"
+)
+
+// listPage shows every declared flag with its rule and what users get.
+templ listPage(c echo.Context, views []flagView) {
+	@components.Layout(c, "Feature Flags") {
+{{- if eq .CSS "tailwind"}}
+		<div class="max-w-4xl mx-auto mt-8">
+			<h2 class="text-2xl font-bold text-slate-100 mb-2">Feature Flags</h2>
+			<p class="text-sm text-slate-400 mb-6">
+				A flag serves its value when enabled and the audience matches: everyone, only the listed users and roles, or a percentage of users plus the listed ones. Otherwise it serves the code default.
+			</p>
+			@flagTable(c, views)
+		</div>
+{{- else}}
+		<div class="container">
+			<h2>Feature Flags</h2>
+			<p>
+				A flag serves its value when enabled and the audience matches: everyone, only the listed users and roles, or a percentage of users plus the listed ones. Otherwise it serves the code default.
+			</p>
+			@flagTable(c, views)
+		</div>
+{{- end}}
+	}
+}
+
+templ flagTable(c echo.Context, views []flagView) {
+	if len(views) == 0 {
+{{- if eq .CSS "tailwind"}}
+		<p class="text-slate-400">No flags are declared in code yet.</p>
+{{- else}}
+		<p>No flags are declared in code yet.</p>
+{{- end}}
+	} else {
+{{- if eq .CSS "tailwind"}}
+		<table class="w-full text-left text-sm text-slate-300 bg-slate-800 border border-slate-700 rounded-lg">
+			<caption class="sr-only">Declared feature flags</caption>
+			<thead>
+				<tr class="border-b border-slate-700 text-slate-400">
+					<th scope="col" class="px-4 py-3 font-medium">Key</th>
+					<th scope="col" class="px-4 py-3 font-medium">Type</th>
+					<th scope="col" class="px-4 py-3 font-medium">Rule</th>
+					<th scope="col" class="px-4 py-3 font-medium">Serving</th>
+					<th scope="col" class="px-4 py-3 font-medium">Actions</th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, v := range views {
+					@flagRow(c, v)
+				}
+			</tbody>
+		</table>
+{{- else}}
+		<table>
+			<caption>Declared feature flags</caption>
+			<thead>
+				<tr>
+					<th scope="col">Key</th>
+					<th scope="col">Type</th>
+					<th scope="col">Rule</th>
+					<th scope="col">Serving</th>
+					<th scope="col">Actions</th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, v := range views {
+					@flagRow(c, v)
+				}
+			</tbody>
+		</table>
+{{- end}}
+	}
+}
+
+templ flagRow(c echo.Context, v flagView) {
+{{- if eq .CSS "tailwind"}}
+	<tr class="border-b border-slate-700 last:border-b-0">
+		<th scope="row" class="px-4 py-3 font-semibold text-slate-100">{ v.Key }</th>
+		<td class="px-4 py-3">{ v.Type }</td>
+		<td class="px-4 py-3">@statusBadge(v)</td>
+		<td class="px-4 py-3">
+			if v.Shown == "" {
+				<em class="text-slate-400">(empty)</em>
+			} else {
+				<code>{ v.Shown }</code>
+			}
+			if v.ShownIsDef {
+				<span class="text-xs text-slate-400">(default)</span>
+			}
+		</td>
+		<td class="px-4 py-3">
+			<div class="flex items-center gap-3">
+				if v.CanToggle {
+					<form method="POST" action={ templ.SafeURL("/admin/flags/" + v.Key + "/toggle") }>
+						@form.CSRFField(c)
+						if v.ToggleMuted {
+							<button type="submit" aria-label={ v.ToggleLabel + " for " + v.Key } class="py-1 px-3 bg-slate-700 hover:bg-slate-600 text-slate-100 text-sm rounded-md transition-colors">{ v.ToggleLabel }</button>
+						} else {
+							<button type="submit" aria-label={ v.ToggleLabel + " for " + v.Key } class="py-1 px-3 bg-blue-500 hover:bg-blue-400 text-white text-sm rounded-md transition-colors">{ v.ToggleLabel }</button>
+						}
+					</form>
+				} else {
+					<span class="text-xs text-slate-400">Edit to set a value</span>
+				}
+				<a href={ templ.SafeURL("/admin/flags/" + v.Key) } aria-label={ "Edit " + v.Key } class="text-blue-400 hover:text-blue-300">Edit</a>
+			</div>
+		</td>
+	</tr>
+{{- else}}
+	<tr>
+		<th scope="row">{ v.Key }</th>
+		<td>{ v.Type }</td>
+		<td>@statusBadge(v)</td>
+		<td>
+			if v.Shown == "" {
+				<em>(empty)</em>
+			} else {
+				<code>{ v.Shown }</code>
+			}
+			if v.ShownIsDef {
+				<small>(default)</small>
+			}
+		</td>
+		<td>
+			if v.CanToggle {
+				<form method="POST" action={ templ.SafeURL("/admin/flags/" + v.Key + "/toggle") }>
+					@form.CSRFField(c)
+					if v.ToggleMuted {
+						<button type="submit" aria-label={ v.ToggleLabel + " for " + v.Key } class="btn btn-secondary btn-sm">{ v.ToggleLabel }</button>
+					} else {
+						<button type="submit" aria-label={ v.ToggleLabel + " for " + v.Key } class="btn btn-primary btn-sm">{ v.ToggleLabel }</button>
+					}
+				</form>
+			} else {
+				<small>Edit to set a value</small>
+			}
+			<a href={ templ.SafeURL("/admin/flags/" + v.Key) } aria-label={ "Edit " + v.Key }>Edit</a>
+		</td>
+	</tr>
+{{- end}}
+}
+
+// statusBadge is the No rule / Disabled / Everyone / Listed only / N% label.
+templ statusBadge(v flagView) {
+{{- if eq .CSS "tailwind"}}
+	if v.Rule == "No rule" || v.Rule == "Disabled" {
+		<span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-slate-700 text-slate-300">{ v.Rule }</span>
+	} else if v.Rule == "Everyone" {
+		<span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-green-900/50 text-green-300">{ v.Rule }</span>
+	} else {
+		<span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-blue-900/50 text-blue-300">{ v.Rule }</span>
+	}
+{{- else}}
+	<strong>{ v.Rule }</strong>
+{{- end}}
+}
+
+// editPage is the full form for one flag.
+templ editPage(c echo.Context, v flagView) {
+	@components.Layout(c, "Edit flag "+v.Key) {
+{{- if eq .CSS "tailwind"}}
+		<div class="max-w-3xl mx-auto mt-8">
+			<a href="/admin/flags" class="text-sm text-blue-400 hover:text-blue-300">&larr; All flags</a>
+			<form
+				method="POST"
+				action={ templ.SafeURL("/admin/flags/" + v.Key) }
+				class="mt-4 bg-slate-800 border border-slate-700 rounded-lg p-6"
+				aria-labelledby="flag-title"
+			>
+				@form.CSRFField(c)
+				<h2 id="flag-title" class="text-lg font-semibold text-slate-100">{ v.Key }</h2>
+				<p class="text-sm text-slate-400 mb-4">Type: { v.Type } | Code default: <code>{ v.Default }</code></p>
+				if v.Error != "" {
+					<div class="mb-4 px-4 py-3 rounded-md border bg-red-900/50 border-red-700 text-red-300 text-sm" role="alert">
+						{ v.Error }
+					</div>
+				}
+				<div class="mb-4">
+					<label class="inline-flex items-center gap-2 text-sm font-medium text-slate-300">
+						<input type="checkbox" name="enabled" value="true" checked?={ v.Enabled }/>
+						Enabled
+					</label>
+				</div>
+				<div class="mb-4">
+					@valueInput(v)
+				</div>
+				<div class="mb-4">
+					@audiencePicker(v)
+				</div>
+				<div class="mb-4">
+					<label for="flag-subjects" class="block text-sm font-medium text-slate-400 mb-1">Subject IDs (comma-separated)</label>
+					<input type="text" id="flag-subjects" name="subjects" value={ v.Subjects } class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"/>
+				</div>
+				<div class="mb-4">
+					<label for="flag-roles" class="block text-sm font-medium text-slate-400 mb-1">Roles (comma-separated)</label>
+					<input type="text" id="flag-roles" name="roles" value={ v.Roles } class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"/>
+				</div>
+				<div class="flex items-center gap-4">
+					<button type="submit" class="py-2 px-4 bg-blue-500 hover:bg-blue-400 text-white font-medium rounded-md transition-colors">Save</button>
+					<a href="/admin/flags" class="text-sm text-slate-400 hover:text-slate-300">Cancel</a>
+				</div>
+			</form>
+		</div>
+{{- else}}
+		<div class="container">
+			<a href="/admin/flags">&larr; All flags</a>
+			<form
+				method="POST"
+				action={ templ.SafeURL("/admin/flags/" + v.Key) }
+				aria-labelledby="flag-title"
+			>
+				@form.CSRFField(c)
+				<h2 id="flag-title">{ v.Key }</h2>
+				<p>Type: { v.Type } | Code default: <code>{ v.Default }</code></p>
+				if v.Error != "" {
+					<div class="alert alert-error" role="alert">
+						{ v.Error }
+					</div>
+				}
+				<div class="form-group">
+					<label>
+						<input type="checkbox" name="enabled" value="true" checked?={ v.Enabled }/>
+						Enabled
+					</label>
+				</div>
+				<div class="form-group">
+					@valueInput(v)
+				</div>
+				<div class="form-group">
+					@audiencePicker(v)
+				</div>
+				<div class="form-group">
+					<label for="flag-subjects">Subject IDs (comma-separated)</label>
+					<input type="text" id="flag-subjects" name="subjects" value={ v.Subjects }/>
+				</div>
+				<div class="form-group">
+					<label for="flag-roles">Roles (comma-separated)</label>
+					<input type="text" id="flag-roles" name="roles" value={ v.Roles }/>
+				</div>
+				<button type="submit" class="btn btn-primary">Save</button>
+				<a href="/admin/flags">Cancel</a>
+			</form>
+		</div>
+{{- end}}
+	}
+}
+
+// audiencePicker is the Everyone / Listed / Percent radio plus the percent field.
+templ audiencePicker(v flagView) {
+{{- if eq .CSS "tailwind"}}
+	<fieldset class="mb-2">
+		<legend class="text-sm font-medium text-slate-300 mb-1">Audience</legend>
+		<label class="flex items-center gap-2 text-sm text-slate-300">
+			<input type="radio" name="audience" value="everyone" checked?={ v.Audience == "everyone" }/>
+			Everyone
+		</label>
+		<label class="flex items-center gap-2 text-sm text-slate-300">
+			<input type="radio" name="audience" value="listed" checked?={ v.Audience == "listed" }/>
+			Only listed users &amp; roles
+		</label>
+		<label class="flex items-center gap-2 text-sm text-slate-300">
+			<input type="radio" name="audience" value="percent" checked?={ v.Audience == "percent" }/>
+			Percentage of users, plus listed
+		</label>
+	</fieldset>
+	<label for="flag-percent" class="block text-sm font-medium text-slate-400 mb-1">Percent of users (0-100, used for "Percentage of users")</label>
+	<input type="number" min="0" max="100" id="flag-percent" name="percent" value={ v.Percent } class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"/>
+{{- else}}
+	<fieldset>
+		<legend>Audience</legend>
+		<label>
+			<input type="radio" name="audience" value="everyone" checked?={ v.Audience == "everyone" }/>
+			Everyone
+		</label>
+		<label>
+			<input type="radio" name="audience" value="listed" checked?={ v.Audience == "listed" }/>
+			Only listed users &amp; roles
+		</label>
+		<label>
+			<input type="radio" name="audience" value="percent" checked?={ v.Audience == "percent" }/>
+			Percentage of users, plus listed
+		</label>
+	</fieldset>
+	<label for="flag-percent">Percent of users (0-100, used for "Percentage of users")</label>
+	<input type="number" min="0" max="100" id="flag-percent" name="percent" value={ v.Percent }/>
+{{- end}}
+}
+
+// valueInput renders the value control matching the flag's type.
+templ valueInput(v flagView) {
+{{- if eq .CSS "tailwind"}}
+	if v.Type == "bool" {
+		<label for="flag-value" class="block text-sm font-medium text-slate-400 mb-1">Value</label>
+		<select id="flag-value" name="value" class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+			<option value="true" selected?={ v.Value != "false" }>On</option>
+			<option value="false" selected?={ v.Value == "false" }>Off</option>
+		</select>
+	} else if v.Type == "int" {
+		<label for="flag-value" class="block text-sm font-medium text-slate-400 mb-1">Value (number)</label>
+		<input type="number" step="1" id="flag-value" name="value" value={ v.Value } class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"/>
+	} else if v.Type == "string" {
+		<label for="flag-value" class="block text-sm font-medium text-slate-400 mb-1">Value (text)</label>
+		<input type="text" id="flag-value" name="value" value={ v.Value } class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"/>
+	} else {
+		<label for="flag-value" class="block text-sm font-medium text-slate-400 mb-1">Value (JSON)</label>
+		<textarea id="flag-value" name="value" rows="4" class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 font-mono">{ v.Value }</textarea>
+	}
+{{- else}}
+	if v.Type == "bool" {
+		<label for="flag-value">Value</label>
+		<select id="flag-value" name="value">
+			<option value="true" selected?={ v.Value != "false" }>On</option>
+			<option value="false" selected?={ v.Value == "false" }>Off</option>
+		</select>
+	} else if v.Type == "int" {
+		<label for="flag-value">Value (number)</label>
+		<input type="number" step="1" id="flag-value" name="value" value={ v.Value }/>
+	} else if v.Type == "string" {
+		<label for="flag-value">Value (text)</label>
+		<input type="text" id="flag-value" name="value" value={ v.Value }/>
+	} else {
+		<label for="flag-value">Value (JSON)</label>
+		<textarea id="flag-value" name="value" rows="4">{ v.Value }</textarea>
+	}
+{{- end}}
+}

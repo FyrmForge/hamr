@@ -1,0 +1,20 @@
+package repo
+
+import "time"
+
+// FeatureFlag is the feature_flags table. The gorm tags are the schema:
+// internal/db registers this struct for auto-migration. Value, Subjects and
+// Roles hold JSON text. Enabled and Percent carry no default tag: gorm
+// omits zero values of defaulted fields from INSERTs.
+type FeatureFlag struct {
+	Key       string    `gorm:"column:key;primaryKey"`
+	Enabled   bool      `gorm:"not null"`
+	Value     string    `gorm:"not null;default:'null'"`
+	Subjects  string    `gorm:"not null;default:'[]'"`
+	Roles     string    `gorm:"not null;default:'[]'"`
+	Percent   int       `gorm:"not null"`
+	UpdatedAt time.Time `gorm:"not null;default:CURRENT_TIMESTAMP;autoUpdateTime"`
+}
+
+// TableName pins the table name so it does not track struct renames.
+func (FeatureFlag) TableName() string { return "feature_flags" }

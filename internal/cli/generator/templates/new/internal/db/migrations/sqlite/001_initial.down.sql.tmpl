@@ -1,10 +1,13 @@
-{{- if and .IncludeAuth .AuthWithTables -}}
+{{- if .IncludeFlags}}
+DROP TABLE IF EXISTS feature_flags;
+{{- end}}
+{{- if and .IncludeAuth .AuthWithTables}}
 DROP TABLE IF EXISTS users;
 {{- end}}
 {{- if .IncludeSessions}}
 DROP TABLE IF EXISTS sessions;
 {{- end}}
-{{- if not (or .IncludeSessions (and .IncludeAuth .AuthWithTables))}}
+{{- if not (or .IncludeSessions .IncludeFlags (and .IncludeAuth .AuthWithTables))}}
 -- Reverse the initial migration here.
 -- Example:
 -- DROP TABLE IF EXISTS examples;

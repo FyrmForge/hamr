@@ -45,6 +45,10 @@ func Logging() echo.MiddlewareFunc {
 				method := c.Request().Method
 				path := c.Request().URL.Path
 
+				// Re-read: later middleware (e.g. feature flags) may have added
+				// attributes to the request's context logger.
+				logger := logging.FromContext(c.Request().Context())
+
 				attrs := []any{
 					slog.String("method", method),
 					slog.String("path", path),

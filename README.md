@@ -57,6 +57,7 @@ HAMR is two things:
 | `pkg/sync`         | S3 sync for static assets with file watching                                       | [docs/guide/pkg/sync.md](docs/guide/pkg/sync.md) |
 | `pkg/email`        | Provider-agnostic `Sender` interface for outbound email                            | [docs/guide/pkg/email.md](docs/guide/pkg/email.md) |
 | `pkg/sms`          | Provider-agnostic `Sender` interface for outbound SMS                              | [docs/guide/pkg/sms.md](docs/guide/pkg/sms.md) |
+| `pkg/flags`        | Feature flags in your own DB: typed flags, per-user rules, sticky % rollout          | [docs/guide/pkg/flags.md](docs/guide/pkg/flags.md) |
 | `pkg/emailmock`    | Dev-only `email.Sender` that delivers to the `hamr dev` inbox at `/__hamr/mail`    | [docs/guide/pkg/emailmock.md](docs/guide/pkg/emailmock.md) |
 | `pkg/smsmock`      | Dev-only `sms.Sender` that delivers to the `hamr dev` inbox at `/__hamr/sms`       | [docs/guide/pkg/smsmock.md](docs/guide/pkg/smsmock.md) |
 | `pkg/e2e`          | Reusable go-rod browser helpers for E2E testing                                    | [docs/guide/pkg/e2e.md](docs/guide/pkg/e2e.md) |

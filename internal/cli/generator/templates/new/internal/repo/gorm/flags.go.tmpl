@@ -1,0 +1,79 @@
+package {{if eq .Database "sqlite"}}sqlite{{else}}postgres{{end}}
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"time"
+
+	hflags "github.com/FyrmForge/hamr/pkg/flags"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+
+	"{{.Module}}/internal/repo"
+)
+
+// Flags returns the feature flag store.
+func (s *Store) Flags() hflags.Store { return &flagStore{db: s.db} }
+
+// keyColumn is a var so the literal never needs two braces in a row.
+var keyColumn = clause.Column{Name: "key"}
+
+type flagStore struct {
+	db *gorm.DB
+}
+
+func (s *flagStore) List(ctx context.Context) ([]hflags.Rule, error) {
+	var rows []repo.FeatureFlag
+	if err := s.db.WithContext(ctx).Order(clause.OrderByColumn{Column: keyColumn}).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	rules := make([]hflags.Rule, 0, len(rows))
+	for _, row := range rows {
+		r := hflags.Rule{Key: row.Key, Enabled: row.Enabled, Value: json.RawMessage(row.Value), Percent: row.Percent}
+		// A bad list cell disables only this flag (code default), not all of them.
+		if err := errors.Join(json.Unmarshal([]byte(row.Subjects), &r.Subjects), json.Unmarshal([]byte(row.Roles), &r.Roles)); err != nil {
+			slog.WarnContext(ctx, "flags: bad subjects/roles, serving code default", "key", r.Key, "error", err)
+			continue
+		}
+		rules = append(rules, r)
+	}
+	return rules, nil
+}
+
+func (s *flagStore) Save(ctx context.Context, r hflags.Rule) error {
+	value := string(r.Value)
+	if value == "" {
+		value = "null"
+	}
+	subjects, err := json.Marshal(nonNil(r.Subjects))
+	if err != nil {
+		return err
+	}
+	roles, err := json.Marshal(nonNil(r.Roles))
+	if err != nil {
+		return err
+	}
+	row := repo.FeatureFlag{
+		Key:       r.Key,
+		Enabled:   r.Enabled,
+		Value:     value,
+		Subjects:  string(subjects),
+		Roles:     string(roles),
+		Percent:   r.Percent,
+		UpdatedAt: time.Now(),
+	}
+	return s.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{keyColumn},
+		DoUpdates: clause.AssignmentColumns([]string{"enabled", "value", "subjects", "roles", "percent", "updated_at"}),
+	}).Create(&row).Error
+}
+
+// nonNil keeps empty lists as [] instead of null in the JSON columns.
+func nonNil(v []string) []string {
+	if v == nil {
+		return []string{}
+	}
+	return v
+}

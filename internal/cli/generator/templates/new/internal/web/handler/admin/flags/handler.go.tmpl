@@ -1,0 +1,372 @@
+package flags
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strconv"
+	"strings"
+
+	hflags "github.com/FyrmForge/hamr/pkg/flags"
+	"github.com/FyrmForge/hamr/pkg/logging"
+	"github.com/FyrmForge/hamr/pkg/middleware"
+	"github.com/FyrmForge/hamr/pkg/respond"
+	"github.com/labstack/echo/v4"
+)
+
+// flagView is one flag as the admin pages show it: the code declaration plus
+// the current (or just-submitted) rule, with list fields as comma-separated
+// text for the form. Audience is the targeting radio: everyone (100%), listed
+// (0% plus the lists) or percent (a share of users plus the lists).
+type flagView struct {
+	Key      string
+	Type     string
+	Default  string
+	Enabled  bool
+	Value    string
+	Audience string
+	Percent  string
+	Subjects string
+	Roles    string
+	Error    string
+
+	// List-page summary: the rule badge text, the value the rule's audience
+	// gets (the code default when no enabled rule supplies one), and the
+	// one-click button (hidden unless CanToggle).
+	Rule        string
+	Shown       string
+	ShownIsDef  bool
+	CanToggle   bool
+	ToggleLabel string
+	ToggleMuted bool
+}
+
+// Values of the targeting radio.
+const (
+	audienceEveryone = "everyone"
+	audienceListed   = "listed"
+	audiencePercent  = "percent"
+)
+
+// handler owns the admin feature flags pages.
+type handler struct {
+	client *hflags.Client
+}
+
+// NewHandler creates a new admin flags handler.
+func NewHandler(client *hflags.Client) *handler {
+	return &handler{client: client}
+}
+
+// GET /admin/flags
+func (h *handler) List(c echo.Context) error {
+	return respond.HTML(c, http.StatusOK, listPage(c, h.views()))
+}
+
+// GET /admin/flags/:key
+func (h *handler) Edit(c echo.Context) error {
+	v, ok := h.view(c.Param("key"))
+	if !ok {
+		return echo.NewHTTPError(http.StatusNotFound, "unknown flag")
+	}
+	return respond.HTML(c, http.StatusOK, editPage(c, v))
+}
+
+// POST /admin/flags/:key
+func (h *handler) Save(c echo.Context) error {
+	key := c.Param("key")
+	def, ok := definition(key)
+	if !ok {
+		return echo.NewHTTPError(http.StatusNotFound, "unknown flag")
+	}
+
+	typed := c.FormValue("value")
+	rule := hflags.Rule{
+		Key:      key,
+		Enabled:  c.FormValue("enabled") == "true",
+		Value:    formToJSON(def.Type, typed),
+		Subjects: splitList(c.FormValue("subjects")),
+		Roles:    splitList(c.FormValue("roles")),
+	}
+
+	audience := c.FormValue("audience")
+	pct := strings.TrimSpace(c.FormValue("percent"))
+	msg := ""
+	switch audience {
+	case audienceEveryone:
+		rule.Percent = 100
+	case audienceListed:
+		rule.Percent = 0
+		if len(rule.Subjects) == 0 && len(rule.Roles) == 0 {
+			msg = "List at least one user ID or role."
+		}
+	case audiencePercent:
+		var err error
+		rule.Percent, err = strconv.Atoi(pct)
+		if err != nil || rule.Percent < 0 || rule.Percent > 100 {
+			msg = "Percent must be a whole number from 0 to 100."
+		}
+	default:
+		msg = "Choose who the flag applies to."
+	}
+	if msg == "" {
+		msg = h.set(c, rule)
+	}
+	if msg != "" {
+		submitted := toView(def, &rule)
+		submitted.Value = typed
+		submitted.Audience = audience
+		submitted.Percent = pct
+		submitted.Error = msg
+		return respond.HTML(c, http.StatusUnprocessableEntity, editPage(c, submitted))
+	}
+
+	middleware.SetFlash(c, "Flag "+key+" saved", middleware.FlashSuccess)
+	return respond.Redirect(c, "/admin/flags")
+}
+
+// POST /admin/flags/:key/toggle
+//
+// Bool flags: serve the opposite of what users get now (rule value when an
+// enabled rule exists, else the code default), enabling the rule and keeping
+// its audience; with no rule yet, create one for everyone. Other types flip
+// Enabled only and need a value set via Edit first.
+func (h *handler) Toggle(c echo.Context) error {
+	key := c.Param("key")
+	def, ok := definition(key)
+	if !ok {
+		return echo.NewHTTPError(http.StatusNotFound, "unknown flag")
+	}
+
+	rule, exists := h.rule(key)
+	var flash string
+	if def.Type == hflags.TypeBool {
+		var cur flagView
+		if exists {
+			cur = toView(def, &rule)
+		} else {
+			rule = hflags.Rule{Key: key, Percent: 100}
+			cur = toView(def, nil)
+		}
+		next := cur.Shown != "true"
+		rule.Enabled = true
+		rule.Value = json.RawMessage(strconv.FormatBool(next))
+		flash = key + " now serves " + strconv.FormatBool(next) + " to " + audienceText(toView(def, &rule))
+	} else {
+		if !exists || (!rule.Enabled && !hasValue(rule.Value)) {
+			middleware.SetFlash(c, "Edit flag "+key+" to set a value first.", middleware.FlashError)
+			return respond.Redirect(c, "/admin/flags")
+		}
+		rule.Enabled = !rule.Enabled
+		state := "disabled"
+		if rule.Enabled {
+			state = "enabled"
+		}
+		flash = "Rule for " + key + " " + state
+	}
+
+	if msg := h.set(c, rule); msg != "" {
+		middleware.SetFlash(c, msg, middleware.FlashError)
+		return respond.Redirect(c, "/admin/flags")
+	}
+	middleware.SetFlash(c, flash, middleware.FlashSuccess)
+	return respond.Redirect(c, "/admin/flags")
+}
+
+// audienceText describes who a rule's audience covers, for flash messages.
+func audienceText(v flagView) string {
+	switch v.Audience {
+	case audienceEveryone:
+		return "everyone"
+	case audienceListed:
+		return "listed users and roles"
+	default:
+		return v.Percent + "% of users (plus listed)"
+	}
+}
+
+// set saves rule and returns the message to show on failure ("" on success).
+// ErrInvalid reasons are safe to show; other store errors are logged and
+// replaced by a generic message.
+func (h *handler) set(c echo.Context, rule hflags.Rule) string {
+	err := h.client.Set(c.Request().Context(), rule)
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, hflags.ErrInvalid):
+		return "Could not save: " + strings.TrimPrefix(err.Error(), hflags.ErrInvalid.Error()+": ") + "."
+	default:
+		logging.FromContext(c.Request().Context()).Error("save flag failed", "key", rule.Key, "error", err)
+		return "Could not save the flag. Please try again."
+	}
+}
+
+// rule returns the stored rule for key.
+func (h *handler) rule(key string) (hflags.Rule, bool) {
+	for _, r := range h.client.Rules() {
+		if r.Key == key {
+			return r, true
+		}
+	}
+	return hflags.Rule{}, false
+}
+
+// views merges every declared flag with its current rule.
+func (h *handler) views() []flagView {
+	rules := map[string]hflags.Rule{}
+	for _, r := range h.client.Rules() {
+		rules[r.Key] = r
+	}
+	var out []flagView
+	for _, d := range hflags.Definitions() {
+		if r, ok := rules[d.Key]; ok {
+			out = append(out, toView(d, &r))
+		} else {
+			out = append(out, toView(d, nil))
+		}
+	}
+	return out
+}
+
+// view returns the current state of one declared flag.
+func (h *handler) view(key string) (flagView, bool) {
+	d, ok := definition(key)
+	if !ok {
+		return flagView{}, false
+	}
+	if r, ok := h.rule(key); ok {
+		return toView(d, &r), true
+	}
+	// No rule yet: pre-tick Enabled so saving creates a live rule.
+	v := toView(d, nil)
+	v.Enabled = true
+	return v, true
+}
+
+func toView(d hflags.Definition, r *hflags.Rule) flagView {
+	// A flag with no rule yet is for everyone, so ticking "enabled" turns it on.
+	v := flagView{
+		Key: d.Key, Type: string(d.Type), Default: string(d.Default),
+		Audience: audienceEveryone, Rule: "No rule",
+		Shown: jsonToText(d.Type, d.Default), ShownIsDef: true,
+		CanToggle: d.Type == hflags.TypeBool,
+	}
+	if r == nil {
+		v.setToggle(d.Type, "Enable rule")
+		return v
+	}
+	v.Enabled = r.Enabled
+	v.Value = jsonToText(d.Type, r.Value)
+	v.Subjects = strings.Join(r.Subjects, ", ")
+	v.Roles = strings.Join(r.Roles, ", ")
+	v.CanToggle = v.CanToggle || hasValue(r.Value)
+	switch {
+	case r.Percent >= 100:
+		v.Audience = audienceEveryone
+	case r.Percent == 0 && (len(r.Subjects) > 0 || len(r.Roles) > 0):
+		v.Audience = audienceListed
+	default:
+		v.Audience = audiencePercent
+		v.Percent = strconv.Itoa(r.Percent)
+	}
+	if !r.Enabled {
+		v.Rule = "Disabled"
+		v.setToggle(d.Type, "Enable rule")
+		return v
+	}
+	switch v.Audience {
+	case audienceEveryone:
+		v.Rule = "Everyone"
+	case audienceListed:
+		v.Rule = "Listed only"
+	default:
+		v.Rule = v.Percent + "%"
+	}
+	// An enabled bool with no stored value reads as true; other types fall
+	// back to the code default.
+	if d.Type == hflags.TypeBool || hasValue(r.Value) {
+		v.Shown, v.ShownIsDef = v.Value, false
+	}
+	v.setToggle(d.Type, "Disable rule")
+	return v
+}
+
+// setToggle fills the one-click button: bool flags offer the opposite of
+// what is served now; other types use the given rule label.
+func (v *flagView) setToggle(t hflags.Type, ruleLabel string) {
+	if t == hflags.TypeBool {
+		v.ToggleLabel = "Serve " + strconv.FormatBool(v.Shown != "true")
+		return
+	}
+	v.ToggleLabel, v.ToggleMuted = ruleLabel, ruleLabel == "Disable rule"
+}
+
+// hasValue reports whether raw holds a stored value (not empty or null).
+func hasValue(raw json.RawMessage) bool {
+	return len(raw) > 0 && string(raw) != "null"
+}
+
+// definition returns the declaration of key.
+func definition(key string) (hflags.Definition, bool) {
+	for _, d := range hflags.Definitions() {
+		if d.Key == key {
+			return d, true
+		}
+	}
+	return hflags.Definition{}, false
+}
+
+// formToJSON turns the typed form value into the stored JSON. Bool flags come
+// from the On/Off select: "false" stores false, anything else true. Empty
+// input stores null (the code default). Strings are quoted for the user; int
+// and json pass through for Set to validate.
+func formToJSON(t hflags.Type, text string) json.RawMessage {
+	text = strings.TrimSpace(text)
+	if t == hflags.TypeBool {
+		if text == "false" {
+			return json.RawMessage("false")
+		}
+		return json.RawMessage("true")
+	}
+	if text == "" {
+		return json.RawMessage("null")
+	}
+	if t == hflags.TypeString {
+		b, _ := json.Marshal(text)
+		return b
+	}
+	return json.RawMessage(text)
+}
+
+// jsonToText is the inverse of formToJSON: the stored JSON as the form shows
+// it (a string flag without its quotes, null as empty). A bool is "false" only
+// when stored false, so the On/Off select round-trips (null reads as on).
+func jsonToText(t hflags.Type, raw json.RawMessage) string {
+	if t == hflags.TypeBool {
+		if string(raw) == "false" {
+			return "false"
+		}
+		return "true"
+	}
+	if string(raw) == "null" {
+		return ""
+	}
+	if t == hflags.TypeString {
+		var s string
+		if json.Unmarshal(raw, &s) == nil {
+			return s
+		}
+	}
+	return string(raw)
+}
+
+// splitList parses comma-separated input, trimming blanks.
+func splitList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}

@@ -817,6 +817,24 @@ hub.SendToRoom("chat:123", msg)
 2. **HTMX Trigger**: set Target + Trigger — client calls htmx.trigger()
 3. **Data Only**: set Payload — client handles via registered callback
 {{- end}}
+{{- if .IncludeFlags}}
+
+## Feature Flags
+
+Feature flags via `hamr/pkg/flags` (imported as `hflags`; rules live in the `feature_flags` table, reads come from memory):
+
+- Declare each flag once in `internal/flags/flags.go`: `hflags.Bool("key", def)`, `Int`, `String`, `JSON[T]`. `cmd/site/main.go` imports that package, so flags register at startup.
+- Read with `flags.MyFlag.Get(ctx)` in site handlers (the flags middleware is on the site routes only, not `/api`); in jobs use `client.For(ctx, who)`. It never errors; with no matching rule it returns the code default.
+- In jobs, wrap the ctx first: `ctx = client.For(ctx, hflags.Who{SubjectID: id})`.
+- Rules are `Enabled`, `Value`, `Subjects`, `Roles` and a sticky `Percent`. An enabled bool flag with no value reads `true`.
+- Change rules with `client.Set(ctx, rule)`{{if and .IncludeAuth .AuthWithTables}}, the admin page at `/admin/flags` (admin role),{{end}} or the `set-flag` action in the `hamr dev` widget.
+- Tests: `hflags.NewMemStore(rules...)` with `hflags.New`, or `hflags.Override(ctx, flag, v)`.
+- The middleware adds a `flags` group to the request logger, so log lines show each flag's value.
+{{- if ne .Database "sqlite"}}
+- Behind PgBouncer in transaction mode set `FLAGS_DIRECT_DATABASE_URL` to a direct database URL, so `LISTEN` works.
+{{- end}}
+- Full guide: `docs/guide/pkg/flags.md` in the hamr repo, or `llms.txt` (`### flags`).
+{{- end}}
 
 ## Code Style
 

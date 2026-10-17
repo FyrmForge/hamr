@@ -28,6 +28,7 @@ type wizardResult struct {
 	Stripe           string // "yes" | "no"
 	EmailMock        string // "yes" | "no"
 	Alpine           string // "yes" | "no"
+	FeatureFlags     string // "yes" | "no"
 }
 
 // wizardStep pairs a huh group with a callback that prints the selection.
@@ -61,6 +62,7 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 		Stripe:           "yes",
 		EmailMock:        "yes",
 		Alpine:           "no",
+		FeatureFlags:     "no",
 	}
 
 	var steps []wizardStep
@@ -489,6 +491,33 @@ func runInteractiveForm(cmd *cobra.Command, name string, needsName, needsLocatio
 			res.EmailMock = "yes"
 		} else {
 			res.EmailMock = "no"
+		}
+	}
+
+	// ── Feature flags ──────────────────────────────────────
+	if !cmd.Flags().Changed("feature-flags") {
+		if err := huh.NewForm(huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Feature flags").
+				Description("Ship code dark and roll it out gradually via pkg/flags: typed flags declared in code, rules stored in your database (per-user allow-list, role, sticky % rollout), live updates across instances, and an admin page when auth is enabled.").
+				Options(
+					huh.NewOption("No", "no"),
+					huh.NewOption("Yes — add the feature_flags table, store, client wiring + dev widget action", "yes"),
+				).
+				Value(&res.FeatureFlags),
+		)).Run(); err != nil {
+			return nil, err
+		}
+		if res.FeatureFlags == "yes" {
+			fmt.Println("  Feature flags: Enabled")
+		} else {
+			fmt.Println("  Feature flags: Disabled")
+		}
+	} else {
+		if v, _ := cmd.Flags().GetBool("feature-flags"); v {
+			res.FeatureFlags = "yes"
+		} else {
+			res.FeatureFlags = "no"
 		}
 	}
 

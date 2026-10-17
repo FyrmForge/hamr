@@ -14,7 +14,7 @@ Create a new project with the interactive wizard:
 hamr new
 ```
 
-The wizard prompts for module path, CSS approach, storage backend, and optional features (WebSocket, E2E tests, Stripe). To skip prompts, pass flags directly:
+The wizard prompts for module path, CSS approach, storage backend, and optional features (WebSocket, E2E tests, Stripe, feature flags). To skip prompts, pass flags directly:
 
 ```bash
 hamr new myapp \

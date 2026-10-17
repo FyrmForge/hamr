@@ -3537,6 +3537,155 @@ injects both automatically.
 
 ---
 
+### flags
+
+> Package flags provides feature flags stored in the app's own database:
+> typed flags declared in code, per-user evaluation with an allow-list,
+> roles and sticky percentage rollout, and an in-memory cache kept fresh by
+> database change listeners.
+
+For safe rollout (ship dark, 10% then 100%, or off). Not experimentation: hamr
+never measures outcomes. Opt-in at scaffold with `hamr new --feature-flags`
+(wizard question "Feature flags"). Import as `hflags`
+(`github.com/FyrmForge/hamr/pkg/flags`); the app's own package is also named
+`flags`.
+
+#### Declaring and reading
+
+```go
+// internal/flags/flags.go
+var (
+    NewCheckout = hflags.Bool("new_checkout", false)
+    MaxUploads  = hflags.Int("max_uploads", 5)
+    Banner      = hflags.String("banner", "")
+    Theme       = hflags.JSON("theme", ThemeCfg{})
+)
+
+func Bool(key string, def bool) *Flag[bool]   // also Int, String, JSON[T any]
+func (f *Flag[T]) Get(ctx context.Context) T
+func (f *Flag[T]) Key() string
+func (f *Flag[T]) Default() T
+func Definitions() []Definition // {Key, Type (bool|int|string|json), Default json.RawMessage}, sorted by key
+func Override[T any](ctx context.Context, f *Flag[T], v T) context.Context // tests
+```
+
+Declaring a key twice, or a key outside `^[a-z0-9][a-z0-9_.-]*$`, panics at init. JSON `Get` decodes a fresh `T` per call (safe to mutate). `cmd/site/main.go` must import the flags
+package (blank import is fine) or its flags never register. `Get` never errors
+or panics: no client on ctx, no rule, disabled rule, user does not match, or a
+stored value that does not decode (one warning logged per load) → code
+default.
+
+#### Rules and matching
+
+```go
+type Rule struct {
+    Key      string
+    Enabled  bool
+    Value    json.RawMessage // served when the rule matches
+    Subjects []string        // allow-list of subject IDs
+    Roles    []string
+    Percent  int             // 0-100
+}
+```
+
+A disabled rule never matches. An enabled rule matches when the subject ID is
+in `Subjects`, or any role is in `Roles`, or `Percent >= 100`, or
+`hash(key + "\x00" + subjectID) % 100 < Percent`. The bucket is sticky: a user
+keeps the same value with no stored assignment.
+
+Empty or `null` value: a bool flag reads `true` (enabling means "on"); int,
+string and JSON flags serve the code default.
+
+Logged-out visitors have no subject ID. By default only ID-free rules apply
+(enabled at 100%, or off); a partial percent serves the code default. Opt in
+with `WithAnonymousCookie(name)`: a random first-party ID cookie (HttpOnly,
+SameSite Lax, 1 year, Secure when `Scheme()` is https incl. X-Forwarded-Proto) is hashed instead. This cookie is likely not "strictly
+necessary" under ePrivacy, so the app may need consent / a cookie banner.
+
+#### Client
+
+```go
+type Store interface {
+    List(ctx context.Context) ([]Rule, error)
+    Save(ctx context.Context, r Rule) error // upsert by key
+}
+func NewMemStore(rules ...Rule) Store       // tests; real Client over it evaluates like prod
+
+func New(store Store, opts ...Option) *Client
+func (c *Client) Start(ctx context.Context) error // load, watcher, safety poll until ctx ends
+func (c *Client) Set(ctx context.Context, r Rule) error
+func (c *Client) Rules() []Rule
+func (c *Client) For(ctx context.Context, w Who) context.Context // background jobs
+func (c *Client) Middleware(who WhoFunc) echo.MiddlewareFunc
+
+type Who struct{ SubjectID string; Roles []string }
+type WhoFunc func(c echo.Context) Who
+```
+
+`Start` returns a load error but the client stays usable (serves code defaults,
+keeps retrying). `Set` rejects unknown keys, `Percent` outside 0-100 and values
+that do not decode into the flag's type (each error wraps `ErrInvalid`, safe
+to show to users; other errors come from the store); it saves, then updates the local cache
+at once. `Middleware` must run after the auth middleware; it puts the client
+and `Who` on the request ctx and adds a `flags` group (every declared flag's
+value) to the context logger (`pkg/logging`), so each log line of the request
+traces back to flag values. Scaffold mounts it on site routes only; `/api`
+and `hamr add service` handlers get code defaults unless they use
+`client.For`. `WhoFunc` is app code: map the auth subject to ID
+and roles.
+
+#### Options
+
+| Option | Effect |
+|---|---|
+| `WithLogger(*slog.Logger)` | Logger for warnings. Default `slog.Default()` |
+| `WithPollInterval(d)` | Safety-net full reload. Default 5m |
+| `WithPostgres(*sql.DB)` | `LISTEN` on a pgx-backed DB; reload on every notify and after every reconnect. Pins one pooled connection: pool needs at least 2, or use `WithDirectURL`; on a 1-conn pool it logs an error and stays poll-only |
+| `WithDirectURL(url)` | Postgres: open an own pgx connection for LISTEN. Needed behind PgBouncer in transaction mode (scaffold env `FLAGS_DIRECT_DATABASE_URL`) |
+| `WithSQLite(*sql.DB)` | Poll `PRAGMA data_version` ~1s, reload when it changes (other processes' writes). On a single-connection pool the connection is borrowed per tick |
+| `WithAnonymousCookie(name)` | Anonymous ID cookie for logged-out percent rollout (consent warning above) |
+
+#### Table and trigger
+
+```go
+const Table = "feature_flags"
+const Channel = "hamr_feature_flags"
+const PostgresTriggerSQL = `...` // idempotent, multi-statement
+```
+
+Columns: `key TEXT PRIMARY KEY`, `enabled` (pg `BOOLEAN NOT NULL DEFAULT FALSE`,
+sqlite `INTEGER NOT NULL DEFAULT 0`), `value TEXT NOT NULL DEFAULT 'null'`,
+`subjects TEXT NOT NULL DEFAULT '[]'`, `roles TEXT NOT NULL DEFAULT '[]'`
+(JSON arrays), `percent INTEGER NOT NULL DEFAULT 0`, `updated_at` (pg
+`TIMESTAMPTZ NOT NULL DEFAULT NOW()`, sqlite `TEXT NOT NULL DEFAULT
+CURRENT_TIMESTAMP`). On Postgres the trigger runs `pg_notify(Channel, '')` on
+every insert/update/delete/truncate, so hand-written SQL notifies too. Existing
+projects create the table and run `PostgresTriggerSQL` by hand (full SQL and a
+`Store` sketch in `docs/guide/pkg/flags.md`).
+
+#### Scaffold and dev widget
+
+`hamr new --feature-flags` (`ProjectConfig.IncludeFlags`) adds: the table in
+`001_initial` (trigger SQL via `ProjectConfig.FlagsTriggerSQL()`; gorm runs it
+after AutoMigrate in one advisory-locked transaction), `internal/repo/.../flags.go` (`Store.Flags()`),
+`internal/flags/flags.go` (example flag `example_banner`), client wiring in
+`cmd/site/main.go` (`Deps.Flags`, env `FLAGS_DIRECT_DATABASE_URL` on
+Postgres), the middleware in `internal/web/server.go` after `auth.Load()`, and
+a `set-flag` dev action. With auth and user tables it also adds `/admin/flags`
+behind `RequireRoles(..., "admin")`: `GET /admin/flags` lists every declared flag (key, type, Rule badge No rule / Disabled / Everyone / Listed only / N%, Serving = what the rule's audience gets or the code default) with a one-click button (`POST /admin/flags/:key/toggle`: bool flags always show "Serve <opposite of what users get now>", which enables the rule, sets that value, keeps the audience, and creates an Everyone rule when none exists; other types show "Enable rule"/"Disable rule", flipping Enabled only, hidden without a saved value) and Edit (`GET /admin/flags/:key`, saved by `POST /admin/flags/:key`, 422 re-render on error, redirect to the list on success). On the edit form the value input follows the flag type (On/Off select for bool, saving `true`/`false`; number, text without quotes, JSON textarea; empty saves `null`); an "Audience" radio
+(Everyone saves Percent 100; Only listed users & roles saves 0 and needs a subject or role; Percentage of users plus listed uses the percent field, 0 allowed; no rule
+shows Everyone and the edit form pre-ticks Enabled) and saves through `Client.Set`. `ErrInvalid` errors show as
+"Could not save: <reason>."; store errors are logged and show a generic
+message.
+
+`DevAction(c *Client) devactions.Action` returns the `set-flag` action (key
+select, enabled, value JSON, percent, subjects, roles) for the hamr dev widget.
+Empty percent means 0 when subjects or roles are given, else 100.
+The reply is "<key>: <value> for N%" when a value is set, "on for N%" otherwise, "off" when disabled.
+Build it after flags are declared: it reads the flag list when called.
+
+---
+
 ## CLI Commands
 
 ### Version gating
@@ -3552,6 +3701,13 @@ Two commands refuse to run on version mismatch (released CLI builds only):
 
 Both accept `--skip-version-check` to bypass. Dev builds of the CLI (no
 release tag) skip both checks entirely.
+
+### `hamr new --feature-flags`
+
+Opt-in feature flags (`pkg/flags`): `feature_flags` table, store, client
+wiring, `set-flag` dev widget action, and an `/admin/flags` page when auth with
+user tables is on. Also asked by the interactive wizard ("Feature flags",
+default no). See `### flags`.
 
 ### `[dev].port_walk` and `hamr env`
 

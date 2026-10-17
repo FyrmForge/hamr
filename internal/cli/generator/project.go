@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/FyrmForge/hamr/llmsdocs"
+	hflags "github.com/FyrmForge/hamr/pkg/flags"
 )
 
 // ProjectConfig holds the data used to render project templates.
@@ -39,6 +40,7 @@ type ProjectConfig struct {
 	IncludeEmailMock    bool // wire pkg/emailmock + enable /__hamr/mail in hamr.toml
 	IncludeLocale       bool
 	IncludeAlpine       bool
+	IncludeFlags        bool   // pkg/flags: feature flags table, store, admin page
 	DefaultLocale       string // default: "en"
 	HamrVersion         string // HAMR version at scaffold time
 	ScaffoldedAt        string // date the project was scaffolded (YYYY-MM-DD)
@@ -211,6 +213,10 @@ func ReadExistingGoMod(dir string) (module, goVersion string, err error) {
 	return parseGoMod(path)
 }
 
+// FlagsTriggerSQL is the Postgres trigger SQL from pkg/flags, exposed to the
+// migration template so the scaffold can never drift from the library.
+func (ProjectConfig) FlagsTriggerSQL() string { return hflags.PostgresTriggerSQL }
+
 func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 	files := []templateFile{
 		// cmd/site
@@ -285,6 +291,24 @@ func buildProjectFileList(cfg *ProjectConfig) []templateFile {
 	}
 	files = append(files, templateFile{"templates/new/internal/devactions/seed." + dbDir + ".sql.tmpl", "internal/devactions/seed.sql"})
 	files = append(files, templateFile{repoTmplDir + "/store.go.tmpl", "internal/repo/" + dbDir + "/store.go"})
+
+	// Feature flags: app flag declarations, the Store per connector/database,
+	// and (gorm only) the table model that AutoMigrate registers.
+	if cfg.IncludeFlags {
+		files = append(files,
+			templateFile{"templates/new/internal/flags/flags.go.tmpl", "internal/flags/flags.go"},
+			templateFile{repoTmplDir + "/flags.go.tmpl", "internal/repo/" + dbDir + "/flags.go"},
+		)
+		if cfg.DBConnector == "gorm" {
+			files = append(files, templateFile{"templates/new/internal/repo/gorm-flags.go.tmpl", "internal/repo/flags.go"})
+		}
+		if cfg.IncludeAuth && cfg.AuthWithTables {
+			files = append(files,
+				templateFile{"templates/new/internal/web/handler/admin/flags/handler.go.tmpl", "internal/web/handler/admin/flags/handler.go"},
+				templateFile{"templates/new/internal/web/handler/admin/flags/flags.templ.tmpl", "internal/web/handler/admin/flags/flags.templ"},
+			)
+		}
+	}
 
 	// Session model — gorm scaffolds carry the sessions schema as a struct;
 	// sqlx scaffolds get it from the SQL migrations instead.

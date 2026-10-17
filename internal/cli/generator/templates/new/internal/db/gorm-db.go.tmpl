@@ -12,13 +12,16 @@ import (
 	"strings"
 {{- end}}
 	"time"
-
-{{- if eq .Database "sqlite"}}
+{{if eq .Database "sqlite"}}
 	"github.com/glebarez/sqlite"
-{{- else}}
-	"gorm.io/driver/postgres"
-{{- end}}
 	"gorm.io/gorm"
+{{- else}}
+{{- if .IncludeFlags}}
+	hflags "github.com/FyrmForge/hamr/pkg/flags"
+{{- end}}
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+{{- end}}
 )
 
 const (
@@ -108,7 +111,26 @@ func jitter(base time.Duration) time.Duration {
 
 // AutoMigrate runs GORM auto-migration for all registered models.
 func AutoMigrate(db *gorm.DB) error {
+{{- if eq .Database "sqlite"}}
 	return db.AutoMigrate(models()...)
+{{- else}}
+	// The advisory lock makes replicas booting together on an empty database
+	// take turns: concurrent CREATE TABLE fails with a pg_type unique violation.
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext('hamr_automigrate'))").Error; err != nil {
+			return err
+		}
+		if err := tx.AutoMigrate(models()...); err != nil {
+			return err
+		}
+{{- if .IncludeFlags}}
+		// Notify every instance when a flag changes (see pkg/flags).
+		return tx.Exec(hflags.PostgresTriggerSQL).Error
+{{- else}}
+		return nil
+{{- end}}
+	})
+{{- end}}
 }
 {{- if eq .Database "sqlite"}}
 

@@ -19,6 +19,7 @@ test:
 
 test-integration-db:
 	go test -mod=mod -tags=integration -count=1 ./pkg/db -run TestConnectContext_ReconnectsAfterBackendTermination
+	go test -mod=mod -tags=integration -count=1 ./pkg/flags -run TestWithPostgres_ReloadsOnNotifyAndRecovers
 
 test-integration-scaffold:
 	go test -mod=mod -tags=integration -count=1 -timeout=20m -v ./test/integration/...

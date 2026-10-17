@@ -1,0 +1,22 @@
+// Package flags declares the feature flags of this app.
+//
+// Declare each flag once, as a package-level var. The var holds only the key
+// and the code default; the live value comes from the database, through the
+// client that cmd/site/main.go starts and the flags middleware puts on the
+// request context. Read a flag anywhere you have a ctx:
+//
+//	if flags.ExampleBanner.Get(ctx) { ... }
+//
+// Types: hflags.Bool, hflags.Int, hflags.String and hflags.JSON. Declaring
+// the same key twice panics at startup. Rules (enabled, allow-list, roles,
+// rollout percent) are edited from the admin page or the hamr dev widget, and
+// Get serves the code default whenever no rule matches.
+//
+// cmd/site/main.go imports this package, so every flag declared here is
+// registered before the client starts.
+package flags
+
+import hflags "github.com/FyrmForge/hamr/pkg/flags"
+
+// ExampleBanner is a sample flag. Replace it with your own.
+var ExampleBanner = hflags.Bool("example_banner", false)

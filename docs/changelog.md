@@ -10,6 +10,20 @@ the TL;DR on top of it.
 
 ### Added
 
+- **Feature flags (`pkg/flags`).** Ship code dark and roll it out
+  gradually. Typed flags (bool, int, string, JSON) are declared in code; rules
+  (enabled, subject allow-list, roles, sticky percent rollout) live in your
+  own database and are read from memory. Changes reach every instance through
+  Postgres LISTEN/NOTIFY or a SQLite `data_version` poll, with a 5-minute
+  safety reload. The middleware adds a `flags` group to the request logger.
+  `hamr new --feature-flags` (or the wizard question) scaffolds the
+  `feature_flags` table, the store, the client wiring, a `set-flag` action in
+  the `hamr dev` widget, and an `/admin/flags` page when auth has user
+  tables. Keys must be lowercase letters, digits, `_`, `.` or `-`.
+  Existing projects wire it by hand, see the guide. The optional anonymous
+  cookie for logged-out rollout likely needs consent. Guide:
+  `docs/guide/pkg/flags.md`.
+
 - **`hamr dev` command palette.** `:` opens one fuzzy-searchable list of
   hamr commands (`rebuild`, `restart`, `open browser`, `clear logs`,
   `toggle mcp`, `toggle tunnel`, `stripe mode`, `help`, `quit`; each with its
@@ -76,6 +90,11 @@ the TL;DR on top of it.
   than a custom `/etc/hosts` name; the tunnel is unaffected.
 
 ### Fixed
+
+- **Scaffolded gorm + Postgres apps no longer crash when replicas boot
+  together on an empty database.** `AutoMigrate` now runs inside a
+  transaction holding a Postgres advisory lock, so concurrent first boots
+  take turns instead of failing with a `pg_type` unique violation.
 
 - **`hamr dev` keeps walked compose ports when it adopts a running stack.**
   Docker lists every published port twice (IPv4 and IPv6), and adopt

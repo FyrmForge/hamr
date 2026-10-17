@@ -137,6 +137,16 @@ Library backing `hamr lint templ`. Also usable programmatically.
 
 ## Optional (scaffold flag-gated)
 
+### `flags` (`--feature-flags`)
+Feature flags for safe rollout; rules live in the app's `feature_flags` table, reads come from memory. Import as `hflags` (the app's own package is `internal/flags`).
+
+- Declare once in `internal/flags`: `hflags.Bool/Int/String(key, def)`, `hflags.JSON[T](key, def)`; read with `Flag.Get(ctx)` (never errors; no match → code default)
+- `Rule{Key, Enabled, Value, Subjects, Roles, Percent}`; sticky % rollout; enabled bool flag with no value reads `true`
+- `New(store, opts...)`, `Start(ctx)`, `Set(ctx, Rule)` (validation errors wrap `ErrInvalid`; store errors do not), `Rules()`, `For(ctx, Who)` for jobs, `Middleware(WhoFunc)` after auth (adds a `flags` log group)
+- Tests: `NewMemStore(rules...)`, `Override(ctx, flag, v)`
+- Options: `WithPostgres(db)` / `WithSQLite(db)` (live updates), `WithDirectURL(url)` (PgBouncer), `WithPollInterval`, `WithAnonymousCookie(name)` (may need cookie consent)
+- Scaffold also adds the `set-flag` dev widget action and, with auth, `/admin/flags`. Guide: `docs/guide/pkg/flags.md`
+
 ### `e2e` (`--e2e`)
 Reusable go-rod browser helpers for Playwright-free E2E testing.
 
@@ -234,6 +244,7 @@ File-watching and S3-syncing for static assets.
 | Fire-and-forget goroutine (safely)            | `async.Fire`                |
 | Concurrent fan-out with first-error cancel    | `async.All`                 |
 | Cron jobs                                     | `janitor`                   |
+| Roll out a feature gradually                  | `flags`                     |
 | Upload an image/video                         | `media`                     |
 | Save a file locally or to S3                  | `storage`                   |
 | Live server→client push                       | `websocket`                 |

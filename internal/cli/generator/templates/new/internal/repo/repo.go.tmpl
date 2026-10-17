@@ -2,9 +2,13 @@ package repo
 
 import (
 	"context"
+{{- if or .IncludeSessions .IncludeFlags}}
+{{end}}
 {{- if .IncludeSessions}}
-
 	"github.com/FyrmForge/hamr/pkg/auth"
+{{- end}}
+{{- if .IncludeFlags}}
+	hflags "github.com/FyrmForge/hamr/pkg/flags"
 {{- end}}
 )
 
@@ -30,5 +34,10 @@ type Store interface {
 
 	// Users returns the user sub-store.
 	Users() UserStore
+{{- end}}
+{{- if .IncludeFlags}}
+
+	// Flags returns the feature flag store, used by pkg/flags.
+	Flags() hflags.Store
 {{- end}}
 }

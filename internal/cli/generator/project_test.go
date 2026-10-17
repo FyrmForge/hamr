@@ -2,6 +2,7 @@ package generator
 
 import (
 	"fmt"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	hflags "github.com/FyrmForge/hamr/pkg/flags"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1953,4 +1955,168 @@ func TestGenerateProject_envExampleDevActions(t *testing.T) {
 	env := readFile(t, dir, ".env.example")
 	assert.Contains(t, env, "# HAMR_ACTIONS_TOKEN=")
 	assert.Contains(t, env, "# HAMR_ACTIONS_ENV=")
+}
+
+func TestBuildProjectFileList_flags(t *testing.T) {
+	for _, connector := range []string{"gorm", "sqlx"} {
+		for _, database := range []string{"postgres", "sqlite"} {
+			for _, withAuth := range []bool{true, false} {
+				cfg := &ProjectConfig{
+					Name: "proj", Module: "github.com/test/proj", CSS: "plain",
+					Database: database, DBConnector: connector,
+					IncludeFlags: true, IncludeAuth: withAuth, AuthWithTables: withAuth, IncludeSessions: withAuth,
+				}
+				dests := map[string]bool{}
+				for _, f := range buildProjectFileList(cfg) {
+					dests[f.dest] = true
+				}
+				dbDir := map[string]string{"postgres": "postgres", "sqlite": "sqlite"}[database]
+				assert.True(t, dests["internal/flags/flags.go"])
+				assert.True(t, dests["internal/repo/"+dbDir+"/flags.go"])
+				assert.Equal(t, connector == "gorm", dests["internal/repo/flags.go"])
+				assert.Equal(t, withAuth, dests["internal/web/handler/admin/flags/handler.go"])
+				assert.Equal(t, withAuth, dests["internal/web/handler/admin/flags/flags.templ"])
+			}
+		}
+	}
+
+	cfg := &ProjectConfig{Name: "proj", Module: "github.com/test/proj", CSS: "plain", DBConnector: "sqlx"}
+	for _, f := range buildProjectFileList(cfg) {
+		assert.NotContains(t, f.dest, "flags")
+	}
+}
+
+func TestGenerateProject_flagsMatrix(t *testing.T) {
+	for _, connector := range []string{"gorm", "sqlx"} {
+		for _, database := range []string{"postgres", "sqlite"} {
+			for _, withAuth := range []bool{true, false} {
+				t.Run(fmt.Sprintf("%s/%s/auth=%t", connector, database, withAuth), func(t *testing.T) {
+					dir := filepath.Join(t.TempDir(), "flagproj")
+					cfg := &ProjectConfig{
+						Name: "flagproj", Module: "github.com/test/flagproj", CSS: "plain",
+						Database: database, DBConnector: connector, GoVersion: "1.25.0",
+						IncludeFlags: true, IncludeSessions: withAuth, IncludeAuth: withAuth, AuthWithTables: withAuth,
+					}
+					require.NoError(t, GenerateProject(dir, cfg))
+
+					goFiles := []string{
+						"cmd/site/main.go", "internal/flags/flags.go", "internal/repo/repo.go",
+						"internal/repo/" + database + "/flags.go", "internal/devactions/devactions.go", "internal/db/db.go",
+					}
+					if connector == "gorm" {
+						goFiles = append(goFiles, "internal/repo/flags.go", "internal/db/models.go")
+					}
+					for _, f := range goFiles {
+						_, err := parser.ParseFile(token.NewFileSet(), f, readFile(t, dir, f), parser.AllErrors)
+						require.NoError(t, err, f)
+					}
+
+					assert.Contains(t, readFile(t, dir, "internal/flags/flags.go"), `ExampleBanner = hflags.Bool("example_banner", false)`)
+					assert.Contains(t, readFile(t, dir, "internal/repo/repo.go"), "Flags() hflags.Store")
+
+					mainGo := readFile(t, dir, "cmd/site/main.go")
+					assert.Contains(t, mainGo, `_ "github.com/test/flagproj/internal/flags"`)
+					assert.Contains(t, mainGo, "hflags.New(store.Flags(), flagsOpts...)")
+					assert.Contains(t, mainGo, "flagsClient.Start(flagsCtx)")
+					assert.Contains(t, mainGo, "Flags: flagsClient,")
+					assert.Contains(t, mainGo, "flagsClient).Handler()")
+					assert.Contains(t, readFile(t, dir, "internal/devactions/devactions.go"), "hflags.DevAction(flags)")
+
+					if database == "sqlite" {
+						assert.Contains(t, mainGo, "hflags.WithSQLite(")
+						assert.NotContains(t, mainGo, "WithDirectURL")
+						assert.NotContains(t, readFile(t, dir, ".env.example"), "FLAGS_DIRECT_DATABASE_URL")
+					} else {
+						assert.Contains(t, mainGo, "hflags.WithPostgres(")
+						assert.Contains(t, mainGo, `hflags.WithDirectURL(envFlagsDirectURL)`)
+						assert.Contains(t, readFile(t, dir, ".env.example"), "# FLAGS_DIRECT_DATABASE_URL=")
+					}
+					if connector == "gorm" {
+						assert.Contains(t, mainGo, "database.DB()")
+						assert.Contains(t, readFile(t, dir, "internal/db/models.go"), "&repo.FeatureFlag{}")
+						assert.Contains(t, readFile(t, dir, "internal/repo/flags.go"), `TableName() string { return "feature_flags" }`)
+						gdb := readFile(t, dir, "internal/db/db.go")
+						if database == "postgres" {
+							assert.Contains(t, gdb, "tx.Exec(hflags.PostgresTriggerSQL)")
+							assert.Contains(t, gdb, "hamr_automigrate")
+						} else {
+							assert.NotContains(t, gdb, "PostgresTriggerSQL")
+						}
+						assertFileNotExists(t, dir, "internal/db/migrations/001_initial.up.sql")
+					} else {
+						up := readFile(t, dir, "internal/db/migrations/001_initial.up.sql")
+						assert.Contains(t, up, "CREATE TABLE feature_flags")
+						assert.Contains(t, readFile(t, dir, "internal/db/migrations/001_initial.down.sql"), "DROP TABLE IF EXISTS feature_flags;")
+						if database == "postgres" {
+							// The migration inlines the library's trigger SQL verbatim.
+							assert.Contains(t, up, hflags.PostgresTriggerSQL)
+						} else {
+							assert.NotContains(t, up, "pg_notify")
+						}
+					}
+
+					if withAuth {
+						assertFileExists(t, dir, "internal/web/handler/admin/flags/handler.go")
+					} else {
+						assertFileNotExists(t, dir, "internal/web/handler/admin/flags/handler.go")
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestGenerateProject_noFlags(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "noflags")
+	cfg := &ProjectConfig{
+		Name: "noflags", Module: "github.com/test/noflags", CSS: "plain",
+		Database: "postgres", DBConnector: "sqlx", GoVersion: "1.25.0",
+	}
+	require.NoError(t, GenerateProject(dir, cfg))
+	assertFileNotExists(t, dir, "internal/flags/flags.go")
+	assert.NotContains(t, readFile(t, dir, "cmd/site/main.go"), "hflags")
+	assert.NotContains(t, readFile(t, dir, "internal/db/migrations/001_initial.up.sql"), "feature_flags")
+}
+
+func TestGenerateProject_gormDBGofmtClean(t *testing.T) {
+	for _, database := range []string{"postgres", "sqlite"} {
+		for _, flags := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/flags=%v", database, flags), func(t *testing.T) {
+				dir := filepath.Join(t.TempDir(), "p")
+				cfg := &ProjectConfig{
+					Name: "p", Module: "github.com/test/p", CSS: "plain",
+					Database: database, DBConnector: "gorm", GoVersion: "1.25.0",
+					IncludeFlags: flags,
+				}
+				require.NoError(t, GenerateProject(dir, cfg))
+				src := readFile(t, dir, "internal/db/db.go")
+				out, err := format.Source([]byte(src))
+				require.NoError(t, err)
+				assert.Equal(t, strings.TrimSpace(src), strings.TrimSpace(string(out)), "db.go is not gofmt-clean")
+			})
+		}
+	}
+}
+
+func TestGenerateProject_serverGoGofmtClean(t *testing.T) {
+	for _, flags := range []bool{false, true} {
+		for _, auth := range []bool{false, true} {
+			for _, tables := range []bool{false, true} {
+				t.Run(fmt.Sprintf("flags=%v/auth=%v/tables=%v", flags, auth, tables), func(t *testing.T) {
+					dir := filepath.Join(t.TempDir(), "p")
+					cfg := &ProjectConfig{
+						Name: "p", Module: "github.com/test/p", CSS: "plain",
+						Database: "postgres", DBConnector: "gorm", GoVersion: "1.25.0",
+						IncludeFlags: flags, IncludeAuth: auth, AuthWithTables: tables,
+						IncludeStorage: true, IncludeLocale: true, IncludeWS: true, IncludeEmailMock: true,
+					}
+					require.NoError(t, GenerateProject(dir, cfg))
+					src := readFile(t, dir, "internal/web/server.go")
+					out, err := format.Source([]byte(src))
+					require.NoError(t, err)
+					assert.Equal(t, strings.TrimSpace(src), strings.TrimSpace(string(out)), "server.go is not gofmt-clean")
+				})
+			}
+		}
+	}
 }

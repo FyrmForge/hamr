@@ -173,6 +173,18 @@ func TestApplyWizardResult_noStripe(t *testing.T) {
 	assert.False(t, cfg.IncludeStripe)
 }
 
+func TestApplyWizardResult_featureFlags(t *testing.T) {
+	for _, tc := range []struct {
+		answer string
+		want   bool
+	}{{"yes", true}, {"no", false}, {"", false}} {
+		res := &wizardResult{Owner: "user", CSS: "plain", Database: "postgres", StorageBackend: "local", FeatureFlags: tc.answer}
+		cfg := &generator.ProjectConfig{Name: "app", GoVersion: "1.25.0"}
+		applyWizardResult(newCmd, "app", res, cfg)
+		assert.Equal(t, tc.want, cfg.IncludeFlags, tc.answer)
+	}
+}
+
 func TestWizardResult_locationDefault(t *testing.T) {
 	res := &wizardResult{
 		Location: "subfolder",

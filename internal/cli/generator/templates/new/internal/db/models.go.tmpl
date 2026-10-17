@@ -1,6 +1,6 @@
 package db
 
-{{- $hasModels := or .IncludeSessions (and .IncludeAuth .AuthWithTables)}}
+{{- $hasModels := or .IncludeSessions .IncludeFlags (and .IncludeAuth .AuthWithTables)}}
 {{- if $hasModels}}
 
 import "{{.Module}}/internal/repo"
@@ -17,6 +17,9 @@ func models() []any {
 {{- end}}
 {{- if and .IncludeAuth .AuthWithTables}}
 		&repo.User{},
+{{- end}}
+{{- if .IncludeFlags}}
+		&repo.FeatureFlag{},
 {{- end}}
 {{- if not $hasModels}}
 		// Add your model structs here, e.g.:

@@ -20,6 +20,9 @@ import (
 	"github.com/FyrmForge/hamr/pkg/db"
 {{- end}}
 {{- end}}
+{{- if .IncludeFlags}}
+	hflags "github.com/FyrmForge/hamr/pkg/flags"
+{{- end}}
 	"github.com/FyrmForge/hamr/pkg/logging"
 {{- if .IncludeSessions}}
 	"github.com/FyrmForge/hamr/pkg/middleware"
@@ -60,6 +63,10 @@ import (
 {{- end}}
 	"{{.Module}}/internal/api"
 	"{{.Module}}/internal/devactions"
+{{- if .IncludeFlags}}
+	// Imported for its flag declarations: they register at init.
+	_ "{{.Module}}/internal/flags"
+{{- end}}
 	"{{.Module}}/internal/web"
 	"{{.Module}}/internal/web/components"
 )
@@ -109,6 +116,11 @@ var (
 {{- if .IncludeEmailMock}}
 	envEmailMock   = config.GetEnvOrDefaultBool("EMAIL_MOCK", false)
 	envHamrDevURL  = config.GetEnvOrDefault("HAMR_DEV_URL", "http://localhost:3000")
+{{- end}}
+{{- if and .IncludeFlags (ne .Database "sqlite")}}
+	// Optional direct (non-pooled) URL for the flags LISTEN connection, for
+	// PgBouncer in transaction mode. Empty: use the pool.
+	envFlagsDirectURL = config.GetEnvOrDefault("FLAGS_DIRECT_DATABASE_URL", "")
 {{- end}}
 	envTrustedProxies = config.GetEnvCSV("TRUSTED_PROXIES")
 )
@@ -339,6 +351,38 @@ func main() {
 	}
 {{- end}}
 
+{{- if .IncludeFlags}}
+
+	// Feature flags. A failed start is not fatal: Get serves the code defaults
+	// until the database answers.
+	flagsCtx, cancelFlags := context.WithCancel(context.Background())
+	defer cancelFlags()
+{{- if eq .DBConnector "gorm"}}
+	flagsSQLDB, err := database.DB()
+	if err != nil {
+		log.Error("failed to get sql.DB for flags", "error", err)
+		os.Exit(1)
+	}
+{{- end}}
+	flagsOpts := []hflags.Option{
+		hflags.WithLogger(log),
+{{- if eq .Database "sqlite"}}
+		hflags.WithSQLite({{if eq .DBConnector "gorm"}}flagsSQLDB{{else}}database.DB{{end}}),
+{{- else}}
+		hflags.WithPostgres({{if eq .DBConnector "gorm"}}flagsSQLDB{{else}}database.DB{{end}}),
+{{- end}}
+	}
+{{- if ne .Database "sqlite"}}
+	if envFlagsDirectURL != "" {
+		flagsOpts = append(flagsOpts, hflags.WithDirectURL(envFlagsDirectURL))
+	}
+{{- end}}
+	flagsClient := hflags.New(store.Flags(), flagsOpts...)
+	if err := flagsClient.Start(flagsCtx); err != nil {
+		log.Warn("feature flags failed to start", "error", err)
+	}
+{{- end}}
+
 	api.RegisterRoutes(srv, &api.Deps{
 		Store: store,
 {{- if .IncludeStripe}}
@@ -355,11 +399,11 @@ func main() {
 		DevMode:       envDevMode,
 		// Nil unless HAMR_ACTIONS_TOKEN and HAMR_ACTIONS_ENV enable it.
 {{- if and .IncludeAuth .AuthWithTables .IncludeSessions}}
-		DevActions: devactions.New(database, store, sessionManager).Handler(),
+		DevActions: devactions.New(database, store, sessionManager{{if .IncludeFlags}}, flagsClient{{end}}).Handler(),
 {{- else if and .IncludeAuth .AuthWithTables}}
-		DevActions: devactions.New(database, store).Handler(),
+		DevActions: devactions.New(database, store{{if .IncludeFlags}}, flagsClient{{end}}).Handler(),
 {{- else}}
-		DevActions: devactions.New(database).Handler(),
+		DevActions: devactions.New(database{{if .IncludeFlags}}, flagsClient{{end}}).Handler(),
 {{- end}}
 {{- if .IncludeSessions}}
 		SessionManager: sessionManager,
@@ -378,6 +422,9 @@ func main() {
 {{- end}}
 {{- if .IncludeEmailMock}}
 		EmailSender: emailSender,
+{{- end}}
+{{- if .IncludeFlags}}
+		Flags: flagsClient,
 {{- end}}
 	})
 

@@ -20,6 +20,9 @@ import (
 	"github.com/FyrmForge/hamr/pkg/auth"
 	"github.com/google/uuid"
 {{- end}}
+{{- if .IncludeFlags}}
+	hflags "github.com/FyrmForge/hamr/pkg/flags"
+{{- end}}
 {{- if eq .DBConnector "gorm"}}
 	"gorm.io/gorm"
 {{- else}}
@@ -53,21 +56,21 @@ var accounts = []hamrdev.Account{
 // New builds the registry of dev actions.
 {{- if $whoami}}
 {{- if eq .DBConnector "gorm"}}
-func New(db *gorm.DB, store repo.Store, sessions *auth.SessionManager) *hamrdev.Registry {
+func New(db *gorm.DB, store repo.Store, sessions *auth.SessionManager{{if .IncludeFlags}}, flags *hflags.Client{{end}}) *hamrdev.Registry {
 {{- else}}
-func New(db *sqlx.DB, store repo.Store, sessions *auth.SessionManager) *hamrdev.Registry {
+func New(db *sqlx.DB, store repo.Store, sessions *auth.SessionManager{{if .IncludeFlags}}, flags *hflags.Client{{end}}) *hamrdev.Registry {
 {{- end}}
 {{- else if $users}}
 {{- if eq .DBConnector "gorm"}}
-func New(db *gorm.DB, store repo.Store) *hamrdev.Registry {
+func New(db *gorm.DB, store repo.Store{{if .IncludeFlags}}, flags *hflags.Client{{end}}) *hamrdev.Registry {
 {{- else}}
-func New(db *sqlx.DB, store repo.Store) *hamrdev.Registry {
+func New(db *sqlx.DB, store repo.Store{{if .IncludeFlags}}, flags *hflags.Client{{end}}) *hamrdev.Registry {
 {{- end}}
 {{- else}}
 {{- if eq .DBConnector "gorm"}}
-func New(db *gorm.DB) *hamrdev.Registry {
+func New(db *gorm.DB{{if .IncludeFlags}}, flags *hflags.Client{{end}}) *hamrdev.Registry {
 {{- else}}
-func New(db *sqlx.DB) *hamrdev.Registry {
+func New(db *sqlx.DB{{if .IncludeFlags}}, flags *hflags.Client{{end}}) *hamrdev.Registry {
 {{- end}}
 {{- end}}
 	r := &hamrdev.Registry{
@@ -184,6 +187,11 @@ func New(db *sqlx.DB) *hamrdev.Registry {
 			return "All sessions deleted", nil
 		},
 	})
+{{- end}}
+{{- if .IncludeFlags}}
+
+	// Lets testers flip a flag from the hamr widget without an admin login.
+	r.Register(hflags.DevAction(flags))
 {{- end}}
 
 	return r

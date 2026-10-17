@@ -6,23 +6,27 @@ import (
 {{- end}}
 	"net/http"
 
-	"github.com/FyrmForge/hamr/pkg/devactions"
-	hamrmw "github.com/FyrmForge/hamr/pkg/middleware"
-	"github.com/FyrmForge/hamr/pkg/server"
 {{- if .IncludeSessions}}
+
 	"github.com/FyrmForge/hamr/pkg/auth"
+{{- else}}{{"\n"}}{{- end}}
+	"github.com/FyrmForge/hamr/pkg/devactions"
+{{- if .IncludeEmailMock}}
+	"github.com/FyrmForge/hamr/pkg/email"
 {{- end}}
-{{- if .IncludeStorage}}
-	"github.com/FyrmForge/hamr/pkg/storage"
+{{- if .IncludeFlags}}
+	hflags "github.com/FyrmForge/hamr/pkg/flags"
 {{- end}}
 {{- if .IncludeLocale}}
 	"github.com/FyrmForge/hamr/pkg/i18n"
 {{- end}}
+	hamrmw "github.com/FyrmForge/hamr/pkg/middleware"
+	"github.com/FyrmForge/hamr/pkg/server"
+{{- if .IncludeStorage}}
+	"github.com/FyrmForge/hamr/pkg/storage"
+{{- end}}
 {{- if .IncludeWS}}
 	"github.com/FyrmForge/hamr/pkg/websocket"
-{{- end}}
-{{- if .IncludeEmailMock}}
-	"github.com/FyrmForge/hamr/pkg/email"
 {{- end}}
 	"github.com/labstack/echo/v4"
 
@@ -30,43 +34,60 @@ import (
 	"{{.Module}}/internal/repo"
 {{- if .IncludeAuth}}
 	"{{.Module}}/internal/service"
+{{- end}}
+	"{{.Module}}/internal/web/components"
+	"{{.Module}}/internal/web/handler/about"
+{{- if and .IncludeFlags .IncludeAuth .AuthWithTables}}
+	adminflags "{{.Module}}/internal/web/handler/admin/flags"
+{{- end}}
+{{- if .IncludeAuth}}
 	"{{.Module}}/internal/web/handler/auth/login"
 	"{{.Module}}/internal/web/handler/auth/register"
 {{- end}}
-	"{{.Module}}/internal/web/handler/about"
 {{- if .IncludeEmailMock}}
 	"{{.Module}}/internal/web/handler/devemail"
 {{- end}}
 	"{{.Module}}/internal/web/handler/home"
-	"{{.Module}}/internal/web/components"
 )
 
 // Deps holds the dependencies for route registration.
 type Deps struct {
-	Store          repo.Store
-	BaseURL        string
-	StaticBaseURL  string
-	DevMode        bool
+	Store         repo.Store
+	BaseURL       string
+	StaticBaseURL string
+	DevMode       bool
+
 	// DevActions is the hamr dev/staging actions endpoint (see
 	// internal/devactions). Nil unless HAMR_ACTIONS_TOKEN and
 	// HAMR_ACTIONS_ENV enable it.
 	DevActions http.Handler
 {{- if .IncludeSessions}}
+
 	SessionManager *auth.SessionManager
 {{- end}}
 {{- if .IncludeAuth}}
+
 	AuthService *service.AuthService
 {{- end}}
+{{- if .IncludeFlags}}
+
+	// Flags is the feature flag client (see internal/flags).
+	Flags *hflags.Client
+{{- end}}
 {{- if .IncludeStorage}}
+
 	FileStorage storage.FileStorage
 {{- end}}
 {{- if .IncludeWS}}
+
 	Hub *websocket.Hub
 {{- end}}
 {{- if .IncludeLocale}}
+
 	LocaleBundle *i18n.Bundle
 {{- end}}
 {{- if .IncludeEmailMock}}
+
 	// EmailSender is the outbound mail transport. In dev it points at the
 	// hamr email inbox at /__hamr/mail (via pkg/emailmock); in production
 	// swap in a real provider adapter that satisfies email.Sender.
@@ -126,6 +147,28 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 	)
 	site.Use(auth.Load())
 {{- end}}
+{{- if .IncludeFlags}}
+
+{{- if .IncludeAuth}}
+
+	// Feature flags: after auth.Load() so the subject is known. Logged-out
+	// requests (empty Who) only match rules that need no identity.
+	site.Use(deps.Flags.Middleware(func(c echo.Context) hflags.Who {
+		who := hflags.Who{SubjectID: hamrmw.GetSubjectID(c)}
+		if u, ok := hamrmw.GetSubject(c).(*repo.User); ok && u != nil {
+			who.Roles = []string{u.Role}
+		}
+		return who
+	}))
+{{- else}}
+
+	// Feature flags: without auth there is no subject, so only rules that
+	// need no identity (everyone, percent) can match.
+	site.Use(deps.Flags.Middleware(func(c echo.Context) hflags.Who {
+		return hflags.Who{SubjectID: hamrmw.GetSubjectID(c)}
+	}))
+{{- end}}
+{{- end}}
 
 	homeHandler := home.NewHandler()
 	site.GET("/", homeHandler.Index)
@@ -152,6 +195,28 @@ func RegisterRoutes(srv *server.Server, deps *Deps) {
 	site.GET("/register", registerHandler.Page, auth.RequireNotAuth())
 	site.POST("/register", registerHandler.Submit, auth.RequireNotAuth())
 	site.POST("/register/validate/:field", registerHandler.FormRules.ValidationHandler("field"), auth.RequireNotAuth())
+{{- end}}
+{{- if and .IncludeFlags .IncludeAuth .AuthWithTables}}
+
+	// Admin: feature flags. Auth first, then the admin role check.
+	isAdmin := func(subject any, roles []string) bool {
+		u, ok := subject.(*repo.User)
+		if !ok || u == nil {
+			return false
+		}
+		for _, r := range roles {
+			if u.Role == r {
+				return true
+			}
+		}
+		return false
+	}
+	admin := site.Group("/admin", auth.RequireAuth(), hamrmw.RequireRoles(isAdmin, "admin"))
+	flagsHandler := adminflags.NewHandler(deps.Flags)
+	admin.GET("/flags", flagsHandler.List)
+	admin.GET("/flags/:key", flagsHandler.Edit)
+	admin.POST("/flags/:key", flagsHandler.Save)
+	admin.POST("/flags/:key/toggle", flagsHandler.Toggle)
 {{- end}}
 }
 

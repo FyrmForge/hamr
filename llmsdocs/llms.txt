@@ -203,6 +203,7 @@
   latest release and refuses to run when the local CLI is out of date so
   scaffolds never lag the template; bypass with `--skip-version-check`.
   Network errors warn and fall through; dev builds skip the check.
+  `--feature-flags` (wizard question "Feature flags", default no) scaffolds `pkg/flags` (see `### flags`).
 - **hamr env**: Prints `KEY=VALUE` (or `export KEY=VALUE` with `--export`)
   pairs derived from `.hamr/walks.json` (written by `hamr dev` after
   walking +1 on busy) merged with `.env`. Used in Makefiles / shell scripts
@@ -560,6 +561,17 @@ App-side endpoint behind the hamr widget's actions panel and login helper (`hamr
 - Every call needs `X-Hamr-Actions-Token`. `GET /_devactions` → `{actions, accounts}`; `POST /_devactions/<name>` `{inputs, confirm}` → `{message}`; errors `{error}`: 400/401/404/405/409 (confirm needed)/412 (not disposable)/500
 - Dangerous actions need `confirm:true` and `Disposable()==true`; scaffold checks the `hamr_disposable` table, created only by the dev seed — on a fresh DB apply the seed once before dangerous actions unlock
 - Staging: set the same `HAMR_ACTIONS_TOKEN` on `hamr mock-serve` and the app
+
+### flags
+Feature flags for safe rollout (`hamr/pkg/flags`, guide `flags.md`). Typed flags declared in code; rules stored in the app's own DB table `feature_flags`; reads come from memory. Opt-in at scaffold: `hamr new --feature-flags` (wizard question "Feature flags", `IncludeFlags`). Not experimentation: hamr never measures outcomes.
+- Declare in the app's `internal/flags` (import as `hflags`): `Bool(key, def)`, `Int`, `String`, `JSON[T](key, def) *Flag[T]`; duplicate key or key outside `^[a-z0-9][a-z0-9_.-]*$` panics at init; JSON `Get` decodes a fresh `T` each call. `(*Flag[T]).Get(ctx) T` never errors: no client, no rule, disabled, no match or undecodable value → code default. `Key()`, `Default()`. `Definitions() []Definition{Key, Type, Default}`
+- `Rule{ Key; Enabled bool; Value json.RawMessage; Subjects, Roles []string; Percent int }`. Matches when enabled and subject ID in `Subjects`, or role in `Roles`, or `Percent>=100`, or `hash(key+"\x00"+subjectID)%100 < Percent` (sticky). Empty/`null` value: bool flag reads `true`, other types serve the code default
+- `Store{ List(ctx) ([]Rule, error); Save(ctx, Rule) error }` (app implements; scaffold has sqlx + gorm × pg/sqlite). `NewMemStore(rules...)` for tests
+- `New(store, opts...) *Client`; `Start(ctx) error` (load + watcher + 5-min safety poll; load error leaves client serving defaults); `Set(ctx, Rule) error` (validates key/percent/value, saves, updates local cache; validation errors wrap exported `ErrInvalid`, store errors do not); `Rules()`; `For(ctx, Who) ctx` for jobs; `Override(ctx, flag, v) ctx` for tests
+- Options: `WithLogger`, `WithPollInterval` (default 5m), `WithPostgres(*sql.DB)` (LISTEN on channel `hamr_feature_flags`, reload on notify and on reconnect; pins one pooled conn, so pool needs ≥2; on a 1-conn pool without `WithDirectURL` it logs an error and stays poll-only), `WithDirectURL(url)` (own pgx conn; needed behind PgBouncer transaction mode; scaffold env `FLAGS_DIRECT_DATABASE_URL`), `WithSQLite(*sql.DB)` (polls `PRAGMA data_version` ~1s; borrows the conn per tick on a single-conn pool), `WithAnonymousCookie(name)` (random first-party ID cookie for logged-out % rollout; likely not "strictly necessary" under ePrivacy → may need consent/cookie banner)
+- `Middleware(WhoFunc) echo.MiddlewareFunc`; `WhoFunc func(echo.Context) Who{SubjectID string; Roles []string}`. Run after auth. Puts client + Who on the request ctx and a `flags` slog group (every flag's value) on the context logger. Logged-out without cookie: only ID-free rules apply (100% or off). Scaffold mounts it on site routes only; `/api` and services get code defaults unless they use `client.For`
+- Postgres trigger: const `PostgresTriggerSQL` (idempotent, multi-statement) NOTIFYs `Channel` on insert/update/delete/truncate of `Table` (`feature_flags`). Existing projects add table + trigger by hand (see guide)
+- `DevAction(client) devactions.Action` — `set-flag` for the hamr dev widget (key, enabled, value JSON, percent [empty = 0 if subjects/roles given, else 100], subjects, roles; reply names the value when set, e.g. "max_uploads: 10 for 25%"). Scaffold registers it; with auth + user tables also `/admin/flags` list + `/admin/flags/:key` edit + `POST /admin/flags/:key/toggle` (admin role, saves via `Set`; value input follows flag type, bool is an On/Off select; audience radio everyone / listed only / percent plus listed; a flag with no rule opens with Enabled pre-ticked)
 
 ### sms
 Provider-agnostic `Sender` interface for outbound transactional SMS. Apps depend on this interface; concrete impls (real provider adapters, smsmock) plug in at startup.

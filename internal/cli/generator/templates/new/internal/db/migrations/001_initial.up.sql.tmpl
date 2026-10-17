@@ -27,7 +27,21 @@ CREATE TABLE users (
 
 CREATE INDEX idx_users_email ON users (email);
 {{- end}}
-{{- if not (or .IncludeSessions (and .IncludeAuth .AuthWithTables))}}
+{{- if .IncludeFlags}}
+
+CREATE TABLE feature_flags (
+    key         TEXT        PRIMARY KEY,
+    enabled     BOOLEAN     NOT NULL DEFAULT FALSE,
+    value       TEXT        NOT NULL DEFAULT 'null',
+    subjects    TEXT        NOT NULL DEFAULT '[]',
+    roles       TEXT        NOT NULL DEFAULT '[]',
+    percent     INTEGER     NOT NULL DEFAULT 0,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+{{.FlagsTriggerSQL}}
+{{- end}}
+{{- if not (or .IncludeSessions .IncludeFlags (and .IncludeAuth .AuthWithTables))}}
 -- Add your initial migration here.
 -- Example:
 -- CREATE TABLE examples (

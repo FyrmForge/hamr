@@ -265,6 +265,7 @@ func applyWizardResult(cmd *cobra.Command, name string, res *wizardResult, cfg *
 	cfg.IncludeEmailMock = res.EmailMock == "yes"
 	cfg.IncludeLocale = res.Locale == "yes"
 	cfg.IncludeAlpine = res.Alpine == "yes"
+	cfg.IncludeFlags = res.FeatureFlags == "yes"
 
 	cfg.StorageBackend = res.StorageBackend
 	cfg.IncludeStorage = res.StorageBackend == "local" || res.StorageBackend == "s3"
@@ -342,6 +343,7 @@ func init() {
 	newCmd.Flags().Bool("stripe", false, "wire stripe-go + the local Stripe mock (Connect-aware API at /v1/* and /v2/* (Accounts v2 + thin events), dashboard at /__hamr/stripe with replay/refund/dispute actions, signed webhooks, persistent state)")
 	newCmd.Flags().Bool("email-mock", false, "wire pkg/emailmock + the dev inbox at /__hamr/mail (mbox-persisted, Thunderbird-openable)")
 	newCmd.Flags().Bool("locale", false, "include localisation (i18n) support")
+	newCmd.Flags().Bool("feature-flags", false, "include feature flags (pkg/flags): feature_flags table, store, client wiring, dev widget action, and an admin page when auth is enabled")
 	newCmd.Flags().Bool("alpine", false, "include Alpine.js for local UI state")
 	newCmd.Flags().Bool("skip-version-check", false, "skip the \"is a newer hamr release available\" check")
 }

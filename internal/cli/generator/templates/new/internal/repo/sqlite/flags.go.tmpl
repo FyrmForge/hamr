@@ -1,0 +1,82 @@
+package sqlite
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
+
+	hflags "github.com/FyrmForge/hamr/pkg/flags"
+	"github.com/jmoiron/sqlx"
+)
+
+// Flags returns the feature flag store.
+func (s *Store) Flags() hflags.Store { return &flagStore{db: s.db} }
+
+type flagStore struct {
+	db *sqlx.DB
+}
+
+func (s *flagStore) List(ctx context.Context) ([]hflags.Rule, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT "key", enabled, value, subjects, roles, percent FROM feature_flags ORDER BY "key"`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var rules []hflags.Rule
+	for rows.Next() {
+		var (
+			r                      hflags.Rule
+			value, subjects, roles string
+		)
+		if err := rows.Scan(&r.Key, &r.Enabled, &value, &subjects, &roles, &r.Percent); err != nil {
+			return nil, err
+		}
+		r.Value = json.RawMessage(value)
+		// A bad list cell disables only this flag (code default), not all of them.
+		if err := errors.Join(json.Unmarshal([]byte(subjects), &r.Subjects), json.Unmarshal([]byte(roles), &r.Roles)); err != nil {
+			slog.WarnContext(ctx, "flags: bad subjects/roles, serving code default", "key", r.Key, "error", err)
+			continue
+		}
+		rules = append(rules, r)
+	}
+	return rules, rows.Err()
+}
+
+func (s *flagStore) Save(ctx context.Context, r hflags.Rule) error {
+	value := string(r.Value)
+	if value == "" {
+		value = "null"
+	}
+	subjects, err := json.Marshal(nonNil(r.Subjects))
+	if err != nil {
+		return err
+	}
+	roles, err := json.Marshal(nonNil(r.Roles))
+	if err != nil {
+		return err
+	}
+	enabled := 0
+	if r.Enabled {
+		enabled = 1
+	}
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO feature_flags ("key", enabled, value, subjects, roles, percent, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		 ON CONFLICT ("key") DO UPDATE SET
+		   enabled = EXCLUDED.enabled, value = EXCLUDED.value,
+		   subjects = EXCLUDED.subjects, roles = EXCLUDED.roles,
+		   percent = EXCLUDED.percent, updated_at = CURRENT_TIMESTAMP`,
+		r.Key, enabled, value, string(subjects), string(roles), r.Percent)
+	return err
+}
+
+// nonNil keeps empty lists as [] instead of null in the JSON columns.
+func nonNil(v []string) []string {
+	if v == nil {
+		return []string{}
+	}
+	return v
+}

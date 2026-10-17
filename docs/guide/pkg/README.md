@@ -56,3 +56,7 @@ API reference for every `hamr/pkg` package.
 26. [Templint](templint.md) — Static linter for `.templ` files
 27. [Static Generation](static-generation.md) — Build-time page generation
 28. [Dev](dev.md) — Live reload development environment
+
+## Rollout
+
+29. [Flags](flags.md) — Feature flags: typed flags, per-user rules, sticky percent rollout
