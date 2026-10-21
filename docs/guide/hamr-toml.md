@@ -454,7 +454,7 @@ replaces the localhost URL in the status bar and `o` opens it.
 
 **Security.** The tunnel serves the same proxy — live reload, error pages, and
 the mail/SMS/Stripe mocks all work through it — on its own listener that
-allows only `/__hamr/reload`, `/__hamr/logo.png`, `/__hamr/mail/*`,
+allows only `/__hamr/reload`, `/__hamr/client.js`, `/__hamr/logo.png`, `/__hamr/mail/*`,
 `/__hamr/sms/*` and `/__hamr/stripe/*`. Every other `/__hamr/*` route returns
 403: the ones that run commands, leak logs, accept log lines or flip the dark
 filter for every open browser, and any route added later. Process output is withheld too: the live-reload stream

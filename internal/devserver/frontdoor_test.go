@@ -57,13 +57,14 @@ func TestFrontDoorPublicHandler(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code)
 		body := rec.Body.String()
 		assert.Contains(t, body, "app /some/page")
-		assert.Contains(t, body, "/__hamr/reload")
+		assert.Contains(t, body, clientJSPath)
 	})
 
 	t.Run("mock UI and widget assets served locally", func(t *testing.T) {
 		before := hits.Load()
 		assert.Equal(t, http.StatusOK, frontDoorGet(public, "/__hamr/mail", nil).Code)
 		assert.Equal(t, http.StatusOK, frontDoorGet(public, "/__hamr/logo.png", nil).Code)
+		assert.Equal(t, http.StatusOK, frontDoorGet(public, clientJSPath, nil).Code)
 		assert.Equal(t, http.StatusNotFound, frontDoorGet(public, "/__hamr/nope", nil).Code)
 		assert.Equal(t, before, hits.Load(), "/__hamr/* must never reach the app")
 	})

@@ -38,7 +38,9 @@
   with SIGTERM. Mirrors its recent output to a rolling log file (default
   `.hamr/dev_logs.txt`, 200 lines) for LLM consumption. The file contains
   `[hamr dev]` messages plus watched command/daemon stdout-stderr with terminal
-  escapes stripped. The injected reload script also pipes browser
+  escapes stripped. The reload script is injected as
+  `<script src="/__hamr/client.js">` (a file, so an app CSP of
+  `script-src 'self'` allows it), and it also pipes browser
   `window.console.*` calls + uncaught JS errors + unhandled promise
   rejections + resource-load failures (`<img>`/`<script>`/`<link>` 404s)
   + CSP violations back to the dev server over a WebSocket at
@@ -75,7 +77,7 @@
   (`provider` = `cloudflared` default | `ngrok`, `args` appended to the built-in
   command, or `cmd` with a `{port}` placeholder whose first printed https URL is
   used; `env` default `["BASE_URL"]`). On: a loopback tunnel listener serves the
-  proxy handler with an allow-list (`tunnelAllowedPrefixes`: `/__hamr/reload`,
+  proxy handler with an allow-list (`tunnelAllowedPrefixes`: `/__hamr/reload`, `/__hamr/client.js`,
   `/__hamr/logo.png`, `/__hamr/mail`, `/__hamr/sms`, `/__hamr/stripe`); every
   other `/__hamr/*` route, including ones added later, returns 403 and
   tunnel requests flagged in context so `/__hamr/reload` drops `output` events,

@@ -241,7 +241,8 @@ The server automatically sets cache headers via the built-in [CacheControl middl
 The server enables gzip response compression by default. Use
 `server.WithGzipConfig(server.GzipConfig{Enabled: false})` if compression should
 be handled only by nginx, Caddy, Traefik, or a CDN. Use `Skipper` to exclude
-specific routes such as streaming endpoints.
+specific routes such as streaming endpoints. Websocket (`Upgrade`) requests are
+never compressed.
 
 ---
 

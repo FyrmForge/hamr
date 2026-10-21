@@ -88,6 +88,7 @@ func TestBlockDevCommands(t *testing.T) {
 		"/__hamr/stripe/checkout":    http.StatusOK,
 		"/__hamr/reload":             http.StatusOK,
 		"/__hamr/logo.png":           http.StatusOK,
+		clientJSPath:                 http.StatusOK,
 		"/v1/payment_intents":        http.StatusOK,
 		"/__hamrx":                   http.StatusOK,
 		"/":                          http.StatusOK,

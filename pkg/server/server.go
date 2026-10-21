@@ -124,8 +124,14 @@ func New(opts ...Option) (*Server, error) {
 	// max-age and serve day-old styles.
 	e.Use(middleware.CacheControl(s.devMode))
 	if s.gzipConfig.Enabled {
+		userSkip := s.gzipConfig.Skipper
 		e.Use(echoMw.GzipWithConfig(echoMw.GzipConfig{
-			Skipper:   s.gzipConfig.Skipper,
+			// Never wrap protocol upgrades: the gzip writer holds the 101
+			// status back across Hijack, so websockets never open.
+			Skipper: func(c echo.Context) bool {
+				return c.Request().Header.Get("Upgrade") != "" ||
+					(userSkip != nil && userSkip(c))
+			},
 			Level:     s.gzipConfig.Level,
 			MinLength: s.gzipConfig.MinLength,
 		}))

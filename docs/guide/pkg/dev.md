@@ -62,7 +62,8 @@ Browser :3000  →  hamr proxy  →  App :8080
                SSE /__hamr/reload
 ```
 
-All HTML responses get a small script injected before `</body>` that opens an SSE
+All HTML responses get a `<script src="/__hamr/client.js">` tag injected before `</body>`
+(served as a file, so a strict `script-src 'self'` CSP allows it) that opens an SSE
 connection. When builds complete, the browser reloads automatically.
 
 You can also skip the proxy at runtime with `hamr dev --no-proxy`.

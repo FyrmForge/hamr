@@ -89,6 +89,13 @@ the TL;DR on top of it.
   reading the inboxes or running dev actions. Use `localhost` or an IP rather
   than a custom `/etc/hosts` name; the tunnel is unaffected.
 
+- **The `hamr dev` widget script is served as a file.** The proxy and the
+  front door now inject `<script src="/__hamr/client.js">` instead of
+  inlining the whole script, so apps with a strict `script-src 'self'` CSP
+  live reload and the dev widget without `'unsafe-inline'` on `script-src`
+  (the widget's own styles still need it on `style-src`). The tunnel allows
+  `/__hamr/client.js` too.
+
 ### Fixed
 
 - **Scaffolded gorm + Postgres apps no longer crash when replicas boot
@@ -105,6 +112,13 @@ the TL;DR on top of it.
   correctly, records them in `walks.json` and rewrites `.env`. If a running
   service's ports still can't be matched, hamr keeps the override and logs a
   `WARN` instead of deleting it.
+
+- **Websockets now open in production.** `pkg/server`'s default gzip
+  middleware held back the `101 Switching Protocols` status and never sent
+  it once the connection was hijacked, so every browser websocket (the
+  scaffolded `/ws` included) hung. Dev hid it because the `hamr dev` proxy
+  strips `Accept-Encoding`. Gzip now skips any request with an `Upgrade`
+  header; a custom `GzipConfig.Skipper` still applies on top.
 
 ### Documentation
 

@@ -36,8 +36,7 @@ func TestInjectReloadScript_HTML(t *testing.T) {
 	require.NoError(t, err)
 
 	bodyStr := string(body)
-	assert.Contains(t, bodyStr, "<script>")
-	assert.Contains(t, bodyStr, "/__hamr/reload")
+	assert.Contains(t, bodyStr, `<script src="/__hamr/client.js"></script>`)
 	assert.Contains(t, bodyStr, "</body>")
 	// Script should come before </body>.
 	assert.Less(t,
@@ -190,8 +189,7 @@ func TestInjectReloadScript_NoBodyTag(t *testing.T) {
 
 	bodyStr := string(body)
 	// Script should still be appended.
-	assert.Contains(t, bodyStr, "<script>")
-	assert.Contains(t, bodyStr, "EventSource")
+	assert.Contains(t, bodyStr, `<script src="/__hamr/client.js"></script>`)
 }
 
 func TestInjectReloadScript_EmptyBody(t *testing.T) {
@@ -215,7 +213,7 @@ func TestInjectReloadScript_EmptyBody(t *testing.T) {
 	require.NoError(t, err)
 
 	// Even with empty body, script is appended.
-	assert.Contains(t, string(body), "<script>")
+	assert.Contains(t, string(body), `<script src="/__hamr/client.js"></script>`)
 }
 
 func TestInjectReloadScript_MultipleBodyTags(t *testing.T) {
@@ -240,10 +238,10 @@ func TestInjectReloadScript_MultipleBodyTags(t *testing.T) {
 
 	bodyStr := string(body)
 	// Script injected before the LAST </body>.
-	assert.Contains(t, bodyStr, "<script>")
+	assert.Contains(t, bodyStr, `<script src="/__hamr/client.js"></script>`)
 	// The first </body> should remain intact.
 	firstIdx := indexOf(bodyStr, "</body>")
-	scriptIdx := indexOf(bodyStr, "<script>")
+	scriptIdx := indexOf(bodyStr, "<script src=")
 	assert.Less(t, firstIdx, scriptIdx, "script should be injected after the first </body>")
 }
 
@@ -581,4 +579,30 @@ func TestLoopbackOnlyHamr(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
+}
+
+func TestClientJS(t *testing.T) {
+	broker := NewSSEBroker(nil, nil, nil, false, false, false, false, false)
+	handler := NewProxyHandler("127.0.0.1:1", broker, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, true)
+	proxy := httptest.NewServer(handler)
+	defer proxy.Close()
+
+	resp, err := http.Get(proxy.URL + "/__hamr/client.js")
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "text/javascript; charset=utf-8", resp.Header.Get("Content-Type"))
+	assert.Equal(t, reloadJS, body)
+	etag := resp.Header.Get("ETag")
+	require.NotEmpty(t, etag)
+
+	req, _ := http.NewRequest(http.MethodGet, proxy.URL+"/__hamr/client.js", nil)
+	req.Header.Set("If-None-Match", etag)
+	resp2, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp2.Body.Close() }()
+	assert.Equal(t, http.StatusNotModified, resp2.StatusCode)
 }

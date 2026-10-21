@@ -22,7 +22,8 @@ type GzipConfig struct {
 	// MinLength is the minimum response size before compression is applied.
 	MinLength int
 
-	// Skipper skips gzip for matching requests.
+	// Skipper skips gzip for matching requests. Upgrade requests
+	// (websockets) are always skipped.
 	Skipper echoMw.Skipper
 }
 

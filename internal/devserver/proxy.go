@@ -3,7 +3,9 @@ package devserver
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net"
@@ -22,11 +24,16 @@ var reloadJS []byte
 //go:embed logo.png
 var logoPNG []byte
 
-var reloadScript []byte
+// clientJSPath serves reload.js as a file so apps with a strict CSP
+// (script-src 'self') still run it; inlining would be blocked.
+const clientJSPath = "/__hamr/client.js"
 
-func init() {
-	reloadScript = []byte("\n<script>\n" + string(reloadJS) + "\n</script>\n")
-}
+var reloadScript = []byte("\n<script src=\"" + clientJSPath + "\"></script>\n")
+
+var reloadJSETag = func() string {
+	sum := sha256.Sum256(reloadJS)
+	return `"` + hex.EncodeToString(sum[:8]) + `"`
+}()
 
 // NewProxyHandler creates an HTTP handler that reverse-proxies to the target
 // address, optionally injecting the live reload script into HTML responses.
@@ -157,6 +164,12 @@ func newProxyHandler(target string, opts proxyOpts, broker *SSEBroker, errorStat
 
 	mux := http.NewServeMux()
 	mux.Handle("/__hamr/reload", broker.Handler())
+	mux.HandleFunc("GET "+clientJSPath, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("ETag", reloadJSETag)
+		http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(reloadJS))
+	})
 	mux.HandleFunc("/__hamr/logo.png", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		w.Header().Set("Cache-Control", "public, max-age=86400")

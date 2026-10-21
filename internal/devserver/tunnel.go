@@ -98,10 +98,11 @@ func (c TunnelConfig) command(port int) ([]string, *regexp.Regexp) {
 }
 
 // tunnelAllowedPrefixes are the only /__hamr routes reachable through the
-// tunnel: live reload, the logo, and the mail/SMS/Stripe mocks. Every other
-// /__hamr route (commands, logs, MCP, console ingest, the dark filter, and any
-// route added later) is refused, so a new dev-only route is private by default.
-var tunnelAllowedPrefixes = []string{"/__hamr/reload", "/__hamr/logo.png", "/__hamr/mail", "/__hamr/sms", "/__hamr/stripe"}
+// tunnel: live reload and its client script, the logo, and the mail/SMS/Stripe
+// mocks. Every other /__hamr route (commands, logs, MCP, console ingest, the
+// dark filter, and any route added later) is refused, so a new dev-only route
+// is private by default.
+var tunnelAllowedPrefixes = []string{"/__hamr/reload", clientJSPath, "/__hamr/logo.png", "/__hamr/mail", "/__hamr/sms", "/__hamr/stripe"}
 
 func tunnelAllowed(p string) bool {
 	if p != "/__hamr" && !strings.HasPrefix(p, "/__hamr/") {

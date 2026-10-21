@@ -1,11 +1,15 @@
 package server_test
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/FyrmForge/hamr/pkg/server"
+	"github.com/coder/websocket"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -241,4 +245,36 @@ func TestServer_BlankTrustedProxiesIgnored(t *testing.T) {
 	req.RemoteAddr = "203.0.113.7:5555"
 	req.Header.Set("X-Forwarded-For", "1.2.3.4")
 	assert.Equal(t, "203.0.113.7", ext(req), "blank entries leave the safe direct default")
+}
+
+func TestGzip_websocketUpgradeNotBlocked(t *testing.T) {
+	srv, err := server.New(server.WithDevMode(true))
+	require.NoError(t, err)
+	srv.GET("/ws", func(c echo.Context) error {
+		conn, err := websocket.Accept(c.Response(), c.Request(), nil)
+		if err != nil {
+			return err
+		}
+		return conn.Close(websocket.StatusNormalClosure, "")
+	})
+	srv.GET("/big", func(c echo.Context) error {
+		return c.String(http.StatusOK, strings.Repeat("hello ", 500))
+	})
+	ts := httptest.NewServer(srv.Echo())
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(ts.URL, "http")+"/ws", &websocket.DialOptions{
+		HTTPHeader: http.Header{"Accept-Encoding": {"gzip"}},
+	})
+	require.NoError(t, err)
+	_ = conn.CloseNow()
+
+	// Normal routes are still compressed.
+	req := httptest.NewRequest(http.MethodGet, "/big", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	srv.Echo().ServeHTTP(rec, req)
+	assert.Equal(t, "gzip", rec.Header().Get("Content-Encoding"))
 }
