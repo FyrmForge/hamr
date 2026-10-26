@@ -71,6 +71,11 @@ the TL;DR on top of it.
 
 ### Changed
 
+- **Scaffold pins Tailwind 3.4.19.** `package.json` now uses the exact latest v3
+  instead of `^3.4.0`. v4 is deliberately not adopted: it drops browsers older
+  than Safari 16.4 / Chrome 111 / Firefox 128 (~4-5% of traffic), and
+  Tailwind advises staying on v3 for those. Existing projects are unaffected.
+
 - **templ bumped to v0.3.1100, and scaffolds now pin it.** Picks up security
   fixes: JS `${}` escaping inside backtick strings and stricter handling of
   mixed-case and dynamic attribute names. `hamr new` writes
