@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -166,7 +168,8 @@ const tunnelURLTimeout = 15 * time.Second
 // tunnelProc is one running tunnel: its listener, server and child process.
 type tunnelProc struct {
 	*childProc
-	srv *http.Server
+	srv     *http.Server
+	expired atomic.Bool // the provider reported the tunnel gone; set before the stop
 }
 
 // stop stops the child and closes the listener.
@@ -189,6 +192,8 @@ type tunnel struct {
 	busy bool
 	proc *tunnelProc
 	url  string // public URL while on; "" when off
+
+	expiryMarker string // overrides the built-in cloudflared marker (tests)
 }
 
 // URL returns the public URL, or "" when the tunnel is off.
@@ -250,7 +255,11 @@ func (t *tunnel) Toggle() {
 		if t.ctx.Err() != nil {
 			return // shutting down
 		}
-		t.logger.Warn("tunnel process exited; tunnel is off")
+		if p.expired.Load() {
+			t.logger.Warn("tunnel expired on Cloudflare's side; tunnel is off, press T for a new URL")
+		} else {
+			t.logger.Warn("tunnel process exited; tunnel is off")
+		}
 
 		// Reset under the toggle guard, waiting out a toggle in flight. Once
 		// it's ours: a T press may have started a new tunnel meanwhile
@@ -302,12 +311,75 @@ func (t *tunnel) start() (*tunnelProc, string, error) {
 		return nil, "", fmt.Errorf("%s not found on PATH (install it, or set [dev.tunnel] cmd)", argv[0])
 	}
 	srv := serveProxy(ln, t.handler)
-	c, url, err := startChild(t.ctx, t.pm, "tunnel", argv, nil, urlRE, "a public URL", tunnelURLTimeout)
+	marker := t.expiryMarker
+	if marker == "" && tc.Cmd == "" && tc.ResolvedProvider() == TunnelCloudflared {
+		marker = cloudflaredExpiredMarker
+	}
+	var w *expiryWatcher
+	var watch []io.Writer
+	if marker != "" {
+		w = &expiryWatcher{marker: marker}
+		watch = append(watch, w)
+	}
+	c, url, err := startChild(t.ctx, t.pm, "tunnel", argv, nil, urlRE, "a public URL", tunnelURLTimeout, watch...)
 	if err != nil {
 		_ = srv.Close()
 		return nil, "", err
 	}
-	return &tunnelProc{childProc: c, srv: srv}, url, nil
+	p := &tunnelProc{childProc: c, srv: srv}
+	if w != nil {
+		w.arm(func() {
+			p.expired.Store(true)
+			p.childProc.stop() // not p.stop(): the exit goroutine closes srv
+		})
+	}
+	return p, url, nil
+}
+
+// cloudflaredExpiredMarker is what cloudflared keeps logging, forever, once
+// Cloudflare has dropped a quick tunnel (e.g. after laptop sleep).
+const cloudflaredExpiredMarker = "Tunnel not found"
+
+// expiryWatcher fires onExpire once when a complete output line contains
+// marker. Lines before arm (the URL wait) are ignored. onExpire runs on its
+// own goroutine: stopping the child waits for the output copy that calls Write.
+type expiryWatcher struct {
+	marker string
+	mu     sync.Mutex
+	buf    []byte
+	fire   func()
+	fired  bool
+}
+
+func (w *expiryWatcher) arm(fire func()) {
+	w.mu.Lock()
+	w.fire = fire
+	w.mu.Unlock()
+}
+
+func (w *expiryWatcher) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.fire == nil || w.fired {
+		w.buf = nil
+		return len(p), nil
+	}
+	w.buf = append(w.buf, p...)
+	for {
+		i := bytes.IndexByte(w.buf, '\n')
+		if i < 0 {
+			break
+		}
+		line := w.buf[:i]
+		w.buf = w.buf[i+1:]
+		if bytes.Contains(line, []byte(w.marker)) {
+			w.fired = true
+			w.buf = nil
+			go w.fire()
+			break
+		}
+	}
+	return len(p), nil
 }
 
 // childProc is a long-running helper process a runtime feature owns (the
@@ -320,8 +392,8 @@ type childProc struct {
 // startChild runs argv in its own process group with its output prefixed as
 // name in the dev log, and waits up to timeout for a line matching re. It
 // returns the first submatch (what: named in errors). env nil inherits
-// hamr's environment.
-func startChild(ctx context.Context, pm *ProcessManager, name string, argv, env []string, re *regexp.Regexp, what string, timeout time.Duration) (*childProc, string, error) {
+// hamr's environment. watch receives a copy of the output for the child's life.
+func startChild(ctx context.Context, pm *ProcessManager, name string, argv, env []string, re *regexp.Regexp, what string, timeout time.Duration, watch ...io.Writer) (*childProc, string, error) {
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Env = env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -332,7 +404,7 @@ func startChild(ctx context.Context, pm *ProcessManager, name string, argv, env 
 	found := make(chan string, 1)
 	scan := &urlScanner{re: re, found: found}
 	var flush func()
-	cmd.Stdout, cmd.Stderr, flush = pm.outputWriters(name, nextColor(), tail, scan)
+	cmd.Stdout, cmd.Stderr, flush = pm.outputWriters(name, nextColor(), append([]io.Writer{tail, scan}, watch...)...)
 
 	if err := cmd.Start(); err != nil {
 		return nil, "", fmt.Errorf("start %s: %w", argv[0], err)

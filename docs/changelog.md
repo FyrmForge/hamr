@@ -113,6 +113,16 @@ the TL;DR on top of it.
   service's ports still can't be matched, hamr keeps the override and logs a
   `WARN` instead of deleting it.
 
+- **`hamr dev` notices a cloudflared tunnel that Cloudflare expired.** After
+  laptop sleep a quick tunnel can vanish on Cloudflare's side; cloudflared
+  then logs `Tunnel not found` forever without exiting, and hamr kept showing
+  the dead URL and serving it as `BASE_URL`. hamr now stops it, turns the
+  tunnel off and warns to press `T` for a new URL.
+
+- **The TUI command palette and help modal no longer blank the log text to
+  their right.** The overlay kept only the text left of the modal; it now
+  keeps both sides, styles included.
+
 - **Websockets now open in production.** `pkg/server`'s default gzip
   middleware held back the `101 Switching Protocols` status and never sent
   it once the connection was hijacked, so every browser websocket (the

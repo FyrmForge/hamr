@@ -452,6 +452,11 @@ the vars and restarts the same processes. The status ticker shows
 `tunnel starting` / `tunnel stopping` meanwhile; while on, the public URL
 replaces the localhost URL in the status bar and `o` opens it.
 
+With the built-in `cloudflared` provider, a quick tunnel that Cloudflare has
+expired on its side (e.g. after laptop sleep) logs `Tunnel not found` forever
+without exiting; hamr stops it, turns the tunnel off, and warns to press `T` for
+a new URL.
+
 **Security.** The tunnel serves the same proxy — live reload, error pages, and
 the mail/SMS/Stripe mocks all work through it — on its own listener that
 allows only `/__hamr/reload`, `/__hamr/client.js`, `/__hamr/logo.png`, `/__hamr/mail/*`,

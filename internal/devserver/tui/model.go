@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // makefilePath is the path the command palette reads (a var so tests can
@@ -2125,26 +2126,24 @@ func overlay(base, modal string, width, height int) string {
 		if row >= len(baseLines)-1 {
 			break
 		}
-		baseLines[row] = padOrTruncate(baseLines[row], startX) + line +
-			padOrTruncate("", width-startX-lipgloss.Width(line))
+		baseLines[row] = spliceLine(baseLines[row], line, startX, width)
 	}
 	return strings.Join(baseLines, "\n")
 }
 
-// padOrTruncate pads s with spaces to width w, or truncates if longer.
-// Width is measured visually (lipgloss.Width) so ANSI escapes don't count.
-func padOrTruncate(s string, w int) string {
-	if w <= 0 {
-		return ""
+// spliceLine returns base with modal drawn at column x: base content left
+// and right of the modal is preserved, the result is exactly width cells.
+// Cells lost to a wide rune cut at a boundary are padded with spaces.
+func spliceLine(base, modal string, x, width int) string {
+	const reset = "\x1b[0m"
+	mw := lipgloss.Width(modal)
+	left := ansi.Truncate(base, x, "")
+	left += strings.Repeat(" ", max(x-lipgloss.Width(left), 0))
+	rw := max(width-x-mw, 0)
+	right := ""
+	if rw > 0 {
+		right = ansi.Truncate(ansi.Cut(base, x+mw, x+mw+rw), rw, "")
+		right += strings.Repeat(" ", max(rw-lipgloss.Width(right), 0))
 	}
-	have := lipgloss.Width(s)
-	if have == w {
-		return s
-	}
-	if have < w {
-		return s + strings.Repeat(" ", w-have)
-	}
-	// Truncation of styled strings is lossy; for the overlay context the
-	// pre-modal slice is empty padding so this branch is rarely taken.
-	return lipgloss.NewStyle().MaxWidth(w).Render(s)
+	return left + reset + modal + reset + right
 }

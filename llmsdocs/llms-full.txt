@@ -84,7 +84,9 @@
   sends a names-only config, and the reload stream and error page hide build
   error output; the `env` vars are set to
   the public URL, and running `run` rules + daemons restart (no rebuild). Off,
-  or the tunnel process exiting, reverts. Off at every start. Progress goes out
+  or the tunnel process exiting, reverts. With built-in `cloudflared`, a
+  `Tunnel not found` output line (quick tunnel expired on Cloudflare's side, e.g. after
+  sleep) makes hamr stop the process, so the same revert runs, with a warning to press `T`. Off at every start. Progress goes out
   on the event bus (`EvTunnelStart` "starting"/"stopping", `EvTunnelUp` with the
   URL, `EvTunnelDown`): the ticker shows `tunnel starting`/`tunnel stopping`, and
   while on the public URL replaces the localhost URL in the status bar (`o`

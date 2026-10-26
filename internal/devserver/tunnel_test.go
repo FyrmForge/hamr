@@ -1,10 +1,13 @@
 package devserver
 
 import (
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -155,4 +158,46 @@ func TestTunnelRedaction(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	assert.Contains(t, rec.Body.String(), "site")
 	assert.NotContains(t, rec.Body.String(), "secret stack trace")
+}
+
+func TestTunnelExpiryTurnsOff(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	pm := NewProcessManager(logger)
+	ctx := t.Context()
+	tn := &tunnel{
+		ctx: ctx,
+		cfg: &Config{Dev: DevConfig{Tunnel: TunnelConfig{
+			// Prints a URL, then (after the URL was seen) the cloudflared expiry line, and keeps running.
+			Cmd: `echo https://x.example.com; sleep 0.3; echo 'ERR Unauthorized: Tunnel not found {port}'; sleep 30`,
+		}}},
+		handler:      http.NotFoundHandler(),
+		pm:           pm,
+		env:          &envLayers{ctx: ctx, cfg: &Config{}, pm: pm, logger: logger},
+		logger:       logger,
+		broker:       NewSSEBroker(nil, nil, nil, false, false, false, false, false),
+		expiryMarker: "Tunnel not found",
+	}
+	events, unsub := tn.broker.Subscribe()
+	defer unsub()
+
+	go tn.Toggle()
+	deadline := time.After(10 * time.Second)
+	var sawUp bool
+	for {
+		select {
+		case evt := <-events:
+			if evt.Type == EvTunnelUp {
+				sawUp = true
+				assert.Equal(t, "https://x.example.com", tn.URL())
+			}
+			if evt.Type == EvTunnelDown {
+				require.True(t, sawUp, "down before up")
+				assert.Empty(t, tn.URL())
+				assert.Empty(t, injected(pm, "BASE_URL"))
+				return
+			}
+		case <-deadline:
+			t.Fatal("tunnel did not turn off after the expiry line")
+		}
+	}
 }
