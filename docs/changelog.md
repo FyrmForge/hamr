@@ -8,67 +8,6 @@ the TL;DR on top of it.
 
 ## [Unreleased]
 
-### Added
-
-- **Feature flags (`pkg/flags`).** Ship code dark and roll it out
-  gradually. Typed flags (bool, int, string, JSON) are declared in code; rules
-  (enabled, subject allow-list, roles, sticky percent rollout) live in your
-  own database and are read from memory. Changes reach every instance through
-  Postgres LISTEN/NOTIFY or a SQLite `data_version` poll, with a 5-minute
-  safety reload. The middleware adds a `flags` group to the request logger.
-  `hamr new --feature-flags` (or the wizard question) scaffolds the
-  `feature_flags` table, the store, the client wiring, a `set-flag` action in
-  the `hamr dev` widget, and an `/admin/flags` page when auth has user
-  tables. Keys must be lowercase letters, digits, `_`, `.` or `-`.
-  Existing projects wire it by hand, see the guide. The optional anonymous
-  cookie for logged-out rollout likely needs consent. Guide:
-  `docs/guide/pkg/flags.md`.
-
-- **`hamr dev` command palette.** `:` opens one fuzzy-searchable list of
-  hamr commands (`rebuild`, `restart`, `open browser`, `clear logs`,
-  `toggle mcp`, `toggle tunnel`, `stripe mode`, `help`, `quit`; each with its
-  hotkey on the right) plus every
-  Makefile target as `make:<target>`, so `db-see` finds `make:db-seed`.
-  `m` now opens the same palette pre-filtered with `make:` (backspace widens
-  it). All single-key bindings still work. The bottom hint bar is trimmed to
-  `r` rebuild, `o` open, `m` make, `:` commands, `/` search, `? help`,
-  `q` quit; the rest are in `?` help (which now lists `:` and `M`) and the
-  palette.
-
-- **Staging front door and dev actions.** `hamr mock-serve` with
-  `HAMR_MOCK_UPSTREAM=http://app:8080` sits on the public domain: it serves
-  the mail/SMS/Stripe dashboards and the hamr widget, and proxies everything
-  else to the app, behind one password. It requires `HAMR_MOCK_UI_PORT` (the
-  public port) and `HAMR_MOCK_UI_PASSWORD` and refuses to start without them;
-  `HAMR_MOCK_PORT` stays the private, ungated API/ingest port. New env:
-  `HAMR_BASE_URL` (public origin; default for `HAMR_STRIPE_BASE_URL`; `https://`
-  makes the gate cookie Secure), `HAMR_GATE_BYPASS` (paths that skip the gate,
-  matched on whole path segments) and `HAMR_ACTIONS_TOKEN`. The new
-  `pkg/devactions` lets an app expose buttons (reseed, create account, ...)
-  and seeded test logins at `/_devactions`, enabled only when
-  `HAMR_ACTIONS_TOKEN` is set and `HAMR_ACTIONS_ENV` is `development` or
-  `staging`. Dangerous actions need a confirm and the `hamr_disposable` marker
-  table that only the dev seed creates; on a fresh database run
-  `make seed` (`./bin/site --seed`) once first. `hamr new` scaffolds
-  `internal/devactions` with reseed, create-account and logout-everyone and the
-  accounts `admin@test.com` / `user@test.com` (`Test1234!`); `hamr dev`
-  injects the token and env automatically. The widget shows the actions, the
-  test accounts, and a count badge on login forms (a password field that is
-  not `autocomplete="new-password"`); click an account to fill and submit. The
-  scaffolded login and register forms now set `autocomplete`. With
-  `Registry.WhoAmI` (scaffolded via `devactions.SessionWhoAmI`) the widget
-  also shows who is logged in, with "Open their mail" / "Open their texts"
-  links; the mail and SMS inboxes gained a `?to=` filter for one recipient.
-  See [Dev Actions](guide/dev-actions.md).
-
-- **Stripe mock supports Checkout trials.** A `mode=subscription` session
-  accepts `subscription_data[trial_end]` (at least 48 hours after the mock
-  clock). Paying it creates a `trialing` subscription with a £0 paid first
-  invoice and no charge; at `trial_end` the clock moves it to `active` with
-  the first real invoice. "Fail next renewal" works during a trial and the
-  dashboard shows a `trial` tag. The hosted checkout page shows
-  nothing due today and the price from `trial_end`. `trial_period_days` is still not mocked.
-
 ### Changed
 
 - **Scaffold pins Tailwind 3.4.19.** `package.json` now uses the exact latest v3
@@ -83,24 +22,6 @@ the TL;DR on top of it.
   `make templ-check` (`templ generate -check`), used by its CI. templ needs
   Go 1.26+. Install the CLI with `make install`, not `@latest`: it must match
   go.mod's templ exactly.
-
-- **Breaking: `HAMR_MOCK_UI_PASSWORD` is no longer HTTP basic auth.** It is
-  now a gate: browsers get a password page at `/__hamr/gate` that sets an
-  HttpOnly cookie valid 7 days (changing the password invalidates every
-  cookie); scripts send `X-Hamr-Gate: <password>`. Both are stripped before the
-  app sees the request. Scripts that sent basic auth must send `X-Hamr-Gate`
-  instead. In plain mode the gate still covers `/__hamr/*` only.
-- **Go 1.27 is now required.** `go.mod`, the Docker build image and the docs
-  move from Go 1.25 to 1.27. CI was failing because projects made by
-  `hamr new` pulled templ v0.3.1070, which needs Go 1.26 or newer.
-- **The `hamr dev` proxy now sends `X-Forwarded-Host` and
-  `X-Forwarded-Proto`** to the app, alongside `X-Forwarded-For`. It moved
-  off the `ReverseProxy.Director` hook, which Go 1.26 deprecated.
-
-- **`hamr dev` serves `/__hamr/*` only for `localhost`, `*.localhost` or IP
-  Hosts.** Other hostnames get 403, which stops DNS-rebinding pages from
-  reading the inboxes or running dev actions. Use `localhost` or an IP rather
-  than a custom `/etc/hosts` name; the tunnel is unaffected.
 
 - **The `hamr dev` widget script is served as a file.** The proxy and the
   front door now inject `<script src="/__hamr/client.js">` instead of
@@ -148,21 +69,6 @@ the TL;DR on top of it.
   templ, so `go get` pulled the newest runtime while CI installed an older
   CLI, whose generated code called helpers the runtime had removed.
 
-- **Scaffolded gorm + Postgres apps no longer crash when replicas boot
-  together on an empty database.** `AutoMigrate` now runs inside a
-  transaction holding a Postgres advisory lock, so concurrent first boots
-  take turns instead of failing with a `pg_type` unique violation.
-
-- **`hamr dev` keeps walked compose ports when it adopts a running stack.**
-  Docker lists every published port twice (IPv4 and IPv6), and adopt
-  failed to match the duplicates to the compose file. It dropped the shift
-  (e.g. postgres on 5433 instead of 5432), left `DATABASE_URL` on the base
-  port and deleted `.hamr/compose.<name>.override.yaml`. The app then
-  reached whatever else held the base port. Adopt now reads the live ports
-  correctly, records them in `walks.json` and rewrites `.env`. If a running
-  service's ports still can't be matched, hamr keeps the override and logs a
-  `WARN` instead of deleting it.
-
 - **`hamr dev` notices a cloudflared tunnel that Cloudflare expired.** After
   laptop sleep a quick tunnel can vanish on Cloudflare's side; cloudflared
   then logs `Tunnel not found` forever without exiting, and hamr kept showing
@@ -191,6 +97,122 @@ the TL;DR on top of it.
   `govulncheck ./...` reports nothing else reachable (GO-2026-5932,
   `x/crypto` openpgp, has no fix and is not called).
 
+## [0.45.0] - 2026-10-17
+
+### Added
+
+- **Feature flags (`pkg/flags`).** Ship code dark and roll it out
+  gradually. Typed flags (bool, int, string, JSON) are declared in code; rules
+  (enabled, subject allow-list, roles, sticky percent rollout) live in your
+  own database and are read from memory. Changes reach every instance through
+  Postgres LISTEN/NOTIFY or a SQLite `data_version` poll, with a 5-minute
+  safety reload. The middleware adds a `flags` group to the request logger.
+  `hamr new --feature-flags` (or the wizard question) scaffolds the
+  `feature_flags` table, the store, the client wiring, a `set-flag` action in
+  the `hamr dev` widget, and an `/admin/flags` page when auth has user
+  tables. Keys must be lowercase letters, digits, `_`, `.` or `-`.
+  Existing projects wire it by hand, see the guide. The optional anonymous
+  cookie for logged-out rollout likely needs consent. Guide:
+  `docs/guide/pkg/flags.md`.
+
+- **`hamr dev` command palette.** `:` opens one fuzzy-searchable list of
+  hamr commands (`rebuild`, `restart`, `open browser`, `clear logs`,
+  `toggle mcp`, `toggle tunnel`, `stripe mode`, `help`, `quit`; each with its
+  hotkey on the right) plus every
+  Makefile target as `make:<target>`, so `db-see` finds `make:db-seed`.
+  `m` now opens the same palette pre-filtered with `make:` (backspace widens
+  it). All single-key bindings still work. The bottom hint bar is trimmed to
+  `r` rebuild, `o` open, `m` make, `:` commands, `/` search, `? help`,
+  `q` quit; the rest are in `?` help (which now lists `:` and `M`) and the
+  palette.
+
+### Fixed
+
+- **Scaffolded gorm + Postgres apps no longer crash when replicas boot
+  together on an empty database.** `AutoMigrate` now runs inside a
+  transaction holding a Postgres advisory lock, so concurrent first boots
+  take turns instead of failing with a `pg_type` unique violation.
+
+## [0.44.0] - 2026-10-14
+
+### Added
+
+- **Staging front door and dev actions.** `hamr mock-serve` with
+  `HAMR_MOCK_UPSTREAM=http://app:8080` sits on the public domain: it serves
+  the mail/SMS/Stripe dashboards and the hamr widget, and proxies everything
+  else to the app, behind one password. It requires `HAMR_MOCK_UI_PORT` (the
+  public port) and `HAMR_MOCK_UI_PASSWORD` and refuses to start without them;
+  `HAMR_MOCK_PORT` stays the private, ungated API/ingest port. New env:
+  `HAMR_BASE_URL` (public origin; default for `HAMR_STRIPE_BASE_URL`; `https://`
+  makes the gate cookie Secure), `HAMR_GATE_BYPASS` (paths that skip the gate,
+  matched on whole path segments) and `HAMR_ACTIONS_TOKEN`. The new
+  `pkg/devactions` lets an app expose buttons (reseed, create account, ...)
+  and seeded test logins at `/_devactions`, enabled only when
+  `HAMR_ACTIONS_TOKEN` is set and `HAMR_ACTIONS_ENV` is `development` or
+  `staging`. Dangerous actions need a confirm and the `hamr_disposable` marker
+  table that only the dev seed creates; on a fresh database run
+  `make seed` (`./bin/site --seed`) once first. `hamr new` scaffolds
+  `internal/devactions` with reseed, create-account and logout-everyone and the
+  accounts `admin@test.com` / `user@test.com` (`Test1234!`); `hamr dev`
+  injects the token and env automatically. The widget shows the actions, the
+  test accounts, and a count badge on login forms (a password field that is
+  not `autocomplete="new-password"`); click an account to fill and submit. The
+  scaffolded login and register forms now set `autocomplete`. With
+  `Registry.WhoAmI` (scaffolded via `devactions.SessionWhoAmI`) the widget
+  also shows who is logged in, with "Open their mail" / "Open their texts"
+  links; the mail and SMS inboxes gained a `?to=` filter for one recipient.
+  See [Dev Actions](guide/dev-actions.md).
+
+### Changed
+
+- **Breaking: `HAMR_MOCK_UI_PASSWORD` is no longer HTTP basic auth.** It is
+  now a gate: browsers get a password page at `/__hamr/gate` that sets an
+  HttpOnly cookie valid 7 days (changing the password invalidates every
+  cookie); scripts send `X-Hamr-Gate: <password>`. Both are stripped before the
+  app sees the request. Scripts that sent basic auth must send `X-Hamr-Gate`
+  instead. In plain mode the gate still covers `/__hamr/*` only.
+
+- **`hamr dev` serves `/__hamr/*` only for `localhost`, `*.localhost` or IP
+  Hosts.** Other hostnames get 403, which stops DNS-rebinding pages from
+  reading the inboxes or running dev actions. Use `localhost` or an IP rather
+  than a custom `/etc/hosts` name; the tunnel is unaffected.
+
+## [0.43.1] - 2026-10-10
+
+### Fixed
+
+- **`hamr dev` keeps walked compose ports when it adopts a running stack.**
+  Docker lists every published port twice (IPv4 and IPv6), and adopt
+  failed to match the duplicates to the compose file. It dropped the shift
+  (e.g. postgres on 5433 instead of 5432), left `DATABASE_URL` on the base
+  port and deleted `.hamr/compose.<name>.override.yaml`. The app then
+  reached whatever else held the base port. Adopt now reads the live ports
+  correctly, records them in `walks.json` and rewrites `.env`. If a running
+  service's ports still can't be matched, hamr keeps the override and logs a
+  `WARN` instead of deleting it.
+
+## [0.43.0] - 2026-10-10
+
+### Added
+
+- **Stripe mock supports Checkout trials.** A `mode=subscription` session
+  accepts `subscription_data[trial_end]` (at least 48 hours after the mock
+  clock). Paying it creates a `trialing` subscription with a £0 paid first
+  invoice and no charge; at `trial_end` the clock moves it to `active` with
+  the first real invoice. "Fail next renewal" works during a trial and the
+  dashboard shows a `trial` tag. The hosted checkout page shows
+  nothing due today and the price from `trial_end`. `trial_period_days` is still not mocked.
+
+### Changed
+
+- **Go 1.27 is now required.** `go.mod`, the Docker build image and the docs
+  move from Go 1.25 to 1.27. CI was failing because projects made by
+  `hamr new` pulled templ v0.3.1070, which needs Go 1.26 or newer.
+
+- **The `hamr dev` proxy now sends `X-Forwarded-Host` and
+  `X-Forwarded-Proto`** to the app, alongside `X-Forwarded-For`. It moved
+  off the `ReverseProxy.Director` hook, which Go 1.26 deprecated.
+
 ### Documentation
 
 - **Root `README.md` caught up with the guide.** The package table gains
@@ -200,6 +222,103 @@ the TL;DR on top of it.
   and requirements no longer say PostgreSQL is the only database. The
   guide index (`docs/guide/README.md`) CLI table gains the same commands plus
   `ai upgrade` and `completion`.
+
+## [0.42.0] - 2026-09-28
+
+### Features
+
+- **`hamr mock-serve` can gate its two surfaces.** `HAMR_MOCK_UI_PASSWORD`
+  puts HTTP basic auth (any username, that password) on every `/__hamr/*`
+  dashboard route — mail and SMS inboxes, the Stripe dashboard and the
+  checkout/onboarding pages — while the mail/SMS ingest sinks stay open so the
+  app keeps working on a shared port. `HAMR_MOCK_API_ALLOW` restricts the
+  app-facing listener to a comma-separated list of IPs/CIDRs, checked against
+  the TCP peer only (forwarded headers are ignored), and logs each rejected
+  peer's address. Both are off when unset, so existing deployments are
+  unchanged.
+
+## [0.41.0] - 2026-09-28
+
+### Features
+
+- **Stripe mock: Customers, Products, Prices and the billing portal.** The
+  mock now stores the objects an app sets up before Checkout, through the
+  usual stripe-go calls. `customer.New/Get/Update/List` (email filter);
+  `product.New/Get/List`; `price.New/Get/Update/List` with recurring or
+  one-time prices, `product_data` inline, `nickname`, `lookup_key` (and
+  `transfer_lookup_key`) and the `active`, `product`, `type` and
+  `lookup_keys[]` filters. A checkout session can reference a stored price
+  with `line_items[].price` instead of inlining `price_data` (recurring
+  needs `mode=subscription`, one-off works in `mode=payment`; unknown or
+  inactive is a 400) and attach a stored customer with `customer=` (unknown
+  is a 400 `resource_missing`, not with `customer_email`); the session
+  reports `customer_details`, and a subscription created from `price=`
+  carries the real price and product ids. Paying a subscription checkout
+  without `customer=` now stores the minted Customer, so `customer.Get` on
+  the id from `checkout.session.completed` works, and invoices carry
+  `customer_email` / `customer_name`. `client.V1BillingPortalSessions.Create`
+  returns a URL to a dev portal page listing the customer's subscriptions
+  and invoices with "Cancel at period end" / "Keep subscription" (fires
+  `customer.subscription.updated`), a no-op "Update card" and a Back link
+  to `return_url`; `client.V1BillingPortalConfigurations.Create` honours
+  `features[subscription_cancel][enabled]` only. The dashboard gains
+  Customers and Prices tables and `stripe.list` returns `customers` and
+  `prices`. No new webhook events; the scaffold's handler stubs are
+  unchanged. Subscriptions paid before this change hold a customer id
+  with no Customer record — `rm .hamr/stripe/state.json` if they need
+  one. Not mocked: Customer delete, product update, metered and tiered
+  prices, portal plan switching and payment-method collection. See
+  "Customers, products and prices" and "Billing portal" in the Stripe mock
+  guide.
+
+## [0.40.0] - 2026-09-28
+
+### Fixes
+
+- **SQLite projects that migrate at startup now pass CI.** A project scaffolded
+  with `--database sqlite --migrate-startup` has no `make migrate`
+  target, but its `.github/workflows/ci.yml` still ran `make migrate` and failed
+  at the "Run migrations" step. New scaffolds skip that step, because the server
+  migrates itself. For an existing project, delete the "Run migrations" step
+  from `.github/workflows/ci.yml`.
+
+### Features
+
+- **Stripe mock: subscriptions, coupons and a test clock.** A checkout
+  session in `mode=subscription` (line items with `price_data.recurring`)
+  now creates a Subscription and its first paid Invoice when paid, with
+  `customer.subscription.created`, `invoice.paid` and
+  `invoice.payment_succeeded` fired alongside the payment events. The app
+  reads and manages them through `subscription.Get/Update/Cancel/List` and
+  `invoice.Get/List`. Renewals are driven by a mock clock, the stand-in for
+  Stripe's test clocks: advance it from the bar on `/__hamr/stripe`
+  (+1 day / week / month / to a date), from a subscription row ("Next
+  period", "Fail next renewal", "Retry payment", "Cancel") or with the new
+  `stripe.advance` and `stripe.subscription` MCP tools, and every renewal
+  that falls due runs in time order. The clock never runs backwards, moves
+  at most five years per call, its offset persists in `state.json`, events
+  are stamped with it and webhook signatures stay on real time. Coupons
+  and promotion codes are mocked too: `coupon.New` / `promotioncode.New`,
+  `discounts[]` or `allow_promotion_codes` on the session (the hosted page
+  gets a code input), Stripe's inline rejection messages, redemption
+  limits (checked again when the session is paid), and coupon durations
+  honoured on renewal. `subscription.*`, `invoice.*`, `coupon.New` and
+  `promotioncode.New` are the stripe-go v86 client calls, not a hamr API.
+  A 100% coupon completes with `no_payment_required` and no
+  PaymentIntent; the same now holds for an undiscounted zero-total payment
+  session, which used to get a 0-amount PaymentIntent and Charge. A
+  session's `payment_intent` is now null until the buyer pays, and always
+  for a subscription, as on Stripe since API 2022-08-01: read it from
+  `checkout.session.completed` or the invoice, not from the create
+  response. Cancelling a subscription voids its open invoice
+  (`invoice.voided`). Scaffolded webhook handlers stub the seven new
+  events. Not mocked: `POST /v1/subscriptions`, trials, proration and
+  plan changes. See the "Coupons and promotion codes" and "Subscriptions
+  and the mock clock" sections of the Stripe mock guide.
+
+## [0.39.0] - 2026-09-24
+
+### Documentation
 
 - **`AGENTS.md` now states the layering rule.** The scaffold's generated code
   always routed handlers through `internal/service/`, but `AGENTS.md` showed
@@ -278,57 +397,33 @@ the TL;DR on top of it.
   --applied`, or pass `--skip-version-check` if you already have. Pin your
   hamr version if you are not ready to follow the same shape.
 
-- **Frontend files consolidated under `frontend/`.** New projects put every
-  frontend artifact in one directory instead of scattering four of them across
-  the repo root:
+## [0.38.1] - 2026-09-17
 
-  ```
-  frontend/
-    static/          # was static/
-    dist/            # was dist/          (committed, as before)
-    css/input.css    # was css/input.css  (tailwind only)
-    package.json     # was ./package.json (tailwind only)
-    tailwind.config.js
-  ```
+### Fixes
 
-  Scaffold-level changes that follow from it: `[static].dir`/`dist` in
-  `hamr.toml` point at `frontend/`, the Makefile runs npm inside `frontend/`,
-  the Dockerfile copies `/app/frontend → /frontend` (container layout now
-  mirrors local), CI's compiled-CSS check watches
-  `frontend/static/css/output.css`, and `hamr vendor` writes to
-  `frontend/static/js/`.
+- **Builds no longer show as running after they finish.** A rebuild that
+  produced a burst of log lines could discard the event that clears the build,
+  leaving the `hamr dev` status bar and the browser panel's dot spinning on
+  work that had already finished. The browser case persisted until the next
+  page reload, so a rule with `reload = "none"` stayed stuck for the session.
+  Rules that only run a process, and builds cancelled while waiting on a
+  dependency, could leave the same stuck entry.
 
-  **Existing projects are unaffected** — nothing reads a hardcoded path. `hamr
-  gen static` already followed `[static]`, and `hamr sync --dir` /
-  `hamr add skill`'s Alpine probe now read `[static].dir` too instead of
-  assuming `static/`. To adopt the layout, move the files and update
-  `hamr.toml`:
+## [0.38.0] - 2026-09-17
 
-  ```toml
-  [static]
-  dir  = "frontend/static"   # was "static"
-  dist = "frontend/dist"     # was "dist"
-  ```
+### Features
 
-  Then fix the paths in `tailwind.config.js` `content` (now relative to
-  `frontend/`, e.g. `../internal/web/**/*.templ`), the `[[dev.watch]]` rule
-  watching `static/**/*`, and your Makefile's npm invocations. `hamr.vendor.json`
-  needs no edit: re-vendoring keeps each dep's recorded `out` path, so a project
-  on the old layout stays on it until you move the files and update the lock
-  yourself.
+- **hamr mock image.** Each release now publishes
+  `ghcr.io/fyrmforge/hamr:<version>` and `:latest` for linux/amd64 and arm64.
+  It runs `hamr mock-serve` by default, so a compose stack can use
+  `image: ghcr.io/fyrmforge/hamr:v0.38.0` instead of building hamr from source.
+  The Stripe mock's dispute fee is now 2000 (was 1500) and, as in real
+  Stripe, a won dispute no longer returns it. The mock-serve guide
+  used a `mock serve` command that doesn't exist; it now shows the image.
 
-- **Tailwind is a watch rule, not a daemon.** The scaffold no longer runs
-  `npx tailwindcss --watch` as a `[[dev.daemon]]` — that process leaks memory
-  over a long session. It's now a `[[dev.watch]]` rule running a one-shot
-  `npm run css:build` on `.templ`/`input.css` changes. The `css` npm script and
-  the `make css` target are gone; use `make css-build`. Cost: a cold Tailwind
-  build per save (~1s in isolation, though it runs concurrently with the Go
-  rebuild) instead of the warm watcher's ~40ms.
+## [0.37.0] - 2026-09-17
 
-- **CLI commands flattened.** `hamr locale gen` is now `hamr gen locale` (folded
-  under the `gen` group alongside `hamr gen static`); `hamr rename module` is now
-  `hamr rename-module`. Update any scripts, `hamr.toml` `cmd =` hooks, and
-  Makefiles. Scaffolded projects' Makefiles already use the new names.
+### Breaking changes
 
 - **Stripe mock moved to stripe-go v86 and API version `2026-08-26.dahlia`.**
   It was on v82 and `2025-08-27.basil`. New projects import
@@ -347,21 +442,6 @@ the TL;DR on top of it.
   in mock mode.
 
 ### Fixes
-
-- **SQLite projects that migrate at startup now pass CI.** A project scaffolded
-  with `--database sqlite --migrate-startup` has no `make migrate`
-  target, but its `.github/workflows/ci.yml` still ran `make migrate` and failed
-  at the "Run migrations" step. New scaffolds skip that step, because the server
-  migrates itself. For an existing project, delete the "Run migrations" step
-  from `.github/workflows/ci.yml`.
-
-- **Builds no longer show as running after they finish.** A rebuild that
-  produced a burst of log lines could discard the event that clears the build,
-  leaving the `hamr dev` status bar and the browser panel's dot spinning on
-  work that had already finished. The browser case persisted until the next
-  page reload, so a rule with `reload = "none"` stayed stuck for the session.
-  Rules that only run a process, and builds cancelled while waiting on a
-  dependency, could leave the same stuck entry.
 
 - **hamr reads common `.env` lines the way your app does.** `hamr dev` and
   `hamr sync` had three separate `.env` parsers that disagreed with godotenv and
@@ -399,121 +479,7 @@ the TL;DR on top of it.
   that leaves the timestamp alone is still ignored, so a rule that
   `chmod +x`es files in its own watch set does not loop.
 
-- **The scaffold integration tests pick free ports instead of hardcoded ones.**
-  They shell `docker compose up` directly rather than going through `hamr dev`,
-  so hamr's own compose port walk never applied to them, and the scaffold
-  hardcodes 5432 for postgres and 9000/9001 for the S3 mock. Any developer
-  already running another project's containers on those ports could not run
-  `make ai` at all — and the failure was not always a clean bind error: in one
-  case compose came up, the scaffolded app connected to the OTHER project's
-  postgres, and it failed much later with "database does not exist". The
-  harness now rewrites each published host port in the generated compose file
-  to a free one and repoints `.env` to match. The app's own port is picked the
-  same way instead of the hardcoded 18080-18082.
-
-- **`hamr setup`'s form test no longer fails at random.** It drove the whole
-  picker from a scripted keystroke string, but huh advances between form groups
-  with `tea.Sequence`, which bubbletea resolves asynchronously while the input
-  reader keeps feeding keys — so a keystroke aimed at a later group could land
-  on the finished one and be swallowed. It failed roughly half the time under
-  repetition and occasionally took the whole package with it. The headless run
-  now drives only the first group, the access selects are exercised
-  field-by-field with no group transitions in play, and the form runs under a
-  timeout so a dropped key fails the test instead of hanging it.
-
-- **Scaffolded inline field re-validation now works, without widening the CSP.**
-  The auth forms' `input[this.closest(...).querySelector(...)]` trigger filter
-  never fired as intended: htmx compiles `hx-trigger` `[...]` filters with
-  `Function()`, the scaffolded CSP has no `'unsafe-eval'`, so htmx dropped the
-  filter and every keystroke triggered a validation request. The condition now
-  lives in `static/js/main.js`, which debounces 300ms and fires a
-  `hamr:revalidate` event only while the field is already showing an error; the
-  inputs use `hx-trigger="blur, hamr:revalidate"`. Inputs pair with their error
-  span by id convention (`name="x"` <-> `id="error-x"`); `data-hamr-watch="y"`
-  gates on another field's error instead, for cross-field validation. The CSP is
-  unchanged — no `'unsafe-eval'`. Same change in `AGENTS.md` and the forms guide.
-
 ### Features
-
-- **`hamr mock-serve` can gate its two surfaces.** `HAMR_MOCK_UI_PASSWORD`
-  puts HTTP basic auth (any username, that password) on every `/__hamr/*`
-  dashboard route — mail and SMS inboxes, the Stripe dashboard and the
-  checkout/onboarding pages — while the mail/SMS ingest sinks stay open so the
-  app keeps working on a shared port. `HAMR_MOCK_API_ALLOW` restricts the
-  app-facing listener to a comma-separated list of IPs/CIDRs, checked against
-  the TCP peer only (forwarded headers are ignored), and logs each rejected
-  peer's address. Both are off when unset, so existing deployments are
-  unchanged.
-
-- **Stripe mock: subscriptions, coupons and a test clock.** A checkout
-  session in `mode=subscription` (line items with `price_data.recurring`)
-  now creates a Subscription and its first paid Invoice when paid, with
-  `customer.subscription.created`, `invoice.paid` and
-  `invoice.payment_succeeded` fired alongside the payment events. The app
-  reads and manages them through `subscription.Get/Update/Cancel/List` and
-  `invoice.Get/List`. Renewals are driven by a mock clock, the stand-in for
-  Stripe's test clocks: advance it from the bar on `/__hamr/stripe`
-  (+1 day / week / month / to a date), from a subscription row ("Next
-  period", "Fail next renewal", "Retry payment", "Cancel") or with the new
-  `stripe.advance` and `stripe.subscription` MCP tools, and every renewal
-  that falls due runs in time order. The clock never runs backwards, moves
-  at most five years per call, its offset persists in `state.json`, events
-  are stamped with it and webhook signatures stay on real time. Coupons
-  and promotion codes are mocked too: `coupon.New` / `promotioncode.New`,
-  `discounts[]` or `allow_promotion_codes` on the session (the hosted page
-  gets a code input), Stripe's inline rejection messages, redemption
-  limits (checked again when the session is paid), and coupon durations
-  honoured on renewal. `subscription.*`, `invoice.*`, `coupon.New` and
-  `promotioncode.New` are the stripe-go v86 client calls, not a hamr API.
-  A 100% coupon completes with `no_payment_required` and no
-  PaymentIntent; the same now holds for an undiscounted zero-total payment
-  session, which used to get a 0-amount PaymentIntent and Charge. A
-  session's `payment_intent` is now null until the buyer pays, and always
-  for a subscription, as on Stripe since API 2022-08-01: read it from
-  `checkout.session.completed` or the invoice, not from the create
-  response. Cancelling a subscription voids its open invoice
-  (`invoice.voided`). Scaffolded webhook handlers stub the seven new
-  events. Not mocked: `POST /v1/subscriptions`, trials, proration and
-  plan changes. See the "Coupons and promotion codes" and "Subscriptions
-  and the mock clock" sections of the Stripe mock guide.
-
-- **Stripe mock: Customers, Products, Prices and the billing portal.** The
-  mock now stores the objects an app sets up before Checkout, through the
-  usual stripe-go calls. `customer.New/Get/Update/List` (email filter);
-  `product.New/Get/List`; `price.New/Get/Update/List` with recurring or
-  one-time prices, `product_data` inline, `nickname`, `lookup_key` (and
-  `transfer_lookup_key`) and the `active`, `product`, `type` and
-  `lookup_keys[]` filters. A checkout session can reference a stored price
-  with `line_items[].price` instead of inlining `price_data` (recurring
-  needs `mode=subscription`, one-off works in `mode=payment`; unknown or
-  inactive is a 400) and attach a stored customer with `customer=` (unknown
-  is a 400 `resource_missing`, not with `customer_email`); the session
-  reports `customer_details`, and a subscription created from `price=`
-  carries the real price and product ids. Paying a subscription checkout
-  without `customer=` now stores the minted Customer, so `customer.Get` on
-  the id from `checkout.session.completed` works, and invoices carry
-  `customer_email` / `customer_name`. `client.V1BillingPortalSessions.Create`
-  returns a URL to a dev portal page listing the customer's subscriptions
-  and invoices with "Cancel at period end" / "Keep subscription" (fires
-  `customer.subscription.updated`), a no-op "Update card" and a Back link
-  to `return_url`; `client.V1BillingPortalConfigurations.Create` honours
-  `features[subscription_cancel][enabled]` only. The dashboard gains
-  Customers and Prices tables and `stripe.list` returns `customers` and
-  `prices`. No new webhook events; the scaffold's handler stubs are
-  unchanged. Subscriptions paid before this change hold a customer id
-  with no Customer record — `rm .hamr/stripe/state.json` if they need
-  one. Not mocked: Customer delete, product update, metered and tiered
-  prices, portal plan switching and payment-method collection. See
-  "Customers, products and prices" and "Billing portal" in the Stripe mock
-  guide.
-
-- **hamr mock image.** Each release now publishes
-  `ghcr.io/fyrmforge/hamr:<version>` and `:latest` for linux/amd64 and arm64.
-  It runs `hamr mock-serve` by default, so a compose stack can use
-  `image: ghcr.io/fyrmforge/hamr:v0.38.0` instead of building hamr from source.
-  The Stripe mock's dispute fee is now 2000 (was 1500) and, as in real
-  Stripe, a won dispute no longer returns it. The mock-serve guide
-  used a `mock serve` command that doesn't exist; it now shows the image.
 
 - **Stripe listen mode for `hamr dev`.** Press `S` to swap the Stripe mock for
   `stripe listen` against your real sandbox, and back. hamr runs the Stripe CLI
@@ -602,6 +568,46 @@ the TL;DR on top of it.
   as every other rule; and there is no longer a key that cancels a running make
   — `Ctrl+C` quits the TUI, which kills the run with it.
 
+## [0.36.0] - 2026-09-11
+
+### Fixes
+
+- **The scaffold integration tests pick free ports instead of hardcoded ones.**
+  They shell `docker compose up` directly rather than going through `hamr dev`,
+  so hamr's own compose port walk never applied to them, and the scaffold
+  hardcodes 5432 for postgres and 9000/9001 for the S3 mock. Any developer
+  already running another project's containers on those ports could not run
+  `make ai` at all — and the failure was not always a clean bind error: in one
+  case compose came up, the scaffolded app connected to the OTHER project's
+  postgres, and it failed much later with "database does not exist". The
+  harness now rewrites each published host port in the generated compose file
+  to a free one and repoints `.env` to match. The app's own port is picked the
+  same way instead of the hardcoded 18080-18082.
+
+- **`hamr setup`'s form test no longer fails at random.** It drove the whole
+  picker from a scripted keystroke string, but huh advances between form groups
+  with `tea.Sequence`, which bubbletea resolves asynchronously while the input
+  reader keeps feeding keys — so a keystroke aimed at a later group could land
+  on the finished one and be swallowed. It failed roughly half the time under
+  repetition and occasionally took the whole package with it. The headless run
+  now drives only the first group, the access selects are exercised
+  field-by-field with no group transitions in play, and the form runs under a
+  timeout so a dropped key fails the test instead of hanging it.
+
+- **Scaffolded inline field re-validation now works, without widening the CSP.**
+  The auth forms' `input[this.closest(...).querySelector(...)]` trigger filter
+  never fired as intended: htmx compiles `hx-trigger` `[...]` filters with
+  `Function()`, the scaffolded CSP has no `'unsafe-eval'`, so htmx dropped the
+  filter and every keystroke triggered a validation request. The condition now
+  lives in `static/js/main.js`, which debounces 300ms and fires a
+  `hamr:revalidate` event only while the field is already showing an error; the
+  inputs use `hx-trigger="blur, hamr:revalidate"`. Inputs pair with their error
+  span by id convention (`name="x"` <-> `id="error-x"`); `data-hamr-watch="y"`
+  gates on another field's error instead, for cross-field validation. The CSP is
+  unchanged — no `'unsafe-eval'`. Same change in `AGENTS.md` and the forms guide.
+
+### Features
+
 - **Restart the dev server without leaving the TUI.** `R` in `hamr dev` tears
   the runner down and re-runs its whole startup lifecycle in place: config
   re-read, docker compose brought up, ports re-resolved, `.env` re-injected,
@@ -645,8 +651,16 @@ the TL;DR on top of it.
   download) and `WithWindowSize` (`E2E_WINDOW_SIZE=1280x800`). Headed local
   debugging: `E2E_HEADLESS=false E2E_GPU=true E2E_WINDOW_SIZE=1280x800`.
 
+## [0.35.2] - 2026-09-02
+
+### Features
+
 - **Licensed under Apache 2.0.** `LICENSE` and `NOTICE` added at the repo root;
   copyright FyrmForge Limited. The README already pointed at `LICENSE`.
+
+## [0.35.0] - 2026-08-30
+
+### Features
 
 - **`hamr add skill` — interactive picker and two new skills.** Run with no
   arguments for a huh picker (agents, then skills); `hamr add skill claude`
@@ -663,6 +677,10 @@ the TL;DR on top of it.
   standard `.agents/skills/` (shared — picking both writes once; opencode
   also reads `.claude/skills/` natively).
 
+## [0.34.0] - 2026-08-29
+
+### Features
+
 - **`hamr dev --headless` — no TUI, one plain stream on stdout.** For an AI
   agent or CI running the dev server in the background
   (`hamr dev --headless > dev.log &`): hamr's own lines, rule/daemon output
@@ -677,6 +695,10 @@ the TL;DR on top of it.
   initial state; the toggle lives in the `hamr dev` process, is kept in sync
   across open tabs over SSE, and is never written back to `hamr.toml`.
 
+## [0.30.0] - 2026-08-20
+
+### Features
+
 - **`hamr add service` — add a new Go binary to an existing project.** A
   stepped wizard (or flags) scaffolds one of four service types — `worker`
   (background loop with graceful shutdown), `api` (JSON server on its own
@@ -688,6 +710,23 @@ the TL;DR on top of it.
   optionally wire the project's repo store, session validation against the
   shared store, and the locale bundle, matching the choices recorded in
   `hamr.toml [options]`.
+
+### Fixes
+
+- **Dev mode no longer caches static assets.** `server.New` mounted
+  `middleware.CacheControl(false)` unconditionally, so `.css`/`.js` under
+  `/static` were served with `public, max-age=86400` even with
+  `WithDevMode(true)`. Dev URLs aren't fingerprinted, so after any rebuild the
+  browser kept serving the stale stylesheet for up to a day — pages looked
+  broken until a hard refresh. The middleware now receives `s.devMode`: dev
+  sends `no-cache, no-store, must-revalidate` on every response; production
+  behavior is unchanged. The two static-cache tests asserted the prod headers
+  under `WithDevMode(true)` — which is exactly how this slipped through — and
+  now run in prod mode, with a new dev-mode test pinning the no-cache header.
+
+## [0.29.0] - 2026-07-31
+
+### Features
 
 - **`templint:ignore` — inline lint suppression for `.templ` files.** A
   deliberate exception no longer forces you to switch a rule `"off"` project-wide:
@@ -709,18 +748,9 @@ the TL;DR on top of it.
   naming a rule that is switched `"off"` reports neither. See
   [Templint](guide/pkg/templint.md#inline-suppression).
 
-- **`hamr setup` — interactive AI-agent setup.** One pass over the decisions
-  that were previously a mix of CLI flags and hand-edited TOML: which agents
-  (claude/codex/opencode) get the hamr MCP bridge registered, whether the
-  gateway is enabled, `deny`/`read`/`write` per `[dev.mcp.access]` area, and
-  which agents get the hamr skill installed. Seeded from the project's current
-  state, writes only `[dev.mcp]` / `[dev.mcp.access]` in `hamr.toml` (comments
-  and every other table untouched) plus the per-agent config `hamr mcp install`
-  already wrote. It also upserts a `## hamr MCP` section into `AGENTS.md` and
-  `CLAUDE.md` scoped to the granted areas, so agents stop defaulting to the
-  manual equivalent (tailing logs, running `make build`, asking what an email
-  said); disabling the gateway removes the section again. `--dry-run` previews.
-  See [CLI reference](guide/cli.md#hamr-setup).
+## [0.28.0] - 2026-07-27
+
+### Features
 
 - **`hamr compose` — docker compose with the config `hamr dev` is actually
   using.** When a compose host port is busy, `hamr dev` walks it and records the
@@ -735,34 +765,7 @@ the TL;DR on top of it.
   the compose-side counterpart to `hamr env`.
   See [CLI reference](guide/cli.md#hamr-compose).
 
-- **`dir` on watch rules and daemons.** `[[dev.watch]]` and `[[dev.daemon]]`
-  accept `dir = "subdir"`, the working directory for `cmd`/`run`, relative to
-  the project root (default: the project root). `watch`/`ignore` globs stay
-  root-relative, so a rule can watch the whole repo while building inside a
-  subdirectory. A `dir` that doesn't exist, isn't a directory, is absolute, or
-  resolves outside the project root (symlinks included) fails at config load
-  rather than silently running in the wrong place.
-
-- **`hamr mock-serve` — headless dev mocks.** Runs the mail and Stripe mocks
-  standalone (no proxy, TUI, build, or watch) for running in a dedicated
-  container in a dev environment. Configured entirely via environment
-  variables (no `hamr.toml`): `HAMR_MOCKS` selects which to start,
-  `HAMR_MOCK_PORT` carries the app-facing surface (Stripe `/v1/*` + mail
-  ingest), and an optional `HAMR_MOCK_UI_PORT` splits the human dashboards
-  onto a separately-exposable listener. See [CLI reference](guide/cli.md).
-
 ### Fixes
-
-- **Dev mode no longer caches static assets.** `server.New` mounted
-  `middleware.CacheControl(false)` unconditionally, so `.css`/`.js` under
-  `/static` were served with `public, max-age=86400` even with
-  `WithDevMode(true)`. Dev URLs aren't fingerprinted, so after any rebuild the
-  browser kept serving the stale stylesheet for up to a day — pages looked
-  broken until a hard refresh. The middleware now receives `s.devMode`: dev
-  sends `no-cache, no-store, must-revalidate` on every response; production
-  behavior is unchanged. The two static-cache tests asserted the prod headers
-  under `WithDevMode(true)` — which is exactly how this slipped through — and
-  now run in prod mode, with a new dev-mode test pinning the no-cache header.
 
 - **Scaffolded projects no longer 500 on their first 404.** `ctx.Get` (and
   `GetAs`) dereferenced the `echo.Context` without a nil check, but components
@@ -786,6 +789,84 @@ the TL;DR on top of it.
   listen on. Existing projects: apply the same one-word change to
   `docker/docker-compose.yaml`.
 
+## [0.27.0] - 2026-07-27
+
+### Breaking changes
+
+- **Frontend files consolidated under `frontend/`.** New projects put every
+  frontend artifact in one directory instead of scattering four of them across
+  the repo root:
+
+  ```
+  frontend/
+    static/          # was static/
+    dist/            # was dist/          (committed, as before)
+    css/input.css    # was css/input.css  (tailwind only)
+    package.json     # was ./package.json (tailwind only)
+    tailwind.config.js
+  ```
+
+  Scaffold-level changes that follow from it: `[static].dir`/`dist` in
+  `hamr.toml` point at `frontend/`, the Makefile runs npm inside `frontend/`,
+  the Dockerfile copies `/app/frontend → /frontend` (container layout now
+  mirrors local), CI's compiled-CSS check watches
+  `frontend/static/css/output.css`, and `hamr vendor` writes to
+  `frontend/static/js/`.
+
+  **Existing projects are unaffected** — nothing reads a hardcoded path. `hamr
+  gen static` already followed `[static]`, and `hamr sync --dir` /
+  `hamr add skill`'s Alpine probe now read `[static].dir` too instead of
+  assuming `static/`. To adopt the layout, move the files and update
+  `hamr.toml`:
+
+  ```toml
+  [static]
+  dir  = "frontend/static"   # was "static"
+  dist = "frontend/dist"     # was "dist"
+  ```
+
+  Then fix the paths in `tailwind.config.js` `content` (now relative to
+  `frontend/`, e.g. `../internal/web/**/*.templ`), the `[[dev.watch]]` rule
+  watching `static/**/*`, and your Makefile's npm invocations. `hamr.vendor.json`
+  needs no edit: re-vendoring keeps each dep's recorded `out` path, so a project
+  on the old layout stays on it until you move the files and update the lock
+  yourself.
+
+- **Tailwind is a watch rule, not a daemon.** The scaffold no longer runs
+  `npx tailwindcss --watch` as a `[[dev.daemon]]` — that process leaks memory
+  over a long session. It's now a `[[dev.watch]]` rule running a one-shot
+  `npm run css:build` on `.templ`/`input.css` changes. The `css` npm script and
+  the `make css` target are gone; use `make css-build`. Cost: a cold Tailwind
+  build per save (~1s in isolation, though it runs concurrently with the Go
+  rebuild) instead of the warm watcher's ~40ms.
+
+### Features
+
+- **`hamr setup` — interactive AI-agent setup.** One pass over the decisions
+  that were previously a mix of CLI flags and hand-edited TOML: which agents
+  (claude/codex/opencode) get the hamr MCP bridge registered, whether the
+  gateway is enabled, `deny`/`read`/`write` per `[dev.mcp.access]` area, and
+  which agents get the hamr skill installed. Seeded from the project's current
+  state, writes only `[dev.mcp]` / `[dev.mcp.access]` in `hamr.toml` (comments
+  and every other table untouched) plus the per-agent config `hamr mcp install`
+  already wrote. It also upserts a `## hamr MCP` section into `AGENTS.md` and
+  `CLAUDE.md` scoped to the granted areas, so agents stop defaulting to the
+  manual equivalent (tailing logs, running `make build`, asking what an email
+  said); disabling the gateway removes the section again. `--dry-run` previews.
+  See [CLI reference](guide/cli.md#hamr-setup).
+
+- **`dir` on watch rules and daemons.** `[[dev.watch]]` and `[[dev.daemon]]`
+  accept `dir = "subdir"`, the working directory for `cmd`/`run`, relative to
+  the project root (default: the project root). `watch`/`ignore` globs stay
+  root-relative, so a rule can watch the whole repo while building inside a
+  subdirectory. A `dir` that doesn't exist, isn't a directory, is absolute, or
+  resolves outside the project root (symlinks included) fails at config load
+  rather than silently running in the wrong place.
+
+## [0.26.1] - 2026-07-27
+
+### Fixes
+
 - **Walked compose ports are now actually published.** When `hamr dev` walked a
   docker-compose host port off a collision (e.g. a second project's postgres
   taking 5432), the generated `.hamr/compose.<name>.override.yaml` tagged the
@@ -795,6 +876,29 @@ the TL;DR on top of it.
   the walked port it had been handed via `.env`. Only triggered when a walk
   actually happened. The override is regenerated on every `hamr dev` start, so
   the fix applies with no manual cleanup.
+
+## [0.26.0] - 2026-07-17
+
+### Breaking changes
+
+- **CLI commands flattened.** `hamr locale gen` is now `hamr gen locale` (folded
+  under the `gen` group alongside `hamr gen static`); `hamr rename module` is now
+  `hamr rename-module`. Update any scripts, `hamr.toml` `cmd =` hooks, and
+  Makefiles. Scaffolded projects' Makefiles already use the new names.
+
+### Features
+
+- **`hamr mock-serve` — headless dev mocks.** Runs the mail and Stripe mocks
+  standalone (no proxy, TUI, build, or watch) for running in a dedicated
+  container in a dev environment. Configured entirely via environment
+  variables (no `hamr.toml`): `HAMR_MOCKS` selects which to start,
+  `HAMR_MOCK_PORT` carries the app-facing surface (Stripe `/v1/*` + mail
+  ingest), and an optional `HAMR_MOCK_UI_PORT` splits the human dashboards
+  onto a separately-exposable listener. See [CLI reference](guide/cli.md).
+
+## [0.25.2] - 2026-06-22
+
+### Fixes
 
 - **S3 `Save` accepts non-seekable readers.** Piping an `Open` result (or any
   non-seekable stream) straight into `S3Storage.Save` previously failed with
