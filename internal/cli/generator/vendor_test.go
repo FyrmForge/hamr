@@ -26,8 +26,8 @@ func TestReadWriteLockFile(t *testing.T) {
 	original := &VendorLock{
 		Deps: map[string]VendorDep{
 			"htmx": {
-				Version: "2.0.4",
-				URL:     "https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js",
+				Version: "2.0.11",
+				URL:     "https://unpkg.com/htmx.org@2.0.11/dist/htmx.min.js",
 				Out:     "static/js/htmx.min.js",
 				SHA256:  "abc123",
 			},
@@ -63,8 +63,8 @@ func TestResolveURL(t *testing.T) {
 	}{
 		{
 			tmpl:    "https://unpkg.com/htmx.org@{{.Version}}/dist/htmx.min.js",
-			version: "2.0.4",
-			want:    "https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js",
+			version: "2.0.11",
+			want:    "https://unpkg.com/htmx.org@2.0.11/dist/htmx.min.js",
 		},
 		{
 			tmpl:    "https://cdn.example.com/lib-{{.Version}}.js",
@@ -157,7 +157,7 @@ func withTestRegistry(t *testing.T, baseURL string) {
 	maps.Copy(original, defaultRegistry)
 
 	defaultRegistry["htmx"] = VendorDep{
-		Version: "2.0.4",
+		Version: "2.0.11",
 		URL:     baseURL + "/htmx.min.js",
 		Out:     "static/js/htmx.min.js",
 	}
@@ -244,7 +244,7 @@ func TestVendorOne(t *testing.T) {
 	lock, err := readLockFile(dir)
 	require.NoError(t, err)
 	assert.Len(t, lock.Deps, 1)
-	assert.Equal(t, "2.0.4", lock.Deps["htmx"].Version)
+	assert.Equal(t, "2.0.11", lock.Deps["htmx"].Version)
 }
 
 func TestVendorOne_withVersion(t *testing.T) {
@@ -330,7 +330,7 @@ func TestVendorSkipsExisting(t *testing.T) {
 
 	original := defaultRegistry["htmx"]
 	defaultRegistry["htmx"] = VendorDep{
-		Version: "2.0.4",
+		Version: "2.0.11",
 		URL:     ts.URL + "/htmx.min.js",
 		Out:     "static/js/htmx.min.js",
 	}

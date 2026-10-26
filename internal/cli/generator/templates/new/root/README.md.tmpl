@@ -8,7 +8,7 @@ A Go web application built with the [HAMR framework](https://github.com/FyrmForg
 {{- if or (ne .Database "sqlite") (eq .StorageBackend "s3")}}
 - Docker{{- if ne .Database "sqlite"}} (for PostgreSQL){{- else}} (for S3/RustFS){{- end}}
 {{- end}}
-- [templ](https://templ.guide) CLI (`go install github.com/a-h/templ/cmd/templ@latest`)
+- [templ](https://templ.guide) CLI (run `make install` to get the version pinned in go.mod; the CLI must match it)
 - [hamr](https://github.com/FyrmForge/hamr) CLI
 
 ## Quick Start

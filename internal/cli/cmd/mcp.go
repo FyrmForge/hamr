@@ -57,8 +57,17 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 	enabled := cfg.Dev.MCP.EnabledTools()
 
 	bridge := &mcpBridge{projectRoot: root, client: &http.Client{Timeout: mcpBridgeTimeout}}
-	server := mcp.NewServer(&mcp.Implementation{Name: "hamr-dev", Version: version}, nil)
+	server, registered := newMCPServer(bridge, enabled)
 
+	// stdout is the MCP transport — status goes to stderr only.
+	fmt.Fprintf(os.Stderr, "hamr mcp: serving %d tool(s) for %s\n", registered, root)
+	return server.Run(cmd.Context(), &mcp.StdioTransport{})
+}
+
+// newMCPServer registers every enabled bridge tool and returns the server and
+// the number registered. AddTool panics on an invalid input schema.
+func newMCPServer(bridge *mcpBridge, enabled map[string]bool) (*mcp.Server, int) {
+	server := mcp.NewServer(&mcp.Implementation{Name: "hamr-dev", Version: version}, nil)
 	registered := 0
 	for _, t := range bridgeTools {
 		if !enabled[t.name] {
@@ -70,10 +79,7 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 		)
 		registered++
 	}
-
-	// stdout is the MCP transport — status goes to stderr only.
-	fmt.Fprintf(os.Stderr, "hamr mcp: serving %d tool(s) for %s\n", registered, root)
-	return server.Run(cmd.Context(), &mcp.StdioTransport{})
+	return server, registered
 }
 
 // mcpBridge forwards MCP tool calls to a project's running dev-server gateway.

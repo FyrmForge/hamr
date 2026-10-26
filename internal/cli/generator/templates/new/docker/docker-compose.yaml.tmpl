@@ -27,7 +27,7 @@ services:
 {{- if eq .StorageBackend "s3"}}
 
   rustfs:
-    image: rustfs/rustfs:latest
+    image: rustfs/rustfs:1.0.4
     command: --console-enable /data
     ports:
       - "9000:9000"

@@ -774,7 +774,7 @@ func TestGenerateProject_ciWorkflow(t *testing.T) {
 	assert.Contains(t, ci, "make build")
 	assert.Contains(t, ci, "make test")
 	assert.Contains(t, ci, "make templint")
-	assert.Contains(t, ci, "templ files are out of date")
+	assert.Contains(t, ci, "make templ-check")
 	assert.Contains(t, ci, "golangci-lint-action")
 	assert.Contains(t, ci, "# - name: Run migrations")
 	assert.Contains(t, ci, "#   run: make migrate")

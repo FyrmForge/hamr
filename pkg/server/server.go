@@ -35,9 +35,10 @@ type Server struct {
 	maxBodySize     string
 	shutdownTimeout time.Duration
 
-	trustedProxies []string // CIDRs only; the cloudflare keyword is stripped in New
-	cloudflare     bool
-	ipExtractor    atomic.Pointer[echo.IPExtractor]
+	trustedProxies  []string // CIDRs only; the cloudflare keyword is stripped in New
+	cloudflare      bool
+	ipExtractor     atomic.Pointer[echo.IPExtractor]
+	schemeExtractor atomic.Pointer[echo.SchemeExtractor]
 
 	userMiddleware []echo.MiddlewareFunc
 	errorHandler   echo.HTTPErrorHandler
@@ -95,6 +96,11 @@ func New(opts ...Option) (*Server, error) {
 		return nil, err
 	}
 	s.ipExtractor.Store(&ipExtractor)
+	schemeExtractor, err := buildSchemeExtractor(cidrs)
+	if err != nil {
+		return nil, err
+	}
+	s.schemeExtractor.Store(&schemeExtractor)
 
 	e := echo.New()
 	e.HideBanner = true
@@ -104,6 +110,9 @@ func New(opts ...Option) (*Server, error) {
 	// closing the spoof-a-header-to-get-a-fresh-bucket bypass. Read through a
 	// pointer so the Cloudflare refresh can swap it while serving.
 	e.IPExtractor = func(r *http.Request) string { return (*s.ipExtractor.Load())(r) }
+	// Same trust set for c.Scheme(): X-Forwarded-Proto is honoured only from the
+	// configured proxies (echo's default trusts any private/loopback peer).
+	e.SchemeExtractor = func(r *http.Request) string { return (*s.schemeExtractor.Load())(r) }
 
 	// Production defaults — applied in order.
 	e.Use(echoMw.RecoverWithConfig(echoMw.RecoverConfig{
@@ -190,12 +199,41 @@ func stripCloudflareKeyword(cidrs []string) ([]string, bool) {
 // ranges are trusted for X-Forwarded-For — auto-trust of loopback/link-local/
 // private ranges is disabled so the trust set is exactly what was configured.
 func buildIPExtractor(cidrs []string) (echo.IPExtractor, error) {
+	opts, err := trustOptions(cidrs)
+	if err != nil {
+		return nil, err
+	}
+	if len(opts) == 3 {
+		return echo.ExtractIPDirect(), nil
+	}
+	return echo.ExtractIPFromXFFHeader(opts...), nil
+}
+
+// buildSchemeExtractor is the c.Scheme() counterpart of buildIPExtractor. With
+// no trusted proxies it keeps echo's default (X-Forwarded-Proto trusted only
+// from loopback/link-local/private/unix peers), because PaaS edges (Railway,
+// Fly) connect from private IPs and apps rarely set TRUSTED_PROXIES. With
+// CIDRs, exactly that list is trusted. Unlike the client IP, a spoofed scheme
+// can only mis-set a cookie Secure flag.
+func buildSchemeExtractor(cidrs []string) (echo.SchemeExtractor, error) {
+	opts, err := trustOptions(cidrs)
+	if err != nil {
+		return nil, err
+	}
+	if len(opts) == 3 {
+		return echo.ExtractSchemeFromHeaders(), nil
+	}
+	return echo.ExtractSchemeFromHeaders(opts...), nil
+}
+
+// trustOptions returns the three auto-trust disablers plus one TrustIPRange per
+// CIDR, so the trust set is exactly what was configured. len == 3 means no CIDRs.
+func trustOptions(cidrs []string) ([]echo.TrustOption, error) {
 	opts := []echo.TrustOption{
 		echo.TrustLoopback(false),
 		echo.TrustLinkLocal(false),
 		echo.TrustPrivateNet(false),
 	}
-	trusted := 0
 	for _, raw := range cidrs {
 		cidr := strings.TrimSpace(raw)
 		if cidr == "" {
@@ -206,12 +244,8 @@ func buildIPExtractor(cidrs []string) (echo.IPExtractor, error) {
 			return nil, fmt.Errorf("server: invalid trusted proxy CIDR %q: %w", cidr, err)
 		}
 		opts = append(opts, echo.TrustIPRange(ipNet))
-		trusted++
 	}
-	if trusted == 0 {
-		return echo.ExtractIPDirect(), nil
-	}
-	return echo.ExtractIPFromXFFHeader(opts...), nil
+	return opts, nil
 }
 
 // Echo returns the underlying Echo instance for direct access.

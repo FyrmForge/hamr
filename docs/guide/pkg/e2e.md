@@ -313,7 +313,7 @@ Override defaults via env vars in your CI pipeline:
 
 - name: Upload failure artifacts
   if: failure()
-  uses: actions/upload-artifact@v4
+  uses: actions/upload-artifact@v7
   with:
     name: e2e-artifacts
     path: test-artifacts/

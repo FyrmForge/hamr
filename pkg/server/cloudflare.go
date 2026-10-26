@@ -87,7 +87,13 @@ func (s *Server) updateCloudflare(ctx context.Context) {
 		slog.Default().Warn("server: cloudflare IP refresh failed, keeping current list", "error", err)
 		return
 	}
+	sch, err := buildSchemeExtractor(append(append([]string{}, s.trustedProxies...), cidrs...))
+	if err != nil {
+		slog.Default().Warn("server: cloudflare IP refresh failed, keeping current list", "error", err)
+		return
+	}
 	s.ipExtractor.Store(&ext)
+	s.schemeExtractor.Store(&sch)
 }
 
 // fetchCloudflareCIDRs downloads and validates Cloudflare's IP list.

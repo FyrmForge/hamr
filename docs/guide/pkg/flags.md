@@ -350,7 +350,7 @@ hflags.New(store, hflags.WithAnonymousCookie("ff_id"))
 
 The middleware then sets a random first-party ID cookie (HttpOnly, SameSite
 Lax, one year, Secure when the request is https, including via
-`X-Forwarded-Proto` behind a proxy) and hashes it for visitors with no subject ID.
+`X-Forwarded-Proto` from a private-network peer or a proxy listed in `WithTrustedProxies`) and hashes it for visitors with no subject ID.
 
 **Warning: consent.** This cookie is likely not "strictly necessary" under the
 ePrivacy rules, because the site works without it. Your app may need the

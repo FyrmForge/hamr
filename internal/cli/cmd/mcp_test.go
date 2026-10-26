@@ -101,3 +101,27 @@ func TestResolveProjectRoot(t *testing.T) {
 	rootResolved, _ := filepath.EvalSymlinks(root)
 	assert.Equal(t, rootResolved, gotResolved)
 }
+
+// TestNewMCPServerRegistersAllTools registers every bridge tool (the SDK
+// panics on an invalid schema) and lists them over an in-memory transport.
+func TestNewMCPServerRegistersAllTools(t *testing.T) {
+	enabled := map[string]bool{}
+	for _, bt := range bridgeTools {
+		enabled[bt.name] = true
+	}
+	server, n := newMCPServer(&mcpBridge{projectRoot: t.TempDir(), client: http.DefaultClient}, enabled)
+	require.Equal(t, len(bridgeTools), n)
+
+	ctx := context.Background()
+	st, ct := mcp.NewInMemoryTransports()
+	ss, err := server.Connect(ctx, st, nil)
+	require.NoError(t, err)
+	defer func() { _ = ss.Close() }()
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil).Connect(ctx, ct, nil)
+	require.NoError(t, err)
+	defer func() { _ = cs.Close() }()
+
+	res, err := cs.ListTools(ctx, nil)
+	require.NoError(t, err)
+	assert.Len(t, res.Tools, len(bridgeTools))
+}

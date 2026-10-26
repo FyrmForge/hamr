@@ -29,7 +29,7 @@ type VendorLock struct {
 // defaultRegistry contains built-in JS dependency definitions.
 var defaultRegistry = map[string]VendorDep{
 	"htmx": {
-		Version: "2.0.4",
+		Version: "2.0.11",
 		URL:     "https://unpkg.com/htmx.org@{{.Version}}/dist/htmx.min.js",
 		Out:     "frontend/static/js/htmx.min.js",
 	},

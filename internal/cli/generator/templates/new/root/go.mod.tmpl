@@ -1,14 +1,15 @@
 module {{.Module}}
 
 go {{.GoVersion}}
-{{- if eq .DBConnector "gorm"}}
 
 require (
-	gorm.io/gorm v1.25.12
+	github.com/a-h/templ {{.TemplVersion}}
+{{- if eq .DBConnector "gorm"}}
+	gorm.io/gorm v1.31.2
 {{- if eq .Database "sqlite"}}
 	github.com/glebarez/sqlite v1.11.0
 {{- else}}
-	gorm.io/driver/postgres v1.5.11
+	gorm.io/driver/postgres v1.6.3
+{{- end}}
 {{- end}}
 )
-{{- end}}

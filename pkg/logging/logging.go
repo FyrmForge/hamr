@@ -24,7 +24,7 @@ func New(production bool) *slog.Logger {
 			Level: slog.LevelInfo,
 		}))
 	}
-	return slog.New(tint.NewHandler(os.Stderr, &tint.Options{
+	return slog.New(tint.NewTextHandler(os.Stderr, &tint.Options{
 		Level:      slog.LevelDebug,
 		TimeFormat: "3:04:05PM",
 	}))

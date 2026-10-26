@@ -13,6 +13,14 @@ import (
 	hflags "github.com/FyrmForge/hamr/pkg/flags"
 )
 
+// TemplVersion is the templ release scaffolded projects pin in go.mod. The
+// templ CLI and runtime must match exactly; keep it equal to hamr's own go.mod
+// (enforced by TestTemplVersionMatchesGoMod).
+const TemplVersion = "v0.3.1100"
+
+// TemplVersion exposes the pin to templates.
+func (ProjectConfig) TemplVersion() string { return TemplVersion }
+
 // ProjectConfig holds the data used to render project templates.
 type ProjectConfig struct {
 	Name             string // "myproject"

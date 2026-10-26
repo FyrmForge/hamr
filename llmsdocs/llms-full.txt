@@ -330,7 +330,7 @@ func WithTimeout(d time.Duration) Option                 // request context time
 func WithMaxBodySize(size string) Option                 // e.g. "2M", "500K"
 func WithShutdownTimeout(d time.Duration) Option         // graceful shutdown (default 10s)
 func WithGeneratedDir(dir string) Option                 // pre-rendered static pages dir
-func WithTrustedProxies(cidrs ...string) Option          // proxy CIDRs trusted for X-Forwarded-For; unset = ignore XFF (RealIP unspoofable); "cloudflare" = Cloudflare ranges, refreshed 24h
+func WithTrustedProxies(cidrs ...string) Option          // proxy CIDRs trusted for X-Forwarded-For and X-Forwarded-Proto (also drives c.Scheme()); unset = ignore XFF (RealIP unspoofable) and Scheme() trusts X-Forwarded-Proto only from loopback/private peers (echo default); "cloudflare" = Cloudflare ranges, refreshed 24h
 var CloudflareCIDRs []string                             // Cloudflare edge ranges pinned at release (static)
 ```
 
@@ -3603,7 +3603,7 @@ string and JSON flags serve the code default.
 Logged-out visitors have no subject ID. By default only ID-free rules apply
 (enabled at 100%, or off); a partial percent serves the code default. Opt in
 with `WithAnonymousCookie(name)`: a random first-party ID cookie (HttpOnly,
-SameSite Lax, 1 year, Secure when `Scheme()` is https incl. X-Forwarded-Proto) is hashed instead. This cookie is likely not "strictly
+SameSite Lax, 1 year, Secure when `Scheme()` is https incl. X-Forwarded-Proto from a private peer or `WithTrustedProxies` peer) is hashed instead. This cookie is likely not "strictly
 necessary" under ePrivacy, so the app may need consent / a cookie banner.
 
 #### Client

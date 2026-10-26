@@ -278,3 +278,25 @@ func TestGzip_websocketUpgradeNotBlocked(t *testing.T) {
 	srv.Echo().ServeHTTP(rec, req)
 	assert.Equal(t, "gzip", rec.Header().Get("Content-Encoding"))
 }
+
+func schemeFor(srv *server.Server, peer, proto string) string {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = peer
+	req.Header.Set("X-Forwarded-Proto", proto)
+	return srv.Echo().NewContext(req, httptest.NewRecorder()).Scheme()
+}
+
+func TestServer_SchemeHonorsTrustedProxyOnly(t *testing.T) {
+	srv, err := server.New(server.WithTrustedProxies("203.0.113.0/24"))
+	require.NoError(t, err)
+	assert.Equal(t, "https", schemeFor(srv, "203.0.113.7:5555", "https"), "trusted public proxy")
+	assert.Equal(t, "http", schemeFor(srv, "198.51.100.7:5555", "https"), "untrusted peer")
+	assert.Equal(t, "http", schemeFor(srv, "10.0.0.1:5555", "https"), "private peer not auto-trusted")
+
+	none, err := server.New()
+	require.NoError(t, err)
+	// No config: echo's default, private/loopback peers trusted, public not.
+	assert.Equal(t, "https", schemeFor(none, "10.0.0.1:5555", "https"), "no config, private peer")
+	assert.Equal(t, "https", schemeFor(none, "127.0.0.1:5555", "https"), "no config, loopback peer")
+	assert.Equal(t, "http", schemeFor(none, "203.0.113.7:5555", "https"), "no config, public peer")
+}

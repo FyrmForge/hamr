@@ -16,11 +16,12 @@ FROM golang:1.27-alpine AS builder
 # Update the Go version to match your go.mod
 
 RUN apk --no-cache add git
-RUN go install github.com/a-h/templ/cmd/templ@latest
 
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
+# The templ CLI must match the templ version in go.mod exactly
+RUN go install github.com/a-h/templ/cmd/templ@$(go list -m -f '{{.Version}}' github.com/a-h/templ)
 
 COPY . .
 RUN templ generate
@@ -31,7 +32,7 @@ RUN go build -ldflags "-s -w" -o /bin/site ./cmd/site
 RUN /bin/site --generate
 
 # Runtime stage
-FROM alpine:3.20
+FROM alpine:3.24
 
 RUN apk --no-cache add ca-certificates tzdata
 COPY --from=builder /bin/site /bin/site
@@ -111,14 +112,15 @@ jobs:
           --health-retries 5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
       - name: Install templ
-        run: go install github.com/a-h/templ/cmd/templ@latest
+        # The CLI must match the templ version in go.mod exactly
+        run: go install github.com/a-h/templ/cmd/templ@$(go list -m -f '{{.Version}}' github.com/a-h/templ)
 
       - name: Generate templates
         run: templ generate

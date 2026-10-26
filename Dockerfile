@@ -17,7 +17,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build \
 
 # No RUN in this stage: it would need emulation for the foreign arch. Certs
 # come from the build stage instead of apk.
-FROM alpine:3.21
+FROM alpine:3.24
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /hamr /usr/local/bin/hamr
 EXPOSE 4500

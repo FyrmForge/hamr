@@ -1,5 +1,5 @@
 {{- $hasCompose := or (ne .Database "sqlite") (eq .StorageBackend "s3") -}}
-.PHONY: build test lint templint{{- if not .MigrateAtStartup}} migrate{{- if eq .DBConnector "sqlx"}} migrate-down migrate-status migrate-create{{- end}}{{- end}} seed db-sh{{- if $hasCompose}} docker-up docker-down docker-delete docker-reload{{- end}} clean install check-templ generate{{- if eq .CSS "tailwind"}} check-node-modules css-build{{- end}}{{- if .StaticS3}} sync-static{{- end}}{{- if .IncludeLocale}} locale-gen{{- end}}{{- if .IncludeE2E}} e2e e2e-local e2e-run e2e-run-local{{- end}}
+.PHONY: build test lint templint templ-check{{- if not .MigrateAtStartup}} migrate{{- if eq .DBConnector "sqlx"}} migrate-down migrate-status migrate-create{{- end}}{{- end}} seed db-sh{{- if $hasCompose}} docker-up docker-down docker-delete docker-reload{{- end}} clean install check-templ generate{{- if eq .CSS "tailwind"}} check-node-modules css-build{{- end}}{{- if .StaticS3}} sync-static{{- end}}{{- if .IncludeLocale}} locale-gen{{- end}}{{- if .IncludeE2E}} e2e e2e-local e2e-run e2e-run-local{{- end}}
 
 # Force bash so the ENV_LOAD eval below works cross-shell (sh on Debian/Ubuntu
 # is dash, which doesn't grok `eval "$(...)"` quoting consistently).
@@ -103,6 +103,10 @@ db-sh:
 ## lint: Run linters
 lint:
 	golangci-lint run
+
+## templ-check: Fail if generated *_templ.go files are stale
+templ-check: check-templ
+	templ generate -check
 
 ## templint: Lint .templ files for common issues
 templint:

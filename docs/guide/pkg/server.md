@@ -46,7 +46,7 @@ if err := srv.Start(); err != nil {
 | `WithMaxBodySize(size)` | `"2M"` | Max request body (`"500K"`, `"2M"`, etc.) |
 | `WithShutdownTimeout(d)` | 10s | Graceful shutdown timeout |
 | `WithGeneratedDir(dir)` | — | Serve pre-rendered static pages from directory |
-| `WithTrustedProxies(cidrs...)` | — (direct) | Proxy CIDRs trusted to set `X-Forwarded-For`; unset ignores it so `RealIP()` can't be spoofed. `"cloudflare"` adds Cloudflare's ranges, refreshed every 24h |
+| `WithTrustedProxies(cidrs...)` | — (direct) | Proxy CIDRs trusted to set `X-Forwarded-For` and `X-Forwarded-Proto` (unset: `Scheme()` trusts private/loopback peers only); unset ignores it so `RealIP()` can't be spoofed. `"cloudflare"` adds Cloudflare's ranges, refreshed every 24h |
 
 ## Trusted Proxies & Client IP
 
@@ -67,6 +67,14 @@ disabled), and `RealIP()` returns the **left-most untrusted hop** in
 `X-Forwarded-For` — i.e. the actual client. Scaffolded apps wire this from the
 `TRUSTED_PROXIES` env var (comma-separated CIDRs); an existing app adds the
 `WithTrustedProxies` option itself.
+
+`c.Scheme()` (`e.SchemeExtractor`) follows the same list when you set one:
+`X-Forwarded-Proto` is honoured only from the listed ranges. With no
+`WithTrustedProxies` it keeps Echo's default, trusting `X-Forwarded-Proto` only
+from loopback, link-local and private-network peers (and unix sockets), so
+platform edges that connect from private IPs (Railway, Fly) still report
+`https`. A public proxy (e.g. Cloudflare) must be listed, otherwise `Scheme()`
+is `"http"` and the `flags` anonymous cookie is not marked `Secure`.
 
 **This is opt-in: behind a proxy you MUST set it, to your proxy's range.**
 
@@ -175,8 +183,8 @@ e.Validator = myValidator
 e.IPExtractor = echo.ExtractIPFromXFFHeader()
 ```
 
-Overwriting `e.IPExtractor` discards the `WithTrustedProxies` config, including
-the Cloudflare refresh.
+Overwriting `e.IPExtractor` (or `e.SchemeExtractor`) discards the
+`WithTrustedProxies` config, including the Cloudflare refresh.
 
 ## Typical Usage
 

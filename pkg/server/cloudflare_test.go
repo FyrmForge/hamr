@@ -82,3 +82,19 @@ func TestCloudflareRefresh_rejectsBadList(t *testing.T) {
 		})
 	}
 }
+
+func TestCloudflareRefresh_swapsSchemeTrust(t *testing.T) {
+	fakeCloudflare(t, http.StatusOK, `{"success":true,"result":{"ipv4_cidrs":["198.51.100.0/24"],"ipv6_cidrs":["2001:db8::/32"]}}`)
+	s, err := New(WithTrustedProxies("cloudflare"))
+	require.NoError(t, err)
+	scheme := func(peer string) string {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = peer
+		req.Header.Set("X-Forwarded-Proto", "https")
+		return s.Echo().SchemeExtractor(req)
+	}
+	assert.Equal(t, "https", scheme("104.16.0.1:443"))
+	s.updateCloudflare(context.Background())
+	assert.Equal(t, "https", scheme("198.51.100.9:443"), "fetched range trusted")
+	assert.Equal(t, "http", scheme("104.16.0.1:443"), "pinned range replaced")
+}

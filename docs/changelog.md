@@ -71,6 +71,14 @@ the TL;DR on top of it.
 
 ### Changed
 
+- **templ bumped to v0.3.1100, and scaffolds now pin it.** Picks up security
+  fixes: JS `${}` escaping inside backtick strings and stricter handling of
+  mixed-case and dynamic attribute names. `hamr new` writes
+  `github.com/a-h/templ` into the project's `go.mod`, and the scaffold gains
+  `make templ-check` (`templ generate -check`), used by its CI. templ needs
+  Go 1.26+. Install the CLI with `make install`, not `@latest`: it must match
+  go.mod's templ exactly.
+
 - **Breaking: `HAMR_MOCK_UI_PASSWORD` is no longer HTTP basic auth.** It is
   now a gate: browsers get a password page at `/__hamr/gate` that sets an
   HttpOnly cookie valid 7 days (changing the password invalidates every
@@ -96,7 +104,44 @@ the TL;DR on top of it.
   (the widget's own styles still need it on `style-src`). The tunnel allows
   `/__hamr/client.js` too.
 
+- **Dependencies refreshed.** Echo v4.16.2, pgx v5.11.0, golang-migrate
+  v4.20.1, testcontainers-go v0.44.0, huh v1.0.0, MCP go-sdk v1.8.0, modernc
+  sqlite v1.61.0, AWS SDK v2 / smithy-go, `golang.org/x/*`, coder/websocket,
+  fsnotify, testify, tint, gommon, fuzzy. Run `go get -u` in existing
+  projects to pick up the same fixes. sqlite, echo and templ need Go 1.26+,
+  so scaffolded projects now need it too.
+
+- **Behaviour change: `c.Scheme()` follows `WithTrustedProxies`.** Echo 4.16
+  trusts `X-Forwarded-Proto` only from loopback/private peers. With
+  `WithTrustedProxies` set, hamr trusts exactly that list (including the 24h
+  Cloudflare refresh) via `e.SchemeExtractor`. With none set, Echo's default
+  applies, so Railway/Fly-style edges on private IPs still report `https`.
+  A public proxy must be listed, or `Scheme()` is `"http"` and the
+  `pkg/flags` anonymous cookie loses its `Secure` flag. Overwriting
+  `e.SchemeExtractor` discards this. Echo static routes (`e.Static`,
+  `StaticFS`) now answer 404 for paths containing `..` or `//`.
+
+- **Logging uses `tint.NewTextHandler`** (`NewHandler` is deprecated). Dev
+  output is unchanged.
+
+- **Scaffold pins refreshed.** New projects get gorm v1.31.2, gorm postgres
+  driver v1.6.3, htmx 2.0.11 (was 2.0.4), and `rustfs/rustfs:1.0.4` instead
+  of `:latest`.
+
+- **Alpine 3.21 (EOL 2026-11-01) replaced by `alpine:3.24`** in the root
+  Dockerfile, the service and site Dockerfile templates and the deployment
+  guide.
+
+- **GitHub Actions bumped to current majors** in hamr's workflows, the
+  scaffolded CI/deploy workflows and the guides: checkout v7, setup-go v7,
+  setup-node v7 (Node 24 instead of 20), upload-artifact v7, docker
+  setup-buildx v4, login v4, build-push v7.
+
 ### Fixed
+
+- **CI failed on projects made by `hamr new`.** The scaffold did not pin
+  templ, so `go get` pulled the newest runtime while CI installed an older
+  CLI, whose generated code called helpers the runtime had removed.
 
 - **Scaffolded gorm + Postgres apps no longer crash when replicas boot
   together on an empty database.** `AutoMigrate` now runs inside a
@@ -129,6 +174,17 @@ the TL;DR on top of it.
   scaffolded `/ws` included) hung. Dev hid it because the `hamr dev` proxy
   strips `Accept-Encoding`. Gzip now skips any request with an `Upgrade`
   header; a custom `GzipConfig.Skipper` still applies on top.
+
+### Security
+
+- **Dependency upgrades fix vulnerabilities reachable from hamr apps:**
+  Echo static-route `%2F` / `..` bypass (GO-2026-6293) and `Scheme()` spoof
+  via `X-Forwarded-Proto` (GHSA-2ffq-g2xg-c22p); pgx SQL injection
+  (GO-2026-5004, reachable via `pkg/flags` Postgres LISTEN); `x/net` HTTP/2
+  server DoS (GO-2026-6603, -6610, -6611, -6612, -6617); `x/text`
+  (GO-2026-5970, GO-2026-6629); AWS S3 eventstream panic (GO-2026-5764).
+  `govulncheck ./...` reports nothing else reachable (GO-2026-5932,
+  `x/crypto` openpgp, has no fix and is not called).
 
 ### Documentation
 

@@ -17,7 +17,7 @@ logger := logging.New(false) // development: coloured to stderr
 ```
 
 Production mode uses `slog.NewJSONHandler` at Info level. Development mode uses
-`tint.NewHandler` at Debug level with `time.Kitchen` timestamps.
+`tint.NewTextHandler` at Debug level with `time.Kitchen` timestamps.
 
 ## Context Propagation
 

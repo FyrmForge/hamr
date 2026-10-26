@@ -217,7 +217,7 @@ For SQLite projects, prefer `:memory:` over testcontainers — it's faster and h
 
 - name: Upload failure artifacts
   if: failure()
-  uses: actions/upload-artifact@v4
+  uses: actions/upload-artifact@v7
   with:
     name: e2e-artifacts
     path: test-artifacts/
