@@ -6,7 +6,7 @@ Where the codebase or docs don't match the directives. Tracked so we don't forge
 
 ## HTML push WS events
 
-`NewHTMLEvent` / `NewOuterHTMLEvent` push rendered HTML over the WS. Not the intended pattern (see [ws-trigger-refresh.md](ws-trigger-refresh.md)). Still documented in [../11-real-time.md](../11-real-time.md).
+`NewHTMLEvent` / `NewOuterHTMLEvent` push rendered HTML over the WS. Not the intended pattern (see [ws-trigger-refresh.md](ws-trigger-refresh.md)). Still documented in [../websockets.md](../websockets.md).
 
 **Direction:** likely remove. Don't add new usages.
 

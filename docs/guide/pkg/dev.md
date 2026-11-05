@@ -406,7 +406,7 @@ docker compose down           ← unless keep_running = true
 
 ## Browser Dev Panel
 
-The injected script adds a small widget (bottom-left corner) that opens a panel showing:
+The injected script adds a small widget (bottom-left corner) that opens a panel. It is not built inside sandboxed (opaque-origin) frames, where `/__hamr/*` is cross-origin; same-origin frames such as IDE preview panes keep it. The panel shows:
 
 - **Connection status** — green dot when connected, red pulsing when disconnected
 - **Watch rules** — status dots (idle/building/error) with a run button to manually trigger builds
@@ -414,6 +414,7 @@ The injected script adds a small widget (bottom-left corner) that opens a panel 
 - **Docker containers** — per-service health LEDs with a settings menu (restart, wipe & recreate)
 - **Logs toggle** — checkbox to open the logs overlay
 - **Dark filter** — checkbox that inverts the proxied site (see below)
+- **Tuck widget** — checkbox that shrinks the widget to a slim tab on the left edge, clear of the page's own bottom-left controls; remembered per browser (localStorage)
 - **Errors** — build error output when a rule fails
 
 ### Dark Filter

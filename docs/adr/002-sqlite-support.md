@@ -150,5 +150,5 @@ hamr.toml, docker-compose, db-shell script, ADR, CI workflow, Dockerfile, README
 AGENTS.md.
 
 ### Docs
-- `docs/guide/03-database.md` — SQLite section
+- `docs/guide/database.md` — SQLite tabs and sections
 - `llmsdocs/llms.txt` and `llmsdocs/llms-full.txt` — mention SQLite, document `pkg/db/sqlite`

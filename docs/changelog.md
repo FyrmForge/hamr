@@ -8,6 +8,17 @@ the TL;DR on top of it.
 
 ## [Unreleased]
 
+### Added
+
+- **"Tuck widget" option in the `hamr dev` browser panel.** The checkbox
+  shrinks the dev widget to a slim tab on the left edge, clear of the page's
+  own bottom-left controls. The choice is remembered per browser
+  (localStorage `__hamr_tucked`).
+
+- **`github.com/FyrmForge/hamr/docs` Go package.** Exports `Guide embed.FS`
+  (embeds `docs/guide`) so sites such as hamrstack.io can render the docs
+  matching a pinned hamr version.
+
 ### Changed
 
 - **Scaffold pins Tailwind 3.4.19.** `package.json` now uses the exact latest v3
@@ -62,6 +73,20 @@ the TL;DR on top of it.
   scaffolded CI/deploy workflows and the guides: checkout v7, setup-go v7,
   setup-node v7 (Node 24 instead of 20), upload-artifact v7, docker
   setup-buildx v4, login v4, build-push v7.
+
+- **Guide reorganised into topic pages.** The numbered chapters
+  `docs/guide/01-project-setup.md` ... `13-deployment.md` are replaced by
+  installation, create-project, structure, routing, templates, validation,
+  static-assets, database, authentication, background-jobs, websockets,
+  storage, hamr-dev, testing and deployment pages, indexed by
+  `docs/guide/README.md`. Old chapter links break; point bookmarks at the new
+  names. `cli.md` and `hamr-toml.md` were refreshed too (`hamr new --storage`
+  is documented as defaulting to `local`; `--email-mock`, `--locale` and
+  `--migrate-startup` are now documented).
+
+- **Dev widget skips sandboxed frames.** It is no longer built inside
+  sandboxed (opaque-origin) frames, where `/__hamr/*` is cross-origin and it
+  could only fail. Same-origin frames such as IDE preview panes keep it.
 
 ### Fixed
 

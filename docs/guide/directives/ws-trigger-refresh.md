@@ -26,4 +26,4 @@ Client:
 ## See also
 
 - `pkg/websocket/event.go` — `NewTriggerEvent`
-- [../11-real-time.md](../11-real-time.md)
+- [../websockets.md](../websockets.md)

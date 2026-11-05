@@ -149,5 +149,5 @@ return an error `stripe is in listen mode` instead of acting on the mock.
 - `internal/devserver/tui/model.go` + hint bar + status bar: `S`.
 - `internal/cli/generator/templates/new/root/hamr.toml.tmpl`, `env.example.tmpl`: `mode = "mock"`, connect secret vars.
 - Scaffold `main.go.tmpl`: no change (already switches on `STRIPE_MOCK`).
-- Docs: `docs/guide/hamr-toml.md`, `docs/guide/pkg/stripemock.md`, `docs/guide/02-dev-workflow.md` (hotkeys), `docs/changelog.md` (Breaking + Features), `llmsdocs/llms.txt`, `llmsdocs/llms-full.txt`.
+- Docs: `docs/guide/hamr-toml.md`, `docs/guide/pkg/stripemock.md`, `docs/guide/hamr-dev.md` (hotkeys), `docs/changelog.md` (Breaking + Features), `llmsdocs/llms.txt`, `llmsdocs/llms-full.txt`.
 - Grep for `dev.stripe.enabled` / `Stripe.Enabled` / `enabled = true` under `[dev.stripe]` everywhere after the rename.

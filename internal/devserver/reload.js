@@ -47,6 +47,7 @@
     var STORAGE_KEY = "__hamr_logs";
     var STORAGE_KEY_CAP = "__hamr_logs_cap";
     var STORAGE_KEY_TAB = "__hamr_logs_tab";
+    var STORAGE_KEY_TUCK = "__hamr_tucked";
     var activeLogTab = "hamr";   // "hamr" or "docker"
 
     // Restore saved settings.
@@ -149,6 +150,8 @@
             "cursor:pointer;opacity:0.6;transition:opacity 0.2s,border-color 0.3s;" +
             "box-shadow:0 2px 8px rgba(0,0,0,0.3);overflow:hidden;}" +
             "#__hamr-status:hover{opacity:1}" +
+            "#__hamr-status[data-tucked]{left:0;width:14px;border-left:0;border-radius:0 8px 8px 0}" +
+            "#__hamr-status[data-tucked] img{display:none !important}" +
             "#__hamr-status.disconnected{border-color:#C92E0A;opacity:1;animation:__hamr-pulse 1.5s ease-in-out infinite}" +
             "#__hamr-status.error{border-color:#EF4444;opacity:1}" +
             "#__hamr-status.reloading{border-color:#FF8C32;opacity:1}" +
@@ -328,6 +331,7 @@
         widget.id = "__hamr-status";
         widget.title = "hamr: connecting...";
         widget.innerHTML = '<img src="/__hamr/logo.png" width="48" height="48" alt="hamr" style="display:block;pointer-events:none"><span class="hp-badge"></span>';
+        try { if (localStorage.getItem(STORAGE_KEY_TUCK) === "1") widget.dataset.tucked = ""; } catch(e) {}
         widget.addEventListener("click", function(e) {
             e.stopPropagation();
             togglePanel();
@@ -407,8 +411,11 @@
         updatePanelStatus();
     }
 
+    // A sandboxed frame has an opaque origin: /__hamr/* is cross-origin from
+    // there, so the widget could only fail. Same-origin frames (IDE preview
+    // panes) keep it.
     function ensureWidget() {
-        if (!widget && document.body) {
+        if (!widget && document.body && self.origin !== "null") {
             createWidget();
         }
     }
@@ -601,7 +608,8 @@
         var logsChecked = isLogOverlayOpen();
         html += '<div class="hp-footer">' +
             '<label><input type="checkbox" class="hp-logs-toggle"' + (logsChecked ? " checked" : "") + '> Show logs</label>' +
-            '<label><input type="checkbox" class="hp-dark-toggle"' + (darkOn ? " checked" : "") + '> Dark filter</label>';
+            '<label><input type="checkbox" class="hp-dark-toggle"' + (darkOn ? " checked" : "") + '> Dark filter</label>' +
+            '<label title="Shrink the widget to a slim tab on the left edge, clear of the page\'s own corner controls"><input type="checkbox" class="hp-tuck-toggle"' + (widget.hasAttribute("data-tucked") ? " checked" : "") + '> Tuck widget</label>';
         if (config.mail_mock) {
             html += '<a class="hp-mail-btn" href="/__hamr/mail" target="_blank" rel="noopener" title="Open captured email inbox in a new tab">' +
                 '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
@@ -636,6 +644,14 @@
                     closeLogOverlay();
                     try { localStorage.setItem(STORAGE_KEY, "0"); } catch(e) {}
                 }
+            });
+        }
+
+        var tuckToggle = panel.querySelector(".hp-tuck-toggle");
+        if (tuckToggle) {
+            tuckToggle.addEventListener("change", function() {
+                widget.toggleAttribute("data-tucked", tuckToggle.checked);
+                try { localStorage.setItem(STORAGE_KEY_TUCK, tuckToggle.checked ? "1" : "0"); } catch(e) {}
             });
         }
 

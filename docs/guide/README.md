@@ -1,53 +1,46 @@
-# HAMR Guide
+# HAMR docs
 
-Learn how to build full-stack Go applications with HAMR.
+HAMR is an opinionated Go full-stack framework: Echo, templ and htmx with sessions, migrations, a live-reload dev server and production defaults wired in. These guides take you from `hamr new` to a deployed app; the package reference covers every `pkg/*` API.
+
+## Getting started
+
+- [Installation](installation.md) — Go, the `hamr` CLI, templ and shell completion
+- [Create a project](create-project.md) — `hamr new`, the wizard and its flags, first run
+- [Project structure](structure.md) — The generated tree, layers, config and Makefile targets
+
+## The basics
+
+- [Routing and handlers](routing.md) — Server setup, route groups, page packages, errors
+- [Templates and htmx](templates.md) — templ components, the layout, htmx helpers, optional Alpine.js
+- [Forms and validation](validation.md) — Validators, per-field htmx validation, CSRF, flash messages
+- [Static assets](static-assets.md) — CSS, JS vendoring, static pages, fingerprinting, CDN
+
+## Database
+
+- [Database](database.md) — PostgreSQL or SQLite, sqlx or GORM, migrations, the repository pattern
+
+## Security
+
+- [Authentication](authentication.md) — Password hashing, sessions, auth middleware, RBAC
+
+## Digging deeper
+
+- [Background jobs](background-jobs.md) — Janitor cron scheduler and async helpers
+- [WebSockets](websockets.md) — Hub, subjects, rooms, applying events with htmx
+- [Storage and media](storage.md) — Local and S3 storage, image and video processing
+
+## Development
+
+- [hamr dev](hamr-dev.md) — Dev server, watch rules, port walks, browser panel
+- [Dev actions](dev-actions.md) — Widget actions, seeded test logins, staging front door
+
+## Testing and deployment
+
+- [Testing](testing.md) — Service, handler and E2E tests, CI
+- [Deployment](deployment.md) — Docker image, CI/CD, production configuration
 
 ## Reference
 
-- [CLI Reference](cli.md) — All `hamr` commands and flags
-- [`hamr.toml` Reference](hamr-toml.md) — Full configuration schema
-
-## CLI Commands
-
-| Command | Description |
-|---------|-------------|
-| [`hamr new`](cli.md#hamr-new) | Scaffold a new project |
-| [`hamr dev`](cli.md#hamr-dev) | Dev server with live reload |
-| [`hamr setup`](cli.md#hamr-setup) | Interactive AI-agent setup: MCP bridge, permissions, skills |
-| [`hamr compose`](cli.md#hamr-compose) | `docker compose` with the port-walk override merged in |
-| [`hamr env`](cli.md#hamr-env) | Print env rewrites from the dev server's port walks |
-| [`hamr mcp`](cli.md#hamr-mcp) | MCP bridge for AI agents; `mcp install` registers it |
-| [`hamr mock-serve`](cli.md#hamr-mock-serve) | Run the mail, SMS and Stripe mocks standalone |
-| [`hamr add service`](cli.md#hamr-add-service) | Add a Go binary to an existing project |
-| [`hamr add skill`](cli.md#hamr-add-skill) | Install AI agent skills |
-| [`hamr ai capture`](cli.md#hamr-ai-capture) | Capture browser screenshots for debugging or LLM use |
-| [`hamr ai upgrade`](cli.md#hamr-ai-upgrade) | Diff scaffold changes between versions |
-| [`hamr gen static`](cli.md#hamr-gen-static) | Fingerprint static assets into dist/ |
-| [`hamr gen locale`](cli.md#hamr-gen-locale) | Type-safe Go accessors from locale JSON |
-| [`hamr sync`](cli.md#hamr-sync) | Sync directory to S3 |
-| [`hamr lint templ`](cli.md#hamr-lint-templ) | Lint `.templ` files |
-| [`hamr vendor`](cli.md#hamr-vendor) | Vendor frontend JS deps |
-| [`hamr rename-module`](cli.md#hamr-rename-module) | Rename Go module + imports |
-| [`hamr version`](cli.md#hamr-version) | Print version |
-| [`hamr completion`](cli.md#hamr-completion) | Shell completion scripts |
-
-## Guides
-
-1. [Project Setup](01-project-setup.md) — Scaffolding, project structure, config
-2. [Development Workflow](02-dev-workflow.md) — Dev server, watch rules, live reload
-3. [Database](03-database.md) — PostgreSQL or SQLite connection, migrations, repo pattern
-4. [Handlers & Routing](04-handlers-routing.md) — Server, routes, middleware, error handling
-5. [Templates & Frontend](05-templates-frontend.md) — Templ, HTMX, optional Alpine.js
-6. [Forms & Validation](06-forms-validation.md) — Validators, CSRF, flash messages
-7. [Authentication](07-authentication.md) — Sessions, auth middleware, login/register
-8. [File Storage](08-file-storage.md) — Local/S3 storage, media processing
-9. [Static Assets](09-static-assets.md) — CSS, JS vendoring, S3 sync, CDN
-10. [Background Jobs](10-background-jobs.md) — Janitor scheduler, async helpers
-11. [Real-Time](11-real-time.md) — WebSocket hub, rooms, HTMX integration
-12. [Testing](12-testing.md) — Unit tests, E2E with go-rod, CI setup
-13. [Deployment](13-deployment.md) — Docker, CI/CD, production config
-14. [Dev Actions](dev-actions.md) — Widget actions, seeded test logins, staging front door
-
-## Package Reference
-
-[Package Reference](pkg/README.md) — Full API docs for every `hamr/pkg` package
+- [CLI reference](cli.md) — Every `hamr` command and flag
+- [hamr.toml reference](hamr-toml.md) — Full configuration schema
+- [Packages](https://pkg.go.dev/github.com/FyrmForge/hamr) — API docs for every pkg/* package

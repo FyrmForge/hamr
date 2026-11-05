@@ -1,10 +1,10 @@
-# Dev Actions
+# Dev actions
 
 Dev actions let the hamr widget run app-defined buttons ("Wipe & reseed", "Create account", ...) and offer seeded test logins, locally under `hamr dev` and on a deployed staging site behind the [`hamr mock-serve` front door](cli.md#front-door-mode-staging).
 
 `hamr/pkg/devactions` is the app side: one token-gated endpoint, mounted at `/_devactions`, that lists actions and test accounts and runs actions on request. New projects get it wired up in `internal/devactions` (see [Scaffold](#scaffold)).
 
-## Quick Start
+## Quick start
 
 ```go
 import hamrdev "github.com/FyrmForge/hamr/pkg/devactions"
@@ -84,7 +84,10 @@ All inputs reach `Run` as strings in `in`, keyed by `Input.Name`. Empty values f
 | `HAMR_ACTIONS_TOKEN` | any non-empty secret |
 | `HAMR_ACTIONS_ENV` | `development` or `staging` |
 
-Never set these in production. Every call must carry `X-Hamr-Actions-Token: <token>`; a wrong token gets 401.
+> [!WARNING]
+> Never set these in production: they mount an endpoint that runs app-defined actions (create accounts, delete sessions, ...) with the token as the only gate.
+
+Every call must carry `X-Hamr-Actions-Token: <token>`; a wrong token gets 401.
 
 - `hamr dev` generates a random per-run token and injects `HAMR_ACTIONS_TOKEN` and `HAMR_ACTIONS_ENV=development` into the app. Nothing to configure.
 - On staging behind the front door, set the same `HAMR_ACTIONS_TOKEN` on `hamr mock-serve` and on the app, and `HAMR_ACTIONS_ENV=staging` on the app.
@@ -110,6 +113,7 @@ An action with `Dangerous: true` (wipe, reseed, ...) runs only when both hold:
 
 `Disposable` is how the app says "this database is safe to wipe". The scaffold checks for a `hamr_disposable` table, which only the dev seed creates, so a production database never has it.
 
+> [!NOTE]
 > On a fresh database run `make seed` (`go run ./cmd/site --seed`) once, after migrations. It loads the test accounts and creates the marker; until then "Wipe & reseed" returns 412. Deliberately not a widget action: whatever creates the marker must not be reachable through the endpoint it protects.
 
 ## Scaffold

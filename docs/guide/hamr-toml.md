@@ -1,15 +1,13 @@
-# `hamr.toml` — Configuration Reference
+# hamr.toml reference
 
 The `hamr.toml` file at the project root configures `hamr dev` (proxy, file
 watchers, mocks, daemons), `hamr gen static` / `hamr gen locale`
-(generators), `hamr lint templ` (linter), and records the scaffold
+(generators) and `hamr lint templ` (linter), and records the scaffold
 options chosen at `hamr new` time.
 
 This is a schema reference. For tutorial-style usage see
-[Development Workflow](02-dev-workflow.md) and
+[hamr dev](hamr-dev.md) and
 [`pkg/dev`](pkg/dev.md).
-
----
 
 ## `.pref.hamr.toml` — per-developer overrides
 
@@ -21,11 +19,11 @@ config. It is optional and gitignored by the scaffold. With
 
 **What it overrides:** the dev-server config — `[proxy]`, `[dev]` and every
 `[dev.*]` table — as read by `hamr dev`, `hamr compose`, `hamr mcp` and
-`hamr add service`, plus `[static].dir` as read by `hamr gen static` and
-`hamr sync`.
+`hamr add service`, plus `[static].dir` as read by `hamr sync` and
+`hamr add skill` (both read `.pref.hamr.toml` from the current directory).
 
-**What it does not override:** `[lint.templ]` (`hamr lint templ` loads it
-through `pkg/templint`), and `[hamr]` / `[options]` / `[ai]` — project
+**What it does not override:** `hamr gen static` (reads `hamr.toml` only),
+`[lint.templ]` (`hamr lint templ` loads it through `pkg/templint`), and `[hamr]` / `[options]` / `[ai]` — project
 identity and scaffold metadata, which are not preferences. `hamr setup`
 deliberately ignores the override too: it writes the `[dev.mcp]` values it
 shows straight back into `hamr.toml`, and a local preference must not end up
@@ -33,8 +31,7 @@ in the committed file.
 
 The merge is per-key at any depth — write only what you want to change:
 
-```toml
-# .pref.hamr.toml — everything else in hamr.toml is untouched
+```toml title=".pref.hamr.toml"
 [proxy]
 listen = ":9999"
 ```
@@ -56,17 +53,15 @@ the override are aliases for one setting, but both fields end up populated
 with different values and the config fails to load with
 `proxy.listen and dev.proxy_listen both set with different values`.
 
----
-
 ## Top-level tables
 
 | Table                   | Used by                       | Notes |
 |-------------------------|-------------------------------|-------|
 | `[hamr]`                | `hamr dev` (version check)    | Scaffold metadata |
-| `[options]`             | `hamr add skill` / `hamr add service` | Records `hamr new` choices |
-| `[ai]`                  | `hamr ai install/upgrade`     | AI artifact directory |
+| `[options]`             | `hamr add skill` / `hamr add service` / `hamr ai upgrade` | Records `hamr new` choices |
+| `[ai]`                  | `hamr ai capture` / `hamr ai upgrade` | AI artifact directory |
 | `[static]`              | `hamr gen static`             | Static asset fingerprinting |
-| `[proxy]`               | `hamr dev`                    | Reverse proxy + live reload |
+| `[proxy]`               | `hamr dev`                    | Reverse proxy + live reload (or the `[dev]` proxy keys) |
 | `[dev]`                 | `hamr dev`                    | Watch rules, daemons, mocks |
 | `[dev.email]`           | `hamr dev`                    | Mail mock at `/__hamr/mail` |
 | `[dev.sms]`             | `hamr dev`                    | SMS mock at `/__hamr/sms` |
@@ -79,8 +74,6 @@ with different values and the config fails to load with
 | `[lint.templ]`          | `hamr lint templ`             | Templ linter rule overrides |
 | `[locale]`              | `hamr gen locale`             | i18n codegen |
 
----
-
 ## `[hamr]` — Scaffold metadata
 
 | Field           | Type   | Default | Notes |
@@ -88,20 +81,19 @@ with different values and the config fails to load with
 | `version`       | string | (set by `hamr new`) | Hamr CLI version that scaffolded this project. `hamr dev` (released builds only) refuses to start if the running CLI is older than this; `--skip-version-check` bypasses. Also read by `hamr ai upgrade` as the baseline for upgrade diffs. |
 | `scaffolded_at` | string | (set by `hamr new`) | ISO date, informational only. |
 
-```toml
+```toml title="hamr.toml"
 [hamr]
-version = "0.16.1"
+version = "0.45.1"
 scaffolded_at = "2026-04-24"
 ```
-
----
 
 ## `[options]` — Recorded `hamr new` choices
 
 Informational record of what was opted into at scaffold time. Read at runtime
 by `hamr add skill` (`alpine`, to tailor installed skill content) and
 `hamr add service` (`database`, `db_connector`, `auth`, `locale`, so a new
-service's wiring matches the project). The rest are kept as an audit trail for
+service's wiring matches the project), and copied into `hamr ai upgrade`
+reports. The rest are kept as an audit trail for
 humans and for tooling that may want to compare against current state.
 
 | Field         | Type   | Values |
@@ -117,63 +109,80 @@ humans and for tooling that may want to compare against current state.
 | `storage`     | string | `"local"` \| `"s3"` |
 | `alpine`      | bool   | |
 
----
-
 ## `[ai]` — AI artifact directory
 
 | Field | Type   | Default     | Notes |
 |-------|--------|-------------|-------|
-| `dir` | string | `.hamr/ai`  | Where `hamr ai install` writes generated skill files. |
-
----
+| `dir` | string | `.hamr/ai`  | Base directory for `hamr ai capture` (`<dir>/captures/`) and `hamr ai upgrade` reports (`<dir>/upgrades/`). Their `--dir` flags override it. |
 
 ## `[static]` — Static asset fingerprinting
 
-Read by `hamr gen static`. All four fields are required when the section is
-present; the scaffold sets them.
+Read by `hamr gen static`; `dir` is also read by `hamr sync` and
+`hamr add skill`. Every field has a default; the scaffold sets all four.
 
-| Field      | Type   | Example | Notes |
+| Field      | Type   | Default | Notes |
 |------------|--------|---------|-------|
-| `dir`      | string | `frontend/static` | Source directory of un-fingerprinted assets. |
-| `dist`     | string | `dist` | Output directory for fingerprinted copies. Current scaffolds set `frontend/dist`. |
+| `dir`      | string | `static` | Source directory of un-fingerprinted assets. Scaffold: `frontend/static`. |
+| `dist`     | string | `dist` | Output directory for fingerprinted copies. Scaffold: `frontend/dist`. |
 | `manifest` | string | `internal/web/components/staticmanifest.go` | Generated Go file path. |
 | `package`  | string | `components` | Package name for the generated file. |
 
----
-
 ## `[proxy]` — Reverse proxy + live reload
 
-`hamr dev` only starts the proxy when this section is present. With it absent,
-file watching still runs but the browser-side reload pipeline does not.
+`hamr dev` starts the proxy when a `[proxy]` table is present **or** any of
+`[dev].proxy_listen`, `[dev].proxy_target`, `[dev].inject_reload` is set
+(in `hamr.toml` or `.pref.hamr.toml`). With none of them, file watching still
+runs but the browser-side reload pipeline does not.
 
-| Field           | Type   | Default          | Notes |
-|-----------------|--------|------------------|-------|
-| `listen`        | string | `localhost:3000` | Address the proxy listens on. Loopback by default — the dev app and the `/__hamr/*` control surface are reachable only from this machine. Set `:3000` to expose on the LAN (e.g. testing from a phone). |
-| `target`        | string | `:8080`          | Where to forward requests. Must match your app's `PORT`. |
-| `inject_reload` | bool   | `true`           | Inject the SSE live-reload script into HTML responses. |
+The scaffold uses the `[dev]` keys and has no `[proxy]` table:
 
-Both `listen` and `target` must be `host:port` or `:port` form. Required by
-`[dev.email]`, `[dev.sms]`, `[dev.stripe]`, and `[dev.mcp]` (their surfaces live on the proxy mux), and by the `[dev.tunnel]` hotkey (the tunnel forwards to the proxy).
+```toml title="hamr.toml"
+[dev]
+# proxy_listen defaults to localhost:3000
+proxy_target = "$PORT"
+inject_reload = true
+```
 
----
+The `[proxy]` form is equivalent; set a value in only one of the two places
+(different values in both fail to load):
+
+| `[proxy]` field | `[dev]` alias   | Type   | Default          | Notes |
+|-----------------|-----------------|--------|------------------|-------|
+| `listen`        | `proxy_listen`  | string | `localhost:3000` | Address the proxy listens on. Loopback by default — the dev app and the `/__hamr/*` control surface are reachable only from this machine. Set `:3000` to expose on the LAN (e.g. testing from a phone). |
+| `target`        | `proxy_target`  | string | `:8080`          | Where to forward requests. Must match your app's `PORT`. |
+| `inject_reload` | `inject_reload` | bool   | `true`           | Inject the SSE live-reload script into HTML responses. |
+
+`listen` and `target` must be `host:port` or `:port` form, or a whole-value
+env reference `$NAME` (not `${NAME}`). `$NAME` resolves from the shell env
+first, then from `.env` next to `hamr.toml`; a bare number becomes `:N`
+(`PORT=8080` → `:8080`). An unresolved name fails config load.
+
+`[dev.email]`, `[dev.sms]` and `[dev.stripe]` fail config load without a proxy
+(their surfaces live on the proxy mux). `[dev.mcp]` without a proxy (or with
+`--no-proxy`) only logs a warning and the gateway stays unavailable. The
+`[dev.tunnel]` hotkey needs a running proxy (the tunnel forwards to it).
 
 ## `[dev]` — Watch rules, daemons, mocks
 
-Top-level fields apply to logging. Sub-tables (`[dev.email]`, `[dev.sms]`, `[dev.stripe]`)
-and array tables (`[[dev.watch]]`, `[[dev.daemon]]`, `[[dev.docker_compose]]`)
+Top-level fields cover logging, port walking, the proxy aliases, and the
+browser console transport. Sub-tables (`[dev.email]`, `[dev.sms]`,
+`[dev.stripe]`, `[dev.mcp]`, `[dev.tunnel]`) and array tables (`[[dev.watch]]`, `[[dev.daemon]]`, `[[dev.docker_compose]]`)
 configure the rest. At least one of watch / daemon / docker_compose must be
 present.
 
 | Field                | Type   | Default                 | Notes |
 |----------------------|--------|-------------------------|-------|
-| `log_file`           | string | `.hamr/dev_logs.txt`    | Rolling log file (also consumed by `hamr ai`). |
-| `log_file_max_lines` | int    | `200`                   | Lines retained. Must be > 0. |
+| `log_file`           | string | `.hamr/dev_logs.txt`    | Rolling log file. `"none"` disables it. |
+| `log_file_max_lines` | int    | `200`                   | Lines retained. `0`/unset → `200`; negative fails config load. |
+| `proxy_listen`       | string | `localhost:3000`        | Alias for `[proxy].listen`; setting it enables the proxy. |
+| `proxy_target`       | string | `:8080`                 | Alias for `[proxy].target`; setting it enables the proxy. Scaffold: `"$PORT"`. |
+| `inject_reload`      | bool   | `true`                  | Alias for `[proxy].inject_reload`; setting it enables the proxy. |
 | `port_walk`          | bool   | `true`                  | When a hamr-managed port is busy, walk +1 up to a small cap and warn (see below). Set `false` to fail fast on EADDRINUSE. |
 | `hamr_console_capture`| bool  | `true`                  | Pipe browser `console.*` + uncaught errors + unhandled rejections + resource-load failures + CSP violations into the dev TUI/log over `/__hamr/console` WebSocket. Set `false` to disable: the WS endpoint isn't mounted, the injected reload script doesn't patch console, and there's zero overhead. See [browser console transport](#browser-console-transport-siteconsole) below. |
 | `dark_filter`        | bool   | `false`                 | Initial state of the dev panel's **Dark filter** — an `invert(1) hue-rotate(180deg)` CSS filter over the proxied site so a light-mode app is bearable to work on. Toggle it live from the dev panel (bottom-left widget); the toggle lives in the `hamr dev` process only and is never written back to `hamr.toml`. Set it in `.pref.hamr.toml` to keep it a per-developer preference. |
 | `hamr_console_filter`| bool   | `false`                 | Drop browser-console frames whose message contains `[hamr]` (i.e. hamr's own injected reload-script chatter like `[hamr] page swapped`). Default `false` shows everything; flip `true` if the per-save chatter drowns out app logs. No effect when `hamr_console_capture = false`. |
 
-#### `port_walk` — collision-tolerant port binding
+### Port walks — collision-tolerant port binding
 
 By default `hamr dev` walks +1 on busy for every port it manages: the proxy
 listen, the spawned-app `PORT`, and each `[[dev.docker_compose]]` service's
@@ -226,7 +235,7 @@ Set `port_walk = false` to disable the shift entirely and fail fast on
 EADDRINUSE — useful in CI or anywhere external tooling pins specific
 ports and would mis-target if hamr silently shifted.
 
-#### Browser console transport (`[site:console]`)
+### Browser console transport (`[site:console]`)
 
 The injected reload script also pipes the browser's `window.console.*`
 output, uncaught JS errors, unhandled promise rejections, resource-load
@@ -235,7 +244,7 @@ the dev server over a WebSocket at `/__hamr/console`. They land in the
 TUI main tab and `dev_logs.txt` tagged `[site:console]`, interleaved
 with backend events in arrival order:
 
-```
+```text
 [site:console] hello world
 [site:console] WARN deprecated API call
 [site:console] ERROR TypeError: x is undefined @ app.js:42:7
@@ -258,6 +267,7 @@ injected reload script (which reads the flag from the SSE config
 payload) skips console patching, the error/rejection/CSP listeners,
 and the WS connection. Default `true`.
 
+> [!NOTE]
 > Toggling this *while a tab is open* applies on the next page reload —
 > a browser that already started capture keeps trying to reach the
 > (now-removed) WS endpoint with reconnect backoff until you refresh.
@@ -275,7 +285,7 @@ string `[hamr]` it will be dropped too.
 
 When `enabled = true`, an inbox is mounted at `/__hamr/mail` on the proxy.
 Pair with `pkg/emailmock` as your `email.Sender` impl in dev. Requires
-`[proxy]`. See [`pkg/emailmock`](pkg/emailmock.md).
+the proxy (`[proxy]` or the `[dev]` proxy keys). See [`pkg/emailmock`](pkg/emailmock.md).
 
 | Field               | Type   | Default                    | Notes |
 |---------------------|--------|----------------------------|-------|
@@ -289,7 +299,7 @@ Pair with `pkg/emailmock` as your `email.Sender` impl in dev. Requires
 
 When `enabled = true`, an inbox is mounted at `/__hamr/sms` on the proxy.
 Pair with `pkg/smsmock` as your `sms.Sender` impl in dev. Requires
-`[proxy]`. See [`pkg/smsmock`](pkg/smsmock.md).
+the proxy (`[proxy]` or the `[dev]` proxy keys). See [`pkg/smsmock`](pkg/smsmock.md).
 
 | Field          | Type   | Default                   | Notes |
 |----------------|--------|---------------------------|-------|
@@ -300,7 +310,7 @@ Pair with `pkg/smsmock` as your `sms.Sender` impl in dev. Requires
 
 ### `[dev.stripe]` — Stripe mock or `stripe listen`
 
-`mode` picks how `hamr dev` handles Stripe. Both modes need `[proxy]`.
+`mode` picks how `hamr dev` handles Stripe. Both modes need the proxy (`[proxy]` or the `[dev]` proxy keys).
 
 - **`mock`**: a Stripe-compatible HTTP backend mounts at `/v1/*` and `/v2/*`,
   and a dashboard at `/__hamr/stripe/*` on the proxy. Apps point real
@@ -358,7 +368,9 @@ and the MCP `stripe.*` tools error — except `stripe.mode`.
 When `enabled = true`, `hamr dev` exposes a token-gated MCP gateway at
 `/__hamr/mcp/*` on the proxy. An agent (Claude Code, Codex, opencode) spawns
 the `hamr mcp` bridge, which forwards tool calls to the gateway authenticated by
-a per-run token written to `.hamr/dev.json` (mode 0600). Requires `[proxy]`.
+a per-run token written to `.hamr/dev.json` (mode 0600). Needs the proxy
+(see [`[proxy]`](#proxy--reverse-proxy--live-reload)); without one `hamr dev`
+warns and the gateway stays off.
 See [`hamr mcp`](cli.md) and the security notes below.
 
 | Field          | Type              | Default               | Notes |
@@ -381,7 +393,7 @@ See [`hamr mcp`](cli.md) and the security notes below.
 | `build`  | — (write-only)                | `rule.run`, `rebuild.all`, `make.run` |
 | `stripe` | `stripe.list`                 | `stripe.complete`, `stripe.expire`, `stripe.refund`, `stripe.advance`, `stripe.subscription`, `stripe.mode` |
 
-```toml
+```toml title="hamr.toml"
 [dev.mcp]
 enabled = true
 
@@ -417,7 +429,7 @@ token while the gateway is on — acceptable on a single-user dev box.
 Press `T` in the `hamr dev` TUI to put the dev proxy on the internet through a
 locally installed tunnel binary — for webhooks, OAuth callbacks, or showing
 someone a page. The tunnel is never on at startup and never survives `R` or a
-config reload; press `T` again to turn it off. Requires `[proxy]`. The whole
+config reload; press `T` again to turn it off. Requires a running proxy. The whole
 table is optional: with no `[dev.tunnel]`, `T` runs `cloudflared` with the
 defaults below.
 
@@ -433,7 +445,7 @@ Built-in commands (`<port>` is a loopback listener hamr picks):
 - cloudflared: `cloudflared tunnel --no-autoupdate --url http://127.0.0.1:<port> <args>`
 - ngrok: `ngrok http 127.0.0.1:<port> --log stdout --log-format logfmt <args>`
 
-```toml
+```toml title="hamr.toml"
 [dev.tunnel]
 provider = "ngrok"
 args = ["--url", "me.ngrok-free.app"]
@@ -532,7 +544,7 @@ Cycles in `depends` fail validation at startup. Unknown deps fail too.
 always project-root-relative, so a rule can watch the whole repo while building
 in a subdirectory:
 
-```toml
+```toml title="hamr.toml"
 [[dev.watch]]
 name = "tailwind"
 watch = ["**/*.templ", "frontend/css/input.css"]   # root-relative
@@ -540,7 +552,7 @@ dir = "frontend"
 cmd = "npm run css:build"                          # runs inside frontend/
 ```
 
-```toml
+```toml title="hamr.toml"
 [[dev.watch]]
 name = "site"
 watch = ["**/*.go", "**/*.templ", ".env"]
@@ -551,11 +563,10 @@ depends = ["templ"]
 reload = "full"
 ```
 
----
-
 ## `[lint.templ]` — Templ linter rules
 
-Read by `hamr lint templ` and the `templ` watch rule.
+Read by `hamr lint templ` (and `make templint`, which runs it). The `templ`
+watch rule only runs `templ generate`; it doesn't lint.
 
 Each entry is a rule ID mapped to one of `"warning"`, `"error"`, or `"off"`.
 Rules **not listed** are disabled; `"off"` is equivalent to omitting the rule.
@@ -563,23 +574,10 @@ Unknown rule IDs and invalid severities cause `hamr lint templ` to fail.
 
 The scaffold writes a `[lint.templ]` block listing every rule at its
 recommended severity, so a freshly generated project starts fully linted.
+Rule IDs and their scaffold severities are listed in
+[`hamr lint templ`](cli.md#hamr-lint-templ).
 
-**Recommended defaults (what the scaffold writes):**
-
-| Rule                     | Default  | Checks |
-|--------------------------|----------|--------|
-| `inline-if`              | error    | `if` must use braces, not inline `@` syntax |
-| `inline-for`             | error    | `for` must use braces, not inline `@` syntax |
-| `inline-switch`          | error    | `switch` must use braces, not inline `@` syntax |
-| `no-native-form-actions` | error    | `action=`, `method=`, `formaction=` flagged (use htmx) |
-| `htmx-conflict`          | error    | Same element with `hx-*` and a native form attribute |
-| `img-alt`                | warning  | `<img>` tags require `alt` attribute |
-| `no-href`                | warning  | `<a>` tags require `href` attribute |
-| `inline-style`           | warning  | `style="..."` attributes flagged |
-| `empty-class`            | warning  | `class=""` flagged |
-| `js-href`                | warning  | `href="javascript:..."` flagged |
-
-```toml
+```toml title="hamr.toml"
 [lint.templ]
 inline-if              = "error"
 no-native-form-actions = "error"
@@ -588,8 +586,6 @@ img-alt                = "error"     # promote a warning to error
 inline-style           = "off"       # disable the rule
 # rules omitted entirely are also disabled
 ```
-
----
 
 ## `[locale]` — i18n codegen
 
@@ -601,8 +597,6 @@ Read by `hamr gen locale`. Only present when scaffolded with `--locale`.
 | `dir`     | string | `"locales"`                     | Directory of `<lang>.json` files. |
 | `output`  | string | `"internal/locale/locale.go"`   | Generated Go file path. |
 | `package` | string | `"locale"`                      | Package name for the generated file. |
-
----
 
 ## Common patterns
 

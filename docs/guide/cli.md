@@ -1,13 +1,16 @@
-# CLI Reference
+# CLI reference
 
-`hamr` is a Go full-stack framework CLI for project scaffolding, development, and tooling.
+`hamr` scaffolds projects, runs the dev server, and bundles the generators, linters and helpers a HAMR project uses. Every command and flag is listed here.
 
-```
+```text
 hamr
 ├── new [name]              Scaffold a new project
 ├── dev                     Start dev server with file watching + live reload
 ├── setup                   Interactive AI-agent setup (MCP bridge, permissions, skills)
 ├── compose [args...]       docker compose with hamr dev's merged config
+├── env                     Print .env rewrites for hamr dev's port walks
+├── mcp                     MCP stdio bridge for AI agents (spawned by the agent)
+│   └── install             Register the bridge with claude / codex / opencode
 ├── add
 │   ├── service [name]      Add a new Go binary (worker, api, html, or empty)
 │   └── skill [target]      Install AI agent skills (hamr, qa-loop, pr-publish)
@@ -31,38 +34,39 @@ hamr
 └── version                 Print hamr version
 ```
 
----
-
 ## hamr new
 
 Scaffold a new HAMR project with all required files.
 
-```bash
+```text
 hamr new [name] [flags]
 ```
 
-When called without flags, an interactive wizard asks for each option. When all flags are provided, no prompts are shown.
+An interactive wizard asks for every option not passed as a flag (name and location included). Pass them all to skip the wizard entirely, e.g. in scripts.
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--module` | prompted | Go module path (e.g. `github.com/user/project`) |
 | `--css` | `plain` | CSS approach: `plain` or `tailwind` |
-| `--storage` | `none` | Storage backend: `none`, `local`, or `s3` |
+| `--storage` | `local` | Storage backend: `local` or `s3` |
 | `--websocket` | `false` | Include WebSocket support |
 | `--e2e` | `false` | Include E2E testing scaffolding |
 | `--database` | `postgres` | Database type: `postgres` or `sqlite` |
 | `--db-connector` | `sqlx` | DB connector: `sqlx` or `gorm` |
 | `--location` | `subfolder` | Project location: `subfolder` or `current` |
-| `--static-s3` | `false` | Sync static assets to a dedicated S3 bucket |
-| `--stripe` | `false` | Include Stripe webhook handler |
+| `--static-s3` | `false` | Sync static assets to a dedicated S3 bucket (only with `--storage s3`) |
+| `--stripe` | `false` | Wire stripe-go, the webhook handler, and the local Stripe mock |
+| `--email-mock` | `false` | Wire `pkg/emailmock` and the dev inbox at `/__hamr/mail` |
+| `--locale` | `false` | Include i18n support (`locales/`, `[locale]`, `hamr gen locale`) |
+| `--migrate-startup` | `false` | Run migrations when the server starts instead of via `cmd/migrate` / `make migrate` |
 | `--feature-flags` | `false` | Include feature flags (`pkg/flags`): table, store, client wiring, dev widget action, and an admin page when auth is on |
 | `--alpine` | `false` | Include Alpine.js for local UI state |
 | `--skip-version-check` | `false` | Skip the "is a newer hamr release available" check |
 
-```bash
+```sh
 hamr new myapp                                          # interactive wizard
 hamr new myapp --module github.com/user/myapp           # set module path
-hamr new myapp --css tailwind --storage s3 --websocket  # all features
+hamr new myapp --css tailwind --storage s3 --websocket  # wizard still asks the rest
 hamr new .                                              # scaffold into current directory
 ```
 
@@ -70,13 +74,11 @@ Before scaffolding, `hamr new` queries GitHub for the latest release and refuses
 
 **Guide:** [Storage](pkg/storage.md) covers the `--storage` and `--static-s3` flags in detail.
 
----
-
 ## hamr dev
 
 Start the development server with file watching, build orchestration, process management, and live reload.
 
-```bash
+```text
 hamr dev [flags]
 ```
 
@@ -88,7 +90,7 @@ hamr dev [flags]
 | `--skip-version-check` | `false` | Skip the "scaffold newer than CLI" guard |
 | `--headless` | `false` | No TUI: plain log lines on stdout. Automatic when stdout is not a terminal (see [dev guide](pkg/dev.md#headless-mode)). |
 
-```bash
+```sh
 hamr dev                    # reads hamr.toml from current directory
 hamr dev --config my.toml   # custom config path
 hamr dev --no-proxy         # skip proxy, just run watchers
@@ -98,27 +100,33 @@ hamr dev --verbose          # detailed watcher/rebuild logs
 
 If `[hamr].version` in `hamr.toml` is newer than the running CLI, `hamr dev` refuses to start — running an old CLI against a scaffold that depends on newer features leads to silent breakage. Upgrade the CLI or pass `--skip-version-check` to bypass. When the CLI is *newer* than the scaffold, `hamr dev` only warns and continues (the status bar shows the mismatch). Dev builds skip the check entirely.
 
-Reads `[proxy]`, `[dev]` sections from `hamr.toml`. Manages Docker Compose deps, file watchers, build commands, long-running processes, and a reverse proxy with SSE-based live reload.
+Reads `[proxy]` and `[dev]` from `hamr.toml` (plus `.pref.hamr.toml`). Manages Docker Compose deps, file watchers, build commands, long-running processes, and a reverse proxy with SSE-based live reload. The proxy runs when `[proxy]` or any of `[dev].proxy_listen` / `proxy_target` / `inject_reload` is set — see [`[proxy]`](hamr-toml.md#proxy--reverse-proxy--live-reload).
 
-By default, `hamr dev` also mirrors its recent log stream to `.hamr/dev_logs.txt` (rolling window, 200 lines, escape sequences stripped) for LLM consumption. This includes `[hamr dev]` messages plus stdout/stderr from watched commands and daemons. Configure via `log_file` and `log_file_max_lines` in `[dev]`.
+By default, `hamr dev` also mirrors its recent log stream to `.hamr/dev_logs.txt` (rolling window, 200 lines, escape sequences stripped) for LLM consumption. Configure via `log_file` and `log_file_max_lines` in `[dev]`.
 
 **Guide:** [Dev Server](pkg/dev.md) covers configuration, watch rules, daemons, Docker Compose, and examples.
 
-The TUI shows an MCP indicator when `[dev.mcp]` is configured; press `M` to toggle the gateway on/off for the session (a runtime kill-switch that doesn't rewrite `hamr.toml`).
-
 On the local listener, hamr's own `/__hamr/*` routes (widget, inboxes, Stripe mock, dev actions) only answer when the Host is `localhost`, `*.localhost` or an IP address; any other hostname gets 403. This blocks DNS-rebinding pages from reading your inboxes or running dev actions. Open the app via `localhost` or an IP, not a custom `/etc/hosts` name.
 
-Press `T` to open a public tunnel to the dev proxy (`cloudflared` by default, or `ngrok` / a custom command). hamr sets `BASE_URL` to the public URL and restarts your app; every hamr route except live reload and the mail/SMS/Stripe mocks is blocked through the tunnel, and process output is kept out of live reload and error pages. See [`[dev.tunnel]`](hamr-toml.md).
+### TUI
 
-Press `:` for the command palette: the hamr commands (`rebuild`, `restart`, `open browser`, `clear logs`, `toggle mcp`, `toggle tunnel`, `stripe mode`, `help`, `quit`) plus each Makefile target as `make:<target>`, fuzzy-searchable (`m` opens it pre-filtered to `make:`). The bottom hint bar shows only the core keys; `?` lists them all.
+The full hotkey table, status ticker, and log tabs are in [Dev → Terminal Hotkeys](pkg/dev.md#terminal-hotkeys). In short:
 
-Press `S` to flip Stripe between hamr's mock and `stripe listen` against your sandbox. hamr runs the Stripe CLI with `STRIPE_KEY` from `.env`, injects the signing secret it prints, and restarts your app. See [`[dev.stripe]`](hamr-toml.md).
+- **Build and run:** `r` rebuild all, `R` restart the whole dev server in place (compose, ports, `.env`, builds; also retries while parked on a config error), `o` open the proxy URL, `c` clear the tab.
+- **Commands:** `:` fuzzy palette of hamr commands plus every Makefile target as `make:<target>`; `m` opens it pre-filtered to `make:`. Target output streams into the hamr tab prefixed `[make:<target>]`.
+- **Toggles:** `M` MCP gateway ([`[dev.mcp]`](hamr-toml.md#devmcp--mcp-gateway-for-ai-agents)), `T` public tunnel ([Public Tunnel](pkg/dev.md#public-tunnel)), `S` Stripe mock ⇄ `stripe listen` ([Stripe Listen Mode](pkg/dev.md#stripe-listen-mode)).
+- **Logs:** `Tab` / `Shift+Tab` cycle tabs (🔨 hamr, 🐳 one per `[[dev.docker_compose]]` entry, mcp); the status bar shows `[k/n]` when there's more than one. `/` searches the active tab live; `↩` commits, `n`/`N` step, `f` filters to matching lines. Search is kept per tab, and new lines are matched as they arrive.
+- **Selection:** click a line, drag or `Shift+Click` for a range, `Ctrl+Click` to toggle one line, `y` to copy, `Esc` to clear. Selection pauses auto-scroll and is dropped on tab change.
+- `?` help, `q` / `Ctrl+C` quit (quit also works while parked on a `hamr.toml` parse error).
 
----
+Two terminal-dependent details:
+
+- `Shift+Click` and `Ctrl+Click` need the terminal to forward the modifier in its mouse encoding. Alacritty, WezTerm, Kitty, Ghostty and iTerm2 do; some others (older gnome-terminal, certain PuTTY builds) keep shift for native text selection, so those clicks act as plain clicks.
+- `y` uses the OS clipboard helper (`xclip` / `wl-copy` on Linux, `pbcopy` on macOS). If it's missing, a `[hamr:tui] clipboard: ...` line appears on the hamr tab.
 
 ## hamr mock-serve
 
-```
+```sh
 hamr mock-serve
 ```
 
@@ -126,12 +134,7 @@ Runs the dev mocks (mail, sms, stripe) standalone — no proxy, TUI, build, or w
 
 Each release publishes it as an image, `ghcr.io/fyrmforge/hamr:<version>` (and `:latest`, linux/amd64 + arm64), whose default command is `hamr mock-serve`. See [Deploying Mocks](pkg/mock-serve.md).
 
-Two listeners:
-
-- **app-facing** (`HAMR_MOCK_PORT`): the surface your app talks to — stripe `/v1/*` API and the mail/SMS ingest sinks.
-- **UI** (`HAMR_MOCK_UI_PORT`): the human dashboards (captured email, fake payments). Optional — when unset the UI mounts on the app-facing port too. Splitting it onto its own port lets your deployment expose the two surfaces differently — e.g. publish the app-facing port to the app while keeping the dashboards on a port you only publish to `127.0.0.1`.
-
-Both listeners bind all interfaces by default (`HAMR_MOCK_BIND` empty), which is correct inside a container where sibling containers reach the mock by service name; isolate by controlling which ports you publish. **The mock surfaces are open by default** — the UI serves every captured email (which can contain password-reset tokens and magic-login links) over plain GET, and the Stripe surface will fire a correctly-signed webhook at your app on request. When a port must be reachable beyond the compose network, gate it: `HAMR_MOCK_UI_PASSWORD` puts a password gate on every `/__hamr/*` dashboard route (browser password page, or an `X-Hamr-Gate` header for scripts; see [Password gate](#password-gate)), and `HAMR_MOCK_API_ALLOW` restricts the app-facing listener to the listed IPs/CIDRs. The allowlist checks the TCP peer only — `X-Forwarded-For` is client-set and ignored — so behind a public proxy keep the app-facing port unpublished and reach it over private networking. Allow the app's exact address, not a whole private range: a broad range contains the Docker bridge gateway, which is where published-port traffic comes from on some Docker setups. Rejected requests log their `remote` address. The gate password is cleartext over plain HTTP; put the UI behind TLS when it crosses an untrusted network. When running outside a container on a shared host, set `HAMR_MOCK_BIND=127.0.0.1`.
+Two listeners: app-facing `HAMR_MOCK_PORT` (Stripe `/v1/*`, mail/SMS ingest) and an optional dashboards port `HAMR_MOCK_UI_PORT` (unset → shares the app-facing port). Both bind all interfaces by default. **The mock surfaces are open by default**: gate dashboards with `HAMR_MOCK_UI_PASSWORD` ([Password gate](#password-gate)), restrict the app-facing port with `HAMR_MOCK_API_ALLOW`, and see [Deploying Mocks → Security](pkg/mock-serve.md#security) for publishing ports, allowlist pitfalls, and TLS.
 
 | Env | Purpose | Default |
 | --- | --- | --- |
@@ -139,7 +142,7 @@ Both listeners bind all interfaces by default (`HAMR_MOCK_BIND` empty), which is
 | `HAMR_MOCK_PORT` | app-facing port (stripe `/v1`, mail/sms ingest) | `4500` |
 | `HAMR_MOCK_UI_PORT` | dashboards port; unset → UI on `HAMR_MOCK_PORT` | unset |
 | `HAMR_MOCK_BIND` | bind host for both listeners; empty → all interfaces | empty |
-| `HAMR_MOCK_UI_PASSWORD` | gate password for `/__hamr/*` (cookie via `/__hamr/gate`, or `X-Hamr-Gate` header); empty → open. Required in front-door mode. Replaced HTTP basic auth | empty |
+| `HAMR_MOCK_UI_PASSWORD` | gate password for `/__hamr/*` (cookie via `/__hamr/gate`, or `X-Hamr-Gate` header); empty → open. Required in front-door mode | empty |
 | `HAMR_MOCK_API_ALLOW` | IPs/CIDRs allowed on the app-facing port, e.g. the app's address `172.30.0.10`; empty → open | empty |
 | `HAMR_MAIL_MAX_MESSAGES` | inbox cap | `500` |
 | `HAMR_MAIL_MAX_MESSAGE_BYTES` | per-message byte cap | `10MiB` |
@@ -159,8 +162,6 @@ Both listeners bind all interfaces by default (`HAMR_MOCK_BIND` empty), which is
 Stripe has no sensible auto-default for its base URL in a container (`localhost:<port>` isn't reachable from the host's published port or sibling containers), so `HAMR_STRIPE_BASE_URL` is required whenever stripe is selected, alongside the webhook url + secret. Point your app at the mock by setting its `HAMR_DEV_URL` / Stripe base to `HAMR_MOCK_PORT`'s URL.
 
 ### Password gate
-
-> **Breaking:** `HAMR_MOCK_UI_PASSWORD` used to be HTTP basic auth. It is now a cookie/header gate. Scripts that sent basic auth must send `X-Hamr-Gate: <password>` instead.
 
 When `HAMR_MOCK_UI_PASSWORD` is set:
 
@@ -206,11 +207,9 @@ services:
       HAMR_DEV_URL: http://mocks:4500
 ```
 
----
-
 ## hamr compose
 
-```
+```text
 hamr compose [--name <entry>] [docker compose args...]
 ```
 
@@ -218,13 +217,13 @@ Passthrough to `docker compose` with this project's compose file **and** the gen
 
 When a host port is busy, `hamr dev` walks it and records the result in `.hamr/compose.<name>.override.yaml`. A plain `docker compose -f docker/docker-compose.yaml ...` merges only the base file, decides the running stack has drifted, and recreates it on the original ports — which fails outright when those ports are busy, which is why they were walked:
 
-```
+```text
 Error response from daemon: Bind for 0.0.0.0:9000 failed: port is already allocated
 ```
 
 `hamr compose` merges what hamr merges, so external callers stop fighting the dev server:
 
-```bash
+```sh
 hamr compose up -d
 hamr compose down -v
 hamr compose exec -T postgres psql -U postgres
@@ -237,11 +236,9 @@ This is the compose-side counterpart to [`hamr env`](#hamr-env), which solves th
 
 The scaffold's `make docker-up` / `docker-down` / `docker-delete` targets use it. In an environment without the `hamr` binary (a CI image that only needs the stack up, with no walking in play), plain `docker compose -f docker/docker-compose.yaml ...` is still fine.
 
----
-
 ## hamr setup
 
-```
+```text
 hamr setup [--dry-run]
 ```
 
@@ -258,11 +255,9 @@ Only `[dev.mcp]` and `[dev.mcp.access]` are rewritten in `hamr.toml`, and only t
 
 Run it from anywhere inside the project; the nearest `hamr.toml` wins. Needs a TTY.
 
----
-
 ## hamr mcp
 
-```
+```text
 hamr mcp [--project <path>]
 ```
 
@@ -276,19 +271,17 @@ Runs the Model Context Protocol bridge over stdio so an AI agent (Claude Code, C
 
 ### hamr mcp install
 
-```
+```text
 hamr mcp install [--client claude|codex|opencode] [--dry-run]
 ```
 
 Registers the bridge with an agent by writing its config (merging, never clobbering; idempotent). With no `--client`, auto-detects installed agents and configures each. Claude (`.mcp.json`) and opencode (`opencode.json`) are project-scoped; Codex (`~/.codex/config.toml`) is global, so its entry is pinned to this project with `--project`. `--dry-run` previews without writing. Requires `hamr` on your `PATH`.
 
----
-
 ## hamr add service
 
 Add a new Go binary to an existing HAMR project. Creates `cmd/<name>/` (main.go + Dockerfile) and `internal/<name>/`, appends a `[[dev.watch]]` rule to `hamr.toml` so `hamr dev` builds and runs the binary alongside the site, and — for the HTTP types — appends a `<NAME>_PORT` entry to `.env` and `.env.example`.
 
-```bash
+```text
 hamr add service [name] [flags]
 ```
 
@@ -312,7 +305,7 @@ Service types:
 | `--port` | `8081` | Listen port for `api`/`html` services, exposed as `<NAME>_PORT` |
 | `--skip-version-check` | `false` | Bypass the `--auth` guard that refuses when the CLI is newer than the project's `[hamr] version` |
 
-```bash
+```sh
 hamr add service                                   # fully interactive
 hamr add service mailer --type worker --db
 hamr add service billing --type api --db --auth --port 8081
@@ -326,8 +319,6 @@ Notes:
 - Migrations stay owned by the site / `cmd/migrate`; services connect to the schema as-is.
 - `--auth` (released builds only) refuses when the CLI is newer than the project's `[hamr] version`: the generated `SubjectLoader` calls `deps.Store.Users().GetByID`, and `internal/repo` is project-owned code that does not upgrade with the CLI. Migrate it by hand (`hamr ai upgrade` shows the diff), then `hamr ai upgrade --applied`, or pass `--skip-version-check`.
 
----
-
 ## hamr add skill
 
 Install AI agent skills for working on a HAMR project. Three are available:
@@ -338,7 +329,7 @@ Install AI agent skills for working on a HAMR project. Three are available:
 
 With no arguments an interactive picker asks which agents and which skills to install (detected agents and already-installed skills start ticked — or an explicit `--skills` seeds the selection — and selected skills overwrite existing installs). With a target argument it runs non-interactively.
 
-```bash
+```text
 hamr add skill [target] [flags]
 ```
 
@@ -348,7 +339,7 @@ hamr add skill [target] [flags]
 | `--force`   | `false` | Overwrite existing skill directories (non-interactive mode)           |
 | `--skills`  | all     | Which skills to install, comma-separated: `hamr`, `qa-loop`, `pr-publish` |
 
-```bash
+```sh
 hamr add skill                          # interactive picker
 hamr add skill claude                   # all skills → ./.claude/skills/{hamr,hamr-qa-loop,hamr-pr-publish}/
 hamr add skill codex                    # all skills → ./.agents/skills/…
@@ -360,20 +351,18 @@ Supported targets: `claude`, `codex`, `opencode`. The SKILL.md format is a cross
 
 Project-local installs must be run from the root of a HAMR project (a directory containing `hamr.toml`) and are typically committed so the whole team benefits. Global installs work from any directory and persist per-user.
 
----
-
 ## hamr ai capture
 
 Capture a browser screenshot of a page for debugging, visual review, or LLM workflows.
 
-```bash
+```text
 hamr ai capture <url> [flags]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--out` | — | Output PNG path |
-| `--dir` | `.hamr/captures` | Root directory for per-capture folders |
+| `--dir` | `<[ai].dir>/captures` (`.hamr/ai/captures`) | Root directory for per-capture folders |
 | `--browser` | auto-detect | Browser binary path |
 | `--text` | `false` | Also save visible page text to a `.txt` sidecar |
 | `--html` | `false` | Also save page HTML to a `.html` sidecar |
@@ -389,21 +378,22 @@ hamr ai capture <url> [flags]
 | `--scroll-x` | `0` | Horizontal scroll offset in pixels |
 | `--scroll-y` | `0` | Vertical scroll offset in pixels |
 | `--scroll-selector` | — | CSS selector for a scroll container; defaults to the window |
+| `--tiles` | `false` | Capture viewport-sized tiles from top to bottom |
+| `--tile-overlap` | `120` with `--tiles` | Pixels of overlap between tiles; requires `--tiles` |
 | `--timeout` | `15s` | Timeout for browser operations |
 | `--wait` | `1s` | Extra delay after page load before capture |
 
-```bash
+```sh
 hamr ai capture http://localhost:3000
 hamr ai capture localhost:3000/login --text --html --json
-hamr ai capture https://example.com --selector '#app' --dir .hamr/captures
+hamr ai capture https://example.com --selector '#app' --dir /tmp/captures
 hamr ai capture https://example.com/docs --full-page --wait 2s
+hamr ai capture https://example.com/docs --tiles --tile-overlap 200
 hamr ai capture https://example.com/pricing --scroll-to middle --width 1280 --height 720
 hamr ai capture https://example.com/dashboard --scroll-selector '.results-pane' --scroll-to bottom
 ```
 
-By default the command creates a per-capture folder under `.hamr/captures/` and writes `screenshot.png`, optional `screenshot.txt` / `screenshot.html`, plus `meta.json`. `--out` lets you force a specific PNG path instead.
-
----
+By default the command creates a per-capture folder under `.hamr/ai/captures/` (`[ai].dir` in `hamr.toml` moves the base) and writes `screenshot.png`, optional `screenshot.txt` / `screenshot.html`, plus `meta.json`. `--out` lets you force a specific PNG path instead. `--tiles` writes `tile_001.png`, `tile_002.png`, … instead, for pages too tall to read as one image; it can't be combined with `--full-page`, `--selector`, or the scroll flags.
 
 ## hamr ai upgrade
 
@@ -417,7 +407,7 @@ commands, dev server, generator logic, the `hamr` binary) and tests are
 excluded — none of it ever lands in a project. This keeps the report focused on
 what an upgrade must adapt to rather than the whole framework diff.
 
-```bash
+```text
 hamr ai upgrade [flags]
 ```
 
@@ -425,27 +415,28 @@ hamr ai upgrade [flags]
 |------|---------|-------------|
 | `--json` | `false` | Output as JSON |
 | `--from` | — | Override the base version to diff from |
-| `--applied` | `false` | Update project baseline to current HAMR version |
-| `--dir` | `.hamr/ai/upgrades` | Directory to save the upgrade report |
+| `--applied` | `false` | Record the project baseline as the current HAMR version (or the `--from` version) |
+| `--dir` | `<[ai].dir>/upgrades` (`.hamr/ai/upgrades`) | Directory to save the upgrade report |
 
-```bash
+```sh
 hamr ai upgrade                    # diff between project version and current HAMR
 hamr ai upgrade --json             # structured JSON output
 hamr ai upgrade --from 0.1.0      # override the base version
 hamr ai upgrade --applied          # bump [hamr] version in hamr.toml
+hamr ai upgrade --applied --from 0.44.0  # record a specific version
 ```
 
-The command clones the HAMR repository (bare, partial clone for speed) and runs `git diff` between the two version tags. The output includes a unified diff and stat summary covering all changes — scaffold templates, packages, and configuration.
+The command clones the HAMR repository (bare, partial clone for speed) and runs `git diff` between the two version tags. The output is a unified diff and stat summary of the scoped paths above.
 
-Reports are saved to `.hamr/ai/upgrades/` as JSON files. An LLM agent can consume the structured output to present changes conversationally and guide the developer through what to adopt.
+`--applied` refuses to move the baseline backwards (an older CLI than the recorded `[hamr].version`); pass `--from` to set a version explicitly.
 
----
+Reports are saved to `.hamr/ai/upgrades/` (under `[ai].dir`) as JSON files. An LLM agent can consume the structured output to present changes conversationally and guide the developer through what to adopt.
 
 ## hamr gen static
 
 Fingerprint static assets by content-hashing filenames.
 
-```bash
+```text
 hamr gen static [flags]
 ```
 
@@ -454,7 +445,7 @@ hamr gen static [flags]
 | `--config` | `hamr.toml` | Path to hamr.toml config file |
 | `--clean` | `false` | Remove the dist dir and reset the generated manifest |
 
-```bash
+```sh
 hamr gen static          # fingerprint frontend/static/ → frontend/dist/
 hamr gen static --clean  # remove frontend/dist/ and reset manifest
 ```
@@ -471,46 +462,42 @@ manifest = "internal/web/components/staticmanifest.go"
 package = "components"
 ```
 
-**Guide:** [Static Assets](09-static-assets.md) covers fingerprinting, cache headers, and deployment.
-
----
+**Guide:** [Static assets](static-assets.md) covers fingerprinting, cache headers, and deployment.
 
 ## hamr sync
 
 Sync a local directory to an S3-compatible bucket.
 
-```bash
+```text
 hamr sync [flags]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--dir` | `static` | Local directory to sync |
+| `--dir` | `[static].dir`, else `static` | Local directory to sync |
 | `--watch` | `false` | Watch for changes after initial sync |
-| `--endpoint` | env `S3_ENDPOINT` | S3 endpoint URL |
-| `--bucket` | env `S3_BUCKET` | S3 bucket name |
-| `--region` | env `S3_REGION` | S3 region |
-| `--access-key` | env `S3_ACCESS_KEY` | S3 access key |
-| `--secret-key` | env `S3_SECRET_KEY` | S3 secret key |
+| `--endpoint` | `S3_ENDPOINT`, else `http://localhost:9000` | S3 endpoint URL |
+| `--bucket` | `S3_BUCKET` | S3 bucket name |
+| `--region` | `S3_REGION`, else `us-east-1` | S3 region |
+| `--access-key` | `S3_ACCESS_KEY` | S3 access key |
+| `--secret-key` | `S3_SECRET_KEY` | S3 secret key |
 | `--path-style` | `true` | Use path-style addressing (required for RustFS) |
 
-```bash
+```sh
 hamr sync                              # one-shot sync of [static].dir to S3
 hamr sync --watch                      # watch for changes and sync continuously
 hamr sync --dir dist --bucket my-cdn   # sync a different directory to a specific bucket
 ```
 
-S3 credentials can be provided via flags or environment variables (`S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`). Flags take precedence. When `hamr dev` is running and walked an `S3_ENDPOINT` host port off its `.env` value, `hamr sync` reads `.hamr/walks.json` automatically and connects to the walked port — no manual override needed.
+Each S3 setting resolves flag → shell env var → `.env` in the current directory → built-in default. Values read from `.env` get `hamr dev`'s port-walk rewrites from `.hamr/walks.json`, so a walked `S3_ENDPOINT` just works with no manual override. `[static].dir` is read from `hamr.toml` and `.pref.hamr.toml` in the current directory.
 
 **Guide:** [Sync](pkg/sync.md) covers the Go library API. [Storage](pkg/storage.md) covers S3 setup.
-
----
 
 ## hamr env
 
 Print env-var rewrites derived from the running dev server's port walks. Reads `.hamr/walks.json` (written by `hamr dev` after walking) and `.env`, applies the same rewrite rules `hamr dev` uses internally, and emits the resulting `KEY=VALUE` pairs to stdout.
 
-```bash
+```sh
 hamr env             # KEY=VALUE form
 hamr env --export    # export KEY=VALUE form, single-quoted for safe sourcing
 ```
@@ -522,7 +509,7 @@ hamr env --export    # export KEY=VALUE form, single-quoted for safe sourcing
 
 When no walks are recorded (port_walk disabled, every port was free, or `hamr dev` isn't running), the command exits 0 with no output — sourcing it is a no-op and the consumer falls through to `.env` unchanged.
 
-```make
+```make title="Makefile"
 SHELL := bash
 .SHELLFLAGS := -ec
 ENV_LOAD := eval "$$(hamr env --export 2>/dev/null || true)";
@@ -531,24 +518,15 @@ migrate:
 	$(ENV_LOAD) go run ./cmd/migrate
 ```
 
-The scaffold's `Makefile` ships this prefix on `migrate`, `db-sh`, `generate`, and `e2e-local` already.
+The scaffold's `Makefile` ships this prefix on its DB and e2e targets already (`migrate*`, `seed`, `db-sh`, `generate`, `e2e-local`, `e2e-run-local`).
 
-Match rules for which `.env` values get rewritten:
-
-- `(localhost|127.0.0.1|0.0.0.0|[::1]):<port>` → port swapped, host kept.
-- whole-value `:<port>` → port swapped (Go listener form).
-
-Values without an explicit port (`postgres://user@localhost/db`) are not rewritten — include the port in `.env` if you want auto-walking. Remote hosts (`db.prod.example.com:5432`) are also left alone.
-
-**Guide:** [`[dev].port_walk`](hamr-toml.md) covers the underlying mechanism.
-
----
+Which `.env` values get rewritten (and which don't) is documented in [`[dev].port_walk`](hamr-toml.md#port-walks--collision-tolerant-port-binding).
 
 ## hamr lint templ
 
 Lint `.templ` files for common issues.
 
-```bash
+```text
 hamr lint templ [flags]
 ```
 
@@ -558,7 +536,7 @@ hamr lint templ [flags]
 | `--config` | `hamr.toml` | Path to hamr.toml config file |
 | `--severity` | all | Minimum severity to report: `warning` or `error` |
 
-```bash
+```sh
 hamr lint templ                          # lint current directory (recursive)
 hamr lint templ --rule inline-if,img-alt # run only specific rules
 hamr lint templ --severity error         # only report errors
@@ -582,11 +560,11 @@ hamr lint templ --config my-hamr.toml    # use a custom config file
 | `empty-class` | warning | Empty `class=""` attributes |
 | `js-href` | warning | `href="javascript:..."` links |
 
-Configure in `hamr.toml` under `[lint.templ]` — each rule mapped to `"warning"`, `"error"`, or `"off"`. Rules not listed are disabled. Unknown rule IDs and invalid severities fail loudly.
+Configure in `hamr.toml` under [`[lint.templ]`](hamr-toml.md#linttempl--templ-linter-rules) — each rule mapped to `"warning"`, `"error"`, or `"off"`. Rules not listed are disabled, so with no `[lint.templ]` table nothing is reported. Unknown rule IDs and invalid severities fail loudly.
 
 **Inline suppression.** A `templint:ignore` directive in a `//` comment silences diagnostics on the next line, or on its own line when it trails source content:
 
-```
+```templ
 // templint:ignore no-native-form-actions -- manifest flow needs a browser POST
 <form method="post" action={ templ.SafeURL(action) }>
 
@@ -599,13 +577,11 @@ Everything after ` -- ` is a human reason. Rules anchor diagnostics to the line 
 
 **Guide:** [Templint](pkg/templint.md) covers rules, configuration, and library usage.
 
----
-
 ## hamr gen locale
 
 Generate type-safe Go accessor methods from locale JSON files.
 
-```bash
+```text
 hamr gen locale [flags]
 ```
 
@@ -615,7 +591,7 @@ hamr gen locale [flags]
 | `--dir` | from config | Locale directory (overrides config) |
 | `--out` | from config | Output file path (overrides config) |
 
-```bash
+```sh
 hamr gen locale                            # use hamr.toml settings
 hamr gen locale --dir locales --out internal/locale/locale.go
 ```
@@ -643,13 +619,11 @@ The scaffolded `Makefile` runs `hamr gen locale` as part of `make build` and
 
 **Guide:** [I18n](pkg/i18n.md) covers the runtime library.
 
----
-
 ## hamr vendor
 
 Download and checksum frontend JavaScript dependencies.
 
-```bash
+```text
 hamr vendor [dep[@version]] [flags]
 ```
 
@@ -660,7 +634,7 @@ hamr vendor [dep[@version]] [flags]
 | `--url` | — | Custom URL to download |
 | `--out` | — | Output path for custom URL (relative to project root) |
 
-```bash
+```sh
 hamr vendor                          # vendor all deps at default/locked versions
 hamr vendor htmx                     # vendor only htmx
 hamr vendor alpine@3.14.9            # vendor alpine at pinned version
@@ -671,13 +645,11 @@ hamr vendor --url <url> --out <path> # custom dependency
 
 Downloads files to `frontend/static/js/` and records checksums in `hamr.vendor.json`. Built-in deps: `htmx`, `alpine`, `idiomorph`.
 
----
-
 ## hamr rename-module
 
 Rename the Go module path and rewrite all import paths.
 
-```bash
+```text
 hamr rename-module <new-module-path> [flags]
 ```
 
@@ -686,7 +658,7 @@ hamr rename-module <new-module-path> [flags]
 | `--dir` | `.` | Directory containing go.mod |
 | `--dry-run` | `false` | Show what would change without writing files |
 
-```bash
+```sh
 hamr rename-module github.com/neworg/myproject
 hamr rename-module github.com/neworg/myproject --dry-run
 hamr rename-module github.com/neworg/tools --dir ./tools
@@ -694,19 +666,15 @@ hamr rename-module github.com/neworg/tools --dir ./tools
 
 Reads the current module path from `go.mod`, then replaces it in every `.go` and `.templ` file and the `go.mod` module directive. The `.git`, `vendor`, `node_modules`, and `testdata` directories are skipped — vendored and third-party code must not be rewritten, and `testdata` is excluded from Go builds (and often holds intentionally malformed fixtures).
 
----
-
 ## hamr version
 
 Print the hamr version and commit hash.
 
-```bash
+```sh
 hamr version
 ```
 
 Output: `hamr <version> (<commit>)`
-
----
 
 ## hamr completion
 
@@ -714,7 +682,7 @@ Generate or install shell completion scripts for bash, zsh, or fish.
 
 ### Generate to stdout
 
-```bash
+```sh
 hamr completion bash
 hamr completion zsh
 hamr completion fish
@@ -722,7 +690,7 @@ hamr completion fish
 
 ### Install
 
-```bash
+```sh
 hamr completion install              # per-user install (auto-detects shell from $SHELL)
 hamr completion install --shell zsh  # override shell detection
 hamr completion install --system     # system-wide install (requires root)
@@ -752,13 +720,15 @@ hamr completion install --system     # system-wide install (requires root)
 
 For zsh per-user installs, you may need to add the following to `~/.zshrc`:
 
-```bash
+```text title="~/.zshrc"
 fpath=(~/.zsh/completions $fpath)
 autoload -Uz compinit && compinit
 ```
 
----
-
 ## Environment
 
-`hamr sync` falls back to `.env` in the current directory for S3 credentials when both flags and shell env vars are unset. No other `hamr` command reads `.env` — the CLI deliberately doesn't mutate its own process env (earlier behavior leaked into spawned children and made `.env` edits silently invisible to live-reloaded site binaries).
+The CLI never loads `.env` into its own process env; commands that need a value read just that key:
+
+- `hamr sync` — S3 settings when neither flag nor shell env var is set.
+- `hamr env` — reads `.env` to emit port-walk rewrites.
+- `hamr dev` — resolves `$VAR` in `proxy_listen` / `proxy_target` (shell env first, then `.env` next to `hamr.toml`), applies port-walk rewrites to `.env` values for spawned processes, and reads `STRIPE_KEY` for `stripe listen`.

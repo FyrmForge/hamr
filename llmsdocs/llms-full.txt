@@ -61,7 +61,10 @@
   `[dev].hamr_console_filter = true` to drop frames whose message
   contains `[hamr]` (the reload script's own chatter — `[hamr] page
   swapped`, `[hamr] CSS reloaded`, etc.); default false shows
-  everything. `[dev].dark_filter` (default false) seeds the dev panel's
+  everything. The widget is not built in sandboxed (opaque-origin)
+  frames; same-origin frames keep it. Its panel's "Tuck widget" checkbox
+  shrinks it to a slim left-edge tab (localStorage `__hamr_tucked`).
+  `[dev].dark_filter` (default false) seeds the dev panel's
   "Dark filter" checkbox: an `invert(1) hue-rotate(180deg)` filter on
   `<html>` (media, iframes and hamr's own overlay re-inverted) so a
   light-mode app is bearable to work on. The SSE config payload carries
