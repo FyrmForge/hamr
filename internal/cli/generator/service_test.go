@@ -228,6 +228,8 @@ func TestGenerateService_html(t *testing.T) {
 	assert.Contains(t, mainGo, "adminweb.RegisterRoutes(srv, &adminweb.Deps{")
 	assert.Contains(t, mainGo, "components.StaticBaseURL")
 	assert.Contains(t, mainGo, "./data/myproj.db")
+	assert.Contains(t, mainGo, "server.WithNoIndex(envNoIndex)")
+	assert.Contains(t, mainGo, `"NOINDEX"`)
 
 	server := readServiceFile(t, dir, "internal", "admin", "web", "server.go")
 	assert.Contains(t, server, "package web")

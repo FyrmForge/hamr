@@ -46,6 +46,7 @@ if err := srv.Start(); err != nil {
 | `WithMaxBodySize(size)` | `"2M"` | Max request body (`"500K"`, `"2M"`, etc.) |
 | `WithShutdownTimeout(d)` | 10s | Graceful shutdown timeout |
 | `WithGeneratedDir(dir)` | — | Serve pre-rendered static pages from directory |
+| `WithNoIndex(bool)` | `false` | Adds `X-Robots-Tag: noindex, nofollow` to every response (HTML, images, PDFs, static files, errors, 404s, Pre-middleware redirects). For staging/preview deploys; the scaffold wires it to `NOINDEX` |
 | `WithTrustedProxies(cidrs...)` | — (direct) | Proxy CIDRs trusted to set `X-Forwarded-For` and `X-Forwarded-Proto` (unset: `Scheme()` trusts private/loopback peers only); unset ignores it so `RealIP()` can't be spoofed. `"cloudflare"` adds Cloudflare's ranges, refreshed every 24h |
 
 ## Trusted Proxies & Client IP
@@ -150,6 +151,10 @@ e.GET("/__debug/ip", func(c echo.Context) error {
 
 ## Production Defaults
 
+Always on (no option):
+
+- HEAD requests are answered by the matching GET handler with no body; an app's own HEAD route takes precedence, and handlers see `Method == HEAD`
+
 Enabled unless overridden:
 
 - Panic recovery (`middleware.Recover()`)
@@ -252,6 +257,7 @@ type Option func(*Server)
 func WithHost(host string) Option
 func WithPort(port int) Option
 func WithDevMode(dev bool) Option
+func WithNoIndex(on bool) Option
 func WithMiddleware(mw ...echo.MiddlewareFunc) Option
 func WithStaticDir(path string) Option
 func WithStaticDistDir(path string) Option

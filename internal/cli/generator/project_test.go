@@ -369,6 +369,9 @@ func TestGenerateProject_createsFiles(t *testing.T) {
 	assert.Contains(t, mainGo, "envPort")
 	assert.Contains(t, mainGo, "envDatabaseURL")
 	assert.NotContains(t, mainGo, "db.Migrate(")
+	assert.Contains(t, mainGo, "server.WithNoIndex(envNoIndex)")
+	assert.Contains(t, mainGo, `"NOINDEX"`)
+	assert.Contains(t, readFile(t, dir, ".env.example"), "NOINDEX=false")
 }
 
 func TestGenerateProject_withAuth(t *testing.T) {

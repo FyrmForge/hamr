@@ -82,6 +82,9 @@ var (
 	// guard — a leftover STRIPE_MOCK=true in a prod deploy without
 	// DEV_MODE explicitly set would otherwise slip through.
 	envDevMode       = config.GetEnvOrDefaultBool("DEV_MODE", false)
+	// NOINDEX=true adds X-Robots-Tag: noindex, nofollow to every response.
+	// For staging/preview deploys only; leave unset in production.
+	envNoIndex       = config.GetEnvOrDefaultBool("NOINDEX", false)
 	envBaseURL       = config.GetEnvOrDefault("BASE_URL", "")
 {{- if eq .Database "sqlite"}}
 	envDatabasePath  = config.GetEnvOrDefault("DATABASE_PATH", "./data/{{.Name | slug}}.db")
@@ -132,6 +135,9 @@ func main() {
 
 	log := logging.New(!envDevMode)
 	slog.SetDefault(log)
+	if envNoIndex {
+		log.Warn("NOINDEX is on: every response carries X-Robots-Tag noindex, nofollow; unset it in production")
+	}
 
 	components.StaticBaseURL = envStaticBaseURL
 
@@ -147,6 +153,7 @@ func main() {
 	srv, err := server.New(
 		server.WithPort(envPort),
 		server.WithDevMode(envDevMode),
+		server.WithNoIndex(envNoIndex),
 		server.WithStaticDir("frontend/static"),
 		server.WithStaticDistDir("frontend/dist"),
 		server.WithGeneratedDir("generated"),

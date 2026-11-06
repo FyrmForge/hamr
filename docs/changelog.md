@@ -10,6 +10,12 @@ the TL;DR on top of it.
 
 ### Added
 
+- **`NOINDEX` for staging deploys (#6).** `server.WithNoIndex(true)` adds
+  `X-Robots-Tag: noindex, nofollow` to every response, including static
+  files, errors, 404s and Pre-middleware redirects. The site and html
+  service scaffolds read `NOINDEX` (default off), pass it through and log a
+  startup warning when it is on.
+
 - **"Tuck widget" option in the `hamr dev` browser panel.** The checkbox
   shrinks the dev widget to a slim tab on the left edge, clear of the page's
   own bottom-left controls. The choice is remembered per browser
@@ -89,6 +95,12 @@ the TL;DR on top of it.
   could only fail. Same-origin frames such as IDE preview panes keep it.
 
 ### Fixed
+
+- **HEAD requests answer like GET.** `curl -I`, uptime monitors and link
+  checkers got 404 on pages and 405 on `/static` because Echo v4 does not
+  route HEAD to GET handlers. `server.New` now answers HEAD with the GET
+  handler and no body; handlers see Method HEAD and an app's own HEAD route
+  takes precedence. No app changes are needed (#5).
 
 - **CI failed on projects made by `hamr new`.** The scaffold did not pin
   templ, so `go get` pulled the newest runtime while CI installed an older

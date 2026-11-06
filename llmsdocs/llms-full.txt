@@ -317,6 +317,8 @@ func New(opts ...Option) (*Server, error)
 ```
 Creates a Server with sensible defaults, applies options, and configures
 production middleware. Returns an error if any option value is invalid.
+HEAD requests are answered by the GET handler with no body; an app's own
+HEAD route takes precedence, and handlers see Method HEAD.
 
 #### Option Functions
 
@@ -333,6 +335,7 @@ func WithTimeout(d time.Duration) Option                 // request context time
 func WithMaxBodySize(size string) Option                 // e.g. "2M", "500K"
 func WithShutdownTimeout(d time.Duration) Option         // graceful shutdown (default 10s)
 func WithGeneratedDir(dir string) Option                 // pre-rendered static pages dir
+func WithNoIndex(on bool) Option                         // X-Robots-Tag: noindex, nofollow on every response incl. errors/static; staging/preview deploys; scaffold env NOINDEX=true (logs a startup warning)
 func WithTrustedProxies(cidrs ...string) Option          // proxy CIDRs trusted for X-Forwarded-For and X-Forwarded-Proto (also drives c.Scheme()); unset = ignore XFF (RealIP unspoofable) and Scheme() trusts X-Forwarded-Proto only from loopback/private peers (echo default); "cloudflare" = Cloudflare ranges, refreshed 24h
 var CloudflareCIDRs []string                             // Cloudflare edge ranges pinned at release (static)
 ```

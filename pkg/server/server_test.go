@@ -2,9 +2,13 @@ package server_test
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -299,4 +303,153 @@ func TestServer_SchemeHonorsTrustedProxyOnly(t *testing.T) {
 	assert.Equal(t, "https", schemeFor(none, "10.0.0.1:5555", "https"), "no config, private peer")
 	assert.Equal(t, "https", schemeFor(none, "127.0.0.1:5555", "https"), "no config, loopback peer")
 	assert.Equal(t, "http", schemeFor(none, "203.0.113.7:5555", "https"), "no config, public peer")
+}
+
+func TestHEAD_answersLikeGET(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("hello static"), 0o644))
+
+	srv, err := server.New(server.WithStaticDir(dir))
+	require.NoError(t, err)
+	srv.GET("/plain", func(c echo.Context) error { return c.String(http.StatusOK, "plain body") })
+	srv.POST("/post-only", func(c echo.Context) error { return c.String(http.StatusOK, "x") })
+	grp := srv.Group("/x", func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			c.Response().Header().Set("X-Group", "1")
+			return next(c)
+		}
+	})
+	grp.GET("/page", func(c echo.Context) error { return c.HTML(http.StatusOK, "<p>grouped</p>") })
+
+	var mu sync.Mutex
+	var seen string
+	srv.GET("/method", func(c echo.Context) error {
+		mu.Lock()
+		seen = c.Request().Method
+		mu.Unlock()
+		return c.String(http.StatusOK, "m")
+	})
+	// Explicit HEAD routes win over the GET handler, also inside a group.
+	srv.GET("/explicit", func(c echo.Context) error { return c.String(http.StatusOK, "get") })
+	srv.Echo().HEAD("/explicit", func(c echo.Context) error {
+		c.Response().Header().Set("X-Handler", "head")
+		return c.NoContent(http.StatusAccepted)
+	})
+	grp.GET("/explicit", func(c echo.Context) error { return c.String(http.StatusOK, "get") })
+	grp.HEAD("/explicit", func(c echo.Context) error {
+		c.Response().Header().Set("X-Handler", "head")
+		return c.NoContent(http.StatusAccepted)
+	})
+
+	ts := httptest.NewServer(srv.Echo())
+	defer ts.Close()
+
+	for _, path := range []string{"/plain", "/x/page", "/static/hello.txt"} {
+		t.Run(path, func(t *testing.T) {
+			getResp, err := http.Get(ts.URL + path)
+			require.NoError(t, err)
+			_ = getResp.Body.Close()
+			require.Equal(t, http.StatusOK, getResp.StatusCode)
+
+			req, err := http.NewRequest(http.MethodHead, ts.URL+path, nil)
+			require.NoError(t, err)
+			resp, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			defer func() { _ = resp.Body.Close() }()
+			body, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+
+			assert.Equal(t, http.StatusOK, resp.StatusCode)
+			assert.Equal(t, getResp.Header.Get("Content-Type"), resp.Header.Get("Content-Type"))
+			assert.Empty(t, body)
+		})
+	}
+
+	t.Run("handler sees HEAD", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodHead, ts.URL+"/method", nil)
+		require.NoError(t, err)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		_ = resp.Body.Close()
+		mu.Lock()
+		defer mu.Unlock()
+		assert.Equal(t, http.MethodHead, seen)
+	})
+
+	for _, path := range []string{"/explicit", "/x/explicit"} {
+		t.Run("explicit HEAD route wins "+path, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodHead, ts.URL+path, nil)
+			require.NoError(t, err)
+			resp, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			_ = resp.Body.Close()
+			assert.Equal(t, http.StatusAccepted, resp.StatusCode)
+			assert.Equal(t, "head", resp.Header.Get("X-Handler"))
+		})
+	}
+
+	t.Run("POST-only route is not 200", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodHead, ts.URL+"/post-only", nil)
+		require.NoError(t, err)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		_ = resp.Body.Close()
+		assert.NotEqual(t, http.StatusOK, resp.StatusCode)
+	})
+}
+
+func TestWithNoIndex(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644))
+
+	for _, on := range []bool{true, false} {
+		srv, err := server.New(server.WithStaticDir(dir), server.WithNoIndex(on))
+		require.NoError(t, err)
+		srv.GET("/plain", func(c echo.Context) error { return c.String(http.StatusOK, "x") })
+		ts := httptest.NewServer(srv.Echo())
+		defer ts.Close()
+
+		for _, tc := range []struct {
+			path string
+			code int
+		}{{"/plain", 200}, {"/static/a.txt", 200}, {"/nope", 404}} {
+			resp, err := http.Get(ts.URL + tc.path)
+			require.NoError(t, err)
+			_ = resp.Body.Close()
+			require.Equal(t, tc.code, resp.StatusCode)
+			want := ""
+			if on {
+				want = "noindex, nofollow"
+			}
+			assert.Equal(t, want, resp.Header.Get("X-Robots-Tag"), "noindex=%v %s", on, tc.path)
+		}
+
+		// HEAD carries it too.
+		req, err := http.NewRequest(http.MethodHead, ts.URL+"/plain", nil)
+		require.NoError(t, err)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		_ = resp.Body.Close()
+		want := ""
+		if on {
+			want = "noindex, nofollow"
+		}
+		assert.Equal(t, want, resp.Header.Get("X-Robots-Tag"), "noindex=%v HEAD", on)
+
+		// Responses written by an app Pre middleware carry it too.
+		srv.Echo().Pre(func(next echo.HandlerFunc) echo.HandlerFunc {
+			return func(c echo.Context) error {
+				if c.Request().URL.Path == "/pre-redirect" {
+					return c.Redirect(http.StatusFound, "/plain")
+				}
+				return next(c)
+			}
+		})
+		noFollow := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		resp, err = noFollow.Get(ts.URL + "/pre-redirect")
+		require.NoError(t, err)
+		_ = resp.Body.Close()
+		require.Equal(t, http.StatusFound, resp.StatusCode)
+		assert.Equal(t, want, resp.Header.Get("X-Robots-Tag"), "noindex=%v pre redirect", on)
+	}
 }

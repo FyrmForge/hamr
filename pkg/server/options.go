@@ -43,6 +43,13 @@ func WithDevMode(dev bool) Option {
 	return func(s *Server) { s.devMode = dev }
 }
 
+// WithNoIndex adds "X-Robots-Tag: noindex, nofollow" to every response, so
+// search engines don't index staging or preview deploys. Header-based, so it
+// covers HTML, images, PDFs and static files. Default: off.
+func WithNoIndex(on bool) Option {
+	return func(s *Server) { s.noIndex = on }
+}
+
 // WithGzipConfig configures gzip response compression.
 // Default: Gzip enabled with Echo defaults.
 func WithGzipConfig(cfg GzipConfig) Option {

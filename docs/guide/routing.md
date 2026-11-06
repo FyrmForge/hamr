@@ -47,6 +47,7 @@ Applied by `server.New` to every route:
 - Request timeout: 30s (`WithTimeout`)
 - `Cache-Control`: immutable for fingerprinted `/static/` files, `max-age` for other static assets, `no-store, private` for dynamic responses; nothing cached in dev mode
 - Gzip (skipped for WebSocket upgrades; tune with `WithGzipConfig`)
+- HEAD requests are answered by the matching GET handler with no body; an app's own HEAD route takes precedence, and handlers see `Method == HEAD`
 - Security headers, outside dev mode only: `Content-Security-Policy: default-src 'self'`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `X-Content-Type-Options: nosniff`, `X-XSS-Protection: 0`
 
 ## Route groups

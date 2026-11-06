@@ -106,6 +106,7 @@ Read by the scaffolded `cmd/site/main.go`:
 |----------|---------|-------------|
 | `PORT` | `8080` | Listen port |
 | `DEV_MODE` | `false` | Leave unset in production. `true` disables secure cookies, the server-level security headers and caching, and switches logs from JSON to coloured text. The site group's CSP is applied either way |
+| `NOINDEX` | `false` | `true` adds `X-Robots-Tag: noindex, nofollow` to every response and logs a startup warning. Honoured by the site and html service scaffolds. Staging/preview deploys only |
 | `BASE_URL` | — | Public origin, e.g. `https://example.com`. Sets the cookie domain, the CORS allowed origin and `components.BaseURL` (absolute URLs) |
 | `TRUSTED_PROXIES` | — | Comma-separated CIDRs of your load balancer / reverse proxy, or `cloudflare`. Unset: `X-Forwarded-For` is ignored |
 | `DATABASE_URL` | local dev URL | PostgreSQL connection string (PostgreSQL projects) |
@@ -122,6 +123,7 @@ The scaffold's defaults are production-safe (`DEV_MODE` off, secure cookies, CSR
 
 - **Set `BASE_URL`** to the public origin.
 - **Set `TRUSTED_PROXIES`** when behind a load balancer or CDN. Otherwise every request appears to come from the proxy's IP, so `c.RealIP()` and the default `middleware.RateLimit` key lump all users together.
+- **Staging or preview deploy? Set `NOINDEX=true`** so search engines don't index a duplicate of the live site. Use this, not `robots.txt`: `robots.txt` controls crawling, not indexing, and a blocked page can still be listed (and its noindex never seen). Leave it unset in production.
 - **Leave dev-only variables unset**: `DEV_MODE`, `HAMR_ACTIONS_TOKEN` / `HAMR_ACTIONS_ENV` (dev actions endpoint), `STRIPE_MOCK`, `EMAIL_MOCK`.
 - **Replace the S3 defaults** with real credentials, and create the bucket (or call `EnsureBucket` at startup — the scaffold doesn't).
 - **Persist uploads and SQLite**: volumes for `/data` and `STORAGE_PATH`, or S3.

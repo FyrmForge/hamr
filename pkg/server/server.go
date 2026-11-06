@@ -30,6 +30,7 @@ type Server struct {
 	host            string
 	port            int
 	devMode         bool
+	noIndex         bool
 	gzipConfig      GzipConfig
 	timeout         time.Duration
 	maxBodySize     string
@@ -113,6 +114,47 @@ func New(opts ...Option) (*Server, error) {
 	// Same trust set for c.Scheme(): X-Forwarded-Proto is honoured only from the
 	// configured proxies (echo's default trusts any private/loopback peer).
 	e.SchemeExtractor = func(r *http.Request) string { return (*s.schemeExtractor.Load())(r) }
+
+	// X-Robots-Tag goes in Pre so responses written by Pre middleware
+	// (redirects, locale handling) and 404s carry it too.
+	if s.noIndex {
+		e.Pre(func(next echo.HandlerFunc) echo.HandlerFunc {
+			return func(c echo.Context) error {
+				c.Response().Header().Set("X-Robots-Tag", "noindex, nofollow")
+				return next(c)
+			}
+		})
+	}
+
+	// Workaround: Echo v4 does not route HEAD requests to GET handlers, so
+	// curl -I, uptime monitors and link checkers would get 404/405. Echo
+	// routes on the *http.Request it captured in ServeHTTP and ignores
+	// c.SetRequest, so a Pre-only rewrite is not enough. Instead, unless the
+	// app registered its own HEAD route for the path, re-dispatch a GET copy
+	// through e.ServeHTTP. The copy is marked, and the first Use middleware
+	// flips its Method back to HEAD after routing, so handlers, loggers and
+	// http.ServeContent see HEAD. net/http still holds the original HEAD
+	// request and discards body writes itself.
+	e.Pre(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			r := c.Request()
+			if r.Method != http.MethodHead || hasHeadRoute(c.Echo(), r) {
+				return next(c)
+			}
+			r2 := r.WithContext(context.WithValue(r.Context(), headRewrittenKey{}, true))
+			r2.Method = http.MethodGet
+			c.Echo().ServeHTTP(c.Response().Writer, r2)
+			return nil
+		}
+	})
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			if r := c.Request(); r.Context().Value(headRewrittenKey{}) != nil {
+				r.Method = http.MethodHead // r is the private copy made above
+			}
+			return next(c)
+		}
+	})
 
 	// Production defaults — applied in order.
 	e.Use(echoMw.RecoverWithConfig(echoMw.RecoverConfig{
@@ -346,4 +388,23 @@ func (s *Server) Start() error {
 // Shutdown shuts down the Echo server gracefully.
 func (s *Server) Shutdown(ctx context.Context) error {
 	return s.echo.Shutdown(ctx)
+}
+
+// headRewrittenKey marks the GET copy of a HEAD request (see New).
+type headRewrittenKey struct{}
+
+// hasHeadRoute reports whether the app registered its own HEAD route matching
+// r. Find on a scratch context resolves the path to a route pattern (or to a
+// 404/405/group-not-found pattern); a real HEAD route is then one whose Method
+// is HEAD and Path equals that pattern. Not-found catch-alls have Method
+// echo.RouteNotFound, so they never match.
+func hasHeadRoute(e *echo.Echo, r *http.Request) bool {
+	sc := e.NewContext(r, nil)
+	e.Router().Find(http.MethodHead, echo.GetPath(r), sc)
+	for _, rt := range e.Routes() {
+		if rt.Method == http.MethodHead && rt.Path == sc.Path() {
+			return true
+		}
+	}
+	return false
 }
