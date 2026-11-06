@@ -42,6 +42,34 @@ On every pooled connection, the following pragmas are applied by default:
 | `journal_mode` | `WAL` | `WithJournalMode(string)` |
 | `foreign_keys` | `ON` | `WithForeignKeys(bool)` |
 | `busy_timeout` | `5000` ms | `WithBusyTimeout(time.Duration)` |
+| `temp_store` | `MEMORY` | `WithPragma("temp_store", ...)` |
+| `journal_size_limit` | `67108864` (64 MB) | `WithPragma("journal_size_limit", ...)` |
+
+Transactions use `_txlock=immediate` by default: the write lock is taken at
+`BEGIN`, so two transactions that both end up writing queue on `busy_timeout`
+instead of failing instantly with `SQLITE_BUSY` (relevant once `MaxOpenConns >
+1`). Change it with `WithTxLock("deferred" | "immediate" | "exclusive")`; an
+empty string omits the parameter (driver default, deferred).
+
+`WithPragma(name, value)` sets any other pragma on every pooled connection. If
+the name is one hamr already sets (`journal_mode`, `foreign_keys`,
+`busy_timeout`, `temp_store`, `journal_size_limit`) your value replaces hamr's;
+a later call for the same name wins. The driver runs pragmas in its own order
+(`busy_timeout` first, then alphabetical), so order-sensitive pragmas such as
+`page_size` will not take effect on a new WAL database. SQLite silently ignores
+unknown pragma names and invalid values; check with `PRAGMA name` if unsure.
+
+```go
+sqlite.WithPragma("cache_size", "-20000")   // negative = KiB (~20 MB)
+sqlite.WithPragma("synchronous", "NORMAL")  // faster; in WAL the last commits can be
+                                            // lost on power loss, but the database
+                                            // cannot be corrupted
+```
+
+After the ping, `ConnectContext` runs `PRAGMA optimize=0x10002` once (not per
+pooled connection); errors are ignored, since read-only databases reject it.
+Long-running apps can run `PRAGMA optimize` periodically
+themselves.
 
 Pool sizing:
 
@@ -59,6 +87,9 @@ database, err := sqlite.ConnectContext(ctx, "./data/app.db",
 ```
 
 Pass `:memory:` as the path for an in-memory database (handy for tests).
+
+You can also skip `ConnectContext` entirely: open the database yourself with
+`sqlx.Open("sqlite", dsn)` and still pass the `*sqlx.DB` to `sqlite.Migrate`.
 
 ## Migrations
 
@@ -102,6 +133,8 @@ type ConnectConfig struct {
     ForeignKeys  bool
     BusyTimeout  time.Duration
     MaxOpenConns int
+    TxLock       string      // default "immediate"; "" omits _txlock
+    Pragmas      [][2]string // see WithPragma
 }
 type ConnectOption func(*ConnectConfig)
 
@@ -112,6 +145,8 @@ func WithJournalMode(mode string) ConnectOption
 func WithForeignKeys(enabled bool) ConnectOption
 func WithBusyTimeout(d time.Duration) ConnectOption
 func WithMaxOpenConns(n int) ConnectOption
+func WithTxLock(mode string) ConnectOption
+func WithPragma(name, value string) ConnectOption
 
 type MigrateConfig struct {
     FS        embed.FS

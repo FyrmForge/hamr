@@ -101,7 +101,9 @@ Default pragmas set on every connection:
 - `PRAGMA busy_timeout=5000` — wait 5s on lock contention instead of failing immediately
 
 These are configurable via functional options (`WithJournalMode`, `WithForeignKeys`,
-`WithBusyTimeout`).
+`WithBusyTimeout`). Later additions: `temp_store=MEMORY`, `journal_size_limit` (64 MB),
+`_txlock=immediate` (`WithTxLock`), a one-off `PRAGMA optimize` at connect, and
+`WithPragma` for any other pragma.
 
 ### No Docker Compose for SQLite-only projects
 

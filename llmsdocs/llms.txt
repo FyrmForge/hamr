@@ -352,8 +352,9 @@ SQLite connection + migrations, pure-Go (modernc.org/sqlite). Mirrors pkg/db's A
 - Import path: `github.com/FyrmForge/hamr/pkg/db/sqlite`
 - `Connect(path, opts...) (*sqlx.DB, error)` — creates parent dir, applies pragmas, pings
 - `ConnectContext(ctx, path, opts...) (*sqlx.DB, error)`
-- Defaults: `journal_mode=WAL`, `foreign_keys=ON`, `busy_timeout=5000ms`, `MaxOpenConns=1`
-- Options: `WithJournalMode`, `WithForeignKeys`, `WithBusyTimeout`, `WithMaxOpenConns`
+- Defaults: `journal_mode=WAL`, `foreign_keys=ON`, `busy_timeout=5000ms`, `temp_store=MEMORY`, `journal_size_limit=64MB`, `_txlock=immediate`, `MaxOpenConns=1`; `PRAGMA optimize=0x10002` runs once after connect
+- Options: `WithJournalMode`, `WithForeignKeys`, `WithBusyTimeout`, `WithMaxOpenConns`, `WithTxLock(mode)` ("" = driver default), `WithPragma(name, value)` (any pragma, e.g. `cache_size`, `synchronous`; replaces hamr's value for a pragma it already sets, later call wins)
+- Apps may skip ConnectContext: `sqlx.Open("sqlite", dsn)` and still pass the `*sqlx.DB` to `Migrate`
 - `Migrate(db, cfg) error`, `MigrateDown`, `MigrateSteps`, `MigrateVersion`, `MigrateForce`
 - Wraps golang-migrate's pure-Go `database/sqlite` driver (not `database/sqlite3` which requires CGO)
 - Scaffolded projects: `DATABASE_PATH` env var (default `./data/<name>.db`); no Docker Compose unless S3 storage is also selected

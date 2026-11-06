@@ -10,6 +10,12 @@ the TL;DR on top of it.
 
 ### Added
 
+- **`sqlite.WithTxLock` and `sqlite.WithPragma`.** `WithTxLock("")` restores the
+  driver's deferred default; `WithPragma(name, value)` sets any pragma
+  (`cache_size`, `synchronous`, ...) and replaces hamr's value for the ones it
+  already sets. Apps can also skip `ConnectContext` and pass their own
+  `*sqlx.DB` to `sqlite.Migrate`.
+
 - **`NOINDEX` for staging deploys (#6).** `server.WithNoIndex(true)` adds
   `X-Robots-Tag: noindex, nofollow` to every response, including static
   files, errors, 404s and Pre-middleware redirects. The site and html
@@ -26,6 +32,12 @@ the TL;DR on top of it.
   matching a pinned hamr version.
 
 ### Changed
+
+- **SQLite defaults: `_txlock=immediate`, `temp_store=MEMORY`,
+  `journal_size_limit` 64 MB.** Transactions take the write lock at `BEGIN`, so
+  concurrent writers queue on `busy_timeout` instead of failing instantly with
+  `SQLITE_BUSY` once `MaxOpenConns > 1`. `ConnectContext` also runs
+  `PRAGMA optimize=0x10002` once after connecting.
 
 - **Scaffold pins Tailwind 3.4.19.** `package.json` now uses the exact latest v3
   instead of `^3.4.0`. v4 is deliberately not adopted: it drops browsers older

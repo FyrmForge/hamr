@@ -78,8 +78,11 @@ This switches pgx to simple protocol mode, avoiding prepared-statement conflicts
 - `journal_mode=WAL` — concurrent readers, better performance
 - `foreign_keys=ON` — SQLite disables these by default
 - `busy_timeout=5000` — 5s wait on lock contention instead of immediate failure
+- `temp_store=MEMORY` and `journal_size_limit=67108864` (64 MB)
+- `_txlock=immediate` — transactions take the write lock at `BEGIN`
+- `PRAGMA optimize=0x10002` runs once after connecting
 
-Override via functional options: `WithJournalMode`, `WithForeignKeys`, `WithBusyTimeout`, `WithMaxOpenConns`.
+Override via functional options: `WithJournalMode`, `WithForeignKeys`, `WithBusyTimeout`, `WithMaxOpenConns`, `WithTxLock`, and `WithPragma(name, value)` for any other pragma (e.g. `cache_size`, `synchronous`). See [pkg/db/sqlite](pkg/sqlite.md).
 
 ## Migrations
 

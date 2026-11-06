@@ -899,6 +899,8 @@ type ConnectConfig struct {
     ForeignKeys  bool          // default true
     BusyTimeout  time.Duration // default 5s
     MaxOpenConns int           // default 1 (SQLite is single-writer)
+    TxLock       string        // default "immediate"; "" omits _txlock
+    Pragmas      [][2]string   // see WithPragma
 }
 
 type ConnectOption func(*ConnectConfig)
@@ -930,7 +932,22 @@ func WithJournalMode(mode string) ConnectOption  // PRAGMA journal_mode
 func WithForeignKeys(enabled bool) ConnectOption // PRAGMA foreign_keys
 func WithBusyTimeout(d time.Duration) ConnectOption // PRAGMA busy_timeout
 func WithMaxOpenConns(n int) ConnectOption
+func WithTxLock(mode string) ConnectOption       // _txlock: deferred|immediate|exclusive; "" omits
+func WithPragma(name, value string) ConnectOption // any pragma, e.g. ("cache_size","-20000"), ("synchronous","NORMAL")
 ```
+Further defaults: `temp_store=MEMORY`, `journal_size_limit=67108864`,
+`_txlock=immediate` (write lock taken at BEGIN, avoids instant SQLITE_BUSY when
+MaxOpenConns > 1). WithPragma replaces hamr's value when the name matches a
+pragma it already sets (journal_mode, foreign_keys, busy_timeout, temp_store,
+journal_size_limit), otherwise appends; a later call for the same name wins.
+The driver runs pragmas in its own order (busy_timeout first, then alphabetical),
+so order-sensitive pragmas such as page_size do not take effect on a new WAL DB.
+SQLite silently ignores unknown pragma names and invalid values; check with
+`PRAGMA name` if unsure.
+`synchronous=NORMAL` in WAL can lose the last commits on power loss but cannot
+corrupt the database. ConnectContext runs `PRAGMA optimize=0x10002` once after
+the ping (not per pooled connection; errors ignored, read-only DBs reject it). Apps can skip ConnectContext, open with
+`sqlx.Open("sqlite", dsn)` and still pass the `*sqlx.DB` to Migrate.
 
 #### Migration
 
