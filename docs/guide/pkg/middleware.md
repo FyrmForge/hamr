@@ -322,7 +322,8 @@ siteGroup.Use(middleware.CSRFWithConfig(middleware.CSRFConfig{
 ```
 
 The CSRF cookie defaults to `SameSite=Lax` (defense-in-depth) rather than the
-browser default.
+browser default, and is always set with `Path=/` so it reaches forms on every
+path. `__Host-` cookie names work with `Secure: true` (the `CSRF()` default).
 
 ## CORS
 

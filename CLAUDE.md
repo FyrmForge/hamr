@@ -20,3 +20,10 @@ General rule: scrutinise every decision and change. Review your own work as if y
 Always use the Makefile targets — never run `go build`, `go test`, or `go vet` directly against individual packages.
 
 - `make ai` — build, lint, test, vet, and confirm
+
+## Changelog (mandatory)
+
+- Every push to master with a `feat:`/`fix:` commit cuts a release automatically.
+- So in the commit that will be pushed, rename `## [Unreleased]` in `docs/changelog.md` to `## [X.Y.Z] - YYYY-MM-DD` and add a fresh empty `## [Unreleased]` above it.
+- X.Y.Z = `git describe --tags --abbrev=0` plus the bump from the highest commit prefix since that tag (`fix:` patch, `feat:` minor).
+- `docs:`/`chore:`-only pushes don't release: leave entries under Unreleased.

@@ -65,3 +65,26 @@ func TestCSRF_explicitSameSite(t *testing.T) {
 	assert.Equal(t, http.SameSiteStrictMode, csrfCookie.SameSite,
 		"explicit SameSite must be honored")
 }
+
+func TestCSRF_cookiePathRoot(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/admin/users", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := middleware.CSRF()(func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	})
+	require.NoError(t, handler(c))
+
+	var csrfCookie *http.Cookie
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == "csrf" {
+			csrfCookie = cookie
+			break
+		}
+	}
+	require.NotNil(t, csrfCookie)
+	assert.Equal(t, "/", csrfCookie.Path,
+		"CSRF cookie must be scoped to / even when set from a nested URL")
+}

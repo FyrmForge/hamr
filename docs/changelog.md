@@ -2,11 +2,24 @@
 
 A brief, human-readable summary of each release — highlights and **breaking
 changes** — with a pointer to the full diff for detail. Append-only: add entries
-under `## [Unreleased]`, rename to the version (e.g. `## [0.24.0]`) at release.
+under `## [Unreleased]`; the commit that gets pushed to master and cuts a
+release renames it to `## [X.Y.Z] - YYYY-MM-DD` (see `docs/release.md`).
 `hamr ai upgrade` already carries the full code diff between versions; this is
 the TL;DR on top of it.
 
 ## [Unreleased]
+
+## [0.46.1] - 2026-11-06
+
+### Fixed
+
+- **CSRF cookie is set with `Path=/`.** It had no Path, so browsers scoped it
+  to the directory of the first URL that set it (e.g. `/admin`) and forms
+  under other paths such as `/login` failed CSRF. `__Host-` cookie names,
+  which browsers reject without `Path=/`, work with `Secure: true` (the
+  `CSRF()` default).
+
+## [0.46.0] - 2026-11-06
 
 ### Added
 
@@ -38,6 +51,32 @@ the TL;DR on top of it.
   concurrent writers queue on `busy_timeout` instead of failing instantly with
   `SQLITE_BUSY` once `MaxOpenConns > 1`. `ConnectContext` also runs
   `PRAGMA optimize=0x10002` once after connecting.
+
+- **Guide reorganised into topic pages.** The numbered chapters
+  `docs/guide/01-project-setup.md` ... `13-deployment.md` are replaced by
+  installation, create-project, structure, routing, templates, validation,
+  static-assets, database, authentication, background-jobs, websockets,
+  storage, hamr-dev, testing and deployment pages, indexed by
+  `docs/guide/README.md`. Old chapter links break; point bookmarks at the new
+  names. `cli.md` and `hamr-toml.md` were refreshed too (`hamr new --storage`
+  is documented as defaulting to `local`; `--email-mock`, `--locale` and
+  `--migrate-startup` are now documented).
+
+- **Dev widget skips sandboxed frames.** It is no longer built inside
+  sandboxed (opaque-origin) frames, where `/__hamr/*` is cross-origin and it
+  could only fail. Same-origin frames such as IDE preview panes keep it.
+
+### Fixed
+
+- **HEAD requests answer like GET.** `curl -I`, uptime monitors and link
+  checkers got 404 on pages and 405 on `/static` because Echo v4 does not
+  route HEAD to GET handlers. `server.New` now answers HEAD with the GET
+  handler and no body; handlers see Method HEAD and an app's own HEAD route
+  takes precedence. No app changes are needed (#5).
+
+## [0.45.1] - 2026-10-26
+
+### Changed
 
 - **Scaffold pins Tailwind 3.4.19.** `package.json` now uses the exact latest v3
   instead of `^3.4.0`. v4 is deliberately not adopted: it drops browsers older
@@ -92,27 +131,7 @@ the TL;DR on top of it.
   setup-node v7 (Node 24 instead of 20), upload-artifact v7, docker
   setup-buildx v4, login v4, build-push v7.
 
-- **Guide reorganised into topic pages.** The numbered chapters
-  `docs/guide/01-project-setup.md` ... `13-deployment.md` are replaced by
-  installation, create-project, structure, routing, templates, validation,
-  static-assets, database, authentication, background-jobs, websockets,
-  storage, hamr-dev, testing and deployment pages, indexed by
-  `docs/guide/README.md`. Old chapter links break; point bookmarks at the new
-  names. `cli.md` and `hamr-toml.md` were refreshed too (`hamr new --storage`
-  is documented as defaulting to `local`; `--email-mock`, `--locale` and
-  `--migrate-startup` are now documented).
-
-- **Dev widget skips sandboxed frames.** It is no longer built inside
-  sandboxed (opaque-origin) frames, where `/__hamr/*` is cross-origin and it
-  could only fail. Same-origin frames such as IDE preview panes keep it.
-
 ### Fixed
-
-- **HEAD requests answer like GET.** `curl -I`, uptime monitors and link
-  checkers got 404 on pages and 405 on `/static` because Echo v4 does not
-  route HEAD to GET handlers. `server.New` now answers HEAD with the GET
-  handler and no body; handlers see Method HEAD and an app's own HEAD route
-  takes precedence. No app changes are needed (#5).
 
 - **CI failed on projects made by `hamr new`.** The scaffold did not pin
   templ, so `go get` pulled the newest runtime while CI installed an older

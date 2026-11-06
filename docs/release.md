@@ -30,6 +30,10 @@ Prefixes that **do not** trigger a release:
 5. Cross-platform binaries are built with the version baked in via ldflags
 6. A multi-arch image (linux/amd64 + arm64) is pushed to `ghcr.io/fyrmforge/hamr` as `v<version>` and `latest`; it runs `hamr mock-serve` by default. The GHCR package was created private on its first push and must be made public once in the package settings.
 
+## Changelog
+
+A `feat:`/`fix:` push releases immediately, so the pushed commit must also rename `## [Unreleased]` in `docs/changelog.md` to `## [X.Y.Z] - YYYY-MM-DD` (the version semantic-release will cut) and add a fresh empty `## [Unreleased]` above it. `docs:`/`chore:`-only pushes don't release; leave their entries under Unreleased.
+
 ## Dev Builds
 
 When running from source without a release tag, `hamr version` shows `dev`. The `hamr new` command resolves the latest git tag and appends `-dev` (e.g. `0.5.0-dev`) when writing scaffold metadata to `hamr.toml`.

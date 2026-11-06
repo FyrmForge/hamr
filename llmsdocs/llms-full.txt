@@ -1063,9 +1063,10 @@ func TrustedSubjectWithConfig(cfg TrustedSubjectConfig) echo.MiddlewareFunc
 type CSRFConfig struct {
     CookieName  string         // default: "csrf"
     TokenLookup string         // default: "form:csrf_token,header:X-CSRF-Token"
-    Secure      bool           // default: true
+    Secure      bool           // CSRF() sets true; CSRFWithConfig uses the value given (zero = false)
     SameSite    http.SameSite  // default: Lax
 }
+// Cookie is always Path=/; "__Host-" names work with Secure: true (the CSRF() default).
 
 func CSRF() echo.MiddlewareFunc
 func CSRFWithConfig(cfg CSRFConfig) echo.MiddlewareFunc

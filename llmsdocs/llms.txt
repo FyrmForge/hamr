@@ -364,7 +364,7 @@ HTTP middleware for auth, CSRF, CORS, flash, security, RBAC, audit, rate limitin
 - Error Pages: `ErrorPages(defaultPage, overrides...)`, `Page(code, page)` — per-group error rendering
 - Auth: `NewBrowserAuth(sm, opts...)`, `Load()`, `RequireAuth()`, `RequireNotAuth()`
 - Subject: `GetSubjectID(c) string`, `GetSubject(c) any`, `TrustedSubject()` (unverified header; internal-only), `TrustedSubjectWithConfig(cfg)` (shared-secret/CIDR gated)
-- CSRF: `CSRF()`, `CSRFWithConfig(cfg)` (cookie defaults to `SameSite=Lax`)
+- CSRF: `CSRF()`, `CSRFWithConfig(cfg)` (cookie defaults to `SameSite=Lax`, always `Path=/`; `__Host-` names work with `Secure: true`, the `CSRF()` default)
 - CORS: `CORS()`, `CORSWithConfig(cfg)` (no `AllowOrigins` configured = cross-origin denied, not `*`)
 - Flash: `Flash()`, `FlashWithConfig(cfg)`, `SetFlash(c, message, flashType)`, `GetFlash(c)`
 - Security: `Secure()`, `SecureWithConfig(cfg)` (expanded `SecureConfig` with all header fields), `CacheControl(disableCaching)`, `CacheControlWithConfig(cfg)` (fingerprint-aware: `*.HASH.*` URLs get immutable headers; dynamic responses default to `no-store, private` unless `AllowDynamicCaching`)
