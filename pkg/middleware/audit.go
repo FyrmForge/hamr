@@ -97,10 +97,22 @@ func AuditWithConfig(cfg AuditConfig) echo.MiddlewareFunc {
 				return err
 			}
 
+			// Mirrors echo's DefaultHTTPErrorHandler, which writes the status after middleware returns.
+			status := c.Response().Status
+			if err != nil && !c.Response().Committed {
+				status = http.StatusInternalServerError
+				if he, ok := err.(*echo.HTTPError); ok {
+					if inner, ok := he.Internal.(*echo.HTTPError); ok {
+						he = inner
+					}
+					status = he.Code
+				}
+			}
+
 			data := map[string]any{
 				"method": c.Request().Method,
 				"path":   c.Request().URL.Path,
-				"status": c.Response().Status,
+				"status": status,
 			}
 
 			if q := c.Request().URL.RawQuery; q != "" {

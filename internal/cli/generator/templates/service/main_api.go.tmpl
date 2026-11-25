@@ -66,6 +66,7 @@ func main() {
 	srv, err := server.New(
 		server.WithPort(envPort),
 		server.WithDevMode(envDevMode),
+		// TRUSTED_PROXIES: CIDRs plus the keywords "cloudflare", "railway".
 		server.WithTrustedProxies(envTrustedProxies...),
 	)
 	if err != nil {

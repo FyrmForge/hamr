@@ -361,7 +361,7 @@ type AuditLogger interface {
 ```
 
 `AuditEntry` contains: `ActorID`, `Action` (HTTP method), `EntityType` (route path),
-`Data` (method, path, status, query, path params), `Timestamp`.
+`Data` (method, path, status, query, path params; status is what echo's default error handler will write when the handler returned an error before writing a response; an app with its own `server.WithErrorHandler` that maps other error types to other statuses is not reflected), `Timestamp`.
 
 Values of sensitive-named query/path params (`token`, `password`, `secret`, `key`,
 `code`, `otp`, `signature`, `auth`, `session`, `csrf`, …) are redacted to

@@ -162,6 +162,7 @@ func main() {
 		// and the rate-limit key). Empty/unset ignores X-Forwarded-For so a
 		// direct client can't spoof its IP; set it to your LB ranges behind one.
 		// "cloudflare" trusts Cloudflare's edge ranges, refreshed every 24h.
+		// "railway" is for apps on Railway (see the deployment guide).
 		server.WithTrustedProxies(envTrustedProxies...),
 	)
 	if err != nil {

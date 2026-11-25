@@ -9,6 +9,70 @@ the TL;DR on top of it.
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-11-25
+
+### Added
+
+- **`railway` keyword for `TRUSTED_PROXIES` / `WithTrustedProxies`.** On Railway
+  the client IP was wrong whatever CIDR you trusted: Railway rewrites
+  `X-Forwarded-For` to `<address that connected to its edge>, <edge address>`
+  and does not publish the edge addresses, so the `X-Forwarded-For` walk never
+  returned the visitor and every visitor shared one rate-limit bucket. With
+  `TRUSTED_PROXIES=railway`, a request whose direct peer is in `100.64.0.0/10`
+  takes the client IP from `X-Real-IP` (which Railway sets), and `c.Scheme()`
+  trusts `X-Forwarded-Proto` from that range. Behind Cloudflare use
+  `railway,cloudflare`: when `X-Real-IP` is itself a Cloudflare address, hamr
+  uses `CF-Connecting-IP`. Apps on Railway without the keyword also do not get
+  `https` from `c.Scheme()` by default, because Railway's proxy range is not a
+  private range; `railway` fixes both the client IP and the scheme. Apps on Railway with a CIDR-only `TRUSTED_PROXIES`
+  should switch to `railway` (or `railway,cloudflare`). Measured on Railway only
+  (2026-11-24); other platforms are unverified. See
+  [Deployment](guide/deployment.md#running-on-railway).
+- **Origin lock: `server.WithOriginSecret`.** Refuses, with an empty 403, any
+  request that lacks a shared-secret header your CDN/proxy adds, so traffic that
+  skips the CDN (and its firewall) is turned away. Generic: any proxy that can
+  add a request header works; Cloudflare is the worked example. Opt-in: the
+  scaffold does not wire it. Add it by hand in `cmd/*/main.go`, reading your own
+  env var (e.g. `ORIGIN_SECRET`) and passing
+  `server.WithOriginSecret(server.OriginSecretConfig{Secret: ..., ExemptPaths: []string{"/api/health"}})`,
+  exempting whatever health route your platform probes. An empty secret means no lock.
+  Rollout order matters: create the proxy rule first, then set `ORIGIN_SECRET`,
+  otherwise the whole site returns 403. See
+  [Deployment](guide/deployment.md#origin-lock).
+
+### Fixed
+
+- **`ErrorPages` recognises a wrapped `*echo.HTTPError`.** A handler returning
+  `fmt.Errorf("load product: %w", echo.NewHTTPError(http.StatusNotFound))`
+  previously rendered the 500 page; it now renders the 404 page (and its
+  override, if any).
+- **Request logger and audit middleware record the real status for returned
+  errors.** When a handler returned an error that echo's `HTTPErrorHandler`
+  writes (API routes, unknown `/api` paths), the scaffold's request logger and
+  `Audit` saw echo's default 200, so 5xx errors were logged at info level with
+  status 200. They now record the status echo's default error handler will
+  write: an `*echo.HTTPError`'s code (or its `Internal` `*echo.HTTPError`'s),
+  500 for anything else, including a wrapped `*echo.HTTPError`. An app with its
+  own error handler (`server.WithErrorHandler`) that maps other error types to
+  other statuses is not reflected. `Audit` needs no change on your side.
+  Existing apps have their own copy of `internal/middleware/logging.go`
+  (created by `hamr new`): replace `status := c.Response().Status` with the
+  following (no new imports; `net/http` and `echo` are already imported there):
+
+  ```go
+  // Mirrors echo's DefaultHTTPErrorHandler, which writes the status after middleware returns.
+  status := c.Response().Status
+  if err != nil && !c.Response().Committed {
+      status = http.StatusInternalServerError
+      if he, ok := err.(*echo.HTTPError); ok {
+          if inner, ok := he.Internal.(*echo.HTTPError); ok {
+              he = inner
+          }
+          status = he.Code
+      }
+  }
+  ```
+
 ## [0.46.1] - 2026-11-06
 
 ### Fixed

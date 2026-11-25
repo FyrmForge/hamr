@@ -339,6 +339,7 @@ func TestGenerateProject_createsFiles(t *testing.T) {
 	// Logging middleware contains expected function.
 	loggingGo := readFile(t, dir, "internal/middleware/logging.go")
 	assert.Contains(t, loggingGo, "func Logging()")
+	assert.Contains(t, loggingGo, "he.Internal.(*echo.HTTPError)")
 
 	// Framework reference docs (raw-copied, not templated).
 	assertFileExists(t, dir, "docs/llms.txt")
@@ -372,6 +373,8 @@ func TestGenerateProject_createsFiles(t *testing.T) {
 	assert.Contains(t, mainGo, "server.WithNoIndex(envNoIndex)")
 	assert.Contains(t, mainGo, `"NOINDEX"`)
 	assert.Contains(t, readFile(t, dir, ".env.example"), "NOINDEX=false")
+	assert.NotContains(t, mainGo, "WithOriginSecret")
+	assert.NotContains(t, readFile(t, dir, ".env.example"), "ORIGIN_SECRET")
 }
 
 func TestGenerateProject_withAuth(t *testing.T) {

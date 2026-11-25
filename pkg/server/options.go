@@ -129,6 +129,28 @@ func WithGeneratedDir(dir string) Option {
 // For a static list with no outbound fetch, pass CloudflareCIDRs instead.
 // Empty or blank entries are ignored; non-empty entries must be valid CIDRs or
 // New returns an error.
+//
+// The entry "railway" is for apps on Railway. Railway's proxy connects from
+// 100.64.0.0/10 and rewrites X-Forwarded-For to "<visitor>, <unpublished edge
+// address>", so no CIDR list can recover the visitor from it. With "railway":
+//   - X-Forwarded-Proto from 100.64.0.0/10 peers is honoured for c.Scheme().
+//     Like any non-empty trusted list, "railway" replaces the loopback/private
+//     default: the scheme is then trusted only from 100.64.0.0/10 plus
+//     whatever else is listed, so e.g. a local nginx must be listed too.
+//   - If the direct peer is in 100.64.0.0/10, the client IP is the X-Real-IP
+//     header (Railway sets it to the visitor and overwrites client-sent values);
+//     a missing, unparseable or repeated (several values) X-Real-IP yields the
+//     peer address, and IPv6 zones are stripped. Peers outside
+//     that range are handled exactly as without the keyword (X-Forwarded-For
+//     only from the configured CIDRs), so their headers are never trusted.
+//   - With "railway,cloudflare" together: if X-Real-IP is itself a Cloudflare
+//     address (the request provably came through Cloudflare) and a valid
+//     CF-Connecting-IP is present, that is the client IP; if it is missing or
+//     not an IP, the result is the (Cloudflare) X-Real-IP address. This follows the
+//     refreshed Cloudflare list. Passing CloudflareCIDRs as a static list does
+//     NOT enable this; only the keyword does.
+//
+// Keywords are case-insensitive and can be mixed with CIDRs.
 func WithTrustedProxies(cidrs ...string) Option {
 	return func(s *Server) { s.trustedProxies = append(s.trustedProxies, cidrs...) }
 }

@@ -3,6 +3,7 @@ package middleware_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -179,4 +180,51 @@ func TestAudit_redactsSensitiveParams(t *testing.T) {
 	params, _ := entry.Data["path_params"].(map[string]string)
 	require.NotNil(t, params)
 	assert.Equal(t, "[REDACTED]", params["reset_token"])
+}
+
+func auditStatus(t *testing.T, h echo.HandlerFunc, pre func(c echo.Context)) (any, error) {
+	t.Helper()
+	logger := &mockAuditLogger{}
+	e := echo.New()
+	c := e.NewContext(httptest.NewRequest(http.MethodPost, "/x", nil), httptest.NewRecorder())
+	if pre != nil {
+		pre(c)
+	}
+	err := middleware.Audit(logger)(h)(c)
+	return logger.lastEntry().Data["status"], err
+}
+
+func TestAudit_statusFromReturnedError(t *testing.T) {
+	plain := errors.New("boom")
+
+	st, err := auditStatus(t, func(echo.Context) error { return echo.NewHTTPError(http.StatusNotFound) }, nil)
+	assert.Equal(t, http.StatusNotFound, st)
+	assert.Error(t, err)
+
+	// Echo's default handler does not unwrap, so a wrapped HTTPError is sent as 500.
+	wrapped := fmt.Errorf("x: %w", echo.NewHTTPError(http.StatusNotFound))
+	st, err = auditStatus(t, func(echo.Context) error { return wrapped }, nil)
+	assert.Equal(t, http.StatusInternalServerError, st)
+	assert.Error(t, err)
+
+	// An HTTPError whose Internal is an HTTPError: echo uses the inner one.
+	st, err = auditStatus(t, func(echo.Context) error {
+		return &echo.HTTPError{Code: http.StatusInternalServerError, Internal: echo.NewHTTPError(http.StatusNotFound)}
+	}, nil)
+	assert.Equal(t, http.StatusNotFound, st)
+	assert.Error(t, err)
+
+	st, err = auditStatus(t, func(echo.Context) error { return plain }, nil)
+	assert.Equal(t, http.StatusInternalServerError, st)
+	assert.Same(t, plain, err)
+
+	st, err = auditStatus(t, func(c echo.Context) error { return c.String(http.StatusCreated, "ok") }, nil)
+	assert.Equal(t, http.StatusCreated, st)
+	assert.NoError(t, err)
+
+	// Response already committed: the written status wins over the error.
+	st, _ = auditStatus(t, func(echo.Context) error { return plain }, func(c echo.Context) {
+		_ = c.String(http.StatusTeapot, "x")
+	})
+	assert.Equal(t, http.StatusTeapot, st)
 }

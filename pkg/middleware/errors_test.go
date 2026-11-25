@@ -87,6 +87,42 @@ func TestErrorPages_override(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "<custom Not Found: gone>")
 }
 
+func TestErrorPages_wrappedHTTPError(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	mw := middleware.ErrorPages(stubPage,
+		middleware.Page(http.StatusNotFound, stubAltPage),
+	)
+	handler := mw(func(c echo.Context) error {
+		return fmt.Errorf("load product: %w", echo.NewHTTPError(http.StatusNotFound))
+	})
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Contains(t, rec.Body.String(), "<custom Not Found: Not Found>")
+}
+
+func TestErrorPages_wrappedHTTPErrorKeepsMessage(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	mw := middleware.ErrorPages(stubPage)
+	handler := mw(func(c echo.Context) error {
+		return fmt.Errorf("load: %w", echo.NewHTTPError(http.StatusForbidden, "denied"))
+	})
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assert.Contains(t, rec.Body.String(), "<error Forbidden: denied>")
+}
+
 func TestErrorPages_noOverrideFallsToDefault(t *testing.T) {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)

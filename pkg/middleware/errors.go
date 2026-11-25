@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/a-h/templ"
@@ -46,7 +47,7 @@ func ErrorPages(defaultPage ErrorPage, overrides ...PageOverride) echo.Middlewar
 			code := http.StatusInternalServerError
 			message := http.StatusText(code)
 
-			if he, ok := err.(*echo.HTTPError); ok {
+			if he, ok := errors.AsType[*echo.HTTPError](err); ok {
 				code = he.Code
 				if m, ok := he.Message.(string); ok {
 					message = m

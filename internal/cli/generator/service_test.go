@@ -178,6 +178,7 @@ func TestGenerateService_api(t *testing.T) {
 	require.NoError(t, GenerateService(dir, cfg))
 
 	mainGo := readServiceFile(t, dir, "cmd", "billing", "main.go")
+	assert.NotContains(t, mainGo, "WithOriginSecret")
 	assert.Contains(t, mainGo, `config.GetEnvOrDefaultInt("BILLING_PORT", 9090)`)
 	assert.Contains(t, mainGo, "auth.NewSessionManager(store")
 	assert.Contains(t, mainGo, "api.RegisterRoutes(srv, &api.Deps{")
@@ -221,6 +222,7 @@ func TestGenerateService_html(t *testing.T) {
 	require.NoError(t, GenerateService(dir, cfg))
 
 	mainGo := readServiceFile(t, dir, "cmd", "admin", "main.go")
+	assert.NotContains(t, mainGo, "WithOriginSecret")
 	assert.Contains(t, mainGo, `config.GetEnvOrDefaultInt("ADMIN_PORT", 8081)`)
 	assert.Contains(t, mainGo, `db "github.com/FyrmForge/hamr/pkg/db/sqlite"`)
 	assert.Contains(t, mainGo, "sqlite.NewStore(database)")

@@ -207,7 +207,7 @@
   mode (no upstream) the gate covers `/__hamr/*` only. `HAMR_ACTIONS_TOKEN` (same value as the app's) enables the
   app's dev actions in the widget. Client IP behind the front door: `X-Forwarded-For` keeps the edge's
   value plus the edge address (first entry is client-set, forgeable); `X-Real-IP` passes through untouched — on
-  Railway read it (edge-overwritten).
+  Railway read it (edge-overwritten; measured 2026-11-24, Railway documents it).
 - **dev actions** (`pkg/devactions`, see `### devactions`): the app mounts the package's handler at `/_devactions`;
   it only exists when `HAMR_ACTIONS_TOKEN` is set AND `HAMR_ACTIONS_ENV` is `development` or `staging`. `hamr dev`
   generates a per-run random token and injects `HAMR_ACTIONS_TOKEN` + `HAMR_ACTIONS_ENV=development` into the app
@@ -336,18 +336,32 @@ func WithMaxBodySize(size string) Option                 // e.g. "2M", "500K"
 func WithShutdownTimeout(d time.Duration) Option         // graceful shutdown (default 10s)
 func WithGeneratedDir(dir string) Option                 // pre-rendered static pages dir
 func WithNoIndex(on bool) Option                         // X-Robots-Tag: noindex, nofollow on every response incl. errors/static; staging/preview deploys; scaffold env NOINDEX=true (logs a startup warning)
-func WithTrustedProxies(cidrs ...string) Option          // proxy CIDRs trusted for X-Forwarded-For and X-Forwarded-Proto (also drives c.Scheme()); unset = ignore XFF (RealIP unspoofable) and Scheme() trusts X-Forwarded-Proto only from loopback/private peers (echo default); "cloudflare" = Cloudflare ranges, refreshed 24h
+func WithTrustedProxies(cidrs ...string) Option          // proxy CIDRs trusted for X-Forwarded-For and X-Forwarded-Proto (also drives c.Scheme()); unset = ignore XFF (RealIP unspoofable) and Scheme() trusts X-Forwarded-Proto only from loopback/private peers (echo default); "cloudflare" = Cloudflare ranges, refreshed 24h; "railway" = Railway (see below)
+func WithOriginSecret(cfg OriginSecretConfig) Option     // origin lock: empty 403 for any request without the shared-secret header the CDN/proxy adds; empty Secret = off
+type OriginSecretConfig struct {
+	Secret      string   // empty = off
+	Header      string   // empty = DefaultOriginSecretHeader
+	ExemptPaths []string // exact path matches let through (health checks); no prefix/case/trailing-slash/encoded variants
+}
+const DefaultOriginSecretHeader = "X-Origin-Secret"
 var CloudflareCIDRs []string                             // Cloudflare edge ranges pinned at release (static)
 ```
 
 Behind a proxy you MUST pass its range (`WithTrustedProxies` / `TRUSTED_PROXIES`
 env, comma-separated CIDRs) or `RealIP()` returns the proxy IP, not the client:
 nginx/Caddy on-host → `127.0.0.1/32` (loopback is NOT auto-trusted); Docker →
-the proxy's subnet; AWS ALB/GCP LB → the VPC/subnet CIDR; PaaS (Railway/Fly/
-Render) → the platform's internal proxy range, which you often can't pin and may
-change, so verify it. Requirements: the proxy must actually emit
-`X-Forwarded-For`; never trust `0.0.0.0/0` (re-enables IP spoofing). Verify by
-dumping `c.Request().RemoteAddr` (the peer → CIDR to trust) vs `c.RealIP()`.
+the proxy's subnet; AWS ALB/GCP LB → the VPC/subnet CIDR; other PaaS (Fly/
+Render/Heroku) → the platform's internal proxy range, which you often can't pin and
+may change; unverified, so verify it (Railway: see below). If the platform
+delivers the client in a single header rather than a walkable X-Forwarded-For,
+that advice cannot work: set `e.IPExtractor` yourself.
+Requirements: the proxy must actually emit
+`X-Forwarded-For`; never trust `0.0.0.0/0` (re-enables IP spoofing). Verify (any
+platform): temporary route printing `RemoteAddr`, `c.RealIP()` and the
+X-Forwarded-For / X-Real-IP / CF-Connecting-IP headers; request via the public domain
+and directly at the platform, with and without forged headers; remove it. With a
+walkable X-Forwarded-For, RemoteAddr's IP is the CIDR to trust; a platform that
+delivers the client in one header (Railway: X-Real-IP) cannot be fixed with a CIDR list.
 
 Cloudflare proxy → `cloudflare` entry: trusts `CloudflareCIDRs` at startup;
 `Start()` refetches `api.cloudflare.com/client/v4/ips` immediately and every 24h
@@ -358,7 +372,55 @@ current list. No egress → pass `CloudflareCIDRs...` (static). Stacked proxies
 XFF (`$proxy_add_x_forwarded_for`), not overwrite it. Cloudflare Tunnel
 (`cloudflared`)/ngrok on-host → `127.0.0.1/32`; unset, every client is
 `127.0.0.1` and shares one rate-limit bucket. Never trust `CF-Connecting-IP`
-alone (forgeable by direct origin hits).
+alone (forgeable by direct origin hits). Cloudflare directly in front of the
+app (VPS, nginx) is where `cloudflare` alone is enough.
+
+Railway → `railway` entry (case-insensitive; combinable with CIDRs and
+`cloudflare`). Railway's proxy connects from 100.64.0.0/10 and rewrites
+`X-Forwarded-For` to "<address that connected to its edge>, <edge address>"
+(unpublished edge addresses), so no CIDR list can make the XFF walk return the
+visitor; the client is in `X-Real-IP`. With `railway`: direct peer in
+100.64.0.0/10 → client IP = `X-Real-IP` (missing/invalid/several values → peer
+address; IPv6 zone stripped), and `c.Scheme()` trusts X-Forwarded-Proto from that
+range; like any non-empty trusted list, `railway` replaces the loopback/private
+default for the scheme (trusted only from 100.64.0.0/10 plus what else is listed, so
+a local nginx must be listed too); other peers behave as without the keyword. Echo's
+default scheme trust covers only loopback/link-local/private peers; 100.64.0.0/10
+is not one, so on Railway `c.Scheme()` needs `railway` (or that range) to report
+https. `railway,cloudflare`: if X-Real-IP is itself a Cloudflare address →
+`CF-Connecting-IP` (missing/invalid → that X-Real-IP address; only the keyword
+enables this, not a static `CloudflareCIDRs` list; the 24h refresh keeps working).
+Settings: Railway alone `TRUSTED_PROXIES=railway`; Cloudflare in front of Railway
+`TRUSTED_PROXIES=railway,cloudflare`. Measured on Railway only (2026-11-24);
+Railway unwrapping Cloudflare into X-Real-IP is observed, not documented;
+unverified on other platforms. Assumed, not verified: hamr decides by peer address
+only and assumes every peer in 100.64.0.0/10 is Railway's proxy or one of your own
+services (a caller in that range would have its X-Real-IP believed).
+
+Origin lock → `WithOriginSecret`. Opt-in, not wired by the scaffold. Purpose: refuse traffic that skips the CDN
+(which would bypass its firewall/bot rules); on platforms like Railway the origin
+stays reachable directly even with a custom domain. Not needed for a correct
+client IP and does not replace `TRUSTED_PROXIES=railway`. First thing for every
+request (before routing and static files); no/wrong header → empty 403;
+constant-time compare; one Info log at startup (header name, exempt paths), one
+Warn on the first refusal; the secret is never logged. Generic: any CDN/proxy that
+can add a request header. hamr never reads env
+vars for it. Where you control the network (VPS, cloud firewall), allowing only the
+CDN's address ranges at the firewall is simpler; the lock is for platforms that
+cannot filter by source address. Add to `cmd/site/main.go`:
+`server.WithOriginSecret(server.OriginSecretConfig{Secret: config.GetEnvOrDefault("ORIGIN_SECRET", ""), ExemptPaths: []string{"/api/health"}})`
+(`ORIGIN_SECRET` is the app's own example variable; exempt whatever health route
+the platform probes). Rollout: `openssl rand -hex 32` → create the proxy rule FIRST
+(Cloudflare: Rules → Transform Rules → Modify Request Header → static header
+`X-Origin-Secret`, all incoming requests) → THEN set `ORIGIN_SECRET` (other order
+403s the whole site). Verify: site loads on its domain; a direct request to the
+platform (`curl -k --resolve <domain>:443:<platform-ip> https://<domain>/`, or the
+platform's own domain) gets 403. Health checks hit the container directly → exempt
+their path; PR/preview deploys on a platform domain and private-network
+service-to-service calls skip the CDN → leave the secret unset there or send the
+header; external uptime monitors use the public domain. Rotation: unset
+`ORIGIN_SECRET` → change the proxy rule → set the new value (lock is off in
+between); two simultaneous secrets are unsupported.
 
 #### Methods
 

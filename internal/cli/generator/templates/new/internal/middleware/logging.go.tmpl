@@ -40,7 +40,17 @@ func Logging() echo.MiddlewareFunc {
 			err := next(c)
 
 			if !strings.HasPrefix(c.Request().URL.Path, "/static") {
+				// Mirrors echo's DefaultHTTPErrorHandler, which writes the status after middleware returns.
 				status := c.Response().Status
+				if err != nil && !c.Response().Committed {
+					status = http.StatusInternalServerError
+					if he, ok := err.(*echo.HTTPError); ok {
+						if inner, ok := he.Internal.(*echo.HTTPError); ok {
+							he = inner
+						}
+						status = he.Code
+					}
+				}
 				duration := time.Since(start)
 				method := c.Request().Method
 				path := c.Request().URL.Path

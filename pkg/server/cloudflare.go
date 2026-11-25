@@ -74,26 +74,18 @@ func (s *Server) refreshCloudflare(ctx context.Context) {
 }
 
 // updateCloudflare performs one fetch and, on success, swaps in an extractor
-// trusting the configured CIDRs plus the fetched Cloudflare ranges.
+// trusting the configured CIDRs plus the fetched Cloudflare ranges (keeping
+// Railway mode if configured).
 func (s *Server) updateCloudflare(ctx context.Context) {
 	cidrs, err := fetchCloudflareCIDRs(ctx)
 	if err != nil {
 		slog.Default().Warn("server: cloudflare IP refresh failed, keeping current list", "error", err)
 		return
 	}
-	ext, err := buildIPExtractor(append(append([]string{}, s.trustedProxies...), cidrs...))
-	if err != nil {
+	if err := s.installExtractors(cidrs); err != nil {
 		// Unreachable: fetched CIDRs are validated and static ones passed New.
 		slog.Default().Warn("server: cloudflare IP refresh failed, keeping current list", "error", err)
-		return
 	}
-	sch, err := buildSchemeExtractor(append(append([]string{}, s.trustedProxies...), cidrs...))
-	if err != nil {
-		slog.Default().Warn("server: cloudflare IP refresh failed, keeping current list", "error", err)
-		return
-	}
-	s.ipExtractor.Store(&ext)
-	s.schemeExtractor.Store(&sch)
 }
 
 // fetchCloudflareCIDRs downloads and validates Cloudflare's IP list.

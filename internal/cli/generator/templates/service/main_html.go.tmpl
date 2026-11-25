@@ -94,6 +94,7 @@ func main() {
 		server.WithNoIndex(envNoIndex),
 		server.WithStaticDir("frontend/static"),
 		server.WithStaticDistDir("frontend/dist"),
+		// TRUSTED_PROXIES: CIDRs plus the keywords "cloudflare", "railway".
 		server.WithTrustedProxies(envTrustedProxies...),
 	)
 	if err != nil {

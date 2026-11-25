@@ -181,7 +181,7 @@ Set `HAMR_MOCK_UPSTREAM` and `hamr mock-serve` sits on the public domain in fron
 - `HAMR_MOCK_PORT` stays the **private** port (Stripe `/v1` `/v2` API, mail/SMS ingest). It is never gated and must not be exposed on the public domain.
 - `HAMR_MOCK_UPSTREAM` must be `http://` and requires both `HAMR_MOCK_UI_PORT` and `HAMR_MOCK_UI_PASSWORD`. Missing either is a startup error: the front door fails closed rather than expose an ungated site.
 - `/_devactions` always returns 404 on the public port. `/__hamr/app/actions` and `/__hamr/app/whoami` are served there behind the gate when `HAMR_ACTIONS_TOKEN` is set, so anyone with the gate password can run the app's actions. hamr calls the app's `/_devactions` itself, server-side, with the token.
-- Client IP: hamr keeps the edge's `X-Forwarded-For` and appends its own peer (the edge), and passes `X-Real-IP` through untouched. On Railway, read the visitor from `X-Real-IP` (the edge overwrites it); the first `X-Forwarded-For` entry is client-set and can be faked.
+- Client IP: hamr keeps the edge's `X-Forwarded-For` and appends its own peer (the edge), and passes `X-Real-IP` through untouched. On Railway, read the visitor from `X-Real-IP` (the edge overwrites it; measured 2026-11-24, and Railway documents `X-Real-IP`); the first `X-Forwarded-For` entry is client-set and can be faked. See the Railway section of the [deployment guide](deployment.md#running-on-railway).
 
 Railway / compose-style example:
 

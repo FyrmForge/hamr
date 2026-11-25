@@ -37,7 +37,7 @@ if err := srv.Start(); err != nil {
 
 `Start` blocks until SIGINT/SIGTERM, then performs graceful shutdown.
 
-`WithTrustedProxies` lists the CIDRs of load balancers allowed to set `X-Forwarded-For` / `X-Forwarded-Proto`. Leave it empty when nothing sits in front of the app: forwarded headers are then ignored, so a client can't spoof its IP (which is also the default rate-limit key). The keyword `"cloudflare"` trusts Cloudflare's edge ranges, refreshed every 24h.
+`WithTrustedProxies` lists the CIDRs of load balancers allowed to set `X-Forwarded-For` / `X-Forwarded-Proto`. Leave it empty when nothing sits in front of the app: forwarded headers are then ignored, so a client can't spoof its IP (which is also the default rate-limit key). The keyword `"cloudflare"` trusts Cloudflare's edge ranges, refreshed every 24h; `"railway"` is for apps on Railway (client IP from Railway's `X-Real-IP`). See [Trusted Proxies & Client IP](pkg/server.md#trusted-proxies--client-ip).
 
 ### Production defaults
 

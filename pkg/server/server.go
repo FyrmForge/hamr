@@ -36,11 +36,13 @@ type Server struct {
 	maxBodySize     string
 	shutdownTimeout time.Duration
 
-	trustedProxies  []string // CIDRs only; the cloudflare keyword is stripped in New
+	trustedProxies  []string // CIDRs only; the cloudflare/railway keywords are stripped in New
 	cloudflare      bool
+	railway         bool
 	ipExtractor     atomic.Pointer[echo.IPExtractor]
 	schemeExtractor atomic.Pointer[echo.SchemeExtractor]
 
+	originSecret   OriginSecretConfig
 	userMiddleware []echo.MiddlewareFunc
 	errorHandler   echo.HTTPErrorHandler
 	staticDir      string
@@ -87,21 +89,14 @@ func New(opts ...Option) (*Server, error) {
 		return nil, fmt.Errorf("server: WithStaticDistDir requires WithStaticDir")
 	}
 
-	s.trustedProxies, s.cloudflare = stripCloudflareKeyword(s.trustedProxies)
-	cidrs := s.trustedProxies
+	s.trustedProxies, s.cloudflare, s.railway = stripProxyKeywords(s.trustedProxies)
+	var cfCIDRs []string
 	if s.cloudflare {
-		cidrs = append(append([]string{}, cidrs...), CloudflareCIDRs...)
+		cfCIDRs = CloudflareCIDRs
 	}
-	ipExtractor, err := buildIPExtractor(cidrs)
-	if err != nil {
+	if err := s.installExtractors(cfCIDRs); err != nil {
 		return nil, err
 	}
-	s.ipExtractor.Store(&ipExtractor)
-	schemeExtractor, err := buildSchemeExtractor(cidrs)
-	if err != nil {
-		return nil, err
-	}
-	s.schemeExtractor.Store(&schemeExtractor)
 
 	e := echo.New()
 	e.HideBanner = true
@@ -114,6 +109,14 @@ func New(opts ...Option) (*Server, error) {
 	// Same trust set for c.Scheme(): X-Forwarded-Proto is honoured only from the
 	// configured proxies (echo's default trusts any private/loopback peer).
 	e.SchemeExtractor = func(r *http.Request) string { return (*s.schemeExtractor.Load())(r) }
+
+	// Origin lock runs first so nothing (routing, static files, other Pre
+	// middleware) answers a request that skipped the CDN/proxy.
+	if s.originSecret.Secret != "" {
+		e.Pre(originLock(s.originSecret))
+		slog.Default().Info("server: origin lock enabled",
+			"header", originHeader(s.originSecret), "exempt_paths", s.originSecret.ExemptPaths)
+	}
 
 	// X-Robots-Tag goes in Pre so responses written by Pre middleware
 	// (redirects, locale handling) and 404s carry it too.
@@ -220,19 +223,21 @@ func New(opts ...Option) (*Server, error) {
 	return s, nil
 }
 
-// stripCloudflareKeyword removes the "cloudflare" keyword (case-insensitive)
-// from cidrs and reports whether it was present.
-func stripCloudflareKeyword(cidrs []string) ([]string, bool) {
-	var out []string
-	found := false
+// stripProxyKeywords removes the "cloudflare" and "railway" keywords
+// (case-insensitive, whitespace-trimmed) from cidrs and reports which were
+// present.
+func stripProxyKeywords(cidrs []string) (out []string, cloudflare, railway bool) {
 	for _, c := range cidrs {
-		if strings.EqualFold(strings.TrimSpace(c), cloudflareKeyword) {
-			found = true
-			continue
+		switch strings.ToLower(strings.TrimSpace(c)) {
+		case cloudflareKeyword:
+			cloudflare = true
+		case railwayKeyword:
+			railway = true
+		default:
+			out = append(out, c)
 		}
-		out = append(out, c)
 	}
-	return out, found
+	return out, cloudflare, railway
 }
 
 // buildIPExtractor returns the echo.IPExtractor implied by the configured
@@ -253,10 +258,12 @@ func buildIPExtractor(cidrs []string) (echo.IPExtractor, error) {
 
 // buildSchemeExtractor is the c.Scheme() counterpart of buildIPExtractor. With
 // no trusted proxies it keeps echo's default (X-Forwarded-Proto trusted only
-// from loopback/link-local/private/unix peers), because PaaS edges (Railway,
-// Fly) connect from private IPs and apps rarely set TRUSTED_PROXIES. With
-// CIDRs, exactly that list is trusted. Unlike the client IP, a spoofed scheme
-// can only mis-set a cookie Secure flag.
+// from loopback/link-local/private/unix peers) so apps behind a private-range
+// proxy work without TRUSTED_PROXIES. Railway's proxy connects from
+// 100.64.0.0/10 (CGNAT), which is not a private range, so on Railway
+// c.Scheme() needs the "railway" keyword (or that range) to report https.
+// With CIDRs, exactly that list is trusted. Unlike the client IP, a spoofed
+// scheme can only mis-set a cookie Secure flag.
 func buildSchemeExtractor(cidrs []string) (echo.SchemeExtractor, error) {
 	opts, err := trustOptions(cidrs)
 	if err != nil {

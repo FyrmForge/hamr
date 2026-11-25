@@ -93,6 +93,7 @@ It doesn't run E2E tests or check `frontend/dist/` and `staticmanifest.go` — s
 2. Fix the secret expressions — the template omits the leading `$`; GitHub Actions needs `${{ secrets.RAILWAY_SERVICE }}` and `${{ secrets.RAILWAY_TOKEN }}`
 3. Add `RAILWAY_TOKEN` and `RAILWAY_SERVICE` (the service ID) as repository secrets
 4. Point the Railway service at the Dockerfile with the service variable `RAILWAY_DOCKERFILE_PATH=cmd/site/Dockerfile`, and attach a volume at `/data` for SQLite
+5. Set `TRUSTED_PROXIES=railway` (or `railway,cloudflare` behind Cloudflare); otherwise all visitors share one rate-limit bucket and `c.Scheme()` reports `http`
 
 Any platform that builds a Dockerfile works the same way: build from the repo root with `-f cmd/site/Dockerfile`, set the environment variables below, and expose port `8080` (or set `PORT`).
 
@@ -108,7 +109,7 @@ Read by the scaffolded `cmd/site/main.go`:
 | `DEV_MODE` | `false` | Leave unset in production. `true` disables secure cookies, the server-level security headers and caching, and switches logs from JSON to coloured text. The site group's CSP is applied either way |
 | `NOINDEX` | `false` | `true` adds `X-Robots-Tag: noindex, nofollow` to every response and logs a startup warning. Honoured by the site and html service scaffolds. Staging/preview deploys only |
 | `BASE_URL` | — | Public origin, e.g. `https://example.com`. Sets the cookie domain, the CORS allowed origin and `components.BaseURL` (absolute URLs) |
-| `TRUSTED_PROXIES` | — | Comma-separated CIDRs of your load balancer / reverse proxy, or `cloudflare`. Unset: `X-Forwarded-For` is ignored |
+| `TRUSTED_PROXIES` | — | Comma-separated CIDRs of your load balancer / reverse proxy, plus the keywords `cloudflare` and `railway`. Unset: `X-Forwarded-For` is ignored. On Railway see [Running on Railway](#running-on-railway) |
 | `DATABASE_URL` | local dev URL | PostgreSQL connection string (PostgreSQL projects) |
 | `DATABASE_PATH` | `./data/<project-slug>.db` | SQLite file path (SQLite projects; the Dockerfile sets `/data/<project-slug>.db`) |
 | `STORAGE_PATH` | `./uploads` | Upload directory (`--storage local`) |
@@ -122,7 +123,7 @@ Feature-specific: `STRIPE_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_WEBHOOK_SECRET_
 The scaffold's defaults are production-safe (`DEV_MODE` off, secure cookies, CSRF, security headers). What's left to you:
 
 - **Set `BASE_URL`** to the public origin.
-- **Set `TRUSTED_PROXIES`** when behind a load balancer or CDN. Otherwise every request appears to come from the proxy's IP, so `c.RealIP()` and the default `middleware.RateLimit` key lump all users together.
+- **Set `TRUSTED_PROXIES`** when behind a load balancer or CDN. Otherwise every request appears to come from the proxy's IP, so `c.RealIP()` and the default `middleware.RateLimit` key lump all users together. `cloudflare` alone is enough only when Cloudflare connects to the app directly (a VPS, or nginx listed alongside it). On Railway see [Running on Railway](#running-on-railway). Check what your platform actually sends with the [debug route](pkg/server.md#verifying).
 - **Staging or preview deploy? Set `NOINDEX=true`** so search engines don't index a duplicate of the live site. Use this, not `robots.txt`: `robots.txt` controls crawling, not indexing, and a blocked page can still be listed (and its noindex never seen). Leave it unset in production.
 - **Leave dev-only variables unset**: `DEV_MODE`, `HAMR_ACTIONS_TOKEN` / `HAMR_ACTIONS_ENV` (dev actions endpoint), `STRIPE_MOCK`, `EMAIL_MOCK`.
 - **Replace the S3 defaults** with real credentials, and create the bucket (or call `EnsureBucket` at startup — the scaffold doesn't).
@@ -130,6 +131,66 @@ The scaffold's defaults are production-safe (`DEV_MODE` off, secure cookies, CSR
 - **WebSockets (`--websocket`) are single-instance.** The hub is in-memory, so a broadcast only reaches clients connected to the same process. Run one replica, or add your own cross-instance fan-out.
 - **Background jobs run per replica.** A [janitor](background-jobs.md#janitor-scheduler) wired into the site binary runs every task on every instance; keep tasks idempotent or gate them.
 - **Install ffmpeg** in the image if you use `pkg/media`.
+
+## Running on Railway
+
+Railway's proxy connects from `100.64.0.0/10`, and a CIDR-only `TRUSTED_PROXIES` cannot recover the visitor there. Use the `railway` keyword:
+
+| Setup | `TRUSTED_PROXIES` |
+|---|---|
+| Railway alone | `railway` |
+| Cloudflare in front of Railway | `railway,cloudflare` |
+
+For peers in that range hamr takes the client IP from Railway's `X-Real-IP` and trusts `X-Forwarded-Proto` from it. With `railway,cloudflare` it uses `CF-Connecting-IP` when `X-Real-IP` is a Cloudflare address. Behaviour detail (fallbacks, the replaced private default, Cloudflare combination): [Server: Railway](pkg/server.md#railway).
+
+### What was measured
+
+Measured on 2026-11-24 on two production hamr apps on Railway. These facts are not generalised beyond them.
+
+- Railway rewrites `X-Forwarded-For` to `<address that connected to Railway's edge>, <Railway edge address>`. A client-sent `X-Forwarded-For` is dropped. Railway's edge addresses are not published, so no `TRUSTED_PROXIES` CIDR list can make the `X-Forwarded-For` walk return the visitor. With the range unset, `RealIP()` is the internal `100.64.x.x` proxy; with `100.64.0.0/10` or `cloudflare,100.64.0.0/10` it is the Railway edge address. Either way all visitors share rate-limit buckets.
+- `X-Real-IP` held the true client IP for direct requests and for requests through Cloudflare's proxy. Client-sent `X-Real-IP`, `X-Forwarded-For`, `True-Client-IP` and `Forwarded` values did not change it.
+- `CF-Connecting-IP` passes through Railway unfiltered. On a request that skips Cloudflare a client can set it to anything, so never trust it on its own; hamr reads it only when `X-Real-IP` is a Cloudflare address.
+
+Documented versus observed: Railway's docs (Networking, Specs & Limits) document `X-Real-IP` as "for identifying client's remote IP" and say the page is subject to change. `X-Forwarded-For` is not documented there. That Railway unwraps Cloudflare into `X-Real-IP` is observed only. That is why the `railway,cloudflare` fallback to `CF-Connecting-IP` exists: hamr stays correct if Railway stops doing it.
+
+Not measured: other platforms (Render, Fly, Heroku), other CDNs in front of Railway, and IPv6 visitors. The `railway` keyword and `X-Real-IP` are not verified anywhere else; on another platform, verify first with the [debug route](pkg/server.md#verifying).
+
+Assumed, not verified: hamr decides purely by the peer address, so it assumes every peer in `100.64.0.0/10` is Railway's proxy or one of your own services. Requests over Railway's private network do not pass Railway's edge and nothing sets a trustworthy `X-Real-IP` on them; a caller in that range would have its `X-Real-IP` believed.
+
+## Origin lock
+
+A CDN in front of the app (Cloudflare's firewall, bot rules, rate limits) only helps if every request goes through it. On platforms like Railway the origin stays reachable directly, even with only a custom domain, and the platform cannot filter by source address. The origin lock closes that gap with a shared secret: the CDN adds a request header, and the app answers an empty 403 to any request without it. Where you control the network (a VPS or a cloud firewall), allowing only the CDN's address ranges at the firewall is the simpler way to do this; the lock is for platforms that cannot filter by source address.
+
+It is opt-in. The scaffold does not wire it and reads no variable for it. To use it, add this to your `cmd/site/main.go`, in the `server.New(...)` options:
+
+```go
+server.WithOriginSecret(server.OriginSecretConfig{
+    Secret:      config.GetEnvOrDefault("ORIGIN_SECRET", ""),
+    ExemptPaths: []string{"/api/health"}, // whatever route your platform health-checks
+})
+```
+
+`ORIGIN_SECRET` is just the example name: it is your app's own variable, hamr and the scaffold never read it. An empty secret turns the lock off. The lock runs before routing and static files, compares in constant time, and is generic: any CDN or proxy that can add a request header works. It is independent of client-IP handling. It does not replace `TRUSTED_PROXIES=railway` and is not needed to get a correct client IP on Railway.
+
+### Cloudflare example
+
+1. Generate the secret: `openssl rand -hex 32`.
+2. In Cloudflare, create the rule first: Rules, Transform Rules, Modify Request Header. Set a static header `X-Origin-Secret` to the secret, for all incoming requests.
+3. Only then set `ORIGIN_SECRET` on the app. The other order returns 403 for the whole site until the rule exists.
+
+Verify: the site loads on its domain, and a direct request to the platform gets 403, e.g. `curl -k --resolve <domain>:443:<platform-ip> https://<domain>/`, or a request to the platform's own domain.
+
+At startup the app logs one Info line (`origin lock enabled`, the header name and the exempt paths) and, on the first refused request, one Warn. The secret is never logged.
+
+### Consequences
+
+- Platform health checks call the container directly, so exempt their path (the scaffold's health route is `/api/health`). `ExemptPaths` are exact matches: no prefix, no case folding, no trailing slash, no percent-encoded variants.
+- PR/preview deployments on a platform domain, and service-to-service calls over a private network, do not pass through the CDN. Leave `ORIGIN_SECRET` unset there, or have the caller send the header.
+- External uptime monitors should use the public domain.
+
+### Rotating the secret
+
+Unset `ORIGIN_SECRET`, change the proxy rule, then set the new value. The lock is off in between. Two simultaneous secrets are not supported.
 
 ## Database migrations
 
@@ -143,7 +204,7 @@ See [Database](database.md#migrations) for writing migrations.
 
 ## Health checks
 
-The scaffold registers `GET /api/health` (`internal/api/handler/health`). It pings the database through `store.Health` and returns `200 {"status":"healthy"}`, or `503` with the error. Point your load balancer or orchestrator at it.
+The scaffold registers `GET /api/health` (`internal/api/handler/health`). It pings the database through `store.Health` and returns `200 {"status":"healthy"}`, or `503` with the error. Point your load balancer or orchestrator at it. If you enable the opt-in [origin lock](#origin-lock), add this path to `ExemptPaths` so the platform can probe the container directly.
 
 ## Static assets and caching
 

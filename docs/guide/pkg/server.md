@@ -47,7 +47,8 @@ if err := srv.Start(); err != nil {
 | `WithShutdownTimeout(d)` | 10s | Graceful shutdown timeout |
 | `WithGeneratedDir(dir)` | — | Serve pre-rendered static pages from directory |
 | `WithNoIndex(bool)` | `false` | Adds `X-Robots-Tag: noindex, nofollow` to every response (HTML, images, PDFs, static files, errors, 404s, Pre-middleware redirects). For staging/preview deploys; the scaffold wires it to `NOINDEX` |
-| `WithTrustedProxies(cidrs...)` | — (direct) | Proxy CIDRs trusted to set `X-Forwarded-For` and `X-Forwarded-Proto` (unset: `Scheme()` trusts private/loopback peers only); unset ignores it so `RealIP()` can't be spoofed. `"cloudflare"` adds Cloudflare's ranges, refreshed every 24h |
+| `WithTrustedProxies(cidrs...)` | — (direct) | Proxy CIDRs trusted to set `X-Forwarded-For` and `X-Forwarded-Proto` (unset: `Scheme()` trusts private/loopback peers only); unset ignores it so `RealIP()` can't be spoofed. `"cloudflare"` adds Cloudflare's ranges, refreshed every 24h. `"railway"` is for apps on Railway: client IP from Railway's `X-Real-IP` ([details](#railway)) |
+| `WithOriginSecret(cfg)` | off | Refuse (empty 403) every request without the shared secret header your CDN/proxy adds. Empty `Secret` = off ([details](#origin-lock)) |
 
 ## Trusted Proxies & Client IP
 
@@ -72,10 +73,12 @@ disabled), and `RealIP()` returns the **left-most untrusted hop** in
 `c.Scheme()` (`e.SchemeExtractor`) follows the same list when you set one:
 `X-Forwarded-Proto` is honoured only from the listed ranges. With no
 `WithTrustedProxies` it keeps Echo's default, trusting `X-Forwarded-Proto` only
-from loopback, link-local and private-network peers (and unix sockets), so
-platform edges that connect from private IPs (Railway, Fly) still report
-`https`. A public proxy (e.g. Cloudflare) must be listed, otherwise `Scheme()`
-is `"http"` and the `flags` anonymous cookie is not marked `Secure`.
+from loopback, link-local and private-network (RFC 1918, `fc00::/7`) peers
+(and unix sockets). Railway's proxy connects from `100.64.0.0/10`, which is not
+one of those, so on Railway `Scheme()` needs the `railway` keyword (or that
+range) to report `https`. A public proxy (e.g. Cloudflare) must be listed,
+otherwise `Scheme()` is `"http"` and the `flags` anonymous cookie is not marked
+`Secure`.
 
 **This is opt-in: behind a proxy you MUST set it, to your proxy's range.**
 
@@ -88,7 +91,9 @@ is `"http"` and the `flags` anonymous cookie is not marked `Secure`.
 | Self-hosted Traefik | the network Traefik runs on (its Docker subnet / host IP) — you control it |
 | AWS ALB / GCP LB | the VPC/subnet CIDR the LB sits in |
 | Kubernetes ingress | the ingress-controller / node pod CIDR |
-| Managed PaaS (Railway, Fly, Render) | the platform's internal proxy range — often a private CIDR you don't control and that can change; **verify it** (below) |
+| Railway | `railway` — a CIDR list can't recover the visitor there, see [Railway](#railway) |
+| Railway behind Cloudflare | `railway,cloudflare` — see [Railway](#railway) |
+| Other managed PaaS (Fly, Render, Heroku) | unverified: the platform's internal proxy range, which you often don't control and which can change; **verify it** (below). If the platform delivers the client in a single header rather than a walkable `X-Forwarded-For`, this advice cannot work; set `e.IPExtractor` yourself, see [Escape Hatch](#escape-hatch) |
 
 **Two non-obvious requirements:**
 
@@ -101,8 +106,10 @@ is `"http"` and the `flags` anonymous cookie is not marked `Secure`.
 
 ### Cloudflare
 
-Behind Cloudflare's proxy, the peer is a Cloudflare edge IP. Add the
-`cloudflare` keyword:
+Behind Cloudflare's proxy, the peer is a Cloudflare edge IP. When Cloudflare
+connects to the app directly (a VPS, or nginx listed alongside it), add the
+`cloudflare` keyword. If something else sits between Cloudflare and the app
+(Railway, say), `cloudflare` alone is not enough; see [Railway](#railway):
 
 ```go
 server.WithTrustedProxies("cloudflare") // or TRUSTED_PROXIES=cloudflare
@@ -133,21 +140,94 @@ e.g. `TRUSTED_PROXIES=cloudflare,127.0.0.1/32`. `RealIP()` walks
 (`$remote_addr`) — overwriting drops the client and every request resolves to a
 Cloudflare edge IP.
 
-**Verify before relying on it.** Add a throwaway handler, hit it through the
-proxy from a known client (e.g. your phone on cellular), and read the values:
+### Railway
+
+Railway's proxy connects from `100.64.0.0/10` and rewrites `X-Forwarded-For`
+to `<address that connected to Railway's edge>, <Railway edge address>`; the
+edge addresses are unpublished, so no CIDR list recovers the visitor from it. Use the `railway`
+keyword (case-insensitive, combinable with CIDRs and `cloudflare`):
+
+```go
+server.WithTrustedProxies("railway")               // or TRUSTED_PROXIES=railway
+server.WithTrustedProxies("railway", "cloudflare") // Cloudflare in front of Railway
+```
+
+- If the direct peer is in `100.64.0.0/10`, the client IP is the `X-Real-IP`
+  header. A missing, unparseable or repeated (several values) `X-Real-IP`
+  yields the peer address; IPv6 zones are stripped. Peers
+  outside that range behave as without the keyword (their headers are not
+  trusted unless listed).
+- `c.Scheme()` also trusts `X-Forwarded-Proto` from that range. Like any
+  non-empty trusted list, `railway` replaces the loopback/private default: the
+  scheme is then trusted only from `100.64.0.0/10` plus whatever else you list,
+  so e.g. a local nginx must be listed too.
+- With `railway,cloudflare`: if `X-Real-IP` is itself a Cloudflare address
+  (the request provably came through Cloudflare), the client IP is
+  `CF-Connecting-IP`; if `CF-Connecting-IP` is missing or not an IP, the
+  result is that `X-Real-IP` (Cloudflare) address. Only the `cloudflare` keyword enables this, not a static
+  `server.CloudflareCIDRs` list. The 24h refresh keeps working.
+- hamr decides purely by the peer address and assumes every peer in
+  `100.64.0.0/10` is Railway's proxy or one of your own services; this was not
+  verified (see [Deployment: What was measured](../deployment.md#what-was-measured)).
+
+Measurements, the documented-versus-observed split and the platforms that are
+not verified: [Deployment: What was measured](../deployment.md#what-was-measured).
+
+### Verifying
+
+**Verify before relying on it**, on any platform. Add a throwaway handler,
+request it through the public domain and directly at the platform's own domain
+(from a known client, e.g. your phone on cellular), each with and without forged
+`X-Forwarded-For`, `X-Real-IP` and `CF-Connecting-IP` headers, and read the values:
 
 ```go
 e.GET("/__debug/ip", func(c echo.Context) error {
+    h := c.Request().Header
     return c.JSON(200, map[string]string{
-        "remote_addr": c.Request().RemoteAddr,                  // direct peer → the CIDR to trust
-        "x_forwarded": c.Request().Header.Get("X-Forwarded-For"),
-        "real_ip":     c.RealIP(),                              // what the framework resolved
+        "remote_addr":      c.Request().RemoteAddr, // direct peer
+        "real_ip":          c.RealIP(),             // what the framework resolved
+        "x_forwarded_for":  h.Get("X-Forwarded-For"),
+        "x_real_ip":        h.Get("X-Real-IP"),
+        "cf_connecting_ip": h.Get("CF-Connecting-IP"),
     })
 })
 ```
 
-`remote_addr`'s IP is the range to put in `TRUSTED_PROXIES`; once configured,
-`real_ip` should equal your real client IP. Remove the handler afterward.
+When the proxy passes the client in a walkable `X-Forwarded-For`,
+`remote_addr`'s IP is the range to put in `TRUSTED_PROXIES`. A platform may
+instead deliver the client in a single header (Railway does with `X-Real-IP`);
+then a CIDR list cannot work. Once configured, `real_ip` should equal your real
+client IP and should not change when you send forged headers. Remove the handler
+afterward.
+
+## Origin lock
+
+Opt-in and not wired by the scaffold: you add it yourself. A CDN's firewall only helps if every request passes through it, and on
+platforms like Railway the origin stays reachable directly. `WithOriginSecret`
+refuses traffic that skipped the CDN:
+
+```go
+server.WithOriginSecret(server.OriginSecretConfig{
+    Secret:      os.Getenv("ORIGIN_SECRET"), // empty = off
+    ExemptPaths: []string{"/api/health"},    // platform health checks
+})
+```
+
+| Field | Meaning |
+|---|---|
+| `Secret` | Shared secret the CDN/proxy adds to every request. Empty turns the lock off |
+| `Header` | Header name. Empty uses `server.DefaultOriginSecretHeader` (`"X-Origin-Secret"`) |
+| `ExemptPaths` | Paths let through without the secret. Exact matches only: no prefix, no case folding, no trailing slash, no percent-encoded variants |
+
+The lock is the first thing every request meets, before routing and static
+files. A request without the matching header gets an empty 403. The compare is
+constant-time. It logs one Info line at startup (`origin lock enabled`, header
+name, exempt paths) and one Warn on the first refused request; the secret is
+never logged. hamr does not read environment variables for this: you read your own
+environment variable (e.g. `ORIGIN_SECRET`) and pass it in. The lock is independent of client-IP
+handling and is not needed to get the right IP on Railway. Rollout order,
+Cloudflare setup, consequences and rotation:
+[Deployment: Origin lock](../deployment.md#origin-lock).
 
 ## Production Defaults
 
@@ -268,6 +348,15 @@ func WithMaxBodySize(size string) Option
 func WithShutdownTimeout(d time.Duration) Option
 func WithGeneratedDir(dir string) Option
 func WithTrustedProxies(cidrs ...string) Option
+func WithOriginSecret(cfg OriginSecretConfig) Option
+
+type OriginSecretConfig struct {
+    Secret      string   // empty = off
+    Header      string   // empty = DefaultOriginSecretHeader
+    ExemptPaths []string // exact path matches
+}
+
+const DefaultOriginSecretHeader = "X-Origin-Secret"
 
 // Static generation
 func (s *Server) StaticPage(path string, handler echo.HandlerFunc)
