@@ -8,6 +8,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/FyrmForge/hamr/pkg/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -29,6 +30,9 @@ func (s *recordingStore) Open(context.Context, string) (io.ReadCloser, error) { 
 func (s *recordingStore) Delete(context.Context, string) error                { return nil }
 func (s *recordingStore) Exists(context.Context, string) (bool, error)        { return false, nil }
 func (s *recordingStore) List(context.Context, string) ([]string, error)      { return nil, nil }
+func (s *recordingStore) ListInfo(context.Context, string) ([]storage.FileInfo, error) {
+	return nil, nil
+}
 
 // TestSyncExistingFiles covers the case fsnotify misses: a directory that
 // appears with files already inside it. All contained files must be synced,

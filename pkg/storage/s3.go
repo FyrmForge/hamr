@@ -284,7 +284,19 @@ func (s *S3Storage) SignURL(ctx context.Context, path string, expiry time.Durati
 }
 
 func (s *S3Storage) List(ctx context.Context, prefix string) ([]string, error) {
+	infos, err := s.ListInfo(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
 	var keys []string
+	for _, fi := range infos {
+		keys = append(keys, fi.Path)
+	}
+	return keys, nil
+}
+
+func (s *S3Storage) ListInfo(ctx context.Context, prefix string) ([]FileInfo, error) {
+	var files []FileInfo
 	input := &s3.ListObjectsV2Input{
 		Bucket: &s.bucket,
 	}
@@ -298,16 +310,24 @@ func (s *S3Storage) List(ctx context.Context, prefix string) ([]string, error) {
 			return nil, fmt.Errorf("storage: s3 list %q: %w", prefix, err)
 		}
 		for _, obj := range out.Contents {
-			if obj.Key != nil {
-				keys = append(keys, *obj.Key)
+			if obj.Key == nil {
+				continue
 			}
+			fi := FileInfo{Path: *obj.Key}
+			if obj.Size != nil {
+				fi.Size = *obj.Size
+			}
+			if obj.LastModified != nil {
+				fi.ModTime = obj.LastModified.UTC()
+			}
+			files = append(files, fi)
 		}
 		if out.IsTruncated == nil || !*out.IsTruncated {
 			break
 		}
 		input.ContinuationToken = out.NextContinuationToken
 	}
-	return keys, nil
+	return files, nil
 }
 
 func endpointPtr(s string) *string {

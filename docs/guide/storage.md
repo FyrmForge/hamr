@@ -15,8 +15,19 @@ type FileStorage interface {
     Delete(ctx context.Context, path string) error
     Exists(ctx context.Context, path string) (bool, error)
     List(ctx context.Context, prefix string) ([]string, error) // keys under prefix ("" = all)
+    ListInfo(ctx context.Context, prefix string) ([]FileInfo, error) // List plus size and last-written time
+}
+
+type FileInfo struct {
+    Path    string    // relative to the storage root, same form List returns
+    Size    int64     // bytes
+    ModTime time.Time // last written, UTC
 }
 ```
+
+`ModTime` is when the file was last written, not when it was created: re-saving an existing path moves it to now. There is no creation time (S3 has none). Local storage hides the temp files of in-flight uploads (`.hamr-upload-*`); ones older than 24h (left by a crash) are listed so they can be cleaned up.
+
+`prefix` is a directory (or file) path on local storage but a plain string-prefix match on S3 (`photo` matches `photos/a.jpg` on S3 only). Pass prefixes with a trailing `/` for the same result on both.
 
 Write code against the interface so backends are swappable:
 

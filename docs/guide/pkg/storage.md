@@ -32,10 +32,14 @@ type FileStorage interface {
     Open(ctx context.Context, path string) (io.ReadCloser, error)
     Delete(ctx context.Context, path string) error
     Exists(ctx context.Context, path string) (bool, error)
+    List(ctx context.Context, prefix string) ([]string, error)
+    ListInfo(ctx context.Context, prefix string) ([]FileInfo, error) // List plus Size and ModTime
 }
 ```
 
 - `Save` overwrites existing files and creates intermediate directories
+- `ListInfo`'s `ModTime` is when the file was last written, not created (re-saving moves it to now; S3 has no creation time). Local storage hides in-flight `.hamr-upload-*` temp files (ones older than 24h are listed)
+- `prefix` is a directory path on local storage but a plain string-prefix match on S3 (`photo` matches `photos/a.jpg` on S3 only); use a trailing `/` for the same result on both
 - `Delete` is idempotent — deleting a non-existent file returns nil
 - `Open` returns a `ReadCloser` — the caller must close it
 
@@ -196,6 +200,13 @@ type FileStorage interface {
     Open(ctx context.Context, path string) (io.ReadCloser, error)
     Delete(ctx context.Context, path string) error
     Exists(ctx context.Context, path string) (bool, error)
+    List(ctx context.Context, prefix string) ([]string, error)
+    ListInfo(ctx context.Context, prefix string) ([]FileInfo, error)
+}
+type FileInfo struct {
+    Path    string    // relative to storage root
+    Size    int64     // bytes
+    ModTime time.Time // last written, UTC
 }
 type SignableStorage interface {
     FileStorage

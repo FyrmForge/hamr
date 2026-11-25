@@ -9,6 +9,26 @@ the TL;DR on top of it.
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-11-25
+
+### Breaking changes
+
+- **`FileStorage` gained `ListInfo`.** Custom implementations and test fakes of
+  `FileStorage` must add `ListInfo(ctx, prefix) ([]FileInfo, error)`.
+
+### Added
+
+- **`ListInfo` and `FileInfo` in `pkg/storage`.** `ListInfo(ctx, prefix)` is
+  `List` plus each file's size and last-written time (`ModTime`: S3
+  `LastModified`, local file mtime; not a creation time, re-saving a path moves
+  it to now). See Breaking changes for the new `FileStorage` method.
+
+### Fixed
+
+- **`LocalStorage.List` no longer returns `.hamr-upload-*` temp files** of
+  uploads in progress. Ones older than 24h (left by a crash) are still listed
+  so they can be cleaned up.
+
 ## [0.47.0] - 2026-11-25
 
 ### Added

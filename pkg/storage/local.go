@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Compile-time check.
@@ -19,6 +20,14 @@ type LocalStorage struct {
 	basePath string
 	logger   *slog.Logger
 }
+
+// uploadTempPrefix names the in-flight temp files Save writes; List hides them
+// while younger than uploadTempMaxAge. Older ones, left by a crash mid-Save,
+// are listed again so a sweep can delete them.
+const (
+	uploadTempPrefix = ".hamr-upload-"
+	uploadTempMaxAge = 24 * time.Hour
+)
 
 // LocalOption configures a LocalStorage instance.
 type LocalOption func(*LocalStorage)
@@ -77,7 +86,7 @@ func (s *LocalStorage) Save(_ context.Context, path string, r io.Reader) error {
 
 	// Write to a temp file then rename for atomicity — a failed or
 	// interrupted write never leaves a partial file at the target path.
-	tmp, err := os.CreateTemp(dir, ".hamr-upload-*")
+	tmp, err := os.CreateTemp(dir, uploadTempPrefix+"*")
 	if err != nil {
 		return fmt.Errorf("storage: create temp file: %w", err)
 	}
@@ -144,7 +153,19 @@ func (s *LocalStorage) Exists(_ context.Context, path string) (bool, error) {
 	return false, fmt.Errorf("storage: stat file: %w", err)
 }
 
-func (s *LocalStorage) List(_ context.Context, prefix string) ([]string, error) {
+func (s *LocalStorage) List(ctx context.Context, prefix string) ([]string, error) {
+	infos, err := s.ListInfo(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, fi := range infos {
+		paths = append(paths, fi.Path)
+	}
+	return paths, nil
+}
+
+func (s *LocalStorage) ListInfo(_ context.Context, prefix string) ([]FileInfo, error) {
 	dir := s.basePath
 	if prefix != "" {
 		resolved, err := s.resolve(prefix)
@@ -154,7 +175,7 @@ func (s *LocalStorage) List(_ context.Context, prefix string) ([]string, error) 
 		dir = resolved
 	}
 
-	var paths []string
+	var files []FileInfo
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
@@ -165,15 +186,25 @@ func (s *LocalStorage) List(_ context.Context, prefix string) ([]string, error) 
 		if d.IsDir() {
 			return nil
 		}
+		info, err := d.Info()
+		if errors.Is(err, os.ErrNotExist) {
+			return nil // vanished since readdir
+		}
+		if err != nil {
+			return err
+		}
+		if strings.HasPrefix(d.Name(), uploadTempPrefix) && time.Since(info.ModTime()) < uploadTempMaxAge {
+			return nil
+		}
 		rel, err := filepath.Rel(s.basePath, path)
 		if err != nil {
 			return err
 		}
-		paths = append(paths, rel)
+		files = append(files, FileInfo{Path: rel, Size: info.Size(), ModTime: info.ModTime().UTC()})
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("storage: list %q: %w", prefix, err)
 	}
-	return paths, nil
+	return files, nil
 }

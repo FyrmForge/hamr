@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -253,6 +254,111 @@ func TestLocalStorage_List_missingPrefix(t *testing.T) {
 	got, err := store.List(context.Background(), "nonexistent")
 	require.NoError(t, err)
 	assert.Empty(t, got)
+}
+
+func TestLocalStorage_ListInfo(t *testing.T) {
+	store, err := NewLocalStorage(t.TempDir())
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	require.NoError(t, store.Save(ctx, "photos/a.jpg", strings.NewReader("a")))
+	require.NoError(t, store.Save(ctx, "photos/b.jpg", strings.NewReader("bbb")))
+	require.NoError(t, store.Save(ctx, "docs/c.txt", strings.NewReader("c")))
+
+	got, err := store.ListInfo(ctx, "photos")
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	sizes := map[string]int64{}
+	for _, fi := range got {
+		sizes[fi.Path] = fi.Size
+		assert.WithinDuration(t, time.Now(), fi.ModTime, 5*time.Second)
+		assert.Equal(t, time.UTC, fi.ModTime.Location())
+	}
+	assert.Equal(t, map[string]int64{
+		filepath.Join("photos", "a.jpg"): 1,
+		filepath.Join("photos", "b.jpg"): 3,
+	}, sizes)
+}
+
+func TestLocalStorage_ListInfo_resaveMovesModTime(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewLocalStorage(dir)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	require.NoError(t, store.Save(ctx, "a.txt", strings.NewReader("a")))
+	old := time.Now().Add(-time.Hour)
+	require.NoError(t, os.Chtimes(filepath.Join(dir, "a.txt"), old, old))
+
+	got, err := store.ListInfo(ctx, "")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.WithinDuration(t, old, got[0].ModTime, 5*time.Second)
+
+	require.NoError(t, store.Save(ctx, "a.txt", strings.NewReader("a")))
+	got, err = store.ListInfo(ctx, "")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.WithinDuration(t, time.Now(), got[0].ModTime, 5*time.Second)
+}
+
+func TestLocalStorage_ListInfo_missingPrefix(t *testing.T) {
+	store, err := NewLocalStorage(t.TempDir())
+	require.NoError(t, err)
+
+	got, err := store.ListInfo(context.Background(), "nonexistent")
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
+func TestLocalStorage_List_skipsUploadTempFiles(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewLocalStorage(dir)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	require.NoError(t, store.Save(ctx, "a.txt", strings.NewReader("a")))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".hamr-upload-xyz"), []byte("partial"), 0o644))
+
+	paths, err := store.List(ctx, "")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a.txt"}, paths)
+
+	infos, err := store.ListInfo(ctx, "")
+	require.NoError(t, err)
+	require.Len(t, infos, 1)
+	assert.Equal(t, "a.txt", infos[0].Path)
+
+	// Save puts temp files next to the target, so subdirectories must hide them too.
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "sub"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sub", ".hamr-upload-fresh"), []byte("x"), 0o644))
+	paths, err = store.List(ctx, "")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a.txt"}, paths)
+	infos, err = store.ListInfo(ctx, "sub")
+	require.NoError(t, err)
+	assert.Empty(t, infos)
+}
+
+func TestLocalStorage_List_listsStaleUploadTempFiles(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewLocalStorage(dir)
+	require.NoError(t, err)
+
+	stale := filepath.Join(dir, "sub", ".hamr-upload-old")
+	require.NoError(t, os.MkdirAll(filepath.Dir(stale), 0o755))
+	require.NoError(t, os.WriteFile(stale, []byte("x"), 0o644))
+	old := time.Now().Add(-25 * time.Hour)
+	require.NoError(t, os.Chtimes(stale, old, old))
+
+	want := filepath.Join("sub", ".hamr-upload-old")
+	paths, err := store.List(context.Background(), "")
+	require.NoError(t, err)
+	assert.Equal(t, []string{want}, paths)
+	infos, err := store.ListInfo(context.Background(), "")
+	require.NoError(t, err)
+	require.Len(t, infos, 1)
+	assert.Equal(t, want, infos[0].Path)
 }
 
 // ---------------------------------------------------------------------------
@@ -618,6 +724,48 @@ func TestS3Storage_List(t *testing.T) {
 	got, err := store.List(context.Background(), "photos/")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"photos/a.jpg", "photos/b.jpg"}, got)
+}
+
+func TestS3Storage_ListInfo(t *testing.T) {
+	key1, key2, key3 := "a.txt", "b.txt", "c.txt"
+	size := int64(42)
+	mod := time.Date(2026, 1, 2, 3, 4, 5, 0, time.FixedZone("x", 3600))
+	token := "next"
+	truncated := true
+	calls := 0
+	mc := &mockS3Client{
+		listFn: func(_ context.Context, in *s3.ListObjectsV2Input) (*s3.ListObjectsV2Output, error) {
+			calls++
+			if calls == 1 {
+				assert.Nil(t, in.ContinuationToken)
+				return &s3.ListObjectsV2Output{
+					IsTruncated:           &truncated,
+					NextContinuationToken: &token,
+					Contents: []s3types.Object{
+						{Key: &key1, Size: &size, LastModified: &mod},
+						{Size: &size},
+					},
+				}, nil
+			}
+			assert.Equal(t, token, *in.ContinuationToken)
+			return &s3.ListObjectsV2Output{
+				Contents: []s3types.Object{
+					{Key: &key2, Size: &size, LastModified: &mod},
+					{Key: &key3},
+				},
+			}, nil
+		},
+	}
+	store := newTestS3(mc, nil)
+	got, err := store.ListInfo(context.Background(), "")
+	require.NoError(t, err)
+	assert.Equal(t, 2, calls)
+	require.Len(t, got, 3)
+	assert.Equal(t, FileInfo{Path: "a.txt", Size: 42, ModTime: mod.UTC()}, got[0])
+	assert.Equal(t, time.UTC, got[0].ModTime.Location())
+	assert.Equal(t, "b.txt", got[1].Path)
+	assert.Equal(t, FileInfo{Path: "c.txt"}, got[2])
+	assert.True(t, got[2].ModTime.IsZero())
 }
 
 func TestS3Storage_List_empty(t *testing.T) {

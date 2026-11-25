@@ -1937,6 +1937,13 @@ type FileStorage interface {
     Delete(ctx context.Context, path string) error
     Exists(ctx context.Context, path string) (bool, error)
     List(ctx context.Context, prefix string) ([]string, error)
+    ListInfo(ctx context.Context, prefix string) ([]FileInfo, error)  // List + size and last-written time
+}
+
+type FileInfo struct {
+    Path    string    // relative to storage root, same form List returns
+    Size    int64     // bytes
+    ModTime time.Time // last WRITTEN (not created; re-save moves it to now), UTC
 }
 
 type SignableStorage interface {
@@ -1948,7 +1955,8 @@ type SignOption func(*signConfig)
 func WithAttachment(filename string) SignOption  // sign with Content-Disposition: attachment; filename=... to force download (RFC 6266; non-ASCII names get authoritative UTF-8 filename* plus ASCII fallback; empty name emits bare "attachment")
 ```
 Save overwrites existing files. Delete is idempotent. List returns all file
-paths under the given prefix.
+paths under the given prefix. LocalStorage hides in-flight `.hamr-upload-*` temp files (ones older than 24h are listed).
+On LocalStorage the prefix is a directory (or file) path; on S3 it is a plain string prefix (`photo` matches `photos/a.jpg` on S3 only). Use a trailing `/` for the same result on both.
 
 #### Local Storage
 
@@ -1959,7 +1967,7 @@ type LocalOption func(*LocalStorage)
 func NewLocalStorage(basePath string, opts ...LocalOption) (*LocalStorage, error)
 func WithLocalLogger(l *slog.Logger) LocalOption
 ```
-Methods: Save, Open, Delete, Exists, List (implementing FileStorage).
+Methods: Save, Open, Delete, Exists, List, ListInfo (implementing FileStorage).
 
 #### S3 Storage
 
@@ -1983,7 +1991,7 @@ func WithMaxUploadBuffer(n int64) S3Option  // cap for buffering non-seekable Sa
 
 func (s *S3Storage) EnsureBucket(ctx context.Context) error
 ```
-Methods: Save, Open, Delete, Exists, List, SignURL (implementing SignableStorage).
+Methods: Save, Open, Delete, Exists, List, ListInfo, SignURL (implementing SignableStorage).
 `Save` streams seekable bodies straight to S3; a non-seekable body (e.g. an `Open` result piped into `Save`) is buffered into memory first because the AWS signer needs a seekable body to hash it. The buffer is bounded by `WithMaxUploadBuffer` (default 64 MiB) — a larger non-seekable body fails the upload rather than allocating unbounded memory.
 
 ---

@@ -30,6 +30,20 @@ type FileStorage interface {
 	// List returns all file paths under the given prefix. Paths are relative
 	// to the storage root. An empty prefix lists all files.
 	List(ctx context.Context, prefix string) ([]string, error)
+
+	// ListInfo is List with each file's size and last-written time.
+	ListInfo(ctx context.Context, prefix string) ([]FileInfo, error)
+}
+
+// FileInfo describes one stored file.
+//
+// ModTime is when the file was last written, not when it was created:
+// re-saving an existing path moves it to now. There is no creation time
+// (S3 has none).
+type FileInfo struct {
+	Path    string    // relative to the storage root, same form List returns
+	Size    int64     // bytes
+	ModTime time.Time // last written (S3 LastModified; local file mtime), UTC
 }
 
 // SignableStorage extends FileStorage with the ability to generate
